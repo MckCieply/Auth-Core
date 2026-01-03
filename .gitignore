@@ -1,0 +1,40 @@
+# .NET
+bin/
+obj/
+out/
+*.user
+*.suo
+.vs/
+
+# Build / publish
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Environment & secrets
+.env
+.env.*
+*.pfx
+*.key
+appsettings.*.Local.json
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+coverage/
+*.trx
+*.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python client (clients/python)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
