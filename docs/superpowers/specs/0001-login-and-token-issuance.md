@@ -1,6 +1,6 @@
 # Spec 0001 — Login and token issuance
 
-- **Status:** Draft
+- **Status:** Accepted
 - **Date:** 2026-01-04
 - **Author:** Alex
 - **Milestone:** Week 1 (foundation) — *"`curl` logs in and gets a JWT that
@@ -105,7 +105,7 @@ arrive in Week 3 and are **absent** here (not empty — absent):
 ```
 
 - Algorithm: **RS256**. Header carries the `kid` of the signing key.
-- Lifetime: **5–10 minutes** (short-lived; refresh comes in Week 2).
+- Lifetime: **10 minutes** (short-lived; refresh comes in Week 2 — spec 0002).
 - The token is a **signed, unencrypted** JWS — decodable by any JWT library.
 
 ### `GET /auth/.well-known/jwks.json`
@@ -122,7 +122,7 @@ arrive in Week 3 and are **absent** here (not empty — absent):
 2. The returned JWT is a valid **RS256 JWS**: header `alg=RS256` + a `kid`, and it
    is **not** encrypted (a plain JWT decoder can read the payload).
 3. The JWT's payload carries `iss`, `aud` (the registered audience), `sub` (the
-   user's id) and a future `exp` within the 5–10 min window.
+   user's id) and a future `exp` no more than 10 minutes out.
 4. `GET /auth/.well-known/jwks.json` returns a JWKS whose `keys` include the public
    key whose `kid` matches the token from criterion 1, and the token **verifies**
    against it with no shared secret and no call back to the service.
@@ -156,13 +156,29 @@ the branch merges to `main`.
   a response body; JWKS exposes public material only (criterion 8); the signing key
   comes from a mounted secret, never a committed file.
 
-## Open questions
+## Decisions (owner, 2026-01-04)
 
-1. **Issuer value** — fixed to the instance's public origin (`.../auth`). For local
-   dev, `http://localhost:8080/auth`; confirm the exact dev port/host once the repo
-   skeleton lands.
-2. **Seed vs CLI for the first user** — seed a dev user for the milestone, or
-   require the admin CLI's create-user first? Leaning seed-for-dev-only, real users
-   via CLI/invite from Week 3. To settle when writing the plan.
-3. **Key format** — PEM vs PKCS#12 for the mounted signing key. To settle in the
-   plan; does not change this contract.
+1. **First slice = `/auth/login` + JWKS only.** The repo skeleton (projects, EF
+   Core, Docker) is bootstrap tracked separately; it is not part of this spec's
+   acceptance criteria.
+2. **A first no-enumeration step is in scope now** (the uniform `401` in criterion
+   5). Full anti-enumeration hardening — lockout, rate limiting, timing-equalisation
+   — stays in Week 2 (its own spec), not here.
+3. **Access token TTL = 10 minutes.** (Within the design's 5–10 min range; pinned to
+   the upper bound to minimise refreshes before spec 0002 lands refresh.)
+4. **First user via a dev-only seed.** Enough to exercise the flow; real users come
+   via the admin CLI / invites from Week 3. No self-service registration here.
+5. **Dev identifiers (provisional):** issuer `http://localhost:8080/auth`, audience
+   `auth-core-dev`. These are dev defaults; the production values are per-instance
+   and confirmed when the repo skeleton and deployment land — a value change here
+   does not change the contract's shape.
+
+## To verify during implementation
+
+- Signing-key file format for the mounted secret (PEM vs PKCS#12) — an
+  implementation detail; does not change this contract.
+- The exact OpenIddict 7 configuration to **disable access-token encryption**
+  (`DisableAccessTokenEncryption()`) and **register the audience**
+  (`RegisterAudiences(...)`), verified against the installed version.
+- Whether the dev seed runs via the host startup or the admin CLI path (settle in
+  the plan).

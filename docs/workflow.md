@@ -52,10 +52,16 @@ claude plugin install i-have-adhd@i-have-adhd
 Every stage runs the same Superpowers-aligned pipeline. The orchestrator (Opus)
 drives; each step is a Sonnet agent unless noted.
 
-1. **Brainstorm** — for each stage, brainstorm the problem and options first
-   (Superpowers `brainstorming`). No code, no spec yet.
-2. **Spec** — turn the brainstorm into a written spec: what is built, acceptance
-   criteria, contracts, out-of-scope. **The spec is the source of truth.**
+1. **Brainstorm — in conversation, not committed.** For each stage, explore the
+   problem, the options and the trade-offs first (Superpowers `brainstorming`). The
+   brainstorm is **not** a committed artifact; only its outcome is — as the spec's
+   `Decisions` section. No code, no spec yet.
+2. **Spec** — write the spec as the **final, resolved** version: what is built,
+   acceptance criteria, contracts, out-of-scope, and a **`## Decisions (owner,
+   date)`** section recording the choices the brainstorm settled. Residual unknowns
+   are either numbered open questions carried explicitly or pushed to the plan's
+   "Open questions for owner" — never left scattered. **The spec is the source of
+   truth.**
 3. **Plan** — from the spec, write an implementation plan the Superpowers way
    (`writing-plans`): ordered, verifiable steps with checkpoints.
 4. **Implement** — a Sonnet agent executes the plan (`executing-plans` /
@@ -155,10 +161,22 @@ Principles (adapted from `speech-to-mail`'s `spec-review.md` / `e2e-review.md`):
 - **Conventional Commits** — `type(scope): description` (e.g. `feat:`, `fix:`,
   `docs:`, `chore:`). Documentation is written in **English**.
 
+## Artifacts & where they live
+
+- **Brainstorm** — in the conversation only. **Not committed.** Its result lands in
+  the spec's `Decisions` section.
+- **Spec** — committed under `docs/superpowers/specs/NNNN-<slug>.md`, as the final,
+  resolved version (`## Decisions (owner, date)`, plus a `## To verify during
+  implementation` section for genuine implementation-time unknowns).
+- **Plan** — committed under `docs/superpowers/plans/NNNN-<slug>.md` (Superpowers
+  `writing-plans`); residual decisions for the owner live in the plan's
+  "Open questions for owner".
+
 ## Backlog & tracking (local, no Issues)
 
 - **No GitHub Issues.** The backlog is local: the Superpowers implementation plans
-  (`writing-plans`, kept under `docs/`) are the task list — work them in order.
+  (`writing-plans`, kept under `docs/superpowers/plans/`) are the task list — work
+  them in order.
 - **Bugs/follow-ups found during verification** are added to the local plan, not
   left as silent scope creep, and not merged into the current change unless the
   spec calls for it.
