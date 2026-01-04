@@ -59,6 +59,8 @@ auth-service/
 - [`docs/design.md`](docs/design.md) — full MVP brief: goals, decisions, scope,
   architecture, contracts, timeline, risks.
 - [`docs/adr/`](docs/adr/) — architecture decision records.
+- [`docs/workflow.md`](docs/workflow.md) — development workflow: model policy,
+  plugins, the spec-driven flow, branch and PR rules.
 
 ## License
 
