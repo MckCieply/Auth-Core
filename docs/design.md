@@ -116,6 +116,15 @@ and roles. Estimated effort is about 32 focused days before AI-assisted speed-up
 **Never in scope:** SAML, SCIM, LDAP, multi-realm mode, fine-grained resource
 permissions (ReBAC), custom crypto or custom token formats.
 
+**Deferred within the MVP (tracked, must be built later):** trusted
+reverse-proxy real-client-IP resolution (`ForwardedHeaders` + `KnownNetworks`)
+and the **per-IP rate limiting** that depends on it. Until these land, abuse
+resistance is **per-identifier lockout only** (spec 0003), which does not
+throttle distributed / multi-IP attacks and leaves a targeted account-lockout
+DoS open. See
+[`docs/superpowers/specs/0003-lockout-and-abuse-resistance.md`](superpowers/specs/0003-lockout-and-abuse-resistance.md)
+→ "Deferred / follow-ups".
+
 ## Architecture and contracts
 
 The browser sees one origin; the reverse proxy splits `/api` to the consumer
