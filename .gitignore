@@ -38,3 +38,6 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+
+# Local secrets (signing/encryption key material)
+.secrets/
