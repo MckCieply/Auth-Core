@@ -3,12 +3,13 @@ using Auth.IntegrationTests.Infrastructure;
 
 namespace Auth.IntegrationTests;
 
-public class SkeletonTests
+public class SkeletonTests(PostgresFixture postgres)
 {
     [Fact]
     public async Task Health_endpoint_returns_200()
     {
-        using var client = new AuthAppFactory().CreateClient();
+        await using var factory = new AuthAppFactory(postgres);
+        using var client = factory.CreateClient();
         var response = await client.GetAsync("/auth/health");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
