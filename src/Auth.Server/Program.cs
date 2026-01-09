@@ -1,9 +1,12 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Keys;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Fail fast on missing or broken key material, before anything else is built.
+builder.Services.AddSingleton(KeyMaterialLoader.LoadAll(builder.Configuration));
 builder.Services.AddHealthChecks();
 builder.Services.AddAuthPersistence(builder.Configuration);
 
