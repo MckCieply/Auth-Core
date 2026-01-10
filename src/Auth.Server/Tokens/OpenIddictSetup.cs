@@ -53,6 +53,9 @@ public static class OpenIddictSetup
                 options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
                     .AddEventHandler(JsonLoginRequestHandler.Descriptor);
 
+                // ...and cut the token response down to {status, access_token}.
+                options.AddEventHandler(LoginResponseShaper.Descriptor);
+
                 options.AddSigningCertificate(keys.Signing)
                     .AddEncryptionCertificate(keys.Encryption);
 

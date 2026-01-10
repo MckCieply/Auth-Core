@@ -1,6 +1,7 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
+using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Tokens;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,7 @@ if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
 app.MapHealthChecks("/auth/health");
+app.MapPost("/auth/login", LoginEndpoint.HandleAsync);
 
 app.Run();
 
