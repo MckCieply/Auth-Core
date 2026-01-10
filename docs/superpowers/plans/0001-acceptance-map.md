@@ -69,9 +69,9 @@ Three Sonnet verifiers (realization vs spec, API/e2e, security) ran per
 - **E1.** The plan's architecture paragraph says refresh can be mapped onto the
   token endpoint with "a one-line `SetTokenEndpointUris` change". With the shipped
   design, spec 0002 must also add its own extraction handler ordered before
-  `UnhandledTokenRequestGuard`. The plan text is left unchanged pending owner sign-off.
+  `UnhandledTokenRequestGuard`. Recorded by the owner in spec 0001 → "As built"; plan 0001 → "As built" marks the remark superseded.
 - **E2.** Spec 0001 Decision 1 tracks the repo skeleton separately; plan 0001
-  bundled it as Task 1 (and the Docker image/compose as Task 9).
+  bundled it as Task 1 (and the Docker image/compose as Task 9). Recorded by the owner in spec 0001 → "As built".
 - **E3.** The token carries OpenIddict metadata claims `iat`, `jti`, `oi_tkn_id`
   beyond the spec's `iss/aud/sub/exp`; the claim-set test accepts them pending an
-  owner decision on whether the spec list is exhaustive.
+  owner decision on whether the spec list is exhaustive. Accepted by the owner (spec 0001 → "As built").

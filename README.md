@@ -6,7 +6,7 @@ project drops in instead of rebuilding login, tenancy, RBAC and token refresh.
 `speech-to-mail` is the first consumer; the MVP milestone is a working end-to-end
 login on a real phone, delivered over a six-week build.
 
-> **Status:** Week 1 slice in progress — `POST /auth/login` issues RS256 JWTs and
+> **Status:** Week 1 milestone done — `POST /auth/login` issues RS256 JWTs and
 > `GET /auth/.well-known/jwks.json` publishes the verification key
 > ([spec 0001](docs/superpowers/specs/0001-login-and-token-issuance.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).

@@ -182,3 +182,50 @@ the branch merges to `main`.
   (`RegisterAudiences(...)`), verified against the installed version.
 - Whether the dev seed runs via the host startup or the admin CLI path (settle in
   the plan).
+
+## As built (owner, 2026-01-10)
+
+Recorded after implementation and local verification (plan 0001,
+[acceptance map](../plans/0001-acceptance-map.md)). What entered this stage stays
+in it; this section records it rather than rewriting the decisions above.
+
+**Scope delivered beyond Decision 1.** The repo skeleton (.NET 10 solution, EF Core
+on PostgreSQL with migrations, Testcontainers test host) and the container image,
+compose stack and real-network e2e script were built in this slice (plan 0001
+Tasks 1 and 9), because the acceptance criteria could not be exercised without
+them.
+
+**"To verify during implementation", resolved:**
+
+1. Signing key format: **PEM** certificate + PKCS#8 key, mounted read-only. An
+   **encryption** certificate is mounted the same way: OpenIddict requires one even
+   with access-token encryption disabled, and refresh tokens (spec 0002) use it.
+2. OpenIddict 7.7.1: `DisableAccessTokenEncryption()` and `RegisterAudiences(...)`
+   exist as named. The access token's `aud` is filled from the principal's
+   resources (`SetResources`); the registered audience and `aud` carry the same value.
+3. Dev seed: at **host startup**, Development environment only.
+
+**Token as built.** In addition to the contract's `iss`, `aud`, `sub`, `exp`, the
+payload carries OpenIddict metadata `iat`, `jti`, `oi_tkn_id`; the header carries
+`typ: at+jwt` and `x5t`, and the JWKS key carries `x5c`/`x5t` (public certificate
+only). Accepted as OpenIddict-standard; the claim set is pinned by a test, so any
+change is deliberate.
+
+**Hardening added during local verification** (none changes the contract):
+NUL/control characters in the login body → `400`; request body capped at 8 KiB;
+`Authorization: Basic` ignored on the login endpoint (anonymous clients only), so
+the `401` stays uniform; unique emails enforced; OpenIddict discovery endpoint
+disabled; outside Development the issuer and audience must be configured
+explicitly; RSA keys below 2048 bits rejected; `/auth/login/` (trailing slash)
+treated as the login path; a token-endpoint request nothing claims → `400`.
+
+**Consequence for spec 0002 (a fact of this implementation, not a scope change).**
+The token endpoint uses a custom JSON extraction handler in place of OpenIddict's
+form extraction. A refresh grant on the token endpoint therefore needs its own
+extraction handler, ordered before `UnhandledTokenRequestGuard`. Plan 0001's
+remark that refresh is "a one-line `SetTokenEndpointUris` change" is superseded.
+
+**Known gaps, owned elsewhere:** timing difference between unknown email and wrong
+password, lockout, rate limiting → spec 0003; whether unconfirmed emails may log
+in → the email-verification spec (Week 2); one `OpenIddictTokens` row per login
+with no pruning → spec 0002 (revocation) or a cleanup job.
