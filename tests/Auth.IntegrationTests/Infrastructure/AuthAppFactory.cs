@@ -1,5 +1,9 @@
+using Auth.Infrastructure.Identity;
+using Auth.Server.Seeding;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests.Infrastructure;
 
@@ -24,6 +28,29 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings["Auth:Keys:SigningKeyPath"] = keys.SigningKeyPath;
         _settings["Auth:Keys:EncryptionCertificatePath"] = keys.EncryptionCertPath;
         _settings["Auth:Keys:EncryptionKeyPath"] = keys.EncryptionKeyPath;
+        _settings[DevUserSeeder.EmailKey] = DefaultSeedEmail;
+        _settings[DevUserSeeder.PasswordKey] = DefaultSeedPassword;
+    }
+
+    /// <summary>Default development seed credentials; the password satisfies Identity's default policy.</summary>
+    public const string DefaultSeedEmail = "user@example.com";
+
+    public const string DefaultSeedPassword = "Correct-Horse-Battery-1";
+
+    /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
+    public string SeedEmail => _settings[DevUserSeeder.EmailKey] ?? "";
+
+    /// <summary>The effective seed password: the default, or the value set via <see cref="WithSetting"/>.</summary>
+    public string SeedPassword => _settings[DevUserSeeder.PasswordKey] ?? "";
+
+    /// <summary>Id of the user created by the development seed (looked up by <see cref="SeedEmail"/>).</summary>
+    public async Task<Guid> SeedUserIdAsync()
+    {
+        using var scope = Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = await users.FindByEmailAsync(SeedEmail)
+            ?? throw new InvalidOperationException($"Seed user '{SeedEmail}' does not exist.");
+        return user.Id;
     }
 
     public string DatabaseName { get; }
