@@ -1,0 +1,93 @@
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Keys;
+using Auth.Server.Login;
+using OpenIddict.Server;
+using OpenIddict.Server.AspNetCore;
+
+namespace Auth.Server.Tokens;
+
+public static class OpenIddictSetup
+{
+    /// <summary>
+    /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) from the password flow only, the token
+    /// endpoint at <c>auth/login</c> in pass-through mode, and the JWKS endpoint at <c>auth/.well-known/jwks.json</c>.
+    /// Signing and encryption credentials come from the mounted <paramref name="keys"/>, never from a generated certificate.
+    /// </summary>
+    /// <param name="isDevelopment">
+    /// Outside Development the issuer and audience must be set explicitly in configuration: the class defaults are
+    /// development identifiers and must never end up in a production token.
+    /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// <c>Auth:Tokens:Issuer</c> is not an absolute URI or <c>Auth:Tokens:Audience</c> is blank, or (outside
+    /// Development) either key is missing from configuration.
+    /// </exception>
+    public static IServiceCollection AddAuthOpenIddict(this IServiceCollection services, IConfiguration configuration, KeyMaterial keys, bool isDevelopment)
+    {
+        if (!isDevelopment)
+        {
+            foreach (var key in new[] { TokenOptions.IssuerKey, TokenOptions.AudienceKey })
+            {
+                if (string.IsNullOrWhiteSpace(configuration[key]))
+                {
+                    throw new InvalidOperationException($"Configuration value '{key}' must be set explicitly outside the Development environment.");
+                }
+            }
+        }
+
+        var section = configuration.GetSection(TokenOptions.SectionName);
+        var tokens = section.Get<TokenOptions>() ?? new TokenOptions();
+
+        if (!Uri.TryCreate(tokens.Issuer, UriKind.Absolute, out var issuer))
+        {
+            throw new InvalidOperationException($"Configuration value '{TokenOptions.IssuerKey}' must be an absolute URI.");
+        }
+
+        if (string.IsNullOrWhiteSpace(tokens.Audience))
+        {
+            throw new InvalidOperationException($"Configuration value '{TokenOptions.AudienceKey}' is missing or blank.");
+        }
+
+        services.Configure<TokenOptions>(section);
+
+        services.AddOpenIddict()
+            .AddCore(options => options.UseEntityFrameworkCore().UseDbContext<AuthDbContext>())
+            .AddServer(options =>
+            {
+                options.SetIssuer(issuer)
+                    .SetTokenEndpointUris(JsonLoginRequestHandler.LoginPath.TrimStart('/'))
+                    .SetJsonWebKeySetEndpointUris("auth/.well-known/jwks.json")
+                    // No discovery document: it is built from the Host header and is not part of the contract.
+                    .SetConfigurationEndpointUris(Array.Empty<Uri>());
+
+                // The password flow is the only flow: the login endpoint is its one entry point.
+                options.AllowPasswordFlow()
+                    .AcceptAnonymousClients();
+
+                options.SetAccessTokenLifetime(TokenOptions.AccessTokenLifetime)
+                    .DisableAccessTokenEncryption()
+                    .RegisterAudiences(tokens.Audience);
+
+                // The token endpoint takes JSON, not a form post: swap OpenIddict's form extraction for ours.
+                options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
+                    .AddEventHandler(JsonLoginRequestHandler.Descriptor)
+                    .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
+
+                // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an
+                // `Authorization: Basic ...` header would be taken as client credentials and fail with invalid_client.
+                options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractBasicAuthenticationCredentials<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor);
+
+                // ...and cut the token response down to {status, access_token}.
+                options.AddEventHandler(LoginResponseShaper.Descriptor);
+
+                options.AddSigningCertificate(keys.Signing)
+                    .AddEncryptionCertificate(keys.Encryption);
+
+                // HTTPS is enforced by the reverse proxy; the container port itself speaks plain HTTP.
+                options.UseAspNetCore()
+                    .EnableTokenEndpointPassthrough()
+                    .DisableTransportSecurityRequirement();
+            });
+
+        return services;
+    }
+}

@@ -1,0 +1,3 @@
+# EF Core generated migrations: exempt from analyzers (scoped to this folder only).
+[*.cs]
+generated_code = true

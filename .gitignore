@@ -19,6 +19,7 @@ publish/
 # Environment & secrets
 .env
 .env.*
+!.env.example
 *.pfx
 *.key
 appsettings.*.Local.json
@@ -38,3 +39,6 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+
+# Local secrets (signing/encryption key material)
+.secrets/

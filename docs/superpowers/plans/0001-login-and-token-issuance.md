@@ -615,3 +615,12 @@ public async Task Malformed_json_login_returns_400(string body)
    plan does both: the audience is registered, and `aud` comes from `SetResources`.
    Criterion 3 (the `aud` value) is the authority. Confirm that this reading of the
    spec is acceptable.
+
+## As built
+
+Implemented, verified locally (three verifiers, PASS in round 3) and merged.
+What the implementation settled, including where it departs from this plan, is
+recorded in spec 0001 → "As built" and in the
+[acceptance map](0001-acceptance-map.md). In particular, the Architecture
+paragraph's "one-line `SetTokenEndpointUris` change" for refresh is superseded:
+spec 0002 also needs its own extraction handler.
