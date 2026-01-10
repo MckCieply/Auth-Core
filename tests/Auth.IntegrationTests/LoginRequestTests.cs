@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Auth.IntegrationTests.Infrastructure;
@@ -123,6 +124,52 @@ public sealed class LoginRequestTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.DoesNotContain("leak-me", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    // OpenIddict matches the token endpoint with or without a trailing slash, so /auth/login/ must behave exactly
+    // like /auth/login (it used to leave the request null and crash with a 500 inside OpenIddict).
+    private const string LoginPathWithSlash = "/auth/login/";
+
+    [Fact]
+    public async Task Trailing_slash_login_with_valid_credentials_returns_200_with_exact_contract_body()
+    {
+        using var response = await _client.PostAsJsonAsync(
+            LoginPathWithSlash, new { email = _factory.SeedEmail, password = _factory.SeedPassword });
+
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected 200, got {(int)response.StatusCode}: {raw}");
+        using var json = JsonDocument.Parse(raw);
+        Assert.Equal("authenticated", json.RootElement.GetProperty("status").GetString());
+        Assert.False(string.IsNullOrEmpty(json.RootElement.GetProperty("access_token").GetString()));
+        Assert.Equal(["access_token", "status"], json.RootElement.EnumerateObject().Select(p => p.Name).Order());
+    }
+
+    [Fact]
+    public async Task Trailing_slash_login_with_wrong_password_returns_the_uniform_401()
+    {
+        using var response = await _client.PostAsJsonAsync(
+            LoginPathWithSlash, new { email = _factory.SeedEmail, password = "definitely-wrong" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("""{"error":"invalid_credentials"}""", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Trailing_slash_login_with_non_json_body_returns_400()
+    {
+        using var response = await _client.PostAsync(LoginPathWithSlash, new StringContent("hello", Encoding.UTF8, "text/plain"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertInvalidRequestBodyAsync(response);
+    }
+
+    [Fact]
+    public async Task Trailing_slash_login_with_get_returns_400()
+    {
+        using var response = await _client.GetAsync(LoginPathWithSlash);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertInvalidRequestBodyAsync(response);
     }
 
     private static async Task AssertInvalidRequestBodyAsync(HttpResponseMessage response)

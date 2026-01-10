@@ -69,7 +69,8 @@ public static class OpenIddictSetup
 
                 // The token endpoint takes JSON, not a form post: swap OpenIddict's form extraction for ours.
                 options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
-                    .AddEventHandler(JsonLoginRequestHandler.Descriptor);
+                    .AddEventHandler(JsonLoginRequestHandler.Descriptor)
+                    .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
 
                 // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an
                 // `Authorization: Basic ...` header would be taken as client credentials and fail with invalid_client.

@@ -30,10 +30,18 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
         "The request body must be a JSON object with non-empty string properties 'email' and 'password'.";
 
     /// <summary>
-    /// <see langword="true"/> when <paramref name="request"/> targets the login endpoint (case-insensitive, exact path).
+    /// <see langword="true"/> when <paramref name="request"/> targets the login endpoint (see <see cref="IsLoginPath"/>).
     /// </summary>
-    internal static bool IsLoginRequest(HttpRequest request) =>
-        request.Path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase);
+    internal static bool IsLoginRequest(HttpRequest request) => IsLoginPath(request.Path);
+
+    /// <summary>
+    /// <see langword="true"/> for <c>/auth/login</c> and <c>/auth/login/</c>, case-insensitive, and nothing else.
+    /// OpenIddict matches the token endpoint with an optional trailing slash, so the login-specific handlers must
+    /// agree with it: a request OpenIddict routes to the login endpoint must never slip past them.
+    /// </summary>
+    internal static bool IsLoginPath(PathString path) =>
+        path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase)
+        || path.Equals(LoginPath + "/", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Takes the exact slot of OpenIddict's <c>ExtractPostRequest</c> (which must be removed from the pipeline), so
@@ -57,8 +65,9 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
 
         // Login only. Another token-endpoint path is some later spec's flow: do nothing, so its own extraction
         // handler can populate the request. OpenIddict's ExtractPostRequest is removed (see OpenIddictSetup), so
-        // spec 0002 MUST provide extraction for /auth/refresh itself; until then such a request is left without a
-        // request and OpenIddict rejects it. This is intended: do not re-add ExtractPostRequest.
+        // spec 0002 MUST provide extraction for /auth/refresh itself, ordered before UnhandledTokenRequestGuard;
+        // until then UnhandledTokenRequestGuard rejects such a request with 400 invalid_request. This is intended:
+        // do not re-add ExtractPostRequest.
         if (!IsLoginRequest(request))
         {
             return;

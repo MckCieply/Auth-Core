@@ -35,7 +35,7 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
     internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
         request is not null
         && request.IsPasswordGrantType()
-        && path.Equals(JsonLoginRequestHandler.LoginPath, StringComparison.OrdinalIgnoreCase);
+        && JsonLoginRequestHandler.IsLoginPath(path);
 
     /// <inheritdoc />
     public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)
