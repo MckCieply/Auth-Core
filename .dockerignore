@@ -1,0 +1,27 @@
+# Keep the build context small and free of local secrets.
+**/bin/
+**/obj/
+.git/
+.gitignore
+.github/
+.vs/
+.idea/
+.vscode/
+.claude/
+
+# Never ship local secrets or environment files into the build context.
+.secrets/
+.env
+.env.*
+*.pfx
+*.key
+*.crt
+
+# Not needed to build the server image.
+tests/
+docs/
+deploy/
+scripts/
+**/TestResults/
+coverage/
+*.md
