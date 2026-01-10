@@ -6,9 +6,29 @@ project drops in instead of rebuilding login, tenancy, RBAC and token refresh.
 `speech-to-mail` is the first consumer; the MVP milestone is a working end-to-end
 login on a real phone, delivered over a six-week build.
 
-> **Status:** design phase. This repository currently holds the design brief and
-> architecture decision records. Implementation follows the milestones in
-> [`docs/design.md`](docs/design.md).
+> **Status:** Week 1 slice in progress — `POST /auth/login` issues RS256 JWTs and
+> `GET /auth/.well-known/jwks.json` publishes the verification key
+> ([spec 0001](docs/superpowers/specs/0001-login-and-token-issuance.md)).
+> Implementation follows the milestones in [`docs/design.md`](docs/design.md).
+
+## Quickstart (development)
+
+Needs the .NET 10 SDK, Docker with Compose, `openssl`, and Python 3 with
+`PyJWT[crypto]` for the e2e check.
+
+```bash
+cp .env.example .env            # set local values; git-ignored
+scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (git-ignored)
+docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
+docker compose -f deploy/docker-compose.yml --env-file .env down -v
+```
+
+Tests (integration, Postgres via Testcontainers — Docker must be running):
+
+```bash
+dotnet build -warnaserror && dotnet test
+```
 
 ## What this is (and is not)
 
