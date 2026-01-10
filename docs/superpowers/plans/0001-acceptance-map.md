@@ -10,12 +10,12 @@ Integration tests live in `tests/Auth.IntegrationTests/`; e2e steps are in
 | - | --------- | ---------------- |
 | 1 | Correct credentials → `200` + JWT | `LoginTests.Valid_credentials_return_200_with_exact_contract_body`; e2e step 1 |
 | 2 | Unencrypted RS256 JWS with `kid` | `LoginTests.Token_is_unencrypted_RS256_jws_with_kid` |
-| 3 | `iss`, `aud`, `sub`, `exp` ≤ 10 min; no Week 3 claims | `LoginTests.Token_carries_contract_claims_and_nothing_from_week_3`, `LoginTests.Token_header_typ_is_at_jwt_and_payload_has_no_identity_extras` |
+| 3 | `iss`, `aud`, `sub`, `exp` ≤ 10 min; no Week 3 claims | `LoginTests.Token_carries_contract_claims_and_nothing_from_week_3` (exp bounded against now), `LoginTests.Token_payload_claim_set_is_exactly_the_contract_plus_openiddict_metadata`, `LoginTests.Token_header_typ_is_at_jwt_and_payload_has_no_identity_extras` |
 | 4 | Verifies against JWKS `kid`, no shared secret | `TokenVerificationTests.Token_verifies_against_jwks_kid_without_shared_secret`, `TokenVerificationTests.Token_from_a_host_with_different_keys_fails_against_this_jwks`; e2e step 2 (PyJWT) |
-| 5 | Unknown email and wrong password → identical `401` | `LoginTests.Unknown_email_and_wrong_password_are_indistinguishable`; e2e step 3 |
-| 6 | Malformed request → `400`, not `500` | `LoginRequestTests.Malformed_json_login_returns_400` (14 cases), `Form_encoded_oidc_request_returns_400`, `Plain_text_body_returns_400`, `Oversized_body_returns_400` |
+| 5 | Unknown email and wrong password → identical `401` | `LoginTests.Unknown_email_and_wrong_password_are_indistinguishable`, `LoginTests.Basic_authorization_header_does_not_change_the_uniform_401`; e2e step 3 |
+| 6 | Malformed request → `400`, not `500` | `LoginRequestTests.Malformed_json_login_returns_400` (18 cases, incl. NUL/control characters), `Form_encoded_oidc_request_returns_400`, `Plain_text_body_returns_400`, `Oversized_body_returns_400`, `Trailing_slash_login_with_non_json_body_returns_400`, `Trailing_slash_login_with_get_returns_400`; `UnhandledTokenRequestGuardTests` |
 | 7 | Token survives a full restart | `TokenVerificationTests.Token_issued_before_restart_verifies_against_jwks_after_restart`; e2e step 4 (real container restart) |
-| 8 | JWKS has no private key members | `JwksTests.Jwks_never_contains_private_key_members`; e2e step 2 |
+| 8 | JWKS has no private key members | `JwksTests.Jwks_never_contains_private_key_members`, `JwksTests.Jwks_has_exactly_one_key_and_never_publishes_the_encryption_certificate`; e2e step 2 |
 
 ## Review Focus (plan 0001)
 
@@ -35,3 +35,43 @@ Integration tests live in `tests/Auth.IntegrationTests/`; e2e steps are in
   and rejects non-form bodies). No fallback middleware.
 - **Task 8:** the plan's single `Tampered_token_fails_verification` became three
   tests (signature, payload, `alg=none`), plus the different-keys control.
+
+## Local verification log
+
+Three Sonnet verifiers (realization vs spec, API/e2e, security) ran per
+[`docs/workflow.md`](../../workflow.md#verification).
+
+| Round | Realization vs spec | API / e2e | Security | Fix commit |
+| ----- | ------------------- | --------- | -------- | ---------- |
+| 1 | FAIL: login handlers applied to every token-endpoint request (spec 0002 trap) | FAIL: NUL in email → `500` + stack trace | PASS | `fix(login): address local verification round 1` |
+| 2 | FAIL: `/auth/login/` → `500` (regression from round 1) | FAIL: same | — | `fix(login): handle trailing-slash login path and unclaimed token requests` |
+| 3 | PASS (combined re-check, incl. mutation check of the new tests) | PASS (clean stack, ~100 probes, no `500`; e2e ALL PASS) | — | — |
+
+### Deferred / follow-ups (not fixed in this slice, by design)
+
+- **Timing oracle** on login: unknown email ≈ 5–10 ms vs wrong password ≈ 100 ms →
+  spec 0003 (timing equalisation). No lockout or rate limiting → spec 0003.
+- **Unconfirmed emails can log in**: spec 0001 is silent; decide in the email
+  verification spec (Week 2).
+- **`OpenIddictTokens` grows by one row per login** (access-token entries, no
+  pruning) → spec 0002 (revocation) or a cleanup job.
+- **Encryption certificate is mandatory** although access-token encryption is
+  off: OpenIddict requires one, and refresh tokens (spec 0002) use it.
+- **Dev seeder** is not safe for two replicas starting at once on one database
+  (dev only) and logs the seed email once.
+- **`scripts/dev-keys.sh` writes keys with mode `0644`** so the non-root
+  container can read the bind mount: single-user dev machines only.
+- **Image ships unused OpenIddict client/validation assemblies** (meta-package);
+  narrower package references could shrink it.
+
+### Escalations for the owner (plan vs spec)
+
+- **E1.** The plan's architecture paragraph says refresh can be mapped onto the
+  token endpoint with "a one-line `SetTokenEndpointUris` change". With the shipped
+  design, spec 0002 must also add its own extraction handler ordered before
+  `UnhandledTokenRequestGuard`. The plan text is left unchanged pending owner sign-off.
+- **E2.** Spec 0001 Decision 1 tracks the repo skeleton separately; plan 0001
+  bundled it as Task 1 (and the Docker image/compose as Task 9).
+- **E3.** The token carries OpenIddict metadata claims `iat`, `jti`, `oi_tkn_id`
+  beyond the spec's `iss/aud/sub/exp`; the claim-set test accepts them pending an
+  owner decision on whether the spec list is exhaustive.
