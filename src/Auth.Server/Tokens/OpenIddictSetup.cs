@@ -1,5 +1,8 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
+using Auth.Server.Login;
+using OpenIddict.Server;
+using OpenIddict.Server.AspNetCore;
 
 namespace Auth.Server.Tokens;
 
@@ -45,6 +48,10 @@ public static class OpenIddictSetup
                 options.SetAccessTokenLifetime(TokenOptions.AccessTokenLifetime)
                     .DisableAccessTokenEncryption()
                     .RegisterAudiences(tokens.Audience);
+
+                // The token endpoint takes JSON, not a form post: swap OpenIddict's form extraction for ours.
+                options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
+                    .AddEventHandler(JsonLoginRequestHandler.Descriptor);
 
                 options.AddSigningCertificate(keys.Signing)
                     .AddEncryptionCertificate(keys.Encryption);
