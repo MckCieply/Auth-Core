@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Tokens;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -58,10 +59,23 @@ public sealed class LoginTests : IAsyncLifetime
         Assert.Equal((await _factory.SeedUserIdAsync()).ToString(), jwt.Subject);
         Assert.True(jwt.ValidTo > DateTime.UtcNow);
         Assert.True(jwt.ValidTo - jwt.IssuedAt <= TimeSpan.FromMinutes(10));
+        // Bound exp against NOW too, so a trivially short (or overlong) lifetime fails: ~10 min from the login.
+        Assert.InRange(jwt.ValidTo, DateTime.UtcNow.AddMinutes(9), DateTime.UtcNow.AddMinutes(10).AddSeconds(30));
         foreach (var absent in new[] { "org_id", "roles", "permissions" })
         {
             Assert.DoesNotContain(jwt.Claims, c => c.Type == absent);
         }
+    }
+
+    [Fact]
+    public async Task Token_payload_claim_set_is_exactly_the_contract_plus_openiddict_metadata()
+    {
+        var jwt = new JsonWebToken(await LoginToken(_client, _factory));
+
+        // iss, aud, sub, exp are the contract. iat, jti and oi_tkn_id are OpenIddict metadata that cannot be
+        // switched off; they are accepted extras pending an owner decision. Anything else is a contract leak.
+        string[] expected = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "sub"];
+        Assert.Equal(expected, jwt.Claims.Select(c => c.Type).Distinct().Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -119,5 +133,41 @@ public sealed class LoginTests : IAsyncLifetime
     public async Task Email_match_is_case_insensitive()   // Review Focus #1
     {
         await LoginOk(_client, _factory.SeedEmail.ToUpperInvariant(), _factory.SeedPassword);
+    }
+
+    [Theory]
+    [InlineData("Basic Zm9vOmJhcg==")]       // foo:bar
+    [InlineData("Basic !!!not-base64!!!")]   // malformed
+    [InlineData("Basic")]                    // no credentials at all
+    public async Task Basic_authorization_header_is_ignored_for_valid_credentials(string authorization)
+    {
+        using var request = JsonLogin(_factory.SeedEmail, _factory.SeedPassword, authorization);
+        using var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("authenticated", body.RootElement.GetProperty("status").GetString());
+    }
+
+    [Theory]
+    [InlineData("Basic Zm9vOmJhcg==")]
+    [InlineData("Basic !!!not-base64!!!")]
+    public async Task Basic_authorization_header_does_not_change_the_uniform_401(string authorization)
+    {
+        using var request = JsonLogin(_factory.SeedEmail, "definitely-wrong", authorization);
+        using var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("""{"error":"invalid_credentials"}""", await response.Content.ReadAsStringAsync());
+    }
+
+    private static HttpRequestMessage JsonLogin(string email, string password, string authorization)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, LoginApi.Path)
+        {
+            Content = JsonContent.Create(new { email, password }),
+        };
+        request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        return request;
     }
 }

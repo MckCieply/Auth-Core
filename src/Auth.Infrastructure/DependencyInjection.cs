@@ -27,7 +27,7 @@ public static class DependencyInjection
         });
 
         services
-            .AddIdentityCore<ApplicationUser>()
+            .AddIdentityCore<ApplicationUser>(options => options.User.RequireUniqueEmail = true)
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<AuthDbContext>();
 

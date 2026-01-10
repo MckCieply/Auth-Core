@@ -62,4 +62,43 @@ public class DevSeedTests(PostgresFixture postgres, KeyMaterialFixture keys)
         Assert.Null(await scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>()
             .FindByEmailAsync("prod-seed@example.com"));
     }
+
+    [Theory]
+    [InlineData("Auth:Tokens:Issuer")]
+    [InlineData("Auth:Tokens:Audience")]
+    public async Task Production_host_refuses_to_start_on_default_token_identifiers(string key)
+    {
+        // Key absent from configuration: the class defaults (the development identifiers) would silently apply.
+        await using var f = new AuthAppFactory(postgres, keys)
+            .WithEnvironment("Production")
+            .WithoutSetting(key);
+
+        // An Auth__Tokens__* variable on this machine would fill the gap: hide it while the host is built. Every other
+        // test pins both identifiers through settings, which win over the environment, so they are unaffected.
+        var variable = key.Replace(":", "__", StringComparison.Ordinal);
+        var saved = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, null);
+        try
+        {
+            var ex = Assert.ThrowsAny<Exception>(() => f.CreateClient());
+            Assert.Contains(key, ex.ToString());
+            Assert.Contains("explicitly", ex.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, saved);
+        }
+    }
+
+    [Fact]
+    public async Task Development_host_starts_on_the_default_token_identifiers()
+    {
+        await using var f = new AuthAppFactory(postgres, keys)
+            .WithoutSetting("Auth:Tokens:Issuer")
+            .WithoutSetting("Auth:Tokens:Audience");
+
+        using var client = f.CreateClient();
+        using var response = await client.GetAsync("/auth/health");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    }
 }

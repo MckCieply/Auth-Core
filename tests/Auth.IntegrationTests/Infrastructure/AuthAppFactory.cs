@@ -1,5 +1,6 @@
 using Auth.Infrastructure.Identity;
 using Auth.Server.Seeding;
+using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,6 +29,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings["Auth:Keys:SigningKeyPath"] = keys.SigningKeyPath;
         _settings["Auth:Keys:EncryptionCertificatePath"] = keys.EncryptionCertPath;
         _settings["Auth:Keys:EncryptionKeyPath"] = keys.EncryptionKeyPath;
+        // Pinned explicitly (UseSetting beats environment variables), so a stray Auth__Tokens__* variable on the
+        // machine running the tests cannot change what the tests expect, and Production-mode hosts pass the
+        // "identifiers must be explicit" check.
+        _settings[TokenOptions.IssuerKey] = "http://localhost:8080/auth";
+        _settings[TokenOptions.AudienceKey] = "auth-core-dev";
         _settings[DevUserSeeder.EmailKey] = DefaultSeedEmail;
         _settings[DevUserSeeder.PasswordKey] = DefaultSeedPassword;
     }
@@ -58,6 +64,13 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public AuthAppFactory WithSetting(string key, string? value)
     {
         _settings[key] = value;
+        return this;
+    }
+
+    /// <summary>Leaves <paramref name="key"/> out of the configuration altogether (also undoing a default pin).</summary>
+    public AuthAppFactory WithoutSetting(string key)
+    {
+        _settings.Remove(key);
         return this;
     }
 

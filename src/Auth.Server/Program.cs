@@ -13,7 +13,7 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 builder.Services.AddHealthChecks();
 builder.Services.AddAuthPersistence(builder.Configuration);
-builder.Services.AddAuthOpenIddict(builder.Configuration, keys);
+builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 
 var app = builder.Build();
 
@@ -26,7 +26,7 @@ if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
 app.MapHealthChecks("/auth/health");
-app.MapPost("/auth/login", LoginEndpoint.HandleAsync);
+app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
 
 app.Run();
 

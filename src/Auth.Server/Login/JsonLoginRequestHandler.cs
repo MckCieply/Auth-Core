@@ -21,7 +21,19 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
     /// <summary>Largest accepted request body, in bytes.</summary>
     public const int MaxBodyBytes = 8 * 1024;
 
+    /// <summary>The one path this handler (and <see cref="LoginResponseShaper"/>) acts on.</summary>
+    public const string LoginPath = "/auth/login";
+
     private const string JsonMediaType = "application/json";
+
+    private const string InvalidCredentialsShapeDescription =
+        "The request body must be a JSON object with non-empty string properties 'email' and 'password'.";
+
+    /// <summary>
+    /// <see langword="true"/> when <paramref name="request"/> targets the login endpoint (case-insensitive, exact path).
+    /// </summary>
+    internal static bool IsLoginRequest(HttpRequest request) =>
+        request.Path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Takes the exact slot of OpenIddict's <c>ExtractPostRequest</c> (which must be removed from the pipeline), so
@@ -42,6 +54,15 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
 
         var request = context.Transaction.GetHttpRequest()
             ?? throw new InvalidOperationException("The token endpoint was reached without an ASP.NET Core request.");
+
+        // Login only. Another token-endpoint path is some later spec's flow: do nothing, so its own extraction
+        // handler can populate the request. OpenIddict's ExtractPostRequest is removed (see OpenIddictSetup), so
+        // spec 0002 MUST provide extraction for /auth/refresh itself; until then such a request is left without a
+        // request and OpenIddict rejects it. This is intended: do not re-add ExtractPostRequest.
+        if (!IsLoginRequest(request))
+        {
+            return;
+        }
 
         if (!HttpMethods.IsPost(request.Method))
         {
@@ -70,7 +91,15 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
 
         if (!TryParseCredentials(body, out var email, out var password))
         {
-            Reject(context, "The request body must be a JSON object with non-empty string properties 'email' and 'password'.");
+            Reject(context, InvalidCredentialsShapeDescription);
+            return;
+        }
+
+        // NUL is not storable in a Postgres text column (it would surface as a 500 from the email lookup), and
+        // control characters have no place in an email. Same fixed 400 as any other malformed body.
+        if (email.Any(static c => c < ' ') || password.Contains('\0'))
+        {
+            Reject(context, InvalidCredentialsShapeDescription);
             return;
         }
 

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Keys;
@@ -49,5 +50,33 @@ public class KeyMaterialTests(PostgresFixture postgres, KeyMaterialFixture keys)
         await using var factory = new AuthAppFactory(postgres, keys).WithSetting("Auth:Keys:SigningKeyPath", "");
         var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
         Assert.Contains("Auth:Keys:SigningKeyPath", ex.ToString());
+    }
+
+    [Fact]
+    public void Rsa_key_shorter_than_2048_bits_is_rejected()
+    {
+        var directory = Directory.CreateTempSubdirectory("auth-core-weak-key-");
+        try
+        {
+            var certPath = Path.Combine(directory.FullName, "weak.crt");
+            var keyPath = Path.Combine(directory.FullName, "weak.key");
+            using (var rsa = RSA.Create(1024))
+            {
+                var request = new CertificateRequest("CN=auth-core-test-weak", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+                File.WriteAllText(certPath, cert.ExportCertificatePem());
+                File.WriteAllText(keyPath, rsa.ExportPkcs8PrivateKeyPem());
+            }
+
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                KeyMaterialLoader.Load(certPath, keyPath, "Auth:Keys:SigningKeyPath"));
+            Assert.Contains("Auth:Keys:SigningKeyPath", ex.Message);
+            Assert.Contains("2048", ex.Message);
+            Assert.DoesNotContain("BEGIN", ex.Message);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 }

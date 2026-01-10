@@ -11,11 +11,11 @@
 
 # Never ship local secrets or environment files into the build context.
 .secrets/
-.env
-.env.*
-*.pfx
-*.key
-*.crt
+**/.env
+**/.env.*
+**/*.pfx
+**/*.key
+**/*.crt
 
 # Not needed to build the server image.
 tests/

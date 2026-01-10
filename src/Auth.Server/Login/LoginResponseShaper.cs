@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Http;
+using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
 
@@ -25,10 +28,25 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
+    /// <summary>
+    /// The response is shaped only for a password grant on the login path; any other token-endpoint response
+    /// (a future refresh, say) passes through untouched.
+    /// </summary>
+    internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
+        request is not null
+        && request.IsPasswordGrantType()
+        && path.Equals(JsonLoginRequestHandler.LoginPath, StringComparison.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        var path = context.Transaction.GetHttpRequest()?.Path ?? default;
+        if (!ShouldShape(context.Request, path))
+        {
+            return ValueTask.CompletedTask;
+        }
 
         if (!string.IsNullOrEmpty(context.Response.Error))
         {
@@ -39,7 +57,7 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
             ?? throw new InvalidOperationException("A successful token response has no access token.");
 
         // Replace, rather than remove one by one: whatever else OpenIddict adds must not leak into the contract.
-        context.Response = new OpenIddict.Abstractions.OpenIddictResponse
+        context.Response = new OpenIddictResponse
         {
             [StatusParameter] = AuthenticatedStatus,
             [AccessTokenParameter] = accessToken,

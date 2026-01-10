@@ -10,6 +10,9 @@ namespace Auth.Server.Keys;
 /// </summary>
 public static class KeyMaterialLoader
 {
+    /// <summary>Smallest accepted RSA modulus size, in bits.</summary>
+    public const int MinimumRsaKeySizeBits = 2048;
+
     /// <summary>
     /// Loads a certificate and its RSA private key from a PEM pair.
     /// </summary>
@@ -19,7 +22,7 @@ public static class KeyMaterialLoader
     /// Configuration key to blame in error messages (for example <c>Auth:Keys:SigningKeyPath</c>).
     /// </param>
     /// <exception cref="InvalidOperationException">
-    /// A path is blank, a file is missing or unreadable, or the key is not an RSA private key.
+    /// A path is blank, a file is missing or unreadable, or the key is not an RSA private key of at least 2048 bits.
     /// Messages name <paramref name="configKey"/> only; they never include file contents or key bytes.
     /// </exception>
     public static X509Certificate2 Load(string? certPath, string? keyPath, string configKey)
@@ -56,6 +59,11 @@ public static class KeyMaterialLoader
             if (rsa is null)
             {
                 throw Fail(configKey, "the private key is not an RSA key (RS256 requires RSA)");
+            }
+
+            if (rsa.KeySize < MinimumRsaKeySizeBits)
+            {
+                throw Fail(configKey, $"the RSA key is shorter than the required {MinimumRsaKeySizeBits} bits");
             }
 
             return cert;

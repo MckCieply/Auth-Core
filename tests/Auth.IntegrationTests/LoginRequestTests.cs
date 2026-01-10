@@ -44,6 +44,10 @@ public sealed class LoginRequestTests : IAsyncLifetime
     [InlineData("""{"email":"a@example.com","password":"\ud800"}""")] // lone surrogate escape
     [InlineData("null")]                                              // JSON null root
     [InlineData("""{"email":"a@example.com","password":"x",""")]      // truncated
+    [InlineData("""{"email":"a\u0000b","password":"x"}""")]          // NUL in email (Npgsql 22021 -> was a 500)
+    [InlineData("""{"email":"a@example.com","password":"x\u0000y"}""")] // NUL in password
+    [InlineData("""{"email":"a@exam\u0007ple.com","password":"x"}""")] // other C0 control char in email
+    [InlineData("""{"email":"a@example.com\n","password":"x"}""")]   // trailing newline in email
     public async Task Malformed_json_login_returns_400(string body)
     {
         var response = await _client.PostAsync(LoginPath, new StringContent(body, Encoding.UTF8, "application/json"));
