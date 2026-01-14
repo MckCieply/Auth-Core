@@ -3,6 +3,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
+using Auth.Server.Sessions;
 using Auth.Server.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -30,6 +31,7 @@ await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
 app.MapHealthChecks("/auth/health");
 app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
+app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
 
 app.Run();
 

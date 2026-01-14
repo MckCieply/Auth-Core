@@ -63,11 +63,10 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
         var request = context.Transaction.GetHttpRequest()
             ?? throw new InvalidOperationException("The token endpoint was reached without an ASP.NET Core request.");
 
-        // Login only. Another token-endpoint path is some later spec's flow: do nothing, so its own extraction
-        // handler can populate the request. OpenIddict's ExtractPostRequest is removed (see OpenIddictSetup), so
-        // spec 0002 MUST provide extraction for /auth/refresh itself, ordered before UnhandledTokenRequestGuard;
-        // until then UnhandledTokenRequestGuard rejects such a request with 400 invalid_request. This is intended:
-        // do not re-add ExtractPostRequest.
+        // Login only. Another token-endpoint path belongs to another flow: do nothing, so that flow's own extraction
+        // handler can populate the request (RefreshRequestHandler does so for /auth/refresh). OpenIddict's
+        // ExtractPostRequest is removed (see OpenIddictSetup), so a path nobody claims is rejected by
+        // UnhandledTokenRequestGuard with 400 invalid_request. This is intended: do not re-add ExtractPostRequest.
         if (!IsLoginRequest(request))
         {
             return;

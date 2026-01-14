@@ -1,13 +1,17 @@
+using System.Text.Json;
 using Auth.Server.Login;
 using Microsoft.AspNetCore;
+using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
+using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Server.Sessions;
 
 /// <summary>
 /// Moves the refresh token of a successful token response out of the body and into the <c>auth_rt</c> cookie. The
-/// refresh token never reaches a response body (spec 0002, criterion 8).
+/// refresh token never reaches a response body (spec 0002, criterion 8). On <c>/auth/refresh</c> it also writes the
+/// response itself: <c>{"access_token"}</c> on success, one uniform <c>401 {"error":"invalid_grant"}</c> on failure.
 /// </summary>
 public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ApplyTokenResponseContext>
 {
@@ -24,16 +28,26 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
             .Build();
 
     /// <inheritdoc />
-    public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)
+    public async ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var http = context.Transaction.GetHttpRequest()?.HttpContext
             ?? throw new InvalidOperationException("The token endpoint was reached without an ASP.NET Core request.");
 
+        var isRefresh = RefreshRequestHandler.IsRefreshPath(http.Request.Path);
+
         if (!string.IsNullOrEmpty(context.Response.Error))
         {
-            return ValueTask.CompletedTask;
+            // invalid_request is the wrong-method case: a malformed request, answered like login's 400. Every other
+            // error on this path is a refresh failure and gets the one uniform answer (spec 0002, criterion 7).
+            if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
+            {
+                http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = Errors.InvalidGrant }, context);
+            }
+
+            return;
         }
 
         // Fail closed: a session without its cookie must not be handed out.
@@ -43,6 +57,29 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
         RefreshCookie.Append(http.Response, refreshToken, SessionPolicy.SlidingLifetime);
         context.Response.RefreshToken = null;
 
-        return ValueTask.CompletedTask;
+        if (isRefresh)
+        {
+            var accessToken = context.Response.AccessToken
+                ?? throw new InvalidOperationException("A successful token response has no access token.");
+
+            // Replace, rather than remove one by one: whatever else OpenIddict adds must not leak into the contract.
+            await WriteCompactAsync(http.Response, new OpenIddictResponse { AccessToken = accessToken }, context);
+        }
+    }
+
+    /// <summary>
+    /// Writes the refresh response itself, because OpenIddict's JSON writer indents its output and the contract is
+    /// the compact <c>{"access_token":"…"}</c> / <c>{"error":"invalid_grant"}</c>. It sets the same headers as that
+    /// writer and, like it, marks the request handled so nothing writes to the response a second time.
+    /// </summary>
+    private static async ValueTask WriteCompactAsync(
+        HttpResponse response, OpenIddictResponse body, OpenIddictServerEvents.ApplyTokenResponseContext context)
+    {
+        response.Headers.CacheControl = "no-store";
+        response.Headers.Pragma = "no-cache";
+        response.ContentType = "application/json;charset=UTF-8";
+
+        await JsonSerializer.SerializeAsync(response.Body, body, cancellationToken: context.CancellationToken);
+        context.HandleRequest();
     }
 }

@@ -11,7 +11,7 @@ public static class OpenIddictSetup
 {
     /// <summary>
     /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) and reference refresh tokens from the
-    /// password and refresh-token flows, the token endpoint at <c>auth/login</c> in pass-through mode, and the JWKS
+    /// password and refresh-token flows, the token endpoint at <c>auth/login</c> and <c>auth/refresh</c> in pass-through mode, and the JWKS
     /// endpoint at <c>auth/.well-known/jwks.json</c>.
     /// Signing and encryption credentials come from the mounted <paramref name="keys"/>, never from a generated certificate.
     /// </summary>
@@ -56,7 +56,9 @@ public static class OpenIddictSetup
             .AddServer(options =>
             {
                 options.SetIssuer(issuer)
-                    .SetTokenEndpointUris(JsonLoginRequestHandler.LoginPath.TrimStart('/'))
+                    .SetTokenEndpointUris(
+                        JsonLoginRequestHandler.LoginPath.TrimStart('/'),
+                        RefreshRequestHandler.RefreshPath.TrimStart('/'))
                     .SetJsonWebKeySetEndpointUris("auth/.well-known/jwks.json")
                     // No discovery document: it is built from the Host header and is not part of the contract.
                     .SetConfigurationEndpointUris(Array.Empty<Uri>());
@@ -75,6 +77,7 @@ public static class OpenIddictSetup
                 // The token endpoint takes JSON, not a form post: swap OpenIddict's form extraction for ours.
                 options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
                     .AddEventHandler(JsonLoginRequestHandler.Descriptor)
+                    .AddEventHandler(RefreshRequestHandler.Descriptor)
                     .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
 
                 // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an
