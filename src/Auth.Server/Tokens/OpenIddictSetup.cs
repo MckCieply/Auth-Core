@@ -1,6 +1,7 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
+using Auth.Server.Sessions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
 
@@ -9,8 +10,9 @@ namespace Auth.Server.Tokens;
 public static class OpenIddictSetup
 {
     /// <summary>
-    /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) from the password flow only, the token
-    /// endpoint at <c>auth/login</c> in pass-through mode, and the JWKS endpoint at <c>auth/.well-known/jwks.json</c>.
+    /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) and reference refresh tokens from the
+    /// password and refresh-token flows, the token endpoint at <c>auth/login</c> in pass-through mode, and the JWKS
+    /// endpoint at <c>auth/.well-known/jwks.json</c>.
     /// Signing and encryption credentials come from the mounted <paramref name="keys"/>, never from a generated certificate.
     /// </summary>
     /// <param name="isDevelopment">
@@ -59,11 +61,14 @@ public static class OpenIddictSetup
                     // No discovery document: it is built from the Host header and is not part of the contract.
                     .SetConfigurationEndpointUris(Array.Empty<Uri>());
 
-                // The password flow is the only flow: the login endpoint is its one entry point.
+                // The login endpoint is the password flow's one entry point; the refresh-token flow renews a session.
                 options.AllowPasswordFlow()
+                    .AllowRefreshTokenFlow()
                     .AcceptAnonymousClients();
 
                 options.SetAccessTokenLifetime(TokenOptions.AccessTokenLifetime)
+                    .SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime)
+                    .UseReferenceRefreshTokens()
                     .DisableAccessTokenEncryption()
                     .RegisterAudiences(tokens.Audience);
 
@@ -78,6 +83,12 @@ public static class OpenIddictSetup
 
                 // ...and cut the token response down to {status, access_token}.
                 options.AddEventHandler(LoginResponseShaper.Descriptor);
+
+                // Every sign-in gets a refresh token, and it travels in the auth_rt cookie, never in a body. The
+                // authorization that comes with it must not leak into the access token's claim set.
+                options.AddEventHandler(RefreshTokenIssuanceHandler.Descriptor)
+                    .AddEventHandler(AccessTokenClaimFilter.Descriptor)
+                    .AddEventHandler(SessionResponseHandler.Descriptor);
 
                 options.AddSigningCertificate(keys.Signing)
                     .AddEncryptionCertificate(keys.Encryption);

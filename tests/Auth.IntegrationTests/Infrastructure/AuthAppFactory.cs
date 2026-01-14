@@ -4,7 +4,9 @@ using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Auth.IntegrationTests.Infrastructure;
 
@@ -12,6 +14,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 {
     private readonly Dictionary<string, string?> _settings = new();
     private string? _environment;
+    private TimeProvider? _clock;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -74,6 +77,13 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         return this;
     }
 
+    /// <summary>Replaces the host's clock, so a test can move time forward.</summary>
+    public AuthAppFactory WithClock(TimeProvider clock)
+    {
+        _clock = clock;
+        return this;
+    }
+
     public AuthAppFactory WithEnvironment(string environment)
     {
         _environment = environment;
@@ -90,6 +100,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         foreach (var (key, value) in _settings)
         {
             builder.UseSetting(key, value);
+        }
+
+        if (_clock is { } clock)
+        {
+            builder.ConfigureTestServices(services => services.Replace(ServiceDescriptor.Singleton(clock)));
         }
     }
 }
