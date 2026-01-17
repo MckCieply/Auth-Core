@@ -70,6 +70,9 @@ public static class OpenIddictSetup
 
                 options.SetAccessTokenLifetime(TokenOptions.AccessTokenLifetime)
                     .SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime)
+                    // Spec 0002 Decision 2: rotation is on by default; a consumed token is forgiven for 15 s (an honest
+                    // retry or a double submit), after which its reuse revokes the whole family.
+                    .SetRefreshTokenReuseLeeway(SessionPolicy.ReuseLeeway)
                     .UseReferenceRefreshTokens()
                     .DisableAccessTokenEncryption()
                     .RegisterAudiences(tokens.Audience);
