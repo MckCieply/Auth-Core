@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace Auth.IntegrationTests.Infrastructure;
 
@@ -88,6 +89,17 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     {
         _environment = environment;
         return this;
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await base.DisposeAsync();
+        GC.SuppressFinalize(this);
+
+        // Every factory has a database of its own, hence a connection pool of its own that would stay open for
+        // minutes after the test. Without this the suite runs out of server connections as it grows.
+        await using var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]);
+        NpgsqlConnection.ClearPool(connection);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
