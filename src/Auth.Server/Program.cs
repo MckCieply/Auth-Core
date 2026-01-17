@@ -32,6 +32,7 @@ await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 app.MapHealthChecks("/auth/health");
 app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
 app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
+app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
 
 app.Run();
 
