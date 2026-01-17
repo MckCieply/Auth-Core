@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
 using Microsoft.AspNetCore.Authentication;
@@ -18,11 +19,13 @@ namespace Auth.Server.Sessions;
 /// </summary>
 public static class RefreshEndpoint
 {
-    public static async Task<IResult> HandleAsync(HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens)
+    public static async Task<IResult> HandleAsync(
+        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clock);
 
         var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var subject = result.Principal?.GetClaim(Claims.Subject);
@@ -31,6 +34,13 @@ public static class RefreshEndpoint
         // forgot/reset spec's job.
         var user = subject is null ? null : await users.FindByIdAsync(subject);
         if (user is null)
+        {
+            return InvalidGrant();
+        }
+
+        // A refresh token without a readable session start cannot be placed against the cap: reject it.
+        if (!long.TryParse(result.Principal!.GetClaim(SessionPolicy.StartClaim), NumberStyles.None, CultureInfo.InvariantCulture, out var startSeconds)
+            || SessionPolicy.RemainingLifetime(DateTimeOffset.FromUnixTimeSeconds(startSeconds), clock.GetUtcNow()) is not { } lifetime)
         {
             return InvalidGrant();
         }
@@ -47,6 +57,8 @@ public static class RefreshEndpoint
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
         principal.SetDestinations(static claim => claim.Type == Claims.Subject ? [Destinations.AccessToken] : []);
+        principal.SetRefreshTokenLifetime(lifetime);
+        http.Items[RefreshCookie.LifetimeItemKey] = lifetime;
 
         return Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }

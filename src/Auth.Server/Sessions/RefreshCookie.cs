@@ -11,6 +11,12 @@ public static class RefreshCookie
     /// <summary>Longest value treated as a token. A reference token is 43 characters; anything far longer is junk.</summary>
     public const int MaxTokenLength = 256;
 
+    /// <summary>
+    /// <see cref="HttpContext.Items"/> key under which an endpoint leaves the refresh token's lifetime (a
+    /// <see cref="TimeSpan"/>) for <see cref="SessionResponseHandler"/>, so the cookie lives exactly as long as the token.
+    /// </summary>
+    internal static readonly object LifetimeItemKey = new();
+
     public static void Append(HttpResponse response, string token, TimeSpan lifetime) =>
         response.Cookies.Append(Name, token, Options(lifetime));
 

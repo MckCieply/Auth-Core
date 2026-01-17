@@ -54,14 +54,21 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
         var refreshToken = context.Response.RefreshToken
             ?? throw new InvalidOperationException("A successful token response has no refresh token.");
 
-        RefreshCookie.Append(http.Response, refreshToken, SessionPolicy.SlidingLifetime);
+        var lifetime = http.Items[RefreshCookie.LifetimeItemKey] as TimeSpan?
+            ?? throw new InvalidOperationException("The endpoint did not record the refresh token lifetime.");
+
+        // Checked before the cookie is written, so a response about to fail never carries a Set-Cookie.
+        var accessToken = context.Response.AccessToken;
+        if (isRefresh && accessToken is null)
+        {
+            throw new InvalidOperationException("A successful token response has no access token.");
+        }
+
+        RefreshCookie.Append(http.Response, refreshToken, lifetime);
         context.Response.RefreshToken = null;
 
         if (isRefresh)
         {
-            var accessToken = context.Response.AccessToken
-                ?? throw new InvalidOperationException("A successful token response has no access token.");
-
             // Replace, rather than remove one by one: whatever else OpenIddict adds must not leak into the contract.
             await WriteCompactAsync(http.Response, new OpenIddictResponse { AccessToken = accessToken }, context);
         }
