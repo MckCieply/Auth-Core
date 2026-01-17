@@ -18,6 +18,8 @@ builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
+builder.Services.AddSingleton<TokenPruner>();
+builder.Services.AddHostedService<TokenPruningService>();
 
 var app = builder.Build();
 
