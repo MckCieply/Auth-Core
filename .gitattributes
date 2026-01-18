@@ -1,0 +1,2 @@
+# Shell scripts run in bash on every platform (Git Bash on Windows, the container build): keep them LF.
+*.sh text eol=lf
