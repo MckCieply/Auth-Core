@@ -131,7 +131,9 @@ public sealed class RefreshTests(PostgresFixture postgres, KeyMaterialFixture ke
         var login = await SessionApi.LoginAsync(Client, Factory);
         using var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["grant_type"] = "password", ["username"] = Factory.SeedEmail, ["password"] = Factory.SeedPassword,
+            ["grant_type"] = "password",
+            ["username"] = Factory.SeedEmail,
+            ["password"] = Factory.SeedPassword,
             ["refresh_token"] = login.RefreshToken,
         });
         using var json = JsonContent.Create(new { email = Factory.SeedEmail, password = Factory.SeedPassword, refresh_token = login.RefreshToken });
@@ -151,7 +153,8 @@ public sealed class RefreshTests(PostgresFixture postgres, KeyMaterialFixture ke
         {
             Content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
-                ["grant_type"] = "refresh_token", ["refresh_token"] = "not-a-real-reference-0123456789abcdef",
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = "not-a-real-reference-0123456789abcdef",
             }),
         };
         request.Headers.TryAddWithoutValidation("Cookie", $"{SessionApi.CookieName}={login.RefreshToken}");
