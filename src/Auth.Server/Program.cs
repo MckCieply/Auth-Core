@@ -3,8 +3,10 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
+using Auth.Server.Sessions;
 using Auth.Server.Tokens;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,7 +15,11 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 builder.Services.AddHealthChecks();
 builder.Services.AddAuthPersistence(builder.Configuration);
+// OpenIddict takes its clock from DI; tests replace this registration to move time.
+builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
+builder.Services.AddSingleton<TokenPruner>();
+builder.Services.AddHostedService<TokenPruningService>();
 
 var app = builder.Build();
 
@@ -27,6 +33,8 @@ await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
 app.MapHealthChecks("/auth/health");
 app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
+app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
+app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
 
 app.Run();
 

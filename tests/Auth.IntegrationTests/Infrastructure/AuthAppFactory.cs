@@ -4,7 +4,10 @@ using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
 
 namespace Auth.IntegrationTests.Infrastructure;
 
@@ -12,6 +15,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 {
     private readonly Dictionary<string, string?> _settings = new();
     private string? _environment;
+    private TimeProvider? _clock;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -74,10 +78,28 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         return this;
     }
 
+    /// <summary>Replaces the host's clock, so a test can move time forward.</summary>
+    public AuthAppFactory WithClock(TimeProvider clock)
+    {
+        _clock = clock;
+        return this;
+    }
+
     public AuthAppFactory WithEnvironment(string environment)
     {
         _environment = environment;
         return this;
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await base.DisposeAsync();
+        GC.SuppressFinalize(this);
+
+        // Every factory has a database of its own, hence a connection pool of its own that would stay open for
+        // minutes after the test. Without this the suite runs out of server connections as it grows.
+        await using var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]);
+        NpgsqlConnection.ClearPool(connection);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -90,6 +112,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         foreach (var (key, value) in _settings)
         {
             builder.UseSetting(key, value);
+        }
+
+        if (_clock is { } clock)
+        {
+            builder.ConfigureTestServices(services => services.Replace(ServiceDescriptor.Singleton(clock)));
         }
     }
 }

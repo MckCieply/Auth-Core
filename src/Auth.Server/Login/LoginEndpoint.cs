@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
+using Auth.Server.Sessions;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
@@ -23,11 +25,13 @@ public static class LoginEndpoint
 {
     public const string InvalidCredentialsError = "invalid_credentials";
 
-    public static async Task<IResult> HandleAsync(HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens)
+    public static async Task<IResult> HandleAsync(
+        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clock);
 
         var request = http.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The login endpoint was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
@@ -46,10 +50,14 @@ public static class LoginEndpoint
 
         // The token carries `sub` and nothing else: no email, name, role or scope.
         identity.SetClaim(Claims.Subject, user.Id.ToString());
+        identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
 
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
-        principal.SetDestinations(static _ => [Destinations.AccessToken]);
+        // `sub` is the whole access token; the session start stays in the refresh token only.
+        principal.SetDestinations(static claim => claim.Type == Claims.Subject ? [Destinations.AccessToken] : []);
+        principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
+        http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
 
         return Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }

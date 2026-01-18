@@ -9,6 +9,8 @@ login on a real phone, delivered over a six-week build.
 > **Status:** Week 1 milestone done — `POST /auth/login` issues RS256 JWTs and
 > `GET /auth/.well-known/jwks.json` publishes the verification key
 > ([spec 0001](docs/superpowers/specs/0001-login-and-token-issuance.md)).
+> Week 2's session half is done too: `POST /auth/refresh` and `POST /auth/logout`
+> ([spec 0002](docs/superpowers/specs/0002-refresh-and-logout.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).
 
 ## Quickstart (development)
@@ -21,6 +23,7 @@ cp .env.example .env            # set local values; git-ignored
 scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (git-ignored)
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
+scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 

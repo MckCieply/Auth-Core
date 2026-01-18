@@ -30,7 +30,8 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
 
     /// <summary>
     /// The response is shaped only for a password grant on the login path; any other token-endpoint response
-    /// (a future refresh, say) passes through untouched.
+    /// (the refresh, which <see cref="Auth.Server.Sessions.SessionResponseHandler"/> shapes itself) passes through
+    /// untouched.
     /// </summary>
     internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
         request is not null
