@@ -196,3 +196,55 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
   long enough for reuse detection, and that pruning removes what it should.
 - That the cookie `Max-Age` tracks the refresh token's own lifetime as the session
   approaches the absolute cap (Decision 10).
+
+## As built (owner, 2026-01-18)
+
+Recorded after implementation and local verification (plan 0002,
+[acceptance map](../plans/0002-acceptance-map.md)). What entered this stage stays
+in it; this section records it rather than rewriting the decisions above.
+
+**"To verify during implementation", resolved:**
+
+1. Rolling refresh tokens and the reuse leeway are OpenIddict 7.7.1 configuration.
+   Criteria 2–4 hold with no custom reuse handling, so criterion 4 stands.
+2. A password sign-in that issues a refresh token creates an ad-hoc authorization;
+   that is the family. Rotation stays in it; reuse outside the grace window revokes
+   its tokens; logout revokes the authorization and every token under it.
+3. The refresh token is issued without the `offline_access` scope, so no `scope`
+   claim appears. Not foreseen: once an authorization exists, OpenIddict adds its
+   id (`oi_au_id`) to the access token. A handler removes it there, which keeps the
+   claim set of spec 0001 exact (Decision 16).
+4. Pruning removes only entries created before the 14-day threshold, so a consumed
+   entry younger than that stays and reuse detection keeps working. A revoked
+   authorization stays until its newest token is 14 days old; then both go.
+5. The cookie's `Max-Age` equals the refresh token's own lifetime, including the
+   shortened one near the cap. OpenIddict takes its clock from the host, which is
+   what lets the lifetime tests run on a controlled clock.
+
+**Contract as built.** The refresh response is compact JSON — exactly
+`{"access_token":"…"}` or `{"error":"invalid_grant"}` — with `Cache-Control:
+no-store`. The cookie value is a 43-character opaque reference; the store holds only
+its hash.
+
+**Behaviour the spec was silent on:**
+
+- A wrong method on `/auth/logout` returns `405` (`Allow: POST`); on
+  `/auth/refresh` it returns `400 invalid_request` (Decision 15).
+- Every error on `/auth/refresh` other than that wrong-method case is answered with
+  the uniform `401 invalid_grant`, including a server-side OpenIddict error. An
+  unhandled exception is still a `500`.
+- Pruning runs once at host start as well as hourly.
+- Logout with an already-consumed token of the family still ends the family.
+- A cookie value that is empty, longer than 256 characters or contains a control
+  character is treated as no cookie.
+- `/auth/refresh/` and `/auth/logout/` behave like the paths without the slash.
+- The logout response carries `Cache-Control: no-store`.
+
+**Delivered beyond the plan:** a `.gitattributes` rule that keeps shell scripts LF
+on Windows checkouts, and the test host now releases its database connection pool.
+
+**Known gaps, owned elsewhere:** ending every session on a password change → the
+forgot/reset spec; rate limiting of refresh and logout → spec 0003; a CSRF token →
+still deferred (Decision 6); within the grace window a stolen, just-rotated token
+can start a second chain that reuse detection does not see (the trade-off of
+Decision 2). The acceptance map lists the rest.
