@@ -1658,3 +1658,14 @@ inside `app.Run()`, after the startup migration, so the tables exist.
    unhandled exception is still a `500`. Acceptable?
 3. **Pruning also runs once at host start**, not only hourly, so a service that
    restarts often still prunes. Acceptable?
+
+## As built
+
+Implemented and verified locally (three verifiers, PASS in round 1). What the
+implementation settled, including where it departs from this plan, is recorded in
+spec 0002 → "As built" and in the [acceptance map](0002-acceptance-map.md). In
+particular: Task 1 needed an extra handler (`AccessTokenClaimFilter`) to keep the
+access token's claim set; Task 2's response handler writes the refresh response
+itself; Task 5 uses the token type urn, not the `"refresh_token"` hint; Task 6's
+service ends its loop normally on cancellation. Open questions 1–3 above are carried
+to the owner as escalations E1–E3 in the acceptance map.
