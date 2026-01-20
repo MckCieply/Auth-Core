@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Auth.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    [Migration("20261001152310_InitialIdentityAndOpenIddict")]
+    [Migration("20260108204217_InitialIdentityAndOpenIddict")]
     partial class InitialIdentityAndOpenIddict
     {
         /// <inheritdoc />
