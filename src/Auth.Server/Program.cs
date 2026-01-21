@@ -1,6 +1,7 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
+using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
@@ -19,6 +20,7 @@ builder.Services.AddAuthPersistence(builder.Configuration);
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
+builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddHostedService<TokenPruningService>();
 
 var app = builder.Build();
