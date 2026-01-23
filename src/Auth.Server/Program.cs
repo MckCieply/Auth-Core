@@ -21,9 +21,13 @@ builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
+builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
 
 var app = builder.Build();
+
+// Made now, not by the first login with an unknown email, which would then take twice as long as the next one.
+_ = app.Services.GetRequiredService<DecoyPasswordHash>();
 
 if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
 {

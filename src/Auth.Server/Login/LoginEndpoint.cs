@@ -28,13 +28,15 @@ public static class LoginEndpoint
     public const string InvalidCredentialsError = "invalid_credentials";
 
     public static async Task<IResult> HandleAsync(
-        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, LoginStreakStore streaks)
+        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, LoginStreakStore streaks,
+        DecoyPasswordHash decoy)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(streaks);
+        ArgumentNullException.ThrowIfNull(decoy);
 
         var request = http.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The login endpoint was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
@@ -48,9 +50,17 @@ public static class LoginEndpoint
             return new TooManyAttemptsResult(decision.RetryAfter);
         }
 
-        // Timing equalisation for unknown emails is the next step of spec 0003 (decoy hash).
+        var password = request.Password ?? string.Empty;
         var user = await users.FindByEmailAsync(request.Username ?? string.Empty);
-        if (user is null || !await users.CheckPasswordAsync(user, request.Password ?? string.Empty))
+        if (user?.PasswordHash is null)
+        {
+            // No account, or one without a password: still pay for one verification, so this answer takes as long
+            // as a wrong password does.
+            _ = users.PasswordHasher.VerifyHashedPassword(user ?? new ApplicationUser(), decoy.Value, password);
+            return new InvalidCredentialsResult();
+        }
+
+        if (!await users.CheckPasswordAsync(user, password))
         {
             return new InvalidCredentialsResult();
         }
