@@ -14,12 +14,18 @@ public readonly record struct AttemptDecision(bool Allowed, TimeSpan RetryAfter)
 /// <summary>
 /// The lockout rules of spec 0003 as one pure transition. An attempt is counted when it arrives, before its password
 /// is looked at (Decision 14); a successful login then removes the state altogether, so a streak is the attempts
-/// since the last success.
+/// since the last success. Two rules start a cooldown: the streak reaching the threshold, and the burst rule, by which
+/// five evaluated attempts inside one fixed 10-second window raise the streak to the threshold at once.
 /// </summary>
 public static class LockoutPolicy
 {
     /// <summary>The attempt that starts the first cooldown.</summary>
     public const int Threshold = 10;
+
+    /// <summary>This many evaluated attempts inside one <see cref="BurstWindow"/> start the cooldown at once.</summary>
+    public const int BurstLimit = 5;
+
+    public static readonly TimeSpan BurstWindow = TimeSpan.FromSeconds(10);
 
     public static readonly TimeSpan BaseCooldown = TimeSpan.FromMinutes(1);
     public static readonly TimeSpan CooldownStep = TimeSpan.FromMinutes(1);
@@ -42,11 +48,20 @@ public static class LockoutPolicy
                 new AttemptDecision(false, extended - now));
         }
 
-        // This attempt is evaluated. From the threshold on it also starts a cooldown, which only a correct password
-        // (the caller then clears the streak) keeps from applying to the next attempt.
+        // This attempt is evaluated. A fixed 10-second window opens at an attempt that falls outside the open one;
+        // the fifth attempt inside a window is not a person typing, and raises the streak to the threshold.
+        var burstOpen = state.BurstCount > 0 && now - state.BurstStartedAt < BurstWindow;
+        var burstStartedAt = burstOpen ? state.BurstStartedAt : now;
+        var burstCount = burstOpen ? state.BurstCount + 1 : 1;
+        if (burstCount >= BurstLimit)
+        {
+            count = Math.Max(count, Threshold);
+        }
+
+        // From the threshold on the attempt also starts a cooldown, which only a correct password (the caller then
+        // clears the streak) keeps from applying to the next attempt.
         var lockedUntil = count >= Threshold ? now + CooldownFor(count) : (DateTimeOffset?)null;
-        return (state with { AttemptCount = count, LastAttemptAt = now, LockedUntil = lockedUntil },
-            new AttemptDecision(true, TimeSpan.Zero));
+        return (new StreakState(count, now, lockedUntil, burstStartedAt, burstCount), new AttemptDecision(true, TimeSpan.Zero));
     }
 
     /// <summary>The cooldown started by attempt number <paramref name="attemptCount"/> of a streak: min(30, n − 9) minutes.</summary>

@@ -135,4 +135,67 @@ public sealed class LockoutPolicyTests
         Assert.Equal(int.MaxValue, state.AttemptCount);
         Assert.Equal(T0 + HumanPace + LockoutPolicy.MaxCooldown, state.LockedUntil);
     }
+
+    private static readonly TimeSpan Fast = TimeSpan.FromSeconds(1);
+
+    [Fact]
+    public void Fifth_attempt_inside_ten_seconds_starts_the_cooldown_at_once()   // criterion 5
+    {
+        var (state, last, now) = Attempt(StreakState.Fresh(T0), T0, 5, Fast);
+
+        Assert.True(last.Allowed);                                  // the fifth is still evaluated
+        Assert.Equal(LockoutPolicy.Threshold, state.AttemptCount);  // raised to the threshold
+        Assert.Equal(now + Minute, state.LockedUntil);
+
+        (_, var sixth) = LockoutPolicy.Register(state, now + Fast);
+        Assert.False(sixth.Allowed);
+    }
+
+    [Fact]
+    public void Four_fast_attempts_do_not_lock()
+    {
+        var (state, _, _) = Attempt(StreakState.Fresh(T0), T0, 4, Fast);
+
+        Assert.Equal(4, state.AttemptCount);
+        Assert.Null(state.LockedUntil);
+    }
+
+    [Fact]
+    public void Window_runs_ten_seconds_from_its_first_attempt()   // criterion 5
+    {
+        var (four, _, first) = Attempt(StreakState.Fresh(T0), T0 - Fast, 1, Fast);   // one attempt, at T0
+        (four, _, _) = Attempt(four, first, 3, TimeSpan.Zero);                       // three more at T0
+
+        var (inside, _) = LockoutPolicy.Register(four, T0 + TimeSpan.FromSeconds(9.999));
+        var (outside, _) = LockoutPolicy.Register(four, T0 + LockoutPolicy.BurstWindow);
+
+        Assert.NotNull(inside.LockedUntil);
+        Assert.Null(outside.LockedUntil);
+        Assert.Equal(5, outside.AttemptCount);
+        Assert.Equal(1, outside.BurstCount);                        // a new window, opened by this attempt
+    }
+
+    [Fact]
+    public void After_a_burst_lock_the_escalation_continues_from_the_threshold()   // Decision 9
+    {
+        var (state, _, now) = Attempt(StreakState.Fresh(T0), T0, 5, Fast);
+
+        var expiry = now + Minute;
+        (state, var decision) = LockoutPolicy.Register(state, expiry);
+
+        Assert.True(decision.Allowed);
+        Assert.Equal(11, state.AttemptCount);
+        Assert.Equal(expiry + TimeSpan.FromMinutes(2), state.LockedUntil);
+    }
+
+    [Fact]
+    public void Refused_attempts_do_not_touch_the_window()
+    {
+        var (state, _, now) = Attempt(StreakState.Fresh(T0), T0, 5, Fast);
+        var burst = (state.BurstStartedAt, state.BurstCount);
+
+        (state, _) = LockoutPolicy.Register(state, now + Fast);
+
+        Assert.Equal(burst, (state.BurstStartedAt, state.BurstCount));
+    }
 }
