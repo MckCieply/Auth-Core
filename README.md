@@ -11,6 +11,8 @@ login on a real phone, delivered over a six-week build.
 > ([spec 0001](docs/superpowers/specs/0001-login-and-token-issuance.md)).
 > Week 2's session half is done too: `POST /auth/refresh` and `POST /auth/logout`
 > ([spec 0002](docs/superpowers/specs/0002-refresh-and-logout.md)).
+> Login is protected by a per-identifier lockout
+> ([spec 0003](docs/superpowers/specs/0003-lockout-and-abuse-resistance.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).
 
 ## Quickstart (development)
@@ -24,6 +26,7 @@ scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (gi
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
+scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~3 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 
