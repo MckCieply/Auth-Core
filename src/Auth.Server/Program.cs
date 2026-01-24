@@ -20,9 +20,11 @@ builder.Services.AddAuthPersistence(builder.Configuration);
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
+builder.Services.AddSingleton<LockoutPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
+builder.Services.AddHostedService<LockoutPruningService>();
 
 var app = builder.Build();
 
