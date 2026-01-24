@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using Auth.Infrastructure.Identity;
 using Auth.IntegrationTests.Infrastructure;
@@ -85,5 +86,17 @@ public sealed class LoginTimingTests : SessionTestBase
         // Identity's hash starts with a 13-byte header: format marker, PRF, iteration count, salt size.
         Assert.Equal(stored[..13], decoy[..13]);
         Assert.Equal(stored.Length, decoy.Length);
+    }
+    [Fact]
+    public async Task Decoy_follows_the_configured_hasher_settings()   // Decision 11
+    {
+        const int Iterations = 54_321;   // not the default
+        await using var factory = new AuthAppFactory(Postgres, Keys)
+            .WithServices(services => services.Configure<PasswordHasherOptions>(options => options.IterationCount = Iterations));
+
+        var decoy = Convert.FromBase64String(factory.Services.GetRequiredService<DecoyPasswordHash>().Value);
+
+        // Identity's V3 hash header: byte 0 format marker, bytes 1-4 PRF, bytes 5-8 iteration count (big-endian).
+        Assert.Equal(Iterations, BinaryPrimitives.ReadInt32BigEndian(decoy.AsSpan(5, 4)));
     }
 }

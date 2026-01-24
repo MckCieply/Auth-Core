@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 namespace Auth.IntegrationTests.Infrastructure;
@@ -92,6 +93,19 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _serviceOverrides.Add(configure);
         return this;
     }
+
+    /// <summary>
+    /// Leaves a background service out of the host, for tests that drive its work by hand. Stopping the service on a
+    /// running host instead is a race: stopped before its loop has started, it ends as a cancelled task, which the host
+    /// takes for a failed background service and stops itself.
+    /// </summary>
+    public AuthAppFactory WithoutHostedService<TService>()
+        where TService : class, IHostedService =>
+        WithServices(services =>
+        {
+            var registration = services.Single(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(TService));
+            services.Remove(registration);
+        });
 
     public AuthAppFactory WithEnvironment(string environment)
     {

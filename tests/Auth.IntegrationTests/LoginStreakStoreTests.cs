@@ -57,6 +57,8 @@ public sealed class LoginStreakStoreTests(PostgresFixture postgres, KeyMaterialF
     [Fact]
     public async Task Stored_instants_read_back_equal()
     {
+        // PostgreSQL keeps microseconds (10 ticks): make sure the clock sits between two of them, or this test proves nothing.
+        Clock.Advance(TimeSpan.FromTicks(17 - (Clock.GetUtcNow().Ticks % 10)));
         var key = Key("precision");
         for (var i = 0; i < LockoutPolicy.Threshold; i++)
         {

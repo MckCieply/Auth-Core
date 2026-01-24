@@ -24,7 +24,7 @@
 #
 # Reads AUTH_DEV_SEED_EMAIL / AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced).
 # Needs: curl, python3, docker compose (for the stack only). Env: BASE_URL (default http://localhost:8080).
-# Takes about 3 minutes: step 5 waits out a real cooldown (61-120 s). The threshold at human pace, the escalation
+# Takes about 2.5 minutes: step 5 waits out a real cooldown (RETRY + 1 = 62-121 s). The threshold at human pace, the escalation
 # from one cooldown to the next and the 24-hour reset are covered by integration tests with a controlled clock,
 # not here.
 # Re-runnable on the same stack: every unknown address is new per run. A run that dies between steps 4 and 6
@@ -92,7 +92,7 @@ header() { # value of a response header of the last response, CR stripped (empty
 }
 
 header_names() { # sorted header names of the last response, Date excluded
-  tail -n +2 "$tmp/hdr" | tr -d '\r' | grep ':' | cut -d: -f1 | tr '[:upper:]' '[:lower:]' | grep -vx 'date' | sort | tr '\n' ' '
+  tail -n +2 "$tmp/hdr" | tr -d '\r' | grep ':' | cut -d: -f1 | tr '[:upper:]' '[:lower:]' | { grep -vx 'date' || true; } | sort | tr '\n' ' '
 }
 
 # expect_locked <what>  ->  asserts the lockout contract on the last response; sets RETRY
@@ -182,7 +182,7 @@ echo "waiting $((RETRY + 1)) s for the cooldown to elapse"
 sleep $((RETRY + 1))
 login "$tmp/seed-right.json"
 [[ "$HTTP_CODE" == "200" ]] || fail "step 5: login after the cooldown returned HTTP $HTTP_CODE, expected 200"
-[[ -n "$(header set-cookie | grep -i '^auth_rt=' || true)" ]] || fail "step 5: login after the cooldown set no auth_rt cookie"
+[[ -n "$(header set-cookie | grep -i '^auth_rt=[^;]' || true)" ]] || fail "step 5: login after the cooldown set no auth_rt cookie"
 pass "step 5: after the cooldown the correct password -> 200 with an auth_rt cookie"
 
 # --- Step 6: success reset the streak; four failures do not lock ----------------------------------------------

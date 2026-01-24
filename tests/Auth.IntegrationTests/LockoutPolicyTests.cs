@@ -198,4 +198,22 @@ public sealed class LockoutPolicyTests
 
         Assert.Equal(burst, (state.BurstStartedAt, state.BurstCount));
     }
+    [Fact]
+    public void Window_is_fixed_not_sliding()   // Decision 9
+    {
+        // One attempt at T0, three at T0+9 s: four in the window that opened at T0.
+        var (state, _, first) = Attempt(StreakState.Fresh(T0), T0 - Fast, 1, Fast);
+        (state, _) = LockoutPolicy.Register(state, first + TimeSpan.FromSeconds(9));
+        (state, _) = LockoutPolicy.Register(state, first + TimeSpan.FromSeconds(9));
+        (state, _) = LockoutPolicy.Register(state, first + TimeSpan.FromSeconds(9));
+
+        // T0+10.5 s and T0+11 s: five attempts inside the last 10 seconds, but the window that opened at T0 has closed.
+        (state, _) = LockoutPolicy.Register(state, first + TimeSpan.FromSeconds(10.5));
+        (state, var decision) = LockoutPolicy.Register(state, first + TimeSpan.FromSeconds(11));
+
+        Assert.True(decision.Allowed);
+        Assert.Null(state.LockedUntil);
+        Assert.Equal(6, state.AttemptCount);
+        Assert.Equal(2, state.BurstCount);
+    }
 }

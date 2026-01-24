@@ -26,7 +26,7 @@ scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (gi
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
-scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~3 min)
+scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 
