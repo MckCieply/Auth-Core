@@ -279,3 +279,81 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
   hash costs (the e2e medians of criterion 6).
 - That no existing test or e2e script sends five failed logins for one identifier
   within ten seconds on one host, so the velocity rule does not break them.
+
+## As built (owner, 2026-01-24)
+
+Recorded after implementation and local verification (plan 0003,
+[acceptance map](../plans/0003-acceptance-map.md)). What entered this stage stays
+in it; this section records it rather than rewriting the decisions above.
+
+**"To verify during implementation", resolved:**
+
+1. Counting an attempt is one transaction around one statement: `INSERT … ON
+   CONFLICT DO UPDATE … RETURNING *` creates the identifier's row or locks the
+   existing one, the rules run in memory, and the new state is saved. Twelve
+   parallel failed logins get exactly five password evaluations, and a pruning pass
+   racing an attempt cannot fail it. The transaction is over before a password is
+   hashed.
+2. The `429` is the login endpoint's own result. No OpenIddict or session handler
+   runs on it, and it carries no `Set-Cookie`.
+3. A verification against the decoy costs what one against a stored hash costs. Over
+   the compose stack the medians were 279 ms for an unknown email against 283 ms for
+   a wrong password (319 ms against 306 ms in the verifier's own measurement).
+   Slice 1 had measured a 10–20× gap.
+4. No existing test or script sent five failed logins for one identifier within ten
+   seconds; none needed a change for the velocity rule.
+
+**Contract as built.** `429`, compact JSON
+`{"error":"too_many_attempts","retry_after_seconds":n}`, `Retry-After: n`,
+`Cache-Control: no-store`, `Pragma: no-cache`, no cookie. `n` is at least 1 and at
+most 1800.
+
+**Behaviour the spec was silent on:**
+
+- Refused attempts count toward the attempt number *n*: a failure after an expired
+  cooldown starts `min(30, n − 9)` minutes with every attempt of the streak counted,
+  the refused ones included.
+- The 10-second window opens at an *evaluated* attempt; refused attempts neither
+  open nor fill it. A successful login closes it together with the streak.
+- A correct password ends the streak even if the client disconnects before the
+  response.
+- If an attempt cannot be counted (the database is unavailable), the request fails
+  with a `500` before any password is evaluated.
+- `/auth/login/` shares the streak of `/auth/login`. A wrong method is a `400`
+  (spec 0001) and is not an attempt.
+- A running cooldown survives a restart; the decoy is made anew at every start.
+- Pruning runs once at host start as well as hourly, as in spec 0002.
+- Six or more simultaneous logins with the correct password on one identifier:
+  those arriving after the fifth, before the first has finished, get the `429`
+  (Decisions 9 and 14 together). Accepted by the owner.
+
+**Residual risks found in verification** — accepted until per-IP limiting lands;
+they extend the list under "Deferred / follow-ups":
+
+- Every login attempt, refused ones included, is one small database write, and an
+  attempt for an unknown email costs one password hash. An anonymous client can
+  cause both at will.
+- Parallel requests for one identifier wait for its row, each holding a pooled
+  database connection for the few milliseconds a count takes. A flood on one
+  identifier can exhaust the pool.
+- A successful login resets the streak, and someone probing an identifier can see
+  that: it shows that the account exists and that its owner logged in meanwhile.
+  It takes about eleven requests per probe (escalation E2).
+- The decoy follows the current hasher settings. After a settings change, accounts
+  whose hashes still carry the old parameters cost differently until their next
+  login rehashes them.
+
+**Delivered beyond the plan:** the pruning tests build their host without the
+pruning services instead of stopping them, which changes a test file of slice 2
+(escalation E4); a test helper to change or remove service registrations in the
+test host.
+
+**Known gaps, owned elsewhere:** an email containing U+FFFE makes the email
+normaliser throw on a host with ICU (`500`; the container image answers `401`). It
+predates this slice, evaluates no password and is not counted → request validation
+of spec 0001, for the owner to schedule (E1). A later flow that can still refuse a
+login after the password check (unverified email, organisation rules) must decide
+what happens to the streak, which today ends as soon as the password is verified.
+`LockoutPruningService` is a copy of `TokenPruningService` (E3). Per-IP rate
+limiting and trusted-proxy real-IP stay deferred (Decision 6). The acceptance map
+lists the rest.
