@@ -1939,3 +1939,18 @@ median_ms() { python3 -c 'import statistics,sys; print(round(statistics.median(m
    exact under parallel requests; without per-IP limiting (deferred) it also means
    an anonymous client can cause one small write per request. Acceptable until
    the per-IP work lands?
+
+## As built
+
+Implemented and verified locally (three verifiers; realization vs spec passed in
+round 2, after one fix round). What the implementation settled is recorded in spec
+0003 → "As built" and in the [acceptance map](0003-acceptance-map.md). Tasks 1–5
+were built as written here: the code compiled and passed the analyzers unchanged.
+Task 6's script adds an `expect_401` helper. Where the result departs from this
+plan: the pruning tests of Task 5, and those of slice 2, turned out to stop their
+own host now and then, so they build it without the pruning services instead of
+stopping them (which edits an existing test file, against the Global Constraints);
+two tests were added after verification
+(`Decoy_follows_the_configured_hasher_settings`, `Window_is_fixed_not_sliding`).
+Open questions 1–3 above were accepted by the owner as proposed; the escalations
+E1–E4 are in the acceptance map.
