@@ -1,6 +1,7 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
+using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
@@ -19,9 +20,16 @@ builder.Services.AddAuthPersistence(builder.Configuration);
 builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
+builder.Services.AddSingleton<LockoutPruner>();
+builder.Services.AddSingleton<LoginStreakStore>();
+builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
+builder.Services.AddHostedService<LockoutPruningService>();
 
 var app = builder.Build();
+
+// Made now, not by the first login with an unknown email, which would then take twice as long as the next one.
+_ = app.Services.GetRequiredService<DecoyPasswordHash>();
 
 if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
 {

@@ -1,20 +1,19 @@
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Lockout;
 using Auth.Server.Sessions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using OpenIddict.Abstractions;
 
 namespace Auth.IntegrationTests;
 
-public sealed class TokenPruningTests(PostgresFixture postgres, KeyMaterialFixture keys) : SessionTestBase(postgres, keys)
+public sealed class TokenPruningTests : SessionTestBase
 {
-    // The host's own pruning loop waits on the fake clock, and Clock.Advance fires that timer: a background pass would
-    // race the explicit pass of a test and delete what the test expects to count. Stop the loop before the clock
-    // moves, so a test drives exactly one pass.
-    private async Task StopBackgroundPruningAsync()
+    public TokenPruningTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
     {
-        var service = Factory.Services.GetServices<IHostedService>().OfType<TokenPruningService>().Single();
-        await service.StopAsync(TestContext.Current.CancellationToken);
+        // The hosts' pruning loops wait on the fake clock and Clock.Advance fires their timers: a background pass would
+        // race the explicit pass a test counts. Both are left out, and a test drives its pass by hand.
+        Factory.WithoutHostedService<TokenPruningService>().WithoutHostedService<LockoutPruningService>();
     }
 
     private async Task<(long Tokens, long Authorizations)> PruneAsync() =>
@@ -30,8 +29,6 @@ public sealed class TokenPruningTests(PostgresFixture postgres, KeyMaterialFixtu
     [Fact]
     public async Task Pruning_removes_an_ended_session_older_than_the_sliding_window()
     {
-        await StopBackgroundPruningAsync();
-
         var login = await SessionApi.LoginAsync(Client, Factory);
         using var logout = await SessionApi.Logout(Client, login.RefreshToken);
 
@@ -46,8 +43,6 @@ public sealed class TokenPruningTests(PostgresFixture postgres, KeyMaterialFixtu
     [Fact]
     public async Task Pruning_removes_consumed_entries_older_than_the_sliding_window()
     {
-        await StopBackgroundPruningAsync();
-
         var login = await SessionApi.LoginAsync(Client, Factory);
         Clock.Advance(TimeSpan.FromDays(13));
         var day13 = await SessionApi.RefreshOk(Client, login.RefreshToken);
@@ -62,8 +57,6 @@ public sealed class TokenPruningTests(PostgresFixture postgres, KeyMaterialFixtu
     [Fact]
     public async Task Pruning_keeps_a_consumed_entry_that_reuse_detection_still_needs()   // Decision 13
     {
-        await StopBackgroundPruningAsync();
-
         var login = await SessionApi.LoginAsync(Client, Factory);
         var current = await SessionApi.RefreshOk(Client, login.RefreshToken);
 
@@ -80,8 +73,6 @@ public sealed class TokenPruningTests(PostgresFixture postgres, KeyMaterialFixtu
     [Fact]
     public async Task Pruning_leaves_a_live_session_working()
     {
-        await StopBackgroundPruningAsync();
-
         var login = await SessionApi.LoginAsync(Client, Factory);
 
         Clock.Advance(TimeSpan.FromDays(1));

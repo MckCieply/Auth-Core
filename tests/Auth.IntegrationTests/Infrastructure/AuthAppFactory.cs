@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 namespace Auth.IntegrationTests.Infrastructure;
@@ -16,6 +17,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     private readonly Dictionary<string, string?> _settings = new();
     private string? _environment;
     private TimeProvider? _clock;
+    private readonly List<Action<IServiceCollection>> _serviceOverrides = [];
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -85,6 +87,26 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         return this;
     }
 
+    /// <summary>Changes the host's service registrations after the app has made its own.</summary>
+    public AuthAppFactory WithServices(Action<IServiceCollection> configure)
+    {
+        _serviceOverrides.Add(configure);
+        return this;
+    }
+
+    /// <summary>
+    /// Leaves a background service out of the host, for tests that drive its work by hand. Stopping the service on a
+    /// running host instead is a race: stopped before its loop has started, it ends as a cancelled task, which the host
+    /// takes for a failed background service and stops itself.
+    /// </summary>
+    public AuthAppFactory WithoutHostedService<TService>()
+        where TService : class, IHostedService =>
+        WithServices(services =>
+        {
+            var registration = services.Single(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(TService));
+            services.Remove(registration);
+        });
+
     public AuthAppFactory WithEnvironment(string environment)
     {
         _environment = environment;
@@ -117,6 +139,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         if (_clock is { } clock)
         {
             builder.ConfigureTestServices(services => services.Replace(ServiceDescriptor.Singleton(clock)));
+        }
+
+        foreach (var configure in _serviceOverrides)
+        {
+            builder.ConfigureTestServices(configure);
         }
     }
 }

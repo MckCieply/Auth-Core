@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
+using Auth.Server.Lockout;
 using Auth.Server.Sessions;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore;
@@ -19,29 +20,54 @@ namespace Auth.Server.Login;
 /// The pass-through half of <c>POST /auth/login</c>. By the time it runs, OpenIddict has already parsed the JSON body
 /// (see <see cref="JsonLoginRequestHandler"/>) into a password-grant request. This endpoint checks the credentials
 /// with ASP.NET Core Identity and either asks OpenIddict to issue the token (<see cref="Results.SignIn"/>) or returns
-/// the uniform <c>401 invalid_credentials</c>. The success body is reshaped by <see cref="LoginResponseShaper"/>.
+/// the uniform <c>401 invalid_credentials</c>. Every attempt is counted first (<see cref="LoginStreakStore"/>); during
+/// a cooldown it is refused with <c>429</c> before the account is looked up or the password evaluated. The success body is reshaped by <see cref="LoginResponseShaper"/>.
 /// </summary>
 public static class LoginEndpoint
 {
     public const string InvalidCredentialsError = "invalid_credentials";
 
     public static async Task<IResult> HandleAsync(
-        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock)
+        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, LoginStreakStore streaks,
+        DecoyPasswordHash decoy)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(streaks);
+        ArgumentNullException.ThrowIfNull(decoy);
 
         var request = http.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The login endpoint was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
 
-        // Deliberately no lockout, no SignInManager and no timing equalisation: all of that is spec 0003.
+        // Count the attempt before anything about it is known (spec 0003, Decision 14). While a cooldown runs
+        // there is no lookup and no password check: the response must not depend on either (Decision 7).
+        var identifier = LoginIdentifier.HashOf(users.NormalizeEmail(request.Username));
+        var decision = await streaks.RegisterAttemptAsync(identifier, http.RequestAborted);
+        if (!decision.Allowed)
+        {
+            return new TooManyAttemptsResult(decision.RetryAfter);
+        }
+
+        var password = request.Password ?? string.Empty;
         var user = await users.FindByEmailAsync(request.Username ?? string.Empty);
-        if (user is null || !await users.CheckPasswordAsync(user, request.Password ?? string.Empty))
+        if (user?.PasswordHash is null)
+        {
+            // No account, or one without a password: still pay for one verification, so this answer takes as long
+            // as a wrong password does.
+            _ = users.PasswordHasher.VerifyHashedPassword(user ?? new ApplicationUser(), decoy.Value, password);
+            return new InvalidCredentialsResult();
+        }
+
+        if (!await users.CheckPasswordAsync(user, password))
         {
             return new InvalidCredentialsResult();
         }
+
+        // Not the request's token: from the tenth attempt on, counting has already started a cooldown, and a client
+        // that goes away right after its correct password was verified must not be left with it.
+        await streaks.ClearAsync(identifier, CancellationToken.None);
 
         var identity = new ClaimsIdentity(
             authenticationType: TokenValidationParameters.DefaultAuthenticationType,
