@@ -85,12 +85,14 @@ is `application/json`; the body is at most 8 KiB; it is a JSON object whose name
 properties are non-empty strings. Anything else is
 `400 {"error":"invalid_request"}`, as is:
 
-- an `email` that contains a control character, cannot be normalised, or is longer
-  than 254 characters;
+- an `email` that contains a control character, a Unicode noncharacter or an
+  unpaired surrogate, or that the host's email normaliser rejects (the same rule
+  applies to login, see below);
+- on the two endpoints that send mail, an `email` longer than 254 characters;
 - a `new_password` that contains NUL.
 
-A `token` is never an `invalid_request` for its content: any non-empty string that
-is not a usable token is an `invalid_token`.
+A `token` that is a non-blank string is never an `invalid_request` for its
+content: whatever it holds, if it is not a usable token it is an `invalid_token`.
 
 ### `POST /auth/password/forgot` — `{"email"}`
 
@@ -136,8 +138,10 @@ is not a usable token is an `invalid_token`.
   the password can learn that the address is unconfirmed.
 - The refused login **ends the streak**, as a successful one does: the password was
   proven.
-- An email that cannot be normalised is a `400 invalid_request` (it was a `500` on
-  hosts with ICU). As before, a malformed request is not an attempt.
+- An email that holds a Unicode noncharacter or an unpaired surrogate, or that the
+  host's email normaliser rejects, is a `400 invalid_request` — on every host (it
+  was a `500` on hosts with ICU and a `401` elsewhere). As before, a malformed
+  request is not an attempt.
 
 ### Link tokens
 
@@ -173,7 +177,8 @@ account existence.
 ### Password policy
 
 A password set through the API has **at least 8 characters, an uppercase letter, a
-lowercase letter and a digit**. A non-alphanumeric character is not required. The
+lowercase letter and a digit**. A non-alphanumeric character is not required.
+Letters and digits of any script count: `Ż` is an uppercase letter. The
 `rules` of `weak_password` are drawn from `too_short`, `requires_upper`,
 `requires_lower` and `requires_digit`. The policy applies when a password is set;
 it never blocks a login with an existing password. The new password may equal the
@@ -185,7 +190,9 @@ A successful `POST /auth/password/reset`, as one unit:
 
 1. sets the new password;
 2. **ends every session of the account**: every refresh token issued before the
-   reset is refused by `POST /auth/refresh` with the `401` of spec 0002;
+   reset is refused by `POST /auth/refresh` with the `401` of spec 0002 — and so
+   is one issued by a login that verified the old password while the reset was
+   under way;
 3. ends the login streak of the account's address, so a running cooldown is gone;
 4. confirms the account's email — the link came through that mailbox;
 5. makes every other outstanding reset or verification link of the account unusable.
@@ -261,7 +268,8 @@ must be `https` and `Smtp:Security` must not be `none`.
    `400 weak_password` listing each broken rule, changes nothing, and leaves the
    token usable.
 8. The password policy is 8 characters, an uppercase letter, a lowercase letter and
-   a digit; a password without a non-alphanumeric character is accepted.
+   a digit; a password without a non-alphanumeric character is accepted, and so is
+   one whose only uppercase (or lowercase) letter is not an ASCII one.
 9. **Mail limit:** a second well-formed request for one address within
    60 seconds, and a sixth within the hour, are refused with the `429` contract
    above; the limit of `forgot` and that of `verify/request` do not affect each
@@ -284,10 +292,11 @@ must be `https` and `Smtp:Security` must not be `none`.
     names the application, states the link's lifetime, and arrives with Polish
     diacritics intact. No token, link or mail body appears in the logs or in the
     database.
-16. An email that cannot be normalised is a `400 invalid_request` on
-    `POST /auth/login`, `POST /auth/password/forgot` and
-    `POST /auth/email/verify/request`, on every host, and is not counted by the
-    lockout or by the mail limit.
+16. An email that holds a Unicode noncharacter (U+FFFE is the one that made the
+    normaliser throw) is a `400 invalid_request` on `POST /auth/login`,
+    `POST /auth/password/forgot` and `POST /auth/email/verify/request`, on every
+    host — with or without ICU — and is not counted by the lockout or by the mail
+    limit.
 17. A host with a missing or invalid mail setting does not start; the error names
     the key and no value.
 18. The e2e script drives both flows over the real network against the compose
@@ -368,6 +377,40 @@ session:
     neither survive a restart nor share the lockout's no-enumeration property.
 15. **Limits, lifetimes and the retry schedule are constants, not configuration** —
     the stance of specs 0001–0003.
+16. **Which emails are refused is a rule of our own, not whatever the host's
+    normaliser happens to reject.** Found while preparing the plan: with ICU the
+    framework's normaliser throws for U+FFFE and for an unpaired surrogate; without
+    ICU (the container image) it throws for nothing. A rule that follows the
+    normaliser would make Decision 10 true on a developer machine and false in
+    production. So an email holding a control character, a Unicode noncharacter or
+    an unpaired surrogate is refused everywhere, and the normaliser's own refusal
+    is kept only as a net.
+17. **A session remembers the security stamp of its account, and a refresh is
+    refused once the stamp has changed.** Found in the review of the plan:
+    revoking an account's tokens ends the sessions that exist at that moment, but
+    a login that checked the **old** password just before the reset committed
+    issues its tokens just after — and someone who knows the old password can
+    arrange that by logging in repeatedly while the owner resets. The stamp
+    changes with the password, so such a session fails at its first refresh. This
+    amends spec 0002, Decision 11 ("a refresh only checks that the user still
+    exists") and adds one claim to the refresh token; the access token is
+    unchanged.
+18. **A link token is one row per account and kind.** A new token overwrites the
+    row in one statement, so "only the link in the newest mail works" holds by
+    construction, with any number of instances.
+19. **Requests that will never become a mail are removed from the queue in one
+    statement per pass**, before any mail is composed. Why: anyone can queue
+    requests for addresses without an account; handled one by one they would
+    stand in front of the mails that matter.
+20. **"Uppercase", "lowercase" and "digit" mean any Unicode letter or digit**, not
+    only A–Z, a–z and 0–9 (owner, on the plan's question). Why: ASP.NET Identity's
+    built-in rule tells a user whose password is `Zażółć123Ż` that it has no
+    uppercase letter, which is wrong to anyone who writes Polish.
+
+The owner also accepted, on the plan's questions: mail texts kept in code rather
+than `.resx` (the container image has no ICU, so a culture such as `pl` cannot be
+created there); the queue row staying locked while its mail is sent; delivery
+being at-least-once; and the three cases under "Accepted as they are" below.
 
 ## Deferred / follow-ups
 
@@ -393,13 +436,23 @@ session:
 
 - An anonymous client can make the service write two small rows per request, for
   any number of different addresses; queue rows for addresses without an account
-  are removed within seconds, limit rows within the hour.
+  are removed within seconds, limit rows within two hours.
 - A known address can be sent up to five reset mails and five verification mails
   per hour by anyone. Only the newest link of each kind works, and the mails say
   how to ignore them.
 - Anyone can use up an address's hourly limit. The owner of the address still
   receives those mails, and the newest link works, so this does not keep them from
   resetting their password.
+
+**Accepted as they are:**
+
+- A reset mail that is being sent at the very instant another reset of the same
+  account commits may leave a working link. It reaches only the mailbox owner.
+- Two requests that change one account at the same instant with different tokens
+  (a reset and a verification): one of them fails with a `500`, nothing is left
+  half-done, and its token stays usable.
+- While a mail for an account is being sent (at most 20 seconds), a click on the
+  account's earlier link of the same kind waits for the outcome.
 
 ## Verification notes (for the local verifiers)
 
