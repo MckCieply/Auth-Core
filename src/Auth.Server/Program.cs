@@ -1,5 +1,6 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
@@ -14,6 +15,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Fail fast on missing or broken key material, before anything else is built.
 var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
+// Fail fast on missing or invalid mail settings too.
+builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
 builder.Services.AddHealthChecks();
 builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.

@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Identity;
+using Auth.Server.Email;
 using Auth.Server.Seeding;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
@@ -42,12 +43,27 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[TokenOptions.AudienceKey] = "auth-core-dev";
         _settings[DevUserSeeder.EmailKey] = DefaultSeedEmail;
         _settings[DevUserSeeder.PasswordKey] = DefaultSeedPassword;
+        // Mail: pinned like the token identifiers. The server name does not resolve: a host that is not given a
+        // transport of its own (MailTestBase) or a real catcher (MailpitFixture) can never send anything.
+        _settings[MailSettingsLoader.AppNameKey] = DefaultAppName;
+        _settings[MailSettingsLoader.LocaleKey] = "en";
+        _settings[MailSettingsLoader.ResetPasswordUrlKey] = DefaultResetUrl;
+        _settings[MailSettingsLoader.VerifyEmailUrlKey] = DefaultVerifyUrl;
+        _settings[MailSettingsLoader.FromKey] = DefaultFrom;
+        _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
+        _settings[MailSettingsLoader.SmtpPortKey] = "587";
+        _settings[MailSettingsLoader.SmtpSecurityKey] = "starttls";
     }
 
     /// <summary>Default development seed credentials; the password satisfies Identity's default policy.</summary>
     public const string DefaultSeedEmail = "user@example.com";
 
     public const string DefaultSeedPassword = "Correct-Horse-Battery-1";
+
+    public const string DefaultAppName = "Auth-Core Test";
+    public const string DefaultResetUrl = "https://app.example.com/reset";
+    public const string DefaultVerifyUrl = "https://app.example.com/verify";
+    public const string DefaultFrom = "no-reply@example.com";
 
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
     public string SeedEmail => _settings[DevUserSeeder.EmailKey] ?? "";
