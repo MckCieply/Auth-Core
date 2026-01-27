@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Auth.Infrastructure;
 
@@ -27,9 +28,23 @@ public static class DependencyInjection
         });
 
         services
-            .AddIdentityCore<ApplicationUser>(options => options.User.RequireUniqueEmail = true)
+            .AddIdentityCore<ApplicationUser>(options =>
+            {
+                options.User.RequireUniqueEmail = true;
+                // Spec 0004, Decision 9. Applies when a password is set; a login never checks it.
+                options.Password.RequiredLength = 8;
+                options.Password.RequireUppercase = true;
+                options.Password.RequireLowercase = true;
+                options.Password.RequireDigit = true;
+                options.Password.RequireNonAlphanumeric = false;
+                options.Password.RequiredUniqueChars = 1;
+            })
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<AuthDbContext>();
+
+        // Replaces Identity's validator rather than adding to it: the built-in one would still refuse a password
+        // whose only uppercase letter is not A-Z.
+        services.Replace(ServiceDescriptor.Scoped<IPasswordValidator<ApplicationUser>, UnicodePasswordValidator>());
 
         return services;
     }
