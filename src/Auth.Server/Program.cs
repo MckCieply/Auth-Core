@@ -26,6 +26,7 @@ builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LockoutPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();
+builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
 builder.Services.AddHostedService<LockoutPruningService>();
