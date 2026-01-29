@@ -26,11 +26,14 @@ builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LockoutPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();
+builder.Services.AddSingleton<MailDispatchSignal>();
+builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
 builder.Services.AddHostedService<LockoutPruningService>();
+builder.Services.AddHostedService<MailDispatchService>();
 
 var app = builder.Build();
 

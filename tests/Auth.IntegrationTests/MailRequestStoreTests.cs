@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
-public sealed class MailRequestStoreTests(PostgresFixture postgres, KeyMaterialFixture keys) : SessionTestBase(postgres, keys)
+public sealed class MailRequestStoreTests(PostgresFixture postgres, KeyMaterialFixture keys) : MailTestBase(postgres, keys)
 {
     private const string Address = "SOMEONE@EXAMPLE.COM";
 
