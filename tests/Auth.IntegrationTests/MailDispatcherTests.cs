@@ -178,6 +178,25 @@ public sealed class MailDispatcherTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Fact]
+    public async Task Next_attempt_is_timed_from_the_failure_not_from_the_start()
+    {
+        Mail.Failing = true;
+        Mail.DuringSend = () =>
+        {
+            Clock.Advance(TimeSpan.FromSeconds(20));
+            return Task.CompletedTask;
+        };
+        await EnqueueAsync(MailKind.PasswordReset, Factory.SeedEmail);
+        var start = StorableTime.Now(Clock);
+
+        Assert.Equal(1, await DispatchAsync());   // the row is not taken a second time in the same pass
+
+        var row = Assert.Single(await QueueAsync());
+        Assert.Equal(1, row.Attempts);
+        Assert.Equal(start + TimeSpan.FromSeconds(20) + TimeSpan.FromSeconds(5), row.NextAttemptAt);
+    }
+
+    [Fact]
     public async Task Failed_send_leaves_the_earlier_link_in_force()   // Review Focus 4
     {
         await EnqueueAsync(MailKind.PasswordReset, Factory.SeedEmail);

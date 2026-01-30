@@ -112,17 +112,18 @@ public sealed partial class MailDispatcher(
         const string BeforeToken = "before_token";
         await transaction.CreateSavepointAsync(BeforeToken, cancellationToken);
 
-        var token = await EmailTokens.IssueAsync(db, user.Id, request.Kind, now, cancellationToken);
-        var mail = composer.Compose(request.Kind, user.Email, token);
         try
         {
+            var token = await EmailTokens.IssueAsync(db, user.Id, request.Kind, now, cancellationToken);
+            var mail = composer.Compose(request.Kind, user.Email, token);
             await transport.SendAsync(mail, cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             await transaction.RollbackToSavepointAsync(BeforeToken, CancellationToken.None);
             var attempts = request.Attempts + 1;
-            var next = now + MailDelivery.RetryDelay(attempts);
+            // From the clock after the failure: a send that hung until its deadline must not leave the retry already due.
+            var next = StorableTime.Now(clock) + MailDelivery.RetryDelay(attempts);
             await db.MailRequests.Where(r => r.Id == request.Id).ExecuteUpdateAsync(
                 setters => setters.SetProperty(r => r.Attempts, attempts).SetProperty(r => r.NextAttemptAt, next),
                 CancellationToken.None);
@@ -146,6 +147,6 @@ public sealed partial class MailDispatcher(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Sending mail request {RequestId} ({Kind}) failed on attempt {Attempts}: {Failure}. It will be retried.")]
     private static partial void LogSendFailed(ILogger logger, long requestId, MailKind kind, int attempts, string failure);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Mail request {RequestId} ({Kind}) could not be delivered within the time limit after {Attempts} failed attempts and was dropped.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Mail request {RequestId} ({Kind}) was not delivered within the time limit and was dropped ({Attempts} failed attempts).")]
     private static partial void LogGaveUp(ILogger logger, long requestId, MailKind kind, int attempts);
 }

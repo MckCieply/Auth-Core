@@ -25,6 +25,9 @@ public sealed class CapturingMailTransport : IMailTransport
     /// <summary>How long a send takes, so that two dispatchers can be made to overlap.</summary>
     public TimeSpan Delay { get; set; }
 
+    /// <summary>Runs inside every send, after <see cref="Delay"/> and before the outcome is decided; a test moves the clock here.</summary>
+    public Func<Task>? DuringSend { get; set; }
+
     public bool Failing
     {
         get => _failing;
@@ -38,6 +41,11 @@ public sealed class CapturingMailTransport : IMailTransport
         if (Delay > TimeSpan.Zero)
         {
             await Task.Delay(Delay, cancellationToken);
+        }
+
+        if (DuringSend is { } during)
+        {
+            await during();
         }
 
         if (_failing)
