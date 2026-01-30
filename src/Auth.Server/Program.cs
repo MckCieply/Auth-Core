@@ -1,5 +1,6 @@
 using Auth.Infrastructure;
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Account;
 using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
@@ -7,6 +8,7 @@ using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Auth.Server.Tokens;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -52,6 +54,12 @@ app.MapHealthChecks("/auth/health");
 app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
 app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
 app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
+app.MapPost(MailRequestEndpoint.ForgotPasswordPath,
+    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
+        MailRequestEndpoint.HandleAsync(MailKind.PasswordReset, http, normalizer, requests, signal));
+app.MapPost(MailRequestEndpoint.VerifyEmailRequestPath,
+    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
+        MailRequestEndpoint.HandleAsync(MailKind.EmailVerification, http, normalizer, requests, signal));
 
 app.Run();
 
