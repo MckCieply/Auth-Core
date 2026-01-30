@@ -60,6 +60,7 @@ app.MapPost(MailRequestEndpoint.ForgotPasswordPath,
 app.MapPost(MailRequestEndpoint.VerifyEmailRequestPath,
     (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
         MailRequestEndpoint.HandleAsync(MailKind.EmailVerification, http, normalizer, requests, signal));
+app.MapPost(ResetPasswordEndpoint.Path, ResetPasswordEndpoint.HandleAsync);
 
 app.Run();
 

@@ -78,6 +78,10 @@ public static class LoginEndpoint
         identity.SetClaim(Claims.Subject, user.Id.ToString());
         identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
 
+        // The stamp of the account as this login read it. A session that began before a password change, even one
+        // whose login was still in flight when the change was committed, carries the old stamp and cannot refresh.
+        identity.SetClaim(SessionPolicy.StampClaim, user.SecurityStamp);
+
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
         // `sub` is the whole access token; the session start stays in the refresh token only.
