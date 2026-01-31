@@ -13,6 +13,8 @@ login on a real phone, delivered over a six-week build.
 > ([spec 0002](docs/superpowers/specs/0002-refresh-and-logout.md)).
 > Login is protected by a per-identifier lockout
 > ([spec 0003](docs/superpowers/specs/0003-lockout-and-abuse-resistance.md)).
+> Password reset and email verification by mail are in
+> ([spec 0004](docs/superpowers/specs/0004-email-flows.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).
 
 ## Quickstart (development)
@@ -27,8 +29,11 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
 scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
+scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
+
+The stack includes a mail catcher; its inbox is at `http://localhost:8025`.
 
 Tests (integration, Postgres via Testcontainers — Docker must be running):
 
