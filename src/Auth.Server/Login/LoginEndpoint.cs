@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
+using Auth.Server.Account;
 using Auth.Server.Lockout;
 using Auth.Server.Sessions;
 using Auth.Server.Tokens;
@@ -22,6 +23,7 @@ namespace Auth.Server.Login;
 /// with ASP.NET Core Identity and either asks OpenIddict to issue the token (<see cref="Results.SignIn"/>) or returns
 /// the uniform <c>401 invalid_credentials</c>. Every attempt is counted first (<see cref="LoginStreakStore"/>); during
 /// a cooldown it is refused with <c>429</c> before the account is looked up or the password evaluated. The success body is reshaped by <see cref="LoginResponseShaper"/>.
+/// A correct password for an account whose email is not confirmed is refused with <c>403 email_not_verified</c>.
 /// </summary>
 public static class LoginEndpoint
 {
@@ -68,6 +70,13 @@ public static class LoginEndpoint
         // Not the request's token: from the tenth attempt on, counting has already started a cooldown, and a client
         // that goes away right after its correct password was verified must not be left with it.
         await streaks.ClearAsync(identifier, CancellationToken.None);
+
+        // The password is proven, so the streak is over either way. But an account whose email is not confirmed
+        // gets no session (spec 0004, Decision 3). Only someone who knows the password can see this answer.
+        if (!user.EmailConfirmed)
+        {
+            return AccountResults.EmailNotVerified();
+        }
 
         var identity = new ClaimsIdentity(
             authenticationType: TokenValidationParameters.DefaultAuthenticationType,

@@ -4,14 +4,19 @@ using Microsoft.AspNetCore.Identity;
 namespace Auth.Server.Seeding;
 
 /// <summary>
-/// Creates one development user at host startup so there is someone to log in as. It is a no-op outside
-/// the <c>Development</c> environment and unless both <see cref="EmailKey"/> and <see cref="PasswordKey"/>
-/// are configured. It is idempotent and never resets the password of an existing user.
+/// Creates the development users at host startup so there is someone to log in as. It is a no-op outside the
+/// <c>Development</c> environment. The first user (<see cref="EmailKey"/>, <see cref="PasswordKey"/>) has a
+/// confirmed email. The optional second one (<see cref="UnverifiedEmailKey"/>, <see cref="UnverifiedPasswordKey"/>)
+/// has not: until invitations exist it is the only way to have an account that needs verification (spec 0004,
+/// Decision 2). Each is created only when both of its settings are present. Seeding is idempotent and never resets
+/// the password of an existing user.
 /// </summary>
 public static partial class DevUserSeeder
 {
     public const string EmailKey = "Auth:DevSeed:Email";
     public const string PasswordKey = "Auth:DevSeed:Password";
+    public const string UnverifiedEmailKey = "Auth:DevSeed:UnverifiedEmail";
+    public const string UnverifiedPasswordKey = "Auth:DevSeed:UnverifiedPassword";
 
     public static async Task SeedAsync(IServiceProvider services, CancellationToken ct)
     {
@@ -23,23 +28,30 @@ public static partial class DevUserSeeder
         }
 
         var configuration = services.GetRequiredService<IConfiguration>();
-        var email = configuration[EmailKey];
-        var password = configuration[PasswordKey];
+        using var scope = services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(DevUserSeeder));
+
+        await SeedOneAsync(users, logger, configuration[EmailKey], configuration[PasswordKey], emailConfirmed: true, ct);
+        await SeedOneAsync(users, logger, configuration[UnverifiedEmailKey], configuration[UnverifiedPasswordKey], emailConfirmed: false, ct);
+    }
+
+    private static async Task SeedOneAsync(
+        UserManager<ApplicationUser> users, ILogger logger, string? email, string? password, bool emailConfirmed, CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             return;
         }
 
-        using var scope = services.CreateScope();
         ct.ThrowIfCancellationRequested();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         if (await users.FindByEmailAsync(email) is not null)
         {
             return;
         }
 
         var result = await users.CreateAsync(
-            new ApplicationUser { UserName = email, Email = email, EmailConfirmed = true },
+            new ApplicationUser { UserName = email, Email = email, EmailConfirmed = emailConfirmed },
             password);
         if (!result.Succeeded)
         {
@@ -48,7 +60,6 @@ public static partial class DevUserSeeder
                 "Could not seed the development user: " + string.Join(", ", result.Errors.Select(e => e.Code)));
         }
 
-        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(DevUserSeeder));
         LogSeeded(logger, email);
     }
 
