@@ -30,12 +30,14 @@ builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();
 builder.Services.AddSingleton<MailDispatchSignal>();
 builder.Services.AddSingleton<MailDispatcher>();
+builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
 builder.Services.AddHostedService<LockoutPruningService>();
 builder.Services.AddHostedService<MailDispatchService>();
+builder.Services.AddHostedService<EmailPruningService>();
 
 var app = builder.Build();
 
