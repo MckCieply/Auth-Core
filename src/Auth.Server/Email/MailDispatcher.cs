@@ -6,10 +6,11 @@ namespace Auth.Server.Email;
 /// <summary>
 /// Handles the mail queue (spec 0004 → Delivery). A pass first removes, in one statement, the due rows that will
 /// never become a mail — no account, or nothing to confirm — so that requests for addresses without an account,
-/// which anyone can make, cannot hold up the mails that matter. Then, for each remaining due row, in one transaction
-/// with the row locked: issue a token, compose the mail and send it. The token is committed only once the server
-/// has accepted the mail, so a failed attempt leaves the earlier link in force and no clear token is ever stored
-/// (Decision 13).
+/// which anyone can make, cannot hold up the mails that matter. Then, for each due row that can become a mail, in one
+/// transaction with the row locked: issue a token, compose the mail and send it. Only such rows (and rows an hour
+/// old, which are dropped) are handled singly: requests that need no mail and arrive during the pass wait for the
+/// bulk delete of the next one. The token is committed only once the server has accepted the mail, so a failed
+/// attempt leaves the earlier link in force and no clear token is ever stored (Decision 13).
 /// </summary>
 public sealed partial class MailDispatcher(
     IServiceScopeFactory scopes, TimeProvider clock, MailComposer composer, IMailTransport transport, ILogger<MailDispatcher> logger)
@@ -70,15 +71,25 @@ public sealed partial class MailDispatcher(
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // A row is taken when it is due, or as soon as it is an hour old (to be dropped). SKIP LOCKED: a second
-        // instance takes another row instead of waiting for this one.
+        // Only a row that can become a mail is taken when it is due (an account to mail, and for a verification
+        // one still to confirm), or any row as soon as it is an hour old (to be dropped). A row that needs no mail
+        // is left for the bulk delete of the next pass, so that a flood of such requests arriving during this pass
+        // is never handled one by one ahead of the real mails. SKIP LOCKED: a second instance takes another row
+        // instead of waiting for this one.
+        var passwordReset = (short)MailKind.PasswordReset;
         var due = await db.MailRequests
             .FromSql($"""
-                SELECT * FROM "MailRequests"
-                WHERE "NextAttemptAt" <= {now} OR "RequestedAt" <= {givenUp}
-                ORDER BY "NextAttemptAt", "Id"
+                SELECT r.* FROM "MailRequests" r
+                WHERE (r."NextAttemptAt" <= {now}
+                       AND EXISTS (
+                           SELECT 1 FROM "AspNetUsers" u
+                           WHERE u."NormalizedEmail" = r."NormalizedEmail"
+                             AND u."Email" IS NOT NULL
+                             AND (r."Kind" = {passwordReset} OR NOT u."EmailConfirmed")))
+                   OR r."RequestedAt" <= {givenUp}
+                ORDER BY r."NextAttemptAt", r."Id"
                 LIMIT 1
-                FOR UPDATE SKIP LOCKED
+                FOR UPDATE OF r SKIP LOCKED
                 """)
             .ToListAsync(cancellationToken);
         if (due.Count == 0)

@@ -151,6 +151,42 @@ public sealed class MailDispatcherTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Empty(await QueueAsync());
     }
 
+    [Fact]
+    public async Task Requests_that_arrive_during_a_pass_are_not_handled_one_by_one()   // criterion 2
+    {
+        await CreateUserAsync("second@example.com", confirmed: true);
+        await EnqueueAsync(MailKind.PasswordReset, Factory.SeedEmail);
+        await EnqueueAsync(MailKind.PasswordReset, "second@example.com");
+
+        // While the first mail is being sent, a flood of requests for unknown addresses arrives.
+        var flooded = false;
+        Mail.DuringSend = async () =>
+        {
+            if (flooded)
+            {
+                return;
+            }
+
+            flooded = true;
+            for (var i = 0; i < 30; i++)
+            {
+                await EnqueueAsync(MailKind.PasswordReset, $"nobody-{i}@example.com");
+            }
+        };
+
+        // Only the two real rows are handled in this pass; the flood is left for the bulk delete of the next one.
+        Assert.Equal(2, await DispatchAsync());
+
+        Assert.Equal(new[] { Factory.SeedEmail, "second@example.com" }.Order(), Mail.Sent.Select(m => m.To).Order());
+        var left = await QueueAsync();
+        Assert.Equal(30, left.Count);
+        Assert.All(left, row => Assert.Equal(0, row.Attempts));
+
+        Assert.Equal(30, await DispatchAsync());
+        Assert.Empty(await QueueAsync());
+        Assert.Equal(2, Mail.Sent.Count);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

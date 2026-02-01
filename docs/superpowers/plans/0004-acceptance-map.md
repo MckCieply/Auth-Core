@@ -10,9 +10,9 @@ the auth service) over real HTTP and real SMTP.
 | # | Criterion | Guarding test(s) |
 | - | --------- | ---------------- |
 | 1 | Forgot → `202`, a reset mail with the configured link | `MailRequestEndpointTests.Forgot_for_an_account_is_accepted_and_a_reset_mail_follows`, `MailDispatcherTests.Request_for_an_account_sends_one_mail_and_stores_only_the_hash_of_its_token`, `MailThroughSmtpTests.Forgot_request_ends_as_a_mail_on_the_mail_server`; e2e steps 6–7 |
-| 2 | An address without an account: same response, same statements, no mail | `MailRequestEndpointTests.Address_without_an_account_gets_the_same_answer_the_same_rows_and_no_mail`, `MailDispatcherTests.Request_for_an_address_without_an_account_is_dropped_without_a_mail`, `MailRequestEndpointTests.Request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `MailThroughSmtpTests.Forgot_for_an_unknown_address_sends_nothing`, `MailDispatcherTests.Requests_for_addresses_without_an_account_do_not_hold_up_a_real_mail`; e2e steps 6–7 |
+| 2 | An address without an account: same response, same statements, no mail | `MailRequestEndpointTests.Address_without_an_account_gets_the_same_answer_the_same_rows_and_no_mail`, `MailDispatcherTests.Request_for_an_address_without_an_account_is_dropped_without_a_mail`, `MailRequestEndpointTests.Request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `MailThroughSmtpTests.Forgot_for_an_unknown_address_sends_nothing`, `MailDispatcherTests.Requests_for_addresses_without_an_account_do_not_hold_up_a_real_mail`, `MailDispatcherTests.Requests_that_arrive_during_a_pass_are_not_handled_one_by_one`; e2e steps 6–7 |
 | 3 | Reset → `204`; old password `401`, new one logs in | `ResetPasswordTests.Reset_replaces_the_password`; e2e steps 7–8 |
-| 4 | Every refresh token issued before the reset is refused | `ResetPasswordTests.Reset_ends_every_session_of_the_account`, `ResetPasswordTests.Session_whose_login_overlapped_a_password_change_cannot_refresh`; e2e step 8 |
+| 4 | Every refresh token issued before the reset is refused | `ResetPasswordTests.Reset_ends_every_session_of_the_account`, `ResetPasswordTests.Session_whose_login_overlapped_a_password_change_cannot_refresh`, `ResetPasswordTests.Reset_revokes_every_token_and_authorization_of_the_account`; e2e step 8 |
 | 5 | Reset lifts the cooldown, confirms the email, kills the other links | `ResetPasswordTests.Reset_lifts_a_lockout_and_confirms_the_email_in_one_go`, `ResetPasswordTests.Reset_makes_the_other_links_of_the_account_unusable` |
 | 6 | A token works once; unknown, used, expired, replaced → the same `invalid_token`; one of parallel uses succeeds | `EmailTokensTests.Token_works_once`, `EmailTokensTests.Token_expires_after_its_lifetime`, `EmailTokensTests.Issuing_again_replaces_the_earlier_token_of_that_kind_only`, `EmailTokensTests.Parallel_consumption_succeeds_exactly_once`, `ResetPasswordTests.Token_works_once`, `ResetPasswordTests.Unknown_used_expired_and_replaced_tokens_get_one_answer`, `ResetPasswordTests.Token_is_good_until_just_under_an_hour`, `VerifyEmailTests.Unknown_used_expired_and_replaced_tokens_get_one_answer`, `VerifyEmailTests.Expired_token_confirms_nothing`, `VerifyEmailTests.Token_is_good_until_just_under_24_hours`, `MailDispatcherTests.Newer_mail_replaces_the_earlier_token`; e2e steps 4, 7 |
 | 7 | Weak password → `weak_password` with every broken rule; nothing changes; the token stays usable | `ResetPasswordTests.Weak_password_names_every_broken_rule_and_leaves_everything_as_it_was`; e2e step 7 |
@@ -28,7 +28,8 @@ the auth service) over real HTTP and real SMTP.
 | 17 | A host with a missing or invalid mail setting does not start | `MailSettingsTests` (all) |
 | 18 | The e2e script drives both flows; the three existing scripts still pass | `scripts/e2e-email.sh`; `scripts/e2e-login.sh`, `scripts/e2e-refresh.sh`, `scripts/e2e-lockout.sh` unedited |
 
-Criteria 5, 8, 10, 17 and most of 6, 9, 11 and 14 are not exercised over HTTP: the expiry of a
+Criteria 5, 8, 10, 17 and most of 11 are not exercised by the e2e script (over the real network); the
+integration tests exercise them over HTTP through the test host. The expiry of a
 token, the sixth request within the hour, the one-hour drop of an undelivered request, the cooldown
 and the races need a controlled clock or parallel requests, so integration tests carry them. The e2e
 script covers what needs a real network: SMTP to a real mail server, the links in the mails, a refresh
@@ -80,13 +81,29 @@ confirms the second seed user and changes its password, so a second run needs
   before this change has no stamp and is refused at its next refresh.
 - **Task 10:** the optional second seed user (`Auth:DevSeed:UnverifiedEmail` / `UnverifiedPassword`) is
   created only in Development and only when both values are set.
-- **Task 12:** `scripts/e2e-email.sh` follows the plan's helper code, with three small additions. Every
-  helper that prints a value from `python3` strips a carriage return, because a Windows interpreter ends
-  its lines with CR LF and the value would not compare equal in bash. `refresh` sends the cookie of step
-  5 through a header file, as `e2e-refresh.sh` does, so no cookie reaches a command line. The script's
-  exit trap starts the mail catcher again if the run dies during the outage of step 9. The compose
-  service `mailpit` publishes only the web UI and API port, on loopback; SMTP stays inside the
-  compose network.
+- **Task 12:** `scripts/e2e-email.sh` follows the plan's helper code, with additions. The helpers
+  `refresh`, `expect_status`, `expect_no_store`, `expect_no_cookie` and `wait_mailpit` are new:
+  `refresh` sends the cookie of step 5 through a header file, as `e2e-refresh.sh` does, so no cookie
+  reaches a command line. Step 1 checks the catcher's `/readyz`, and step 9 checks it again after
+  `stop`, so a catcher that is still up cannot pass for an outage. Every helper that prints a value from
+  `python3` strips a carriage return, because a Windows interpreter ends its lines with CR LF and the
+  value would not compare equal in bash. The script's exit trap starts the mail catcher again if the run
+  dies during the outage of step 9. The compose service `mailpit` publishes only the web UI and API
+  port, on loopback; SMTP stays inside the compose network.
+- **Fix wave after local verification** (one line each):
+  - The dispatcher's per-row `SELECT` takes only due rows that can become a mail, or rows an hour old, so
+    requests that need no mail and arrive during a pass wait for the next bulk delete instead of being
+    removed one by one ahead of real mails (spec Decision 19).
+  - `AuthAppFactory` pins the four SMTP-login and unverified-seed keys to empty, so ambient
+    `Auth__Email__Smtp__*` and `Auth__DevSeed__Unverified*` variables cannot change a test host.
+  - New tests: `MailDispatcherTests.Requests_that_arrive_during_a_pass_are_not_handled_one_by_one`
+    (criterion 2) and `ResetPasswordTests.Reset_revokes_every_token_and_authorization_of_the_account`
+    (criterion 4, proves the revocation apart from the security-stamp check).
+  - E2e step 3 accepts a `retry_after_seconds` of 1 to 62, because the container clock on Docker
+    Desktop can step slightly.
+  - E2e checks made stricter: step 9 requires a new `failed on attempt 1` log line; step 7 waits 3 s
+    before it counts mails for the unknown address; step 2 requires `invalid_request` in the U+FFFE
+    answer; step 5 reads the `auth_rt` cookie from the saved headers by name.
 
 Step 9 of the e2e script, on the development machine (Windows, Docker Desktop): with the mail
 catcher stopped, `forgot` answered `202` in 0.22 s; the log showed the failed first attempt; the

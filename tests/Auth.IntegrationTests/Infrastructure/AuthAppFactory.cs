@@ -53,6 +53,13 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
         _settings[MailSettingsLoader.SmtpSecurityKey] = "starttls";
+        // Empty counts as unset for the loader and the seeder: an Auth__Email__Smtp__* or Auth__DevSeed__Unverified*
+        // variable on the machine cannot add a login or a second user to a test host. A test that wants them sets
+        // them with WithSetting.
+        _settings[MailSettingsLoader.SmtpUsernameKey] = "";
+        _settings[MailSettingsLoader.SmtpPasswordKey] = "";
+        _settings[DevUserSeeder.UnverifiedEmailKey] = "";
+        _settings[DevUserSeeder.UnverifiedPasswordKey] = "";
     }
 
     /// <summary>Default development seed credentials; the password satisfies Identity's default policy.</summary>

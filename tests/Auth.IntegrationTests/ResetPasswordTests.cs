@@ -6,6 +6,7 @@ using Auth.Server.Email;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.Abstractions;
 
 namespace Auth.IntegrationTests;
 
@@ -72,6 +73,40 @@ public sealed class ResetPasswordTests(PostgresFixture postgres, KeyMaterialFixt
         using var login = await LoginApi.Login(Client, Factory.SeedEmail, NewPassword);
         var cookie = SessionApi.RefreshCookieOf(login);
         _ = await SessionApi.RefreshOk(Client, cookie.Value.Value!);
+    }
+
+    [Fact]
+    public async Task Reset_revokes_every_token_and_authorization_of_the_account()   // criterion 4
+    {
+        // Read from the store, so the revocation is proved apart from the security-stamp check, which would
+        // refuse these sessions even if nothing were revoked.
+        var first = await SessionApi.LoginAsync(Client, Factory);
+        Clock.Advance(TimeSpan.FromSeconds(30));
+        _ = await SessionApi.RefreshOk(Client, first.RefreshToken);   // leaves a redeemed token behind
+        _ = await SessionApi.LoginAsync(Client, Factory);
+        var token = await ResetTokenAsync(Factory.SeedEmail);
+
+        using var response = await AccountApi.Reset(Client, token, NewPassword);
+        await AccountApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);
+
+        var subject = (await Factory.SeedUserIdAsync()).ToString();
+        using var scope = Factory.Services.CreateScope();
+        var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
+        var authorizations = scope.ServiceProvider.GetRequiredService<IOpenIddictAuthorizationManager>();
+
+        var found = await tokens.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.NotEmpty(found);
+        foreach (var item in found)
+        {
+            Assert.Equal(OpenIddictConstants.Statuses.Revoked, await tokens.GetStatusAsync(item, TestContext.Current.CancellationToken));
+        }
+
+        var grants = await authorizations.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.NotEmpty(grants);
+        foreach (var item in grants)
+        {
+            Assert.Equal(OpenIddictConstants.Statuses.Revoked, await authorizations.GetStatusAsync(item, TestContext.Current.CancellationToken));
+        }
     }
 
     [Fact]
