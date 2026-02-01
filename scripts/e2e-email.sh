@@ -218,7 +218,7 @@ printf '%s' '{"email":"a' > "$tmp/fffe.json"
 printf '\\%s' 'ufffeb@example.com","password":"x"}' >> "$tmp/fffe.json"
 post /auth/login "$tmp/fffe.json"
 expect_status "step 2: an email with U+FFFE" 400
-[[ "$BODY" == *'"error":"invalid_request"'* ]] || fail "step 2: the 400 for U+FFFE is not an invalid_request"
+grep -Eq '"error"[[:space:]]*:[[:space:]]*"invalid_request"' <<< "$BODY" || fail "step 2: the 400 for U+FFFE is not an invalid_request"
 pass "step 2: unconfirmed login -> 401 with a wrong password, 403 email_not_verified (no-store, no cookie) with the right one; U+FFFE email -> 400"
 
 # --- Step 3: a verification request and its limit (criteria 9, 11) ----------------------------------------------
