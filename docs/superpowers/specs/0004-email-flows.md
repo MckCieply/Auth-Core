@@ -494,3 +494,74 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
   policy.
 - Whether any existing test relies on an **unconfirmed** user logging in, or on a
   password the new policy rejects.
+
+## As built (owner, 2026-02-01)
+
+Recorded after implementation and local verification (plan 0004,
+[acceptance map](../plans/0004-acceptance-map.md)). What entered this stage stays
+in it; this section records it rather than rewriting the decisions above. The owner
+answered the plan's open questions before implementation: Decisions 17 (session
+stamp) and 20 (letters of any script) come from them, and the rest were accepted as
+proposed.
+
+**"To verify during implementation", resolved:**
+
+1. `RevokeBySubjectAsync` on OpenIddict's token and authorization managers ends every
+   session of an account; a revoked refresh token gets the ordinary `401 invalid_grant`.
+2. The effects of a reset are one transaction on the request's `AuthDbContext`:
+   Identity, OpenIddict and the tables of this spec all run on it, and a rollback
+   restores everything, the use of the token included.
+3. Using a token up is one `DELETE … RETURNING`, the first statement of the transaction;
+   of six parallel requests with one token exactly one succeeds.
+4. MailKit 4.18.1 sends `multipart/alternative` UTF-8 mail through Mailpit, and its API
+   returns both parts with Polish letters intact.
+5. The dispatcher runs on the injected clock. Tests drive its passes by hand on a host
+   built without the background service; three tests run the service itself.
+6. Identity reports one code per broken rule, mapped onto the four rule names. The seed
+   passwords satisfy the policy.
+7. No existing test logged in as an unconfirmed user or set a password the policy refuses.
+
+**Contract as built.** As specified, with these readings of what the spec left open:
+
+- A `token` or `new_password` whose JSON string cannot be decoded (an unpaired surrogate
+  escape), and a whitespace-only value, make the body malformed: `400 invalid_request`,
+  as for every named property of every body in this service, login included. "Non-empty"
+  and "non-blank" in the Contract both mean this.
+- Any method other than `POST` on the four paths is the framework's `405`, without the
+  cache headers — the same as login, refresh and logout.
+- "8 characters" are counted as UTF-16 code units, as ASP.NET Identity counts them.
+
+**Behaviour the spec was silent on:**
+
+- The next attempt after a failed send is timed from the failure, not from the start of
+  the attempt; a failure to issue the token or to compose the mail counts as a failed
+  attempt too.
+- A pass first removes, in one statement, the due requests that need no mail, and then
+  handles singly only requests that can become a mail (and requests an hour old, which it
+  drops). Under a flood of 200 requests for unknown addresses a real reset mail reached the
+  catcher within 0.6 s.
+- A request is dropped at the first pass after it is an hour old (within a minute).
+- A session that began before this slice has no stamp and is refused at its next refresh.
+- The dispatcher, and pruning of link tokens and mail limits, run in every host: a pass at
+  start, then on signal or schedule.
+- On Docker Desktop `retry_after_seconds` can read one or two seconds more than the wait
+  (61 for 60); the lockout of spec 0003 shows the same on that host.
+
+**Residual risks found in verification** — accepted, they extend "Accepted as they are":
+
+- A login or refresh that overlaps a reset gets a refresh token that is refused at once
+  (Decision 17), but its access token lives up to 10 minutes, like every access token.
+- A reset mail requested before a reset still goes out after it, with a new working link
+  (it reaches only the mailbox owner).
+- A verification racing a reset of the same account can deadlock in PostgreSQL; one of the
+  two gets a `500`, nothing is left half-done, and its token stays usable.
+
+**Delivered beyond the plan:** after the task reviews, the retry timing above; after the
+verifiers, the per-row selection of the dispatcher (security F1), test hosts pinning the
+optional mail and seed settings, a test of the reset's revocation on its own, and stricter
+checks in the e2e script.
+
+**Known gaps, owned elsewhere:** per-IP rate limiting and trusted-proxy real-IP (spec 0003,
+Decision 6); the OpenAPI description; a notification mail after a password change; three
+copies of the pruning service (escalation E3 of slice 3); the second development seed user
+is temporary, until invitations exist (week 3).

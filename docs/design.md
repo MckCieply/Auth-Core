@@ -52,7 +52,7 @@ maintenance. Versions are pinned in `Directory.Packages.props` at bootstrap.
 | Users and passwords | `Microsoft.AspNetCore.Identity.EntityFrameworkCore`           | Password hashing, lockout, email and reset tokens; passkeys later |
 | Token engine        | `OpenIddict.AspNetCore` + `OpenIddict.EntityFrameworkCore` 7.x | Password and refresh flows, rotation, revocation, JWKS; Apache 2.0 |
 | Database            | PostgreSQL 16, `Npgsql.EntityFrameworkCore.PostgreSQL` 10.x, EF Core 10 | Same Postgres as speech-to-mail, separate `auth` database        |
-| Key storage         | `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore`     | Identity's email and reset tokens survive restarts and replicas |
+| Key storage         | `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore`     | Identity's email and reset tokens survive restarts and replicas (not used: spec 0004, Decision 4 stores link tokens instead) |
 | Validation          | Built-in minimal API validation (.NET 10)                     | No FluentValidation needed for a handful of DTOs                 |
 | Rate limiting       | Built-in `Microsoft.AspNetCore.RateLimiting`                  | Per-IP and per-account limits on login, forgot and reset        |
 | Email               | `MailKit`; Mailpit in dev and tests                          | Microsoft's recommended SMTP client; templates as `.resx` for PL/EN |
@@ -95,7 +95,8 @@ framework covers both).
 - Load signing keys from a mounted secret; development certificates are for local
   runs only.
 - Persist Data Protection keys to the database, or email and reset links break on
-  restart.
+  restart. (Superseded by spec 0004, Decision 4: link tokens are stored, not Data
+  Protection tokens.)
 
 ## MVP scope
 

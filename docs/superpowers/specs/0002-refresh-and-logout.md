@@ -55,7 +55,8 @@ curl -i -b jar.txt -X POST .../auth/logout        # -> 204, Set-Cookie cleared
 - Ending every session — revoking all of a user's refresh tokens — when their
   password changes. **To be picked up** by the password forgot/reset spec (Week 2),
   where a password first changes; until then a refresh only checks that the user
-  still exists (Decision 11).
+  still exists (Decision 11). Done in spec 0004: a reset revokes every session, and a
+  refresh also checks the account's security stamp (spec 0004, Decision 17).
 - Organizations, `org_id`, RBAC, the `auth.yaml` manifest (Week 3).
 
 ## Contract
