@@ -5608,3 +5608,13 @@ asked.
    commits may leave a working link (only for the mailbox owner); a reset works
    for an account that has no password yet, and confirms it — relevant when
    invitations arrive in week 3.
+
+## As built
+
+Implemented and verified locally. Tasks 1–12 were built as written here: every code block
+compiled and passed the analyzers unchanged (the blocks had been run in a scratch copy
+before implementation). What changed after the plan — the retry timing after Task 6's
+review, the dispatcher's per-row selection and three smaller fixes after the verifiers, and
+one check in the e2e script — is listed in the [acceptance map](0004-acceptance-map.md)
+("Plan-vs-implementation notes", "Local verification log") and in spec 0004 → "As built".
+The owner's answers to the open questions above are recorded at the top of that section.
