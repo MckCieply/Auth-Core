@@ -21,6 +21,13 @@ public static class SessionPolicy
     public const string StartClaim = "session_start";
 
     /// <summary>
+    /// Claim holding the account's security stamp as it was when the session began. ASP.NET Identity changes the stamp
+    /// whenever the password changes, and a refresh is refused once the two differ (spec 0004 → Effects of a reset).
+    /// Like <see cref="StartClaim"/> it has no destination: it lives in the refresh token only.
+    /// </summary>
+    public const string StampClaim = "session_stamp";
+
+    /// <summary>
     /// Lifetime of the next refresh token: the sliding window, cut short so it never crosses the absolute cap.
     /// <see langword="null"/> once the cap is reached: the session is over.
     /// </summary>

@@ -30,10 +30,15 @@ public static class RefreshEndpoint
         var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var subject = result.Principal?.GetClaim(Claims.Subject);
 
-        // Only existence is checked (spec 0002, Decision 11). Ending sessions on a password change is the
-        // forgot/reset spec's job.
         var user = subject is null ? null : await users.FindByIdAsync(subject);
         if (user is null)
+        {
+            return InvalidGrant();
+        }
+
+        // A password change ends every session (spec 0004): it revokes the tokens it can see, and it changes the
+        // account's security stamp, which also stops a session whose login overlapped the change.
+        if (!string.Equals(result.Principal!.GetClaim(SessionPolicy.StampClaim), user.SecurityStamp, StringComparison.Ordinal))
         {
             return InvalidGrant();
         }

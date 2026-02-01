@@ -87,6 +87,31 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.EmailToken", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.HasKey("UserId", "Kind");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("EmailTokens");
+                });
+
             modelBuilder.Entity("Auth.Infrastructure.Persistence.LoginStreak", b =>
                 {
                     b.Property<byte[]>("IdentifierHash")
@@ -112,6 +137,61 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("LastAttemptAt");
 
                     b.ToTable("LoginStreaks");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.MailRequest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NextAttemptAt");
+
+                    b.ToTable("MailRequests");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.MailRequestLimit", b =>
+                {
+                    b.Property<byte[]>("IdentifierHash")
+                        .HasColumnType("bytea");
+
+                    b.Property<short>("Kind")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTimeOffset>("LastAcceptedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("WindowCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("WindowStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("IdentifierHash", "Kind");
+
+                    b.HasIndex("LastAcceptedAt");
+
+                    b.ToTable("MailRequestLimits");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -450,6 +530,15 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("ApplicationId", "Status", "Subject", "Type");
 
                     b.ToTable("OpenIddictTokens", (string)null);
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.EmailToken", b =>
+                {
+                    b.HasOne("Auth.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

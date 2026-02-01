@@ -1,4 +1,4 @@
-# Local development stack: PostgreSQL + the auth service.
+# Local development stack: PostgreSQL, a mail catcher and the auth service.
 #
 # Compose looks for .env next to this file (deploy/), not in the repo root, so always pass the
 # repo-root file explicitly (the e2e script does this for you):
@@ -23,6 +23,13 @@ services:
       timeout: 3s
       retries: 30
 
+  mailpit:
+    # A mail catcher: the auth service sends to it over SMTP, the e2e script reads the mails from its HTTP API.
+    image: axllent/mailpit:v1.31.3
+    ports:
+      # Loopback only: the web UI and the API (http://localhost:8025). SMTP (1025) stays inside the compose network.
+      - "127.0.0.1:8025:8025"
+
   auth:
     build:
       context: ..
@@ -30,6 +37,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     ports:
       # Loopback only: Development enables the developer exception page and a seeded user, so never LAN-expose it.
       - "127.0.0.1:8080:8080"
@@ -39,6 +48,10 @@ services:
       ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=auth;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       Auth__DevSeed__Email: ${AUTH_DEV_SEED_EMAIL:?set AUTH_DEV_SEED_EMAIL in .env}
       Auth__DevSeed__Password: ${AUTH_DEV_SEED_PASSWORD:?set AUTH_DEV_SEED_PASSWORD in .env}
+      # Optional second seed user with an unconfirmed email (spec 0004); scripts/e2e-email.sh needs it.
+      Auth__DevSeed__UnverifiedEmail: ${AUTH_DEV_SEED_UNVERIFIED_EMAIL:-}
+      Auth__DevSeed__UnverifiedPassword: ${AUTH_DEV_SEED_UNVERIFIED_PASSWORD:-}
+      Auth__Email__Smtp__Host: mailpit
       Auth__Keys__SigningCertificatePath: /run/secrets/auth/signing.crt
       Auth__Keys__SigningKeyPath: /run/secrets/auth/signing.key
       Auth__Keys__EncryptionCertificatePath: /run/secrets/auth/encryption.crt

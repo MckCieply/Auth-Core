@@ -1,7 +1,7 @@
-using System.Buffers;
 using System.Text.Json;
+using Auth.Server.Requests;
 using Microsoft.AspNetCore;
-using Microsoft.Net.Http.Headers;
+using Microsoft.AspNetCore.Identity;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
@@ -19,12 +19,10 @@ namespace Auth.Server.Login;
 public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ExtractTokenRequestContext>
 {
     /// <summary>Largest accepted request body, in bytes.</summary>
-    public const int MaxBodyBytes = 8 * 1024;
+    public const int MaxBodyBytes = JsonObjectBody.MaxBytes;
 
     /// <summary>The one path this handler (and <see cref="LoginResponseShaper"/>) acts on.</summary>
     public const string LoginPath = "/auth/login";
-
-    private const string JsonMediaType = "application/json";
 
     private const string InvalidCredentialsShapeDescription =
         "The request body must be a JSON object with non-empty string properties 'email' and 'password'.";
@@ -78,9 +76,9 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
             return;
         }
 
-        if (!IsJson(request.ContentType))
+        if (!JsonObjectBody.IsJson(request.ContentType))
         {
-            Reject(context, $"The request body must be '{JsonMediaType}'.");
+            Reject(context, "The request body must be 'application/json'.");
             return;
         }
 
@@ -90,7 +88,7 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
             return;
         }
 
-        var body = await ReadBoundedAsync(request.Body, MaxBodyBytes, context.CancellationToken);
+        var body = await JsonObjectBody.ReadBoundedAsync(request.Body, MaxBodyBytes, context.CancellationToken);
         if (body is null)
         {
             Reject(context, "The request body is too large.");
@@ -103,9 +101,10 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
             return;
         }
 
-        // NUL is not storable in a Postgres text column (it would surface as a 500 from the email lookup), and
-        // control characters have no place in an email. Same fixed 400 as any other malformed body.
-        if (email.Any(static c => c < ' ') || password.Contains('\0'))
+        // NUL is not storable in a Postgres text column, control characters have no place in an email, and an
+        // email the normaliser cannot take would throw in the endpoint. Same fixed 400 as any other malformed body.
+        var normalizer = request.HttpContext.RequestServices.GetRequiredService<ILookupNormalizer>();
+        if (!EmailInput.TryNormalize(email, normalizer, out _) || password.Contains('\0'))
         {
             Reject(context, InvalidCredentialsShapeDescription);
             return;
@@ -122,36 +121,6 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
     private static void Reject(OpenIddictServerEvents.ExtractTokenRequestContext context, string description) =>
         context.Reject(error: Errors.InvalidRequest, description: description);
 
-    private static bool IsJson(string? contentType) =>
-        MediaTypeHeaderValue.TryParse(contentType, out var parsed)
-        && string.Equals(parsed.MediaType.Value, JsonMediaType, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Reads the whole body, or returns <see langword="null"/> as soon as it exceeds <paramref name="limit"/> bytes.</summary>
-    private static async Task<byte[]?> ReadBoundedAsync(Stream stream, int limit, CancellationToken cancellationToken)
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(limit + 1);
-        try
-        {
-            var total = 0;
-            while (total <= limit)
-            {
-                var read = await stream.ReadAsync(buffer.AsMemory(total, limit + 1 - total), cancellationToken);
-                if (read == 0)
-                {
-                    return buffer.AsSpan(0, total).ToArray();
-                }
-
-                total += read;
-            }
-
-            return null;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
     private static bool TryParseCredentials(byte[] body, out string email, out string password)
     {
         email = password = string.Empty;
@@ -160,31 +129,13 @@ public sealed class JsonLoginRequestHandler : IOpenIddictServerHandler<OpenIddic
             using var document = JsonDocument.Parse(body);
             var root = document.RootElement;
             return root.ValueKind == JsonValueKind.Object
-                && TryGetRequiredString(root, "email", out email)
-                && TryGetRequiredString(root, "password", out password);
+                && JsonObjectBody.TryGetRequiredString(root, "email", out email)
+                && JsonObjectBody.TryGetRequiredString(root, "password", out password);
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             // InvalidOperationException: GetString() on a string holding an unpaired surrogate escape (e.g. "\ud800").
             return false;
         }
-    }
-
-    private static bool TryGetRequiredString(JsonElement obj, string name, out string value)
-    {
-        value = string.Empty;
-        if (!obj.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        var text = element.GetString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return false;
-        }
-
-        value = text;
-        return true;
     }
 }

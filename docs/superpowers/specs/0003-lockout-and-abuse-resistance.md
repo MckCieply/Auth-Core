@@ -354,6 +354,8 @@ predates this slice, evaluates no password and is not counted → request valida
 of spec 0001, for the owner to schedule (E1). A later flow that can still refuse a
 login after the password check (unverified email, organisation rules) must decide
 what happens to the streak, which today ends as soon as the password is verified.
+(Settled for the unverified email by spec 0004, Decision 3: the streak ends. E1 is fixed
+by spec 0004, Decision 16.)
 `LockoutPruningService` is a copy of `TokenPruningService` (E3). Per-IP rate
 limiting and trusted-proxy real-IP stay deferred (Decision 6). The acceptance map
 lists the rest.
