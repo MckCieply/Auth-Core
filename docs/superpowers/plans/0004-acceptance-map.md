@@ -113,8 +113,43 @@ clean stack, the three existing ones unedited.
 
 ## Local verification log
 
-_To be filled after the three local verifiers have run, per
-[`docs/workflow.md`](../../workflow.md#verification)._
+Three local verifiers ran per [`docs/workflow.md`](../../workflow.md#verification): realization
+vs spec and API/e2e on Sonnet, security on Opus.
 
 | Round | Realization vs spec | API / e2e | Security | Fix commit |
 | ----- | ------------------- | --------- | -------- | ---------- |
+| 1 | PASS — every criterion 1–18 mapped to a test that would fail on wrong behaviour; 388/388, also hermetic and with invariant globalization; 5 minors (a token with a lone-surrogate escape and a whitespace-only password are `invalid_request`; test hosts open to ambient mail/seed variables; revocation not guarded apart from the stamp check; older documents not annotated) | PASS — clean stack, the four scripts ALL PASS; probes as specified, nothing secret in the service log or the database; 4 minors (`retry_after_seconds` 61 for 60 on Docker Desktop, also in spec 0003's lockout; the routing `405` has no cache headers; the e2e step-3 bound too strict) | **FAIL** — F1 (Important): requests for unknown addresses that arrive during a pass were handled one by one, so a flood could hold up real mails until they were dropped after an hour; F2 (informational): an overlapping login keeps its access token up to 10 minutes | `fix(email): address the verification findings of spec 0004` |
+| 2 | PASS — the two minors fixed are addressed; 390/390, also with ambient `Auth__Email__Smtp__Username` / `Auth__DevSeed__UnverifiedEmail` set | **FAIL** — G1 (Important, in the fix): step 2 of `e2e-email.sh` matched compact JSON, but login's `400` is pretty-printed; the three other scripts ALL PASS; flood probe: a real reset mail reached the catcher in 0.4–0.6 s while 50 or 200 unknown-address requests kept arriving | PASS — F1 addressed: the per-row selection and the bulk delete are exact complements; no new findings | `fix(e2e): accept the pretty-printed login error in the email script` |
+| 3 | — | PASS — the four committed scripts ALL PASS on a clean stack | — | — |
+
+### Owner decisions on the plan's open questions (2026-01-26)
+
+1–6 and 9 accepted as proposed (mail texts in code; the queue row locked during the send;
+at-least-once delivery; three more background loops; a one-shot e2e script; the sender's name;
+the rare races listed in spec 0004 → "Accepted as they are"). 7: letters and digits of any
+script count (spec Decision 20). 8: sessions remember the account's security stamp (spec
+Decision 17).
+
+### Rulings by the orchestrator during implementation
+
+- Task 6 review: the next attempt after a failed send is timed from the failure; a failure to
+  issue the token or compose the mail is a failed attempt; the give-up log reworded. Commit
+  `fix(email): time the next mail attempt from the failure`.
+- After round 1: fix F1, the hermetic pins, a revocation test, the e2e tolerance and checks;
+  leave as notes for the owner the `405` without cache headers (same as the other endpoints),
+  the `invalid_request` for undecodable or blank strings, the UTF-16 count of "8 characters",
+  and F2 (all recorded in spec 0004 → "As built").
+- The three verifiers stood in for the skill's final whole-branch review (the repository's
+  workflow is binding).
+
+### Deferred / follow-ups (not fixed in this slice, by design)
+
+- The task reviews' minors, all triaged "can wait" by the realization verifier: test gaps
+  (the token-issue failure path of the dispatcher, the pruning service loop, a lone low
+  surrogate in `IsWellFormed`, the normaliser's catch branch, the service test that can pass
+  without the signal), settings parsing details (port parsed with the current culture,
+  whitespace-only SMTP credentials, untrimmed host name), and small things (the validity
+  wording of the mails is not tied to the token lifetimes by a test; `ConsumeAsync` maps a
+  whole row to read the user id; a third copy of the pruning service — escalation E3).
+- Residual risks: in spec 0004 → "Residual risks" and "As built".
+
