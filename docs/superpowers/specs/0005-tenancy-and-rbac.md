@@ -71,8 +71,8 @@ curl -i -X POST .../auth/login -d '{"email":"worker@acme.test","password":"<p>"}
   database on every call.
 - **Invitations:** send, list, resend, cancel, preview, accept — with an invitation
   mail in Polish and English through the queue of spec 0004.
-- **Safety rules** that keep a company manageable and keep anyone from granting more
-  than they hold.
+- **Safety rules** that keep a company manageable and keep anyone from granting, or
+  acting on, more than they hold.
 - **The operator CLI:** `create-org`, `invite`, `list-orgs`, `remove-member`.
 - **The OpenAPI description** of every endpoint.
 - The development seed users join a development company; a development manifest; an
@@ -91,7 +91,9 @@ and per-IP rate limiting.
 - **Company.** An id and a name. Created only by the operator. Its admin can rename it.
 - **Member.** A user's membership in a company, with exactly one role. A user is a
   member of at most one company; the tables allow more, so switching companies later
-  is additive.
+  is additive. The code keeps a user to one company: accepting an invitation takes a
+  database lock per address, so that two invitations of two companies accepted at once
+  make one membership and the other is `already_member`.
 - **Permission.** A string the product's code checks, such as `reports:approve`. The
   product declares its permissions in the manifest; nobody creates them through the
   API, because a permission no code checks means nothing.
@@ -122,24 +124,39 @@ is an array of strings. Anything else is `400 {"error":"invalid_request"}`, as i
 
 - an `email` that breaks the rules of spec 0004 (control characters,
   noncharacters, unpaired surrogates, rejected by the normaliser, longer than 254
-  characters);
+  characters) — and, where an address is invited (the company API and the CLI), one that
+  is not a single mailbox, `local@domain` with no display name and no list, because an
+  invitation creates an account with the address and mails it;
 - a company or role `name` that is longer than 100 characters, or holds a control
   character, a noncharacter or an unpaired surrogate, or has leading or trailing
   white space;
-- an id in a path or body that is not a UUID;
+- an id in a path or body that is not a UUID in its usual `8-4-4-4-12` form (no braces,
+  no missing hyphens);
 - a `password` that contains NUL.
 
 A `token` that is a non-blank string is never an `invalid_request` for its content,
 as in spec 0004.
 
-**Responses** carry `Cache-Control: no-store` and `Pragma: no-cache`. An error body
-is `{"error":"<code>"}`. JSON property names are `snake_case`. No endpoint of this
-spec sets or clears the refresh cookie.
+**Responses** carry `Cache-Control: no-store` and `Pragma: no-cache`, the `401` of a
+missing token and a `404` or `405` included. An error body is `{"error":"<code>"}`; the
+body of the `404` for an id that does not exist in the caller's company is
+`{"error":"not_found"}`, while a path the service does not have gets the framework's own
+empty `404` (or `405` for a method the path does not have), still `no-store`. JSON property
+names are `snake_case` and times are ISO 8601 in UTC with a `Z`. No endpoint of this spec sets or clears the refresh
+cookie.
+
+**The order of checks** is: authorisation (`401`, then `403`), the shape of the request
+(`400`), existence (`404`), rule 3 (`cannot_change_self`), rule 1 (`permission_not_held`),
+conflicts (`already_in_org`, `invite_pending`, `role_name_taken`), the mail limit (`429`),
+rule 2 (`last_manager`). An invitation to an address that has a pending one is therefore
+`invite_pending`, and not `429`.
 
 **Authenticated endpoints** take the access token as `Authorization: Bearer <token>`.
 The token is validated as a consumer validates it: signature against the instance's
-keys, `iss`, `aud` and `exp`. A missing or invalid token is a `401` with an empty body
-and `WWW-Authenticate: Bearer`; the frontend refreshes and retries.
+keys, `iss`, `aud` and `exp`. A missing token is a `401` with an empty body and
+`WWW-Authenticate: Bearer`; a token that is invalid or expired is a `401` with an empty
+body and `WWW-Authenticate: Bearer error="invalid_token", error_description="…",
+error_uri="…"` (RFC 6750). The frontend refreshes and retries.
 
 **Permission checks of the company API** are made against the database on every
 call, not against the token:
@@ -170,7 +187,9 @@ spec 0002 left it.
 }
 ```
 
-- `roles` is an array with one name in this version.
+- `roles` is an array with one name in this version. `roles` and `permissions` are JSON
+  arrays whatever their length, and the refresh token never carries the three claims: it
+  would only be stale.
 - `permissions` is the role's permissions with `*` expanded to the whole catalog,
   without duplicates, sorted ordinally. It never contains `*`.
 - Login and **every refresh** read the membership, the role and the catalog afresh,
@@ -211,7 +230,8 @@ A caller who is no longer a member gets `403 permissions_changed`.
 
 `200 {"org_name", "email", "role"}` for a usable invitation, so the acceptance screen
 can say who is invited where before it asks for a password. If the invited address
-already belongs to a member of another company: `409 {"error":"already_member"}`.
+already belongs to a member of any company: `409 {"error":"already_member"}`. The
+`role` is the role's name.
 Unknown, used, expired, cancelled or replaced: `400 invalid_token`. The preview does
 not use the token up.
 
@@ -223,8 +243,9 @@ an account with this address exists, the person sets a password here. Answers:
 - `400 invalid_token` — unknown, used, expired, cancelled or replaced;
 - `400 weak_password` with `rules` — the policy of spec 0004; nothing changes and the
   token stays usable;
-- `409 already_member` — the address belongs to a member of another company; nothing
-  changes and the invitation stays usable until it expires.
+- `409 already_member` — the address belongs to a member of any company; nothing
+  changes and the invitation stays usable until it expires. It is checked before the
+  password policy.
 
 It does not sign the user in: the frontend sends them to the login screen.
 
@@ -251,7 +272,13 @@ All endpoints are authenticated and act on the caller's company.
 - `GET /auth/org/roles` is open to `members:manage` too, because inviting needs the
   list of roles. `members` is the number of members holding the role; `catalog` lists
   every permission a role may hold, `*` first.
-- `PUT` on a role replaces its name and its permissions as a whole.
+- `PUT` on a role replaces its name and its permissions as a whole: what the role held
+  that is not in the request, permissions that have left the catalog included, is gone.
+  A role that holds `*` is stored as `*` alone; otherwise the permissions are stored once
+  each, sorted. The list shows `*` as it is, not expanded, and only the permissions that
+  are still in the catalog. A permission that is not `*` and not in the catalog is
+  `unknown_permission`, judged before anything is looked up. Deleting a role removes its
+  expired invitations; only pending ones make it `role_in_use`.
 - Times are ISO 8601 in UTC. Lists are sorted: members and invitations by email,
   roles by name, ordinally. Lists are not paginated.
 - `POST /auth/org/invites` answers `202` whether or not the address already has an
@@ -265,44 +292,68 @@ All endpoints are authenticated and act on the caller's company.
 | `409 already_in_org` | Inviting an address that belongs to a member of the caller's company |
 | `409 invite_pending` | Inviting an address that has a pending invitation to the caller's company; resend or cancel it instead |
 | `429 too_many_attempts` | Sending or resending over the invitation mail limit (below) |
-| `403 permission_not_held` | Inviting with, or giving a member, a role that holds a permission the caller does not hold; or creating or editing a role so that it holds one |
-| `409 last_manager` | A change that would leave the company without a manager |
+| `403 permission_not_held` | Safety rule 1: acting on anything that holds a permission the caller does not hold — inviting with, giving or creating a role that holds one; editing or deleting a role that holds one now, or would hold one; removing a member or changing a member's role when the member's current role holds one; resending or cancelling an invitation whose role holds one |
+| `409 last_manager` | A change that would take a company that has a manager down to none |
 | `409 cannot_change_self` | Changing one's own role, or removing oneself |
 | `409 role_in_use` | Deleting a role held by a member or by a pending invitation |
 | `409 role_name_taken` | A role name already used in the company, compared case-insensitively |
 | `400 unknown_permission` | A permission that is not in the catalog |
-| `404` | An id that does not exist in the caller's company |
+| `404 not_found` | An id that does not exist in the caller's company |
 
 ### Safety rules
 
-1. **Nobody grants more than they hold.** A caller can give a role to a member or an
-   invitation, or create or edit a role, only if every permission that role ends up
-   with is a permission the caller holds. A role with `*` can be given, created or
-   edited only by a caller whose role holds `*`. The operator is exempt.
+1. **Nobody acts on anything that holds more than they do.** A caller may act on a role,
+   a member or an invitation only if every permission involved is a permission the caller
+   holds, and `*` is held only by a caller whose role holds `*`. "Involved" is the role
+   the thing ends up with and the role it has now:
+   - **a role:** creating one, or editing one, needs every permission it will hold; editing
+     or deleting one needs every permission it holds now as well, so a role cannot be
+     emptied, renamed or deleted by someone who could not have given it;
+   - **a member:** giving a role needs every permission of that role; removing the member
+     or changing their role needs every permission their current role holds — so a lesser
+     manager cannot push out or demote an admin, not even to a role the caller could give;
+   - **an invitation:** sending one needs every permission of its role; resending or
+     cancelling one needs the same of the role it names.
+
+   The answer is `403 permission_not_held`. The operator is exempt.
 2. **A company always has a manager.** A role change, a removal or a role edit that
    would leave the company with no member holding `members:manage` is refused. The
    check and the change happen in one transaction, serialised per company, so two
-   managers removing each other at the same instant cannot both succeed.
+   managers removing each other at the same instant cannot both succeed. A company that
+   has no manager already (the operator removed the last with `--force`) is not stopped
+   from other changes. Inside the transaction the caller's membership and role are read
+   again: a caller who was removed or demoted since the permission check is answered
+   `403 permissions_changed`, so of two managers removing each other one succeeds and the
+   other gets that answer.
 3. **Nobody changes their own role or removes themselves.**
 
 ### Invitations
 
-- An invitation is **valid for 7 days** from the moment its mail is composed.
+- An invitation is **valid for 7 days** from the moment its mail is composed. From the
+  moment it is made until then it has no token and an expiry of seven days from the time
+  it was made; composing the mail gives it its token and its real expiry. A queued
+  invitation is listed and can be cancelled or resent.
 - Its token works like a link token of spec 0004: 32 random bytes as base64url, only
   the SHA-256 stored, single use (of parallel accepts, one succeeds), never in the
   database in clear, never in the logs.
 - A company has **at most one pending invitation per address**. An expired invitation is not pending.
 - **Resend** composes a new mail with a new token; the earlier link stops working.
   The expiry starts again.
-- **Cancel** makes the link stop working at once.
+- **Cancel** makes the link stop working at once. It is never subject to the mail limit:
+  it sends no mail, and a link must always be killable.
+- Resending and cancelling are subject to safety rule 1 like sending: a caller who could
+  not have invited with the role of an invitation can neither resend nor cancel it.
 - The role of a pending invitation cannot be changed; cancel it and invite again.
-- Expired invitations disappear from the list and are removed within a day.
+- Expired invitations disappear from the list and are removed within a day, by the hourly
+  pass that already prunes link tokens.
 
 ### Effects
 
 **Accepting an invitation**, as one unit:
 
-1. creates the account if the address has none;
+1. creates the account if the address has none (its user name is the address, so
+   Identity's list of allowed user-name characters is emptied: the default list refuses
+   addresses such as `zażółć@example.com`);
 2. sets the password, confirms the email, and ends every session of the account (as a
    reset of spec 0004 does: the security stamp changes) and its login streak;
 3. makes the account a member of the company with the invitation's role;
@@ -328,7 +379,10 @@ refresh carries the change.
   part and never placed in a mail header. The inviter's address is not in the mail.
 - **Mail limit:** the limit of spec 0004 — one per 60 seconds and five per hour —
   counted per company and address, so that one company cannot block or observe
-  another company's invitations to the same person.
+  another company's invitations to the same person. It limits sending and resending;
+  cancelling is not limited. It is kept in the table of spec 0004 under the kind
+  `Invitation`, keyed by a hash of the company and the address that can never equal the
+  per-address key.
 
 ### Manifest
 
@@ -343,10 +397,21 @@ default_roles:
 
 - A permission is 1–64 characters of lowercase ASCII letters, digits, `_`, `-` and
   `:`, starting with a letter. The built-in permissions may be listed; they are in the
-  catalog either way.
-- Default roles use permissions from the catalog or `*`. At least one default role
-  must hold `members:manage` or `*`, so that the first admin of a new company is a
-  manager.
+  catalog either way. A permission may be listed twice.
+- `Auth:Manifest:Path` is a required setting: a host without it does not start, while a
+  missing or broken *file* does not stop it. A relative path is taken from the
+  application's content root.
+- The file is invalid, and the last stored one stays active, when it has an unknown key
+  (a typo is not an empty list), a duplicate key, an anchor or alias, more than one
+  document, more than 500 permissions, more than 100 default roles, a default role name
+  that breaks the rules for names or repeats another's (compared without regard to case),
+  or is larger than 64 KiB. The old keys of `design.md`'s example (`app:`, `clients:`) are
+  therefore invalid.
+- Default roles use permissions from the catalog or `*`. A default role that lists `*`
+  holds `*` alone: it is stored as `["*"]`, as a role edited through the API is. The
+  default roles keep the order of the file; it decides the role of the second
+  development seed user. At least one default role must hold `members:manage` or `*`, so
+  that the first admin of a new company is a manager.
 - **A broken manifest never stops the service.** At startup the file is validated as a
   whole. If it is valid, it becomes the active manifest and is stored in the database.
   If it is missing, unreadable or invalid, the **last valid manifest stored** stays
@@ -366,18 +431,32 @@ plain text; a refused command exits non-zero with the error code.
 | Command | Does |
 | --- | --- |
 | `auth-server admin create-org --name <name>` | Creates the company with a copy of the default roles; prints its id |
-| `auth-server admin invite --org <id> --email <email> --role <name>` | Sends an invitation through the queue, as the operator |
+| `auth-server admin invite --org <id> --email <email> --role <name>` | Queues an invitation, as the operator; the running service mails it |
 | `auth-server admin list-orgs` | Lists companies: id, name, number of members |
 | `auth-server admin remove-member --org <id> --email <email> [--force]` | Removes a member as the API does; `--force` overrides `last_manager` |
 
-The operator is not bound by safety rule 1; rules 2 and 3 apply, except that `--force`
-lifts rule 2.
+The operator is not bound by safety rule 1; rules 2 and 3 apply, except
+that `--force` lifts rule 2 (and rule 3 cannot apply: the operator is not a member).
+
+`invite` only queues the invitation: the running service mails it at its next pass of the
+mail queue, at most one poll interval (a minute) later, and only while the service is
+running; the command says so. The invitation has no inviter. Exit codes: `0` done; `1`
+refused, with `error: <code>` on the error stream (for the mail limit, `error:
+too_many_attempts (retry in N seconds)`); `2` the arguments were not understood; `3` the
+command could not be carried out, with `error: failed (<exception type>)` and, for a
+missing or invalid setting, our own text naming the key. Standard output holds the command's
+output and nothing else (`create-org` prints the id only); logs go to the error stream. The
+commands never migrate the database, never print a connection string, and activate the
+manifest as the service does.
 
 ### OpenAPI
 
 The service publishes an OpenAPI document describing every endpoint of specs
 0001–0005 — requests, responses and error codes — at `GET /auth/openapi/v1.json` in
-every environment. An interactive reference UI is served in `Development` only.
+every environment. An interactive reference UI is served in `Development` only (at
+`/auth/scalar`, which redirects to `/auth/scalar/`; the document is at
+`/auth/scalar/v1`). The key set (`GET /auth/.well-known/jwks.json`) and the health check
+(`GET /auth/health`, `200` with `Healthy` or `Degraded`) are described too.
 
 ### Configuration
 
@@ -395,11 +474,16 @@ manifest is the exception above, because it comes from the product.
 ### Development setup
 
 - The repository ships a development `auth.yaml` with neutral sample permissions.
-- In `Development`, the seeder creates the development company with the default
-  roles. The first seed user becomes its `admin`. The second seed user (unconfirmed
+- In `Development`, when a seed user is configured, the seeder creates the development
+  company with the default roles (its name is `Auth:DevSeed:OrgName`, default
+  `Development`). The first seed user becomes its `admin`. The second seed user (unconfirmed
   email, spec 0004) becomes a member with a role that does not manage members; it
   stays, because no other path creates an account with an unconfirmed email, and the
-  verification flow still needs one to be tested.
+  verification flow still needs one to be tested. Its role is the first default
+  role, in the order of the manifest, that does not manage members; when every default
+  role manages members, it is a role called `member`, made empty if the company has none. A seed user of a
+  database made before this slice joins at the next start; an existing member is never
+  moved.
 
 ## Acceptance criteria (Done when)
 
@@ -431,9 +515,9 @@ manifest is the exception above, because it comes from the product.
    with a pending invitation to the company is `409 invite_pending`.
 10. Resend sends a new mail whose link works while the earlier link is an
     `invalid_token`; cancel makes the link an `invalid_token` and removes the
-    invitation from the list; both are subject to the mail limit per company and
-    address, with the `429` of spec 0004, and the limit of one company does not
-    affect another's.
+    invitation from the list; sending and resending are subject to the mail limit per
+    company and address, with the `429` of spec 0004, and the limit of one company does
+    not affect another's; cancelling is not limited.
 11. A login with the correct password by a confirmed user without a company is
     `403 no_membership` with no token and no cookie, and ends the streak; with a wrong
     password it is the `401` of spec 0001.
@@ -448,12 +532,20 @@ manifest is the exception above, because it comes from the product.
     permissions_changed` when the token claims a permission the database no longer
     grants; and never reaches another company's data — an id from another company
     is a `404`.
-15. Safety rule 1: giving or inviting with a role, or creating or editing a role, with
-    a permission the caller does not hold is `403 permission_not_held`, and so is
-    anything involving `*` by a caller whose role lacks `*`.
-16. Safety rule 2: every change that would leave a company without a manager is
-    `409 last_manager` — a role change, a removal and a role edit; two concurrent
-    removals of the last two managers by each other leave one manager.
+15. Safety rule 1, one rule — nobody acts on anything that holds more than they do:
+    `403 permission_not_held` when the caller does not hold a permission of the role they
+    give, invite with, create or set on a role; of the role they edit or delete (as it is now
+    as well as what it would become); of the role of a member they remove or re-role (as it
+    is now, whatever role the member would get; a lesser manager cannot push out an admin);
+    or of the role of an invitation they resend or cancel. So is anything involving `*` by a
+    caller whose role lacks `*`, even one that lists every permission. A caller acts freely
+    on what holds the same or less. The operator is exempt.
+16. Safety rule 2: every change that would take a company that has a manager down to
+    none is `409 last_manager` — a role change, a removal and a role edit; two concurrent
+    removals of the last two managers by each other leave one manager (the one that comes
+    second is `403 permissions_changed`). Through the member endpoints only the operator
+    reaches `last_manager`, since a caller who may manage members cannot touch their own
+    membership; a role edit by someone who manages roles but not members reaches it too.
 17. Safety rule 3: changing one's own role or removing oneself is `409
     cannot_change_self`.
 18. Roles: create, rename, change permissions and delete work within the catalog;
@@ -498,9 +590,9 @@ manifest is the exception above, because it comes from the product.
    through the API. This departs from design.md, where roles come from the manifest
    and an admin UI for roles is "Later".
 6. **Roles are per company.** One company's edits never touch another's.
-7. **Safety rules:** nobody grants a permission they do not hold; a company always
-   keeps a member who can manage members; nobody changes their own role or removes
-   themselves.
+7. **Safety rules:** nobody acts on anything that holds a permission they do not hold
+   (Decisions 17 and 19); a company always keeps a member who can manage members; nobody
+   changes their own role or removes themselves.
 8. **The development default roles are `admin` (everything) and `user`.** The
    product's real roles are decided in its own integration slice.
 9. **Inviting an address that belongs to another company looks like any other
@@ -529,6 +621,21 @@ manifest is the exception above, because it comes from the product.
 16. **The invitation mail limit counts per company and address**, unlike the
     per-address limit of spec 0004, so that companies on one instance cannot block or
     observe each other's invitations.
+17. **Nobody removes or re-roles a member who holds a permission the caller lacks**, so a
+    lesser manager cannot push an admin out or demote them. Together with the rule on the
+    role a member would get, safety rule 1 reads: nobody grants more than they hold, and
+    nobody touches a member who holds more than they do. The answer is `403
+    permission_not_held`; a role with `*` can only be touched by a caller whose role holds
+    `*`. The operator stays exempt.
+18. **Cancelling an invitation is never subject to the mail limit.** A cancel sends no mail
+    and must always be able to kill a link; sending and resending are limited per company
+    and address.
+19. **One rule for safety rule 1: nobody acts on anything that holds more than they do.**
+    Beyond Decision 17's members, a caller may not edit or delete a role whose current
+    permissions include one they lack (`*` only a caller holding `*`), nor send, resend or
+    cancel an invitation whose role holds one they lack: `403 permission_not_held`. The
+    check on the permissions a role would get stays. The operator is exempt. Nothing about
+    a role, a member or an invitation is left outside the rule.
 
 ## Deferred / follow-ups
 
@@ -550,7 +657,8 @@ manifest is the exception above, because it comes from the product.
 
 - An attacker with a stolen invitation link can join the company with the invited
   role, as with a reset link. The link lives 7 days and only the newest one works.
-- A manager can send up to five invitation mails per hour to any address. Only
+- The invitation mail limit is per company and address, so a manager can mail any number
+  of distinct addresses, each with the company's own wording of its name and role. Only
   members can do it, and each mail names the company.
 - The company and role names, set by members, appear in invitation mails. They are
   encoded and limited to 100 characters, but a hostile admin can still word them as
@@ -571,7 +679,7 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
 - **security:** confirm that no endpoint under `/auth/org` can read or change another
   company's data whatever ids it is given; that every company API check reads the
   database and not the token; that safety rule 1 cannot be bypassed through a role
-  edit, an invitation or `*`; that the last-manager check holds under concurrency;
+  edit or deletion, an invitation (sent, resent or cancelled), a member's role or `*`; that the last-manager check holds under concurrency;
   that `invites` reveals nothing about addresses outside the caller's company; that
   invitation tokens are never stored or logged in clear; that names set by members are
   encoded in mails and kept out of headers; that a broken or hostile manifest cannot
@@ -579,22 +687,35 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
 
 ## To verify during implementation
 
+All resolved while building (plan 0005); each item stays, with what was found.
+
 - How the service **validates its own access tokens** on the company API (OpenIddict
   validation in the same host, or the framework's JWT bearer handler), with the same
-  rules a consumer applies.
+  rules a consumer applies. *Resolved: OpenIddict's own validation in the same host
+  (`UseLocalServer`), with `AddAudiences` — without it a token for another audience
+  passes.*
 - That **claims can be re-read on refresh** without breaking the session-stamp check
-  of spec 0004, Decision 17.
+  of spec 0004, Decision 17. *Resolved: the three claims are read after the stamp check
+  and replace any stale ones, and they are stripped from the refresh token.*
 - That **the last-manager check can be serialised per company** in PostgreSQL (a row
-  lock on the company) inside the same transaction as the change.
+  lock on the company) inside the same transaction as the change. *Resolved: `SELECT 1 …
+  FOR UPDATE` on the company row at the default isolation level — it does not protect at
+  `REPEATABLE READ`.*
 - That **the invitation token fits the link-token store** of spec 0004, whose rows are
   one per user and kind, although an invitation may name an address without an
-  account; or that it needs its own table.
+  account; or that it needs its own table. *Resolved: it needs its own table, and the mail
+  queue gets the kind `Invitation` and a nullable `InviteId`.*
 - **New packages**, each needing the owner's approval before download: a YAML parser
   (design.md names YamlDotNet), a command-line parser (design.md names
   System.CommandLine; hand parsing of four commands is the alternative), the OpenAPI
   generator and the reference UI (design.md names Microsoft.AspNetCore.OpenApi and
-  Scalar.AspNetCore), and possibly OpenIddict's validation package.
+  Scalar.AspNetCore), and possibly OpenIddict's validation package. *Resolved:
+  `YamlDotNet` 18.1.0, `Microsoft.AspNetCore.OpenApi` 10.0.12 and `Scalar.AspNetCore`
+  2.17.13; the commands are parsed by hand; OpenIddict's validation package needs no
+  addition.*
 - That **the CLI runs from the same image** — the chiseled image has no shell — and
-  reaches the database with the service's configuration.
+  reaches the database with the service's configuration. *Resolved: the arguments reach
+  the entrypoint, and the commands build the services without running the host.*
 - That the existing e2e scripts still pass once **the seed users are members** of the
-  development company.
+  development company. *Resolved: they do (`e2e-login.sh` and `e2e-refresh.sh` need
+  `PyJWT[crypto]` on the machine that runs them, as before).*
