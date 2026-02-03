@@ -7,6 +7,7 @@ using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,8 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.
 builder.Services.TryAddSingleton(TimeProvider.System);
@@ -49,6 +51,9 @@ if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
     using var scope = app.Services.CreateScope();
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
 }
+
+// Which manifest is active: the product's file, or the last valid one. Never a reason to stop.
+await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lifetime.ApplicationStopping);
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
