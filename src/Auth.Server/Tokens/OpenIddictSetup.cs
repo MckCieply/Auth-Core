@@ -110,7 +110,10 @@ public static class OpenIddictSetup
             .AddValidation(options =>
             {
                 options.UseLocalServer();
-                options.UseAspNetCore();
+                // The spec takes the token only from the Authorization header; a token in a URL lands in logs.
+                options.UseAspNetCore()
+                    .DisableAccessTokenExtractionFromQueryString()
+                    .DisableAccessTokenExtractionFromBodyForm();
                 options.AddAudiences(tokens.Audience);
             });
 

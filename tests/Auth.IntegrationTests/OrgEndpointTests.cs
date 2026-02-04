@@ -275,6 +275,6 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
         using var response = await TenancyApi.Send(Client, HttpMethod.Delete, OrgEndpoints.OrgPath, await AdminTokenAsync());
 
         Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
-        Assert.True(response.Headers.CacheControl?.NoStore);
+        AccountApi.AssertNeverStoredAndNoCookie(response);
     }
 }

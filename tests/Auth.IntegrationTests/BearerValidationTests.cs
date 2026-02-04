@@ -144,6 +144,51 @@ public sealed class BearerValidationTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
+    public async Task The_challenge_without_a_token_is_plain_bearer_with_no_error()   // RFC 6750 §3.1
+    {
+        using var response = await MeAsync(null);
+
+        var challenge = Assert.Single(response.Headers.WwwAuthenticate);
+        Assert.Equal("Bearer", challenge.Scheme);
+        Assert.DoesNotContain("error", challenge.Parameter ?? "");
+    }
+
+    [Fact]
+    public async Task The_challenge_of_an_expired_token_names_invalid_token()
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+
+        Clock.Advance(TimeSpan.FromMinutes(11));
+        using var response = await MeAsync(session.AccessToken);
+
+        var challenge = Assert.Single(response.Headers.WwwAuthenticate);
+        Assert.Equal("Bearer", challenge.Scheme);
+        Assert.Contains("error=\"invalid_token\"", challenge.Parameter);
+    }
+
+    [Fact]
+    public async Task A_valid_token_in_the_query_string_is_not_accepted()   // a token in a URL lands in logs
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+
+        using var response = await TenancyApi.Get(Client, $"{OrgEndpoints.MePath}?access_token={Uri.EscapeDataString(session.AccessToken)}", null);
+
+        await TenancyApi.AssertUnauthorizedAsync(response);
+    }
+
+    [Fact]
+    public async Task A_valid_token_in_a_form_body_is_not_accepted()
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+        using var request = TenancyApi.Request(HttpMethod.Patch, OrgEndpoints.OrgPath, null);
+        request.Content = new FormUrlEncodedContent([new KeyValuePair<string, string>("access_token", session.AccessToken)]);
+
+        using var response = await Client.SendAsync(request);
+
+        await TenancyApi.AssertUnauthorizedAsync(response);
+    }
+
+    [Fact]
     public async Task A_refresh_token_cookie_is_not_a_bearer_token()
     {
         var session = await SessionApi.LoginAsync(Client, Factory);
