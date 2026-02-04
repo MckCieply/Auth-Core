@@ -1,6 +1,8 @@
 using Auth.Infrastructure;
+using System.Text.Json;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
+using Auth.Server.Api;
 using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
@@ -20,6 +22,9 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
+// JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
+// property names already are.
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
 builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
@@ -57,7 +62,13 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
+// Before authentication, so that the 401 of a missing or invalid token is marked never to be stored too.
+app.UseNoStoreForTenancyPaths();
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapHealthChecks("/auth/health");
+app.MapTenancyApi();
 app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
 app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
 app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
