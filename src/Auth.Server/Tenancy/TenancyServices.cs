@@ -13,6 +13,7 @@ public static class TenancyServices
         services.AddSingleton(ManifestSettings.Load(configuration, contentRoot));
         services.AddSingleton<ManifestHolder>();
         services.AddSingleton<ManifestActivator>();
+        services.AddScoped<CompanyService>();
         return services;
     }
 }
