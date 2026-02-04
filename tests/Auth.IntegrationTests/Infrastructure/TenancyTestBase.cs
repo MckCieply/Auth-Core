@@ -45,10 +45,34 @@ public abstract class TenancyTestBase : MailTestBase
             .SingleAsync(TestContext.Current.CancellationToken));
     }
 
+    /// <summary>Changes what a role holds, straight in the database.</summary>
+    protected Task SetRolePermissionsAsync(Guid roleId, params string[] permissions) =>
+        InDbAsync(async db =>
+        {
+            var role = await db.CompanyRoles.SingleAsync(r => r.Id == roleId, TestContext.Current.CancellationToken);
+            role.Permissions = permissions;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+
+    /// <summary>Gives a member another role of their company, straight in the database.</summary>
+    protected Task SetMemberRoleAsync(Guid userId, Guid roleId) =>
+        InDbAsync(async db =>
+        {
+            var membership = await db.Memberships.SingleAsync(m => m.UserId == userId, TestContext.Current.CancellationToken);
+            membership.RoleId = roleId;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+
+    /// <summary>Ends a membership, straight in the database.</summary>
+    protected Task RemoveMembershipAsync(Guid userId) =>
+        InDbAsync(db => db.Memberships.Where(m => m.UserId == userId).ExecuteDeleteAsync(TestContext.Current.CancellationToken));
+
     /// <summary>Makes an account with <see cref="MailTestBase.UserPassword"/> and puts it into the company with the named role.</summary>
     protected async Task<Guid> AddMemberAsync(Guid companyId, string email, string role, bool confirmed = true)
     {
-        var user = await CreateUserAsync(email, confirmed);
+        var user = await CreateUserAsync(email, confirmed, member: false);
         var roleId = await RoleIdAsync(companyId, role);
         await InDbAsync(async db =>
         {

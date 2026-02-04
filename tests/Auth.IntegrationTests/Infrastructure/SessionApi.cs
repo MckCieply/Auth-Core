@@ -32,6 +32,13 @@ public static class SessionApi
         return await ReadSessionAsync(response);
     }
 
+    /// <summary>Logs in as any account and returns its session; asserts the <c>200</c>.</summary>
+    public static async Task<Session> LoginAsync(HttpClient client, string email, string password)
+    {
+        using var response = await LoginApi.Login(client, email, password);
+        return await ReadSessionAsync(response);
+    }
+
     public static Task<HttpResponseMessage> Refresh(HttpClient client, string? refreshToken, string path = RefreshPath) =>
         client.SendAsync(WithCookie(new HttpRequestMessage(HttpMethod.Post, path), refreshToken));
 

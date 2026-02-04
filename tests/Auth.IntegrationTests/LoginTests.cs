@@ -50,7 +50,7 @@ public sealed class LoginTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Token_carries_contract_claims_and_nothing_from_week_3()   // criterion 3
+    public async Task Token_carries_contract_claims_and_the_tenancy_claims()   // criterion 3; spec 0005 adds org_id, roles, permissions
     {
         var jwt = new JsonWebToken(await LoginToken(_client, _factory));
 
@@ -61,9 +61,9 @@ public sealed class LoginTests : IAsyncLifetime
         Assert.True(jwt.ValidTo - jwt.IssuedAt <= TimeSpan.FromMinutes(10));
         // Bound exp against NOW too, so a trivially short (or overlong) lifetime fails: ~10 min from the login.
         Assert.InRange(jwt.ValidTo, DateTime.UtcNow.AddMinutes(9), DateTime.UtcNow.AddMinutes(10).AddSeconds(30));
-        foreach (var absent in new[] { "org_id", "roles", "permissions" })
+        foreach (var present in new[] { "org_id", "roles", "permissions" })
         {
-            Assert.DoesNotContain(jwt.Claims, c => c.Type == absent);
+            Assert.Contains(jwt.Claims, c => c.Type == present);
         }
     }
 
@@ -73,8 +73,9 @@ public sealed class LoginTests : IAsyncLifetime
         var jwt = new JsonWebToken(await LoginToken(_client, _factory));
 
         // iss, aud, sub, exp are the contract. iat, jti and oi_tkn_id are OpenIddict metadata that cannot be
-        // switched off; they are accepted extras pending an owner decision. Anything else is a contract leak.
-        string[] expected = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "sub"];
+        // switched off; they are accepted extras pending an owner decision. org_id, roles and permissions came with
+        // spec 0005. Anything else is a contract leak.
+        string[] expected = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"];
         Assert.Equal(expected, jwt.Claims.Select(c => c.Type).Distinct().Order(StringComparer.Ordinal));
     }
 

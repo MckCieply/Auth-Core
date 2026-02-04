@@ -1,3 +1,4 @@
+using Auth.Server.Tenancy;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
@@ -33,6 +34,16 @@ public sealed class AccessTokenClaimFilter : IOpenIddictServerHandler<OpenIddict
             foreach (var claim in subject.FindAll(Claims.Private.AuthorizationId).ToList())
             {
                 subject.RemoveClaim(claim);
+            }
+        }
+
+        // The company, role and permissions belong to the access token: a refresh reads them afresh, so a copy in the
+        // refresh token would only be stale (spec 0005 → Access token).
+        if (context.TokenType == TokenTypeIdentifiers.RefreshToken && context.SecurityTokenDescriptor?.Subject is { } refreshSubject)
+        {
+            foreach (var claim in refreshSubject.Claims.Where(c => TenantClaims.Types.Contains(c.Type)).ToList())
+            {
+                refreshSubject.RemoveClaim(claim);
             }
         }
 

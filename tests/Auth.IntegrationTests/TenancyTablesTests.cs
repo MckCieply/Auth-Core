@@ -76,7 +76,7 @@ public sealed class TenancyTablesTests(PostgresFixture postgres, KeyMaterialFixt
     {
         var (first, firstRole) = await CompanyWithRoleAsync("Acme");
         var (second, secondRole) = await CompanyWithRoleAsync("Globex");
-        var user = (await CreateUserAsync("two@example.com", confirmed: true)).Id;
+        var user = (await CreateUserAsync("two@example.com", confirmed: true, member: false)).Id;
 
         await SaveAsync(db =>
         {
