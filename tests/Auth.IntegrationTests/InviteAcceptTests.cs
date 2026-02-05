@@ -370,6 +370,21 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         _ = await SessionApi.LoginAsync(Client, Address, Password);   // first try
     }
 
+    [Fact]
+    public async Task Accepting_for_an_address_without_an_account_ends_the_login_streak_of_the_address()   // spec 0005 → Effects: new accounts too
+    {
+        await LockoutApi.FailAsync(Client, Clock, Address, 10);   // no account: streaks exist for such addresses all the same
+        Assert.Equal(1, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
+        var company = await CreateCompanyAsync("Acme");
+        var (_, token) = await MailedAsync(company);
+
+        using var accepted = await TenancyApi.Accept(Client, token, Password);
+
+        Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
+        _ = await SessionApi.LoginAsync(Client, Address, Password);   // first try
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

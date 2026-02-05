@@ -1,7 +1,6 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Email;
-using Auth.Server.Lockout;
 using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -67,30 +66,13 @@ public static class ResetPasswordEndpoint
 
         Ensure(await users.AddPasswordAsync(user, password));
 
-        // Every session ends: the refresh tokens, and the authorizations they hang on (spec 0002, Decision 11).
-        var subject = user.Id.ToString();
-        await tokens.RevokeBySubjectAsync(subject, cancellationToken);
-        await authorizations.RevokeBySubjectAsync(subject, cancellationToken);
-
-        // Every other link of the account, of either kind.
-        await db.EmailTokens.Where(t => t.UserId == user.Id).ExecuteDeleteAsync(cancellationToken);
-
-        // Someone failing logins on purpose must not keep the owner out after a reset.
-        var identifier = LoginIdentifier.HashOf(user.NormalizedEmail);
-        await db.LoginStreaks.Where(s => s.IdentifierHash == identifier).ExecuteDeleteAsync(cancellationToken);
+        // Every session ends, every other link goes, the streak is cleared (spec 0004 → Effects of a reset).
+        await AccountSessions.EndAllAsync(db, tokens, authorizations, user, cancellationToken);
 
         // Not the request's token: a client that goes away now must not leave the outcome open.
         await transaction.CommitAsync(CancellationToken.None);
         return AccountResults.Done();
     }
 
-    private static void Ensure(IdentityResult result)
-    {
-        if (!result.Succeeded)
-        {
-            // Codes only: descriptions can echo policy details, and a password must never be logged.
-            throw new InvalidOperationException(
-                "Could not set the password: " + string.Join(", ", result.Errors.Select(e => e.Code)));
-        }
-    }
+    private static void Ensure(IdentityResult result) => AccountSessions.Ensure(result, "Could not set the password");
 }

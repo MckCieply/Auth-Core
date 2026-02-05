@@ -2,7 +2,6 @@ using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
 using Auth.Server.Email;
-using Auth.Server.Lockout;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
@@ -116,8 +115,10 @@ public sealed class InviteAcceptance(
             }
 
             Ensure(await users.AddPasswordAsync(user, password));
-            await EndEverySessionAsync(user, cancellationToken);
         }
+
+        // A new account has no sessions or links yet, but its address may have a streak: streaks do not need an account.
+        await AccountSessions.EndAllAsync(db, tokens, authorizations, account, cancellationToken);
 
         db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now });
         await db.SaveChangesAsync(cancellationToken);
@@ -125,19 +126,6 @@ public sealed class InviteAcceptance(
         // Not the request's token: a client that goes away now must not leave the outcome open.
         await transaction.CommitAsync(CancellationToken.None);
         return new Outcome<IReadOnlyList<string>>([]);
-    }
-
-    /// <summary>What a reset of spec 0004 does to the sessions of an account: every refresh token and its authorization, every other link, the streak.</summary>
-    private async Task EndEverySessionAsync(ApplicationUser user, CancellationToken cancellationToken)
-    {
-        var subject = user.Id.ToString();
-        await tokens.RevokeBySubjectAsync(subject, cancellationToken);
-        await authorizations.RevokeBySubjectAsync(subject, cancellationToken);
-        await db.EmailTokens.Where(t => t.UserId == user.Id).ExecuteDeleteAsync(cancellationToken);
-
-        // Someone failing logins on purpose must not keep the owner out.
-        var identifier = LoginIdentifier.HashOf(user.NormalizedEmail);
-        await db.LoginStreaks.Where(s => s.IdentifierHash == identifier).ExecuteDeleteAsync(cancellationToken);
     }
 
     private Task<bool> IsMemberAsync(string normalizedEmail, CancellationToken cancellationToken) =>
@@ -148,13 +136,5 @@ public sealed class InviteAcceptance(
 
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 
-    private static void Ensure(IdentityResult result)
-    {
-        if (!result.Succeeded)
-        {
-            // Codes only: descriptions can echo policy details, and a password must never be logged.
-            throw new InvalidOperationException(
-                "Could not set up the account: " + string.Join(", ", result.Errors.Select(e => e.Code)));
-        }
-    }
+    private static void Ensure(IdentityResult result) => AccountSessions.Ensure(result, "Could not set up the account");
 }
