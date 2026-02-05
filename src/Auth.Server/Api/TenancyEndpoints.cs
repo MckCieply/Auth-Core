@@ -16,21 +16,42 @@ public static class TenancyEndpoints
         app.MapGet(OrgEndpoints.MePath, OrgEndpoints.MeAsync)
             .RequireAuthorization()
             .Produces<MeResponse>()
-            .ProducesUnauthorized()
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionsChanged, TenancyErrors.Forbidden);
+            .ProducesGuarded();
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization();
 
         company.MapGet("", OrgEndpoints.GetAsync)
             .Produces<OrgResponse>()
-            .ProducesUnauthorized()
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionsChanged, TenancyErrors.Forbidden);
+            .ProducesGuarded();
         company.MapPatch("", OrgEndpoints.RenameAsync)
             .ReadsJson<RenameOrgRequest>()
             .Produces(StatusCodes.Status204NoContent)
-            .ProducesUnauthorized()
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionsChanged, TenancyErrors.Forbidden);
+            .ProducesGuarded();
+
+        company.MapGet("invites", OrgInviteEndpoints.ListAsync)
+            .Produces<InvitesResponse>()
+            .ProducesGuarded();
+        company.MapPost("invites", OrgInviteEndpoints.SendAsync)
+            .ReadsJson<SendInviteRequest>()
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyInOrg, TenancyErrors.InvitePending)
+            .ProducesError(StatusCodes.Status429TooManyRequests, TenancyErrors.TooManyAttempts)
+            .ProducesGuarded();
+        company.MapPost("invites/{id}/resend", OrgInviteEndpoints.ResendAsync)
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status429TooManyRequests, TenancyErrors.TooManyAttempts)
+            .ProducesGuarded();
+        company.MapDelete("invites/{id}", OrgInviteEndpoints.CancelAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesGuarded();
 
         return app;
     }

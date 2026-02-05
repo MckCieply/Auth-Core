@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Identity;
+using MimeKit;
 
 namespace Auth.Server.Requests;
 
@@ -48,6 +49,22 @@ public static class EmailInput
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether the text is one mailbox and nothing more: <c>local@domain</c>, no name, no list, no comment. An invitation
+    /// creates an account with the address and mails it, so a typo such as <c>bob.acme.test</c> is refused at once instead
+    /// of becoming an invitation that never arrives.
+    /// </summary>
+    public static bool IsMailbox(string email)
+    {
+        ArgumentNullException.ThrowIfNull(email);
+
+        var at = email.LastIndexOf('@');
+        return at > 0
+            && at < email.Length - 1
+            && MailboxAddress.TryParse(email, out var mailbox)
+            && string.Equals(mailbox.Address, email, StringComparison.Ordinal);
     }
 
     /// <summary>

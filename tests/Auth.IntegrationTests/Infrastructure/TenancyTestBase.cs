@@ -114,6 +114,16 @@ public abstract class TenancyTestBase : MailTestBase
     protected Task RemoveMembershipAsync(Guid userId) =>
         InDbAsync(db => db.Memberships.Where(m => m.UserId == userId).ExecuteDeleteAsync(TestContext.Current.CancellationToken));
 
+    /// <summary>Adds a role to a company straight in the database; returns its id.</summary>
+    protected Task<Guid> AddRoleAsync(Guid companyId, string name, params string[] permissions) =>
+        InDbAsync(async db =>
+        {
+            var role = new CompanyRole { CompanyId = companyId, Name = name, NormalizedName = NameInput.Normalize(name), Permissions = permissions };
+            db.CompanyRoles.Add(role);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return role.Id;
+        });
+
     /// <summary>Makes an account with <see cref="MailTestBase.UserPassword"/> and puts it into the company with the named role.</summary>
     protected async Task<Guid> AddMemberAsync(Guid companyId, string email, string role, bool confirmed = true)
     {

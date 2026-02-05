@@ -15,6 +15,7 @@ public static class TenancyServices
         services.AddSingleton<ManifestActivator>();
         services.AddScoped<CompanyService>();
         services.AddScoped<MembershipReader>();
+        services.AddScoped<InvitationService>();
         return services;
     }
 }

@@ -1,3 +1,5 @@
+using Auth.Server.Tenancy;
+
 namespace Auth.Server.Api;
 
 /// <summary>The body of every error of the API: <c>{"error":"&lt;code&gt;"}</c>.</summary>
@@ -30,11 +32,16 @@ public static class EndpointMetadata
         return builder.Produces<ErrorBody>(status, "application/json").WithMetadata(new ErrorCodesMetadata(status, codes));
     }
 
-    /// <summary>The <c>401</c> of an endpoint that needs an access token: an empty body and a <c>WWW-Authenticate: Bearer</c> challenge.</summary>
-    public static RouteHandlerBuilder ProducesUnauthorized(this RouteHandlerBuilder builder)
+    /// <summary>
+    /// The answers every endpoint behind an access token and a permission check can give: a <c>401</c> with an empty
+    /// body and a <c>WWW-Authenticate: Bearer</c> challenge, and the two <c>403</c>s of the permission check.
+    /// </summary>
+    public static RouteHandlerBuilder ProducesGuarded(this RouteHandlerBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.Produces(StatusCodes.Status401Unauthorized);
+        return builder
+            .Produces(StatusCodes.Status401Unauthorized)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionsChanged, TenancyErrors.Forbidden);
     }
 }
