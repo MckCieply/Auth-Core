@@ -32,6 +32,15 @@ public static class TenancyApi
 
     public static Task<HttpResponseMessage> Get(HttpClient client, string path, string? token) => Send(client, HttpMethod.Get, path, token);
 
+    public const string PreviewPath = "/auth/invites/preview";
+    public const string AcceptPath = "/auth/invites/accept";
+
+    public static Task<HttpResponseMessage> Preview(HttpClient client, string token) =>
+        client.PostAsJsonAsync(PreviewPath, new { token });
+
+    public static Task<HttpResponseMessage> Accept(HttpClient client, string token, string password) =>
+        client.PostAsJsonAsync(AcceptPath, new { token, password });
+
     /// <summary>Asserts the status, that the answer is never stored and sets no cookie, and returns the raw body.</summary>
     public static async Task<string> ReadAsync(HttpResponseMessage response, HttpStatusCode status)
     {

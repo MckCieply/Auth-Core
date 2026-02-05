@@ -18,6 +18,18 @@ public static class TenancyEndpoints
             .Produces<MeResponse>()
             .ProducesGuarded();
 
+        app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)
+            .ReadsJson<PreviewInviteRequest>()
+            .Produces<InvitePreviewResponse>()
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
+        app.MapPost(InviteEndpoints.AcceptPath, InviteEndpoints.AcceptAsync)
+            .ReadsJson<AcceptInviteRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<WeakPasswordBody>(StatusCodes.Status400BadRequest, "application/json")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
+
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization();
 
         company.MapGet("", OrgEndpoints.GetAsync)

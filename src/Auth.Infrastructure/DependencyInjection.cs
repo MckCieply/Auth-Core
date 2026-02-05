@@ -31,6 +31,9 @@ public static class DependencyInjection
             .AddIdentityCore<ApplicationUser>(options =>
             {
                 options.User.RequireUniqueEmail = true;
+                // The user name of an account is its email (invitations, spec 0005, create accounts for any address a
+                // member types), and Identity's default list of allowed characters would refuse `zażółć@example.com`.
+                options.User.AllowedUserNameCharacters = string.Empty;
                 // Spec 0004, Decision 9. Applies when a password is set; a login never checks it.
                 options.Password.RequiredLength = 8;
                 options.Password.RequireUppercase = true;

@@ -22,3 +22,12 @@ public sealed record InvitesResponse(IReadOnlyList<InviteItem> Invites);
 
 /// <summary>Request of <c>POST /auth/org/invites</c>.</summary>
 public sealed record SendInviteRequest(string Email, Guid RoleId);
+
+/// <summary>Request of <c>POST /auth/invites/preview</c>.</summary>
+public sealed record PreviewInviteRequest(string Token);
+
+/// <summary>Response of <c>POST /auth/invites/preview</c>.</summary>
+public sealed record InvitePreviewResponse(string OrgName, string Email, string Role);
+
+/// <summary>Request of <c>POST /auth/invites/accept</c>.</summary>
+public sealed record AcceptInviteRequest(string Token, string Password);

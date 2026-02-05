@@ -5,6 +5,9 @@ namespace Auth.Server.Api;
 /// <summary>The body of every error of the API: <c>{"error":"&lt;code&gt;"}</c>.</summary>
 public sealed record ErrorBody(string Error);
 
+/// <summary>The <c>400 weak_password</c> body: the password policy rules (spec 0004) the password breaks.</summary>
+public sealed record WeakPasswordBody(string Error, IReadOnlyList<string> Rules);
+
 /// <summary>The codes an endpoint answers with at a status, so that the OpenAPI description can name them.</summary>
 public sealed record ErrorCodesMetadata(int Status, IReadOnlyList<string> Codes);
 
