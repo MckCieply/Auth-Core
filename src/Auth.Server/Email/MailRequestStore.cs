@@ -18,31 +18,15 @@ public sealed class MailRequestStore(IServiceScopeFactory scopes, TimeProvider c
 
         var now = StorableTime.Now(clock);
         var identifierHash = LoginIdentifier.HashOf(normalizedEmail);
-        var kindValue = (short)kind;
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // One statement creates the row or locks the existing one, and returns it either way (the pattern of
-        // LoginStreakStore). ToListAsync, not SingleAsync: EF must send the statement as it is.
-        var rows = await db.MailRequestLimits
-            .FromSql($"""
-                INSERT INTO "MailRequestLimits" ("IdentifierHash", "Kind", "WindowStartedAt", "WindowCount", "LastAcceptedAt")
-                VALUES ({identifierHash}, {kindValue}, {now}, 0, {now})
-                ON CONFLICT ("IdentifierHash", "Kind") DO UPDATE SET "WindowCount" = "MailRequestLimits"."WindowCount"
-                RETURNING *
-                """)
-            .ToListAsync(cancellationToken);
-        var row = rows.Single();
-
-        var (next, decision) = MailLimitPolicy.Register(
-            new MailLimitState(row.WindowStartedAt, row.WindowCount, row.LastAcceptedAt), now);
+        // The limit row is created or locked by one statement (MailLimits), and returned either way.
+        var decision = await MailLimits.RegisterAsync(db, identifierHash, kind, now, cancellationToken);
         if (decision.Allowed)
         {
-            row.WindowStartedAt = next.WindowStartedAt;
-            row.WindowCount = next.WindowCount;
-            row.LastAcceptedAt = next.LastAcceptedAt;
             db.MailRequests.Add(new MailRequest { Kind = kind, NormalizedEmail = normalizedEmail, RequestedAt = now, NextAttemptAt = now });
             await db.SaveChangesAsync(cancellationToken);
         }

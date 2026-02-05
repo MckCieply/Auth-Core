@@ -14,6 +14,7 @@ public sealed class SmtpMailTransportTests(MailpitFixture mailpit) : IClassFixtu
         Locale = "pl",
         ResetPasswordUrl = new Uri("https://app.example.com/reset"),
         VerifyEmailUrl = new Uri("https://app.example.com/verify"),
+        AcceptInviteUrl = new Uri("https://app.example.com/invite"),
         FromAddress = "no-reply@mail.example.com",
         Smtp = new SmtpSettings { Host = mailpit.Host, Port = port ?? mailpit.SmtpPort, Security = SmtpSecurity.None },
     };

@@ -3,6 +3,7 @@ using Auth.Server.Email;
 using Auth.Server.Requests;
 using Auth.Server.Seeding;
 using Auth.Server.Tenancy;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -44,6 +45,50 @@ public abstract class TenancyTestBase : MailTestBase
             .Select(r => r.Id)
             .SingleAsync(TestContext.Current.CancellationToken));
     }
+
+    /// <summary>Makes an invitation straight in the database, as the API would, with no token yet.</summary>
+    protected async Task<Guid> AddInviteAsync(Guid companyId, string email, string role, Guid? invitedBy = null)
+    {
+        var roleId = await RoleIdAsync(companyId, role);
+        using var scope = Factory.Services.CreateScope();
+        var normalized = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>().NormalizeEmail(email);
+        var now = StorableTime.Now(Clock);
+        var invite = new Invite
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            Email = email,
+            NormalizedEmail = normalized,
+            RoleId = roleId,
+            InvitedBy = invitedBy,
+            InvitedAt = now,
+            ExpiresAt = now + InviteTokens.Lifetime,
+        };
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        db.Invites.Add(invite);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return invite.Id;
+    }
+
+    /// <summary>Puts the mail of an invitation on the queue, due now, as sending or resending does.</summary>
+    protected Task EnqueueInvitationAsync(Guid inviteId, string email) =>
+        InDbAsync(async db =>
+        {
+            var now = StorableTime.Now(Clock);
+            db.MailRequests.Add(new MailRequest
+            {
+                Kind = MailKind.Invitation,
+                NormalizedEmail = email.ToUpperInvariant(),
+                InviteId = inviteId,
+                RequestedAt = now,
+                NextAttemptAt = now,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+
+    protected Task<Invite?> InviteAsync(Guid inviteId) =>
+        InDbAsync(db => db.Invites.AsNoTracking().SingleOrDefaultAsync(i => i.Id == inviteId, TestContext.Current.CancellationToken));
 
     /// <summary>Changes what a role holds, straight in the database.</summary>
     protected Task SetRolePermissionsAsync(Guid roleId, params string[] permissions) =>

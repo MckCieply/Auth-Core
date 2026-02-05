@@ -31,6 +31,9 @@ public static class EmailTokens
         return SHA256.HashData(Encoding.UTF8.GetBytes(token));
     }
 
+    /// <summary>A new token in clear: 32 random bytes as 43 base64url characters. Invitations (spec 0005) use it too.</summary>
+    public static string NewToken() => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+
     /// <summary>
     /// Replaces the user's token of this kind by a new one and returns it in clear: 32 random bytes as 43
     /// base64url characters. The caller puts it into a mail and nowhere else. One statement on the row the table
@@ -41,7 +44,7 @@ public static class EmailTokens
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var token = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var token = NewToken();
         var hash = HashOf(token);
         var kindValue = (short)kind;
         var expiresAt = now + LifetimeOf(kind);

@@ -51,6 +51,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.LocaleKey] = "en";
         _settings[MailSettingsLoader.ResetPasswordUrlKey] = DefaultResetUrl;
         _settings[MailSettingsLoader.VerifyEmailUrlKey] = DefaultVerifyUrl;
+        _settings[MailSettingsLoader.AcceptInviteUrlKey] = DefaultInviteUrl;
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
@@ -86,6 +87,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public const string DefaultAppName = "Auth-Core Test";
     public const string DefaultResetUrl = "https://app.example.com/reset";
     public const string DefaultVerifyUrl = "https://app.example.com/verify";
+    public const string DefaultInviteUrl = "https://app.example.com/invite";
     public const string DefaultFrom = "no-reply@example.com";
 
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>

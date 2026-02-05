@@ -15,6 +15,7 @@ public sealed class MailSettingsTests(PostgresFixture postgres, KeyMaterialFixtu
         [MailSettingsLoader.LocaleKey] = "pl",
         [MailSettingsLoader.ResetPasswordUrlKey] = "https://app.example.com/reset",
         [MailSettingsLoader.VerifyEmailUrlKey] = "https://app.example.com/verify",
+        [MailSettingsLoader.AcceptInviteUrlKey] = "https://app.example.com/invite",
         [MailSettingsLoader.FromKey] = "no-reply@example.com",
         [MailSettingsLoader.SmtpHostKey] = "smtp.example.com",
         [MailSettingsLoader.SmtpPortKey] = "587",
@@ -35,6 +36,7 @@ public sealed class MailSettingsTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal("pl", settings.Locale);
         Assert.Equal(new Uri("https://app.example.com/reset"), settings.ResetPasswordUrl);
         Assert.Equal(new Uri("https://app.example.com/verify"), settings.VerifyEmailUrl);
+        Assert.Equal(new Uri("https://app.example.com/invite"), settings.AcceptInviteUrl);
         Assert.Equal("no-reply@example.com", settings.FromAddress);
         Assert.Equal("smtp.example.com", settings.Smtp.Host);
         Assert.Equal(587, settings.Smtp.Port);
@@ -48,6 +50,7 @@ public sealed class MailSettingsTests(PostgresFixture postgres, KeyMaterialFixtu
     [InlineData(MailSettingsLoader.LocaleKey)]
     [InlineData(MailSettingsLoader.ResetPasswordUrlKey)]
     [InlineData(MailSettingsLoader.VerifyEmailUrlKey)]
+    [InlineData(MailSettingsLoader.AcceptInviteUrlKey)]
     [InlineData(MailSettingsLoader.FromKey)]
     [InlineData(MailSettingsLoader.SmtpHostKey)]
     [InlineData(MailSettingsLoader.SmtpPortKey)]
@@ -71,6 +74,8 @@ public sealed class MailSettingsTests(PostgresFixture postgres, KeyMaterialFixtu
     [InlineData(MailSettingsLoader.ResetPasswordUrlKey, "ftp://app.example.com/reset")]
     [InlineData(MailSettingsLoader.ResetPasswordUrlKey, "http://app.example.com/reset")]     // not https outside Development
     [InlineData(MailSettingsLoader.VerifyEmailUrlKey, "https://app.example.com/verify#top")] // a fragment would swallow the token
+    [InlineData(MailSettingsLoader.AcceptInviteUrlKey, "http://app.example.com/invite")]       // not https outside Development
+    [InlineData(MailSettingsLoader.AcceptInviteUrlKey, "https://app.example.com/invite?token=x")]   // the link adds its own
     [InlineData(MailSettingsLoader.ResetPasswordUrlKey, "https://user:secret@app.example.com/reset")]
     [InlineData(MailSettingsLoader.ResetPasswordUrlKey, "https://app.example.com/reset?token=x")]         // the link adds its own
     [InlineData(MailSettingsLoader.FromKey, "not an address")]
