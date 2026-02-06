@@ -31,3 +31,12 @@ public sealed record InvitePreviewResponse(string OrgName, string Email, string 
 
 /// <summary>Request of <c>POST /auth/invites/accept</c>.</summary>
 public sealed record AcceptInviteRequest(string Token, string Password);
+
+/// <summary>One member of <c>GET /auth/org/members</c>. The time is ISO 8601 in UTC.</summary>
+public sealed record MemberItem(Guid UserId, string Email, RoleRef Role, DateTime JoinedAt);
+
+/// <summary>Response of <c>GET /auth/org/members</c>.</summary>
+public sealed record MembersResponse(IReadOnlyList<MemberItem> Members);
+
+/// <summary>Request of <c>PUT /auth/org/members/{user_id}/role</c>.</summary>
+public sealed record ChangeMemberRoleRequest(Guid RoleId);

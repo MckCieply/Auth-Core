@@ -33,6 +33,22 @@ public abstract class TenancyTestBase : MailTestBase
         return created.Value;
     }
 
+    /// <summary>A company with an admin who is logged in: the company, the admin's user id and their access token.</summary>
+    protected async Task<(Guid Company, Guid AdminId, string Token)> CompanyWithAdminAsync(string name = "Acme", string email = "boss@acme.test")
+    {
+        var company = await CreateCompanyAsync(name);
+        var admin = await AddMemberAsync(company, email, "admin");
+        return (company, admin, (await SessionApi.LoginAsync(Client, email, UserPassword)).AccessToken);
+    }
+
+    /// <summary>What the company API would know of the caller: their membership and role as the database has them now.</summary>
+    protected async Task<TenantContext> TenantOfAsync(Guid userId)
+    {
+        using var scope = Factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<MembershipReader>().ReadAsync(userId, TestContext.Current.CancellationToken)
+            ?? throw new InvalidOperationException("The user belongs to no company.");
+    }
+
     /// <summary>The company the development seed made.</summary>
     protected Task<Guid> DevCompanyIdAsync() =>
         InDbAsync(db => db.Companies.Where(c => c.Name == DevUserSeeder.DefaultOrgName).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));

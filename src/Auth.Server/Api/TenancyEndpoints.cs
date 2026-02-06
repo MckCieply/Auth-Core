@@ -65,6 +65,24 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesGuarded();
 
+        company.MapGet("members", OrgMemberEndpoints.ListAsync)
+            .Produces<MembersResponse>()
+            .ProducesGuarded();
+        company.MapPut("members/{user_id}/role", OrgMemberEndpoints.ChangeRoleAsync)
+            .ReadsJson<ChangeMemberRoleRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CannotChangeSelf, TenancyErrors.LastManager)
+            .ProducesGuarded();
+        company.MapDelete("members/{user_id}", OrgMemberEndpoints.RemoveAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CannotChangeSelf, TenancyErrors.LastManager)
+            .ProducesGuarded();
+
         return app;
     }
 }

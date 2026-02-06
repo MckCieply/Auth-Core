@@ -39,6 +39,12 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
         return await TenancyApi.ReadOkAsync(response);
     }
 
+    private async Task<T> InScopeAsync<T>(Func<IServiceProvider, Task<T>> work)
+    {
+        using var scope = Factory.Services.CreateScope();
+        return await work(scope.ServiceProvider);
+    }
+
     private Task<List<Invite>> InvitesAsync() =>
         InDbAsync(db => db.Invites.AsNoTracking().OrderBy(i => i.Email).ToListAsync(TestContext.Current.CancellationToken));
 
@@ -384,6 +390,74 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
         Assert.Null(invite.InvitedBy);
         Assert.Equal(1, await DispatchAsync());
         Assert.Equal("first@acme.test", Assert.Single(Mail.Sent).To);
+    }
+
+    [Fact]
+    public async Task Nobody_resends_or_cancels_an_invitation_whose_role_holds_more_than_they_do()   // criterion 15
+    {
+        var company = await CreateCompanyAsync("Acme");
+        await AddRoleAsync(company, "manager", "members:manage", "reports:read");
+        await AddMemberAsync(company, "mgr@acme.test", "manager");
+        await AddRoleAsync(company, "wider", "reports:read", "reports:approve");
+        var token = (await SessionApi.LoginAsync(Client, "mgr@acme.test", UserPassword)).AccessToken;
+        var wider = await AddInviteAsync(company, "a@acme.test", "wider");
+        var star = await AddInviteAsync(company, "b@acme.test", "admin");
+
+        foreach (var id in new[] { wider, star })
+        {
+            using var resend = await TenancyApi.Send(Client, HttpMethod.Post, $"{InvitesPath}/{id}/resend", token);
+            await TenancyApi.AssertErrorAsync(resend, HttpStatusCode.Forbidden, "permission_not_held");
+            using var cancel = await TenancyApi.Send(Client, HttpMethod.Delete, $"{InvitesPath}/{id}", token);
+            await TenancyApi.AssertErrorAsync(cancel, HttpStatusCode.Forbidden, "permission_not_held");
+        }
+
+        Assert.Equal(2, (await InvitesAsync()).Count);
+        Assert.Empty(await QueueAsync());
+    }
+
+    [Fact]
+    public async Task A_caller_resends_and_cancels_invitations_whose_role_holds_what_they_hold_or_less()   // criterion 15
+    {
+        var company = await CreateCompanyAsync("Acme");
+        await AddRoleAsync(company, "manager", "members:manage", "reports:read");
+        await AddMemberAsync(company, "mgr@acme.test", "manager");
+        await AddRoleAsync(company, "narrower", "reports:read");
+        await AddRoleAsync(company, "plain");
+        var token = (await SessionApi.LoginAsync(Client, "mgr@acme.test", UserPassword)).AccessToken;
+        var own = await AddInviteAsync(company, "a@acme.test", "manager");
+        var subset = await AddInviteAsync(company, "b@acme.test", "narrower");
+        var nothing = await AddInviteAsync(company, "c@acme.test", "plain");
+
+        foreach (var id in new[] { own, subset })
+        {
+            using var resend = await TenancyApi.Send(Client, HttpMethod.Post, $"{InvitesPath}/{id}/resend", token);
+            await TenancyApi.AssertEmptyAsync(resend, HttpStatusCode.Accepted);
+        }
+
+        foreach (var id in new[] { own, subset, nothing })
+        {
+            using var cancel = await TenancyApi.Send(Client, HttpMethod.Delete, $"{InvitesPath}/{id}", token);
+            await TenancyApi.AssertEmptyAsync(cancel, HttpStatusCode.NoContent);
+        }
+
+        Assert.Empty(await InvitesAsync());
+    }
+
+    [Fact]
+    public async Task The_operator_resends_and_cancels_any_invitation()   // the operator is exempt from rule 1
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var star = await AddInviteAsync(company, "a@acme.test", "admin");
+        var other = await AddInviteAsync(company, "b@acme.test", "admin");
+
+        var resend = await InScopeAsync(sp => sp.GetRequiredService<InvitationService>()
+            .ResendAsync(Actor.Operator, company, star, TestContext.Current.CancellationToken));
+        var cancel = await InScopeAsync(sp => sp.GetRequiredService<InvitationService>()
+            .CancelAsync(Actor.Operator, company, other, TestContext.Current.CancellationToken));
+
+        Assert.True(resend.Succeeded, resend.Error);
+        Assert.True(cancel.Succeeded, cancel.Error);
+        Assert.Equal(star, Assert.Single(await InvitesAsync()).Id);
     }
 
     // ---- listing

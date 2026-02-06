@@ -79,7 +79,7 @@ public static class OrgInviteEndpoints
             return ApiResults.InvalidRequest();
         }
 
-        var outcome = await invitations.ResendAsync(caller.CompanyId, inviteId, http.RequestAborted);
+        var outcome = await invitations.ResendAsync(Actor.Of(caller), caller.CompanyId, inviteId, http.RequestAborted);
         if (!outcome.Succeeded)
         {
             return ApiResults.Refused(outcome);
@@ -106,7 +106,7 @@ public static class OrgInviteEndpoints
             return ApiResults.InvalidRequest();
         }
 
-        var outcome = await invitations.CancelAsync(caller.CompanyId, inviteId, http.RequestAborted);
+        var outcome = await invitations.CancelAsync(Actor.Of(caller), caller.CompanyId, inviteId, http.RequestAborted);
         return outcome.Succeeded ? ApiResults.NoContent() : ApiResults.Refused(outcome);
     }
 }
