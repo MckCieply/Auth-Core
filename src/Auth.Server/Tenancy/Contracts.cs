@@ -40,3 +40,15 @@ public sealed record MembersResponse(IReadOnlyList<MemberItem> Members);
 
 /// <summary>Request of <c>PUT /auth/org/members/{user_id}/role</c>.</summary>
 public sealed record ChangeMemberRoleRequest(Guid RoleId);
+
+/// <summary>
+/// A role of <c>GET /auth/org/roles</c>, and the answer of <c>POST /auth/org/roles</c>: the permissions it holds that are
+/// still in the catalog (<c>*</c> is shown as it is), and how many members hold it.
+/// </summary>
+public sealed record RoleItem(Guid Id, string Name, string[] Permissions, int Members);
+
+/// <summary>Response of <c>GET /auth/org/roles</c>: the roles, and every permission a role may hold, <c>*</c> first.</summary>
+public sealed record RolesResponse(IReadOnlyList<RoleItem> Roles, IReadOnlyList<string> Catalog);
+
+/// <summary>Request of <c>POST /auth/org/roles</c> and <c>PUT /auth/org/roles/{id}</c>.</summary>
+public sealed record SaveRoleRequest(string Name, string[] Permissions);

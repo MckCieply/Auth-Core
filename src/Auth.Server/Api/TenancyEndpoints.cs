@@ -83,6 +83,31 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CannotChangeSelf, TenancyErrors.LastManager)
             .ProducesGuarded();
 
+        company.MapGet("roles", OrgRoleEndpoints.ListAsync)
+            .Produces<RolesResponse>()
+            .ProducesGuarded();
+        company.MapPost("roles", OrgRoleEndpoints.CreateAsync)
+            .ReadsJson<SaveRoleRequest>()
+            .Produces<RoleItem>(StatusCodes.Status201Created)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.UnknownPermission)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleNameTaken)
+            .ProducesGuarded();
+        company.MapPut("roles/{id}", OrgRoleEndpoints.ReplaceAsync)
+            .ReadsJson<SaveRoleRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.UnknownPermission)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleNameTaken, TenancyErrors.LastManager)
+            .ProducesGuarded();
+        company.MapDelete("roles/{id}", OrgRoleEndpoints.DeleteAsync)
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleInUse)
+            .ProducesGuarded();
+
         return app;
     }
 }

@@ -19,6 +19,7 @@ public static class TenancyServices
         services.AddScoped<InvitationService>();
         services.AddScoped<InviteAcceptance>();
         services.AddScoped<MemberService>();
+        services.AddScoped<RoleService>();
         return services;
     }
 }
