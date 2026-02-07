@@ -58,12 +58,14 @@ public static class TenancyEndpoints
         company.MapPost("invites/{id}/resend", OrgInviteEndpoints.ResendAsync)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
         company.MapDelete("invites/{id}", OrgInviteEndpoints.CancelAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesGuarded();
 
@@ -81,6 +83,7 @@ public static class TenancyEndpoints
         company.MapDelete("members/{user_id}", OrgMemberEndpoints.RemoveAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CannotChangeSelf, TenancyErrors.LastManager)
             .ProducesGuarded();
@@ -106,6 +109,7 @@ public static class TenancyEndpoints
         company.MapDelete("roles/{id}", OrgRoleEndpoints.DeleteAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleInUse)
             .ProducesGuarded();

@@ -200,6 +200,24 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Theory]
+    [InlineData("POST /auth/org/invites")]
+    [InlineData("POST /auth/org/invites/{id}/resend")]
+    [InlineData("DELETE /auth/org/invites/{id}")]
+    [InlineData("PUT /auth/org/members/{user_id}/role")]
+    [InlineData("DELETE /auth/org/members/{user_id}")]
+    [InlineData("POST /auth/org/roles")]
+    [InlineData("PUT /auth/org/roles/{id}")]
+    [InlineData("DELETE /auth/org/roles/{id}")]
+    public async Task Each_endpoint_under_safety_rule_1_lists_permission_not_held_under_403(string endpoint)   // criterion 24
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+
+        var operation = Operations(await DescriptionAsync(factory))[endpoint];
+
+        Assert.Contains("permission_not_held", Description(operation, "403"));
+    }
+
+    [Theory]
     [InlineData("POST /auth/login", "email,password")]
     [InlineData("POST /auth/password/forgot", "email")]
     [InlineData("POST /auth/password/reset", "new_password,token")]
