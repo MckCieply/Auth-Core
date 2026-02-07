@@ -10,8 +10,8 @@ namespace Auth.Server.Api;
 /// The OpenAPI description of the service (spec 0005 → OpenAPI): every endpoint of specs 0001–0005 with its request, its
 /// responses and the error codes each response carries, at <c>GET /auth/openapi/v1.json</c> in every environment. An
 /// interactive reference of it is served in Development only. The endpoints describe themselves where they are mapped
-/// (<see cref="EndpointMetadata"/>); this adds what the framework cannot see: the JSON bodies the handlers read, the error
-/// codes, the bearer scheme, and the two endpoints that are not minimal-API routes.
+/// (<see cref="EndpointMetadata"/>); this adds what the framework cannot see: the JSON bodies and the cookie the handlers
+/// read, the headers they set, the error codes, the bearer scheme, and the two endpoints that are not minimal-API routes.
 /// </summary>
 public static class OpenApiSetup
 {
@@ -54,6 +54,11 @@ public static class OpenApiSetup
             Description = "Accounts, sessions, companies, members, roles and invitations. Errors are `{\"error\":\"<code>\"}`; "
                 + "every response of the account and company endpoints is marked `Cache-Control: no-store`.",
         };
+
+        // No server: the framework would name the one of the request, from its Host header (AllowedHosts is `*`), and a
+        // cached copy could point generated clients, and their tokens, at another host. Without one, a client resolves the
+        // paths against where it fetched the document.
+        document.Servers = [];
 
         document.Components ??= new OpenApiComponents();
         document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
@@ -110,6 +115,33 @@ public static class OpenApiSetup
                     ["application/json"] = new OpenApiMediaType { Schema = await context.GetOrCreateSchemaAsync(request.Body, null, cancellationToken) },
                 },
             };
+        }
+
+        // The cookie the handler reads itself: refresh and logout take no body.
+        foreach (var cookie in metadata.OfType<CookieRequestMetadata>())
+        {
+            operation.Parameters ??= [];
+            operation.Parameters.Add(new OpenApiParameter
+            {
+                Name = cookie.Name,
+                In = ParameterLocation.Cookie,
+                Description = cookie.Description,
+                Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+            });
+        }
+
+        // The headers the handler sets on a response: the refresh cookie, and the Retry-After of a 429.
+        foreach (var header in metadata.OfType<ResponseHeaderMetadata>())
+        {
+            if (operation.Responses?.TryGetValue(header.Status.ToString(System.Globalization.CultureInfo.InvariantCulture), out var response) == true && response is OpenApiResponse concrete)
+            {
+                concrete.Headers ??= new Dictionary<string, IOpenApiHeader>();
+                concrete.Headers[header.Name] = new OpenApiHeader
+                {
+                    Description = header.Description,
+                    Schema = new OpenApiSchema { Type = header.Type },
+                };
+            }
         }
 
         // The codes of each error status, from every place that declared the status.

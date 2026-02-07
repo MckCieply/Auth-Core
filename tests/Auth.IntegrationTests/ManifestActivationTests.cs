@@ -105,17 +105,41 @@ public sealed class ManifestActivationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task Unreadable_manifest_path_leaves_the_last_stored_one_active()   // criterion 20
+    public async Task Unreadable_manifest_file_leaves_the_last_stored_one_active_and_says_why()   // criterion 20
+    {
+        var database = UniqueDatabase();
+        await using var first = new AuthAppFactory(postgres, keys, database);
+        var good = StateOf(first).Manifest;
+        var logs = new CapturingLoggerProvider();
+
+        await using var second = new AuthAppFactory(postgres, keys, database)
+            .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
+        ManifestState state;
+        // The file is there, but held open by another process for as long as the host starts: reading it fails.
+        using (new FileStream(second.ManifestPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            state = StateOf(second);   // the host starts
+        }
+
+        Assert.True(state.IsDegraded);
+        Assert.Matches(@"^the file cannot be read \((IOException|UnauthorizedAccessException)\)$", state.DegradedReason);
+        Assert.Equal(good.ToJson(), state.Manifest.ToJson());
+        Assert.Equal("Degraded", await HealthAsync(second));
+        Assert.Contains(logs.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("cannot be read") && e.Message.Contains("last valid stored"));
+    }
+
+    [Fact]
+    public async Task A_directory_at_the_manifest_path_is_a_missing_file()   // criterion 20
     {
         var database = UniqueDatabase();
         await using var first = new AuthAppFactory(postgres, keys, database);
         var good = StateOf(first).Manifest;
 
-        // A directory where the file should be: nothing can be read from it.
         await using var second = new AuthAppFactory(postgres, keys, database).WithSetting(ManifestSettings.PathKey, Path.GetTempPath());
         var state = StateOf(second);
 
         Assert.True(state.IsDegraded);
+        Assert.Contains("does not exist", state.DegradedReason);
         Assert.Equal(good.ToJson(), state.Manifest.ToJson());
     }
 

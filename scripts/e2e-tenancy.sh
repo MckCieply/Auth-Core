@@ -4,25 +4,37 @@
 # invites its first admin, who invites a member, whom the admin then removes — and the role and safety cases.
 #
 # What it checks, in order (ADMIN = the first admin of the new company A, WORKER = a member of A, SEED = the development
-# seed user, B = a second company):
-#   1. health (Healthy), the mail catcher, the OpenAPI description and the interactive reference (Development only)
-#      - criteria 20, 24.
-#   2. SEED logs in: its token carries org_id, roles ["admin"] and the expanded permissions; GET /auth/me agrees
-#      - criteria 4, 19.
-#   3. the operator CLI in the service's own image: create-org prints the id, list-orgs shows it - criterion 1.
-#   4. the operator invites ADMIN: the mail arrives at the server's next poll (within a minute), with the link of the
-#      invitation screen; preview twice, a weak password -> 400 weak_password (the token stays), accept -> 204, accept again
-#      -> 400 invalid_token - criteria 2, 3, 4, 6, 7.
+# seed user, B = a second company). Each step names only what it really checks; the criteria it touches only in part
+# are marked "part of".
+#   1. health answers 200 "Healthy"; the mail catcher answers; the OpenAPI description is served and names seven of the
+#      paths; the interactive reference is served (Development). A smoke test: it checks neither the Degraded path of
+#      criterion 20 nor the requests, responses and error codes of criterion 24.
+#   2. SEED logs in: its token carries roles ["admin"] and the expanded permissions; GET /auth/me agrees - criterion 4,
+#      part of 19 (GET /auth/me only).
+#   3. the operator CLI in the service's own image: create-org prints the id only, list-orgs shows it - criterion 1.
+#   4. the operator invites ADMIN: the mail arrives at the server's next poll (within a minute) and names the application,
+#      the company, the role and the 7 days; preview twice, a weak password -> 400 weak_password (the token stays), accept
+#      -> 204 with no cookie, accept and preview again -> 400 invalid_token - criteria 2, 3, 7; part of 4 and 6 (a used
+#      token only).
 #   5. ADMIN logs in: org_id of A, roles ["admin"], permissions sorted, no "*" - criterion 4.
-#   6. ADMIN invites WORKER through the API (202), the mail arrives, WORKER accepts and logs in with roles ["user"].
-#   7. roles and safety: WORKER cannot list members (forbidden); nobody changes their own role or removes themselves; a new
-#      role; unknown permission; a taken name; a role that holds what the caller lacks; star only by star; nobody
-#      removes or re-roles a member, or resends or cancels an invitation, that holds more than they do; a demoted
-#      caller's old token gets permissions_changed; an edit that would leave no manager is refused - criteria 12, 14-18.
-#   8. B: ids of another company are 404; an invitation to an address of another company is answered exactly as one to an
-#      unknown address, and its preview says already_member - criteria 8, 14.
-#   9. removal: WORKER's refresh cookie -> 401, login -> 403 no_membership, the old access token -> permissions_changed - 13.
-#  10. the CLI removes the last manager only with --force; afterwards ADMIN's sessions are over - criteria 16, 22.
+#   6. ADMIN invites WORKER through the API (202), the mail arrives, WORKER accepts and logs in with roles ["user"]; the
+#      member list shows both - part of 2.
+#   7. roles and safety: WORKER without members:manage is forbidden; no token is a 401 with an empty body and a Bearer
+#      challenge (one route); nobody changes their own role or removes themselves; a role is created, an unknown
+#      permission and a taken name are refused; a role change reaches WORKER's next refresh; a lesser manager can neither
+#      remove nor re-role ADMIN, invite with the star role, nor resend or cancel an invitation for it; a demoted caller's
+#      old token gets permissions_changed and the new one forbidden; a role edit that would leave no manager is
+#      last_manager - criterion 17; part of 12, 14, 15, 16 and 18 (no role delete or role_in_use).
+#   8. B: a role or member of another company is 404 on the member and role endpoints; an invitation to an address of
+#      another company is answered with the same status and headers as one to an unknown address, and its preview and
+#      acceptance say already_member - criterion 8; part of 14.
+#   9. removal: WORKER's refresh cookie -> 401 with no cookie written, login with the right password -> 403
+#      no_membership with no cookie, the old access token -> permissions_changed - part of 11 and 13 (no wrong password,
+#      no invitation back in).
+#  10. the CLI refuses to remove the last manager (last_manager) and removes it with --force; afterwards ADMIN's sessions
+#      are over - criterion 22; part of 16.
+# Criteria 5, 9, 10, 19 (GET and PATCH /auth/org), 20, 21, 23 and 24 as a whole, the parallel accepts of 6 and the rest
+# of the partial ones above are guarded by the integration tests, not here: see docs/superpowers/plans/0005-acceptance-map.md.
 #
 # Full sequence, from the repo root (same stack and .env as the other e2e scripts; the four existing ones first,
 # this one last - they must still pass with the seed users as members of the development company):

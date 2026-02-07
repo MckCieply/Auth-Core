@@ -242,6 +242,38 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
         Assert.Empty(await QueueAsync());
     }
 
+    [Theory]
+    [InlineData("\u017Fteve@acme.test")]   // a long s: a host with ICU upper-cases it to the S of steve@acme.test
+    [InlineData("\u212Aate@acme.test")]    // the Kelvin sign: its lower case is k
+    [InlineData("joe@[10.0.0.5]")]          // a domain literal
+    [InlineData("joe@[IPv6:::1]")]
+    [InlineData("joe@localhost")]           // a domain without a dot
+    [InlineData("joe@intranet")]
+    [InlineData("joe@10.0.0.5")]            // an IP address without its brackets
+    public async Task An_address_that_could_stand_for_another_account_or_reach_an_internal_host_is_a_400(string email)
+    {
+        var (company, _, token) = await AcmeAsync();
+
+        using var response = await InviteAsync(token, email, await RoleIdAsync(company, "user"));
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_request");
+        Assert.Empty(await InvitesAsync());
+        Assert.Empty(await QueueAsync());
+    }
+
+    [Theory]
+    [InlineData("worker@acme.test")]
+    [InlineData("zażółć.gęślą@acme.test")]   // letters beyond ASCII that fold to none
+    [InlineData("Łukasz@poczta.example.pl")]
+    public async Task An_ordinary_address_is_invited(string email)
+    {
+        var (company, _, token) = await AcmeAsync();
+
+        await InviteOkAsync(token, email, await RoleIdAsync(company, "user"));
+
+        Assert.Equal(email, Assert.Single(await InvitesAsync()).Email);
+    }
+
     [Fact]
     public async Task Address_longer_than_254_characters_is_a_400()
     {
@@ -592,13 +624,16 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
     }
 
     [Theory]
-    [InlineData("POST", "/resend")]
-    [InlineData("DELETE", "")]
-    public async Task An_id_that_is_not_a_uuid_is_a_400(string method, string suffix)
+    [InlineData("POST", "not-a-uuid", "/resend")]
+    [InlineData("DELETE", "not-a-uuid", "")]
+    [InlineData("POST", "11111111-1111-1111-1111-111111111111%20", "/resend")]   // white space is not part of a UUID
+    [InlineData("DELETE", "%2011111111-1111-1111-1111-111111111111", "")]
+    [InlineData("DELETE", "11111111-1111-1111-1111-111111111111%09", "")]
+    public async Task An_id_that_is_not_a_uuid_is_a_400(string method, string id, string suffix)
     {
         var (_, _, token) = await AcmeAsync();
 
-        using var response = await TenancyApi.Send(Client, new HttpMethod(method), $"{InvitesPath}/not-a-uuid{suffix}", token);
+        using var response = await TenancyApi.Send(Client, new HttpMethod(method), $"{InvitesPath}/{id}{suffix}", token);
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_request");
     }
@@ -653,6 +688,25 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
         Assert.Equal(5, statuses.Count(s => s == HttpStatusCode.Conflict));
         Assert.Single(await InvitesAsync());
         Assert.Single(await QueueAsync());
+    }
+
+    [Fact]
+    public async Task A_caller_demoted_before_the_lock_cannot_resend_or_cancel()   // safety rule 2: the caller is read again under the lock
+    {
+        var (company, boss, _) = await AcmeAsync();
+        var invite = await AddInviteAsync(company, Worker, "user", boss);
+        var stale = Actor.Of(await TenantOfAsync(boss));
+        await SetMemberRoleAsync(boss, await RoleIdAsync(company, "user"));   // demoted after the endpoint read them
+
+        var resend = await InScopeAsync(sp => sp.GetRequiredService<InvitationService>()
+            .ResendAsync(stale, company, invite, TestContext.Current.CancellationToken));
+        var cancel = await InScopeAsync(sp => sp.GetRequiredService<InvitationService>()
+            .CancelAsync(stale, company, invite, TestContext.Current.CancellationToken));
+
+        Assert.Equal("permissions_changed", resend.Error);
+        Assert.Equal("permissions_changed", cancel.Error);
+        Assert.NotNull(await InviteAsync(invite));
+        Assert.Empty(await QueueAsync());
     }
 
     [Fact]

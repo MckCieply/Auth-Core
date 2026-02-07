@@ -409,6 +409,12 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
     [InlineData("11111111-1111-1111-1111-111111111111", "{}")]
     [InlineData("11111111-1111-1111-1111-111111111111", """{"role_id":7}""")]
     [InlineData("11111111-1111-1111-1111-111111111111", "not json")]
+    [InlineData("11111111-1111-1111-1111-111111111111 ", """{"role_id":"11111111-1111-1111-1111-111111111111"}""")]   // white space is not part of a UUID
+    [InlineData(" 11111111-1111-1111-1111-111111111111", """{"role_id":"11111111-1111-1111-1111-111111111111"}""")]
+    [InlineData("11111111-1111-1111-1111-111111111111\t", """{"role_id":"11111111-1111-1111-1111-111111111111"}""")]
+    [InlineData("11111111-1111-1111-1111-111111111111", """{"role_id":"11111111-1111-1111-1111-111111111111 "}""")]
+    [InlineData("11111111-1111-1111-1111-111111111111", """{"role_id":" 11111111-1111-1111-1111-111111111111"}""")]
+    [InlineData("11111111-1111-1111-1111-111111111111", """{"role_id":"11111111-1111-1111-1111-111111111111\t"}""")]
     public async Task A_malformed_id_or_body_is_a_400(string user, string body)
     {
         var (_, _, token) = await CompanyWithAdminAsync();
@@ -551,6 +557,30 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
         Assert.Equal("permissions_changed", change.Error);
         Assert.Equal("permissions_changed", invite.Error);
         Assert.Equal(await RoleIdAsync(company, "user"), (await MembershipAsync(worker))!.RoleId);
+        Assert.Equal(0, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task Rule_1_is_judged_on_the_caller_as_read_again_under_the_lock()
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var manager = await AddRoleAsync(company, "manager", "members:manage", "reports:read", "reports:approve");
+        var boss = await AddMemberAsync(company, "boss@acme.test", "manager");
+        var worker = await AddMemberAsync(company, "worker@acme.test", "user");   // reports:read, reports:approve
+        var stale = Actor.Of(await TenantOfAsync(boss));
+        await SetRolePermissionsAsync(manager, "members:manage", "reports:read");   // still manages members, no longer approves
+        var user = await RoleIdAsync(company, "user");
+        var reader = await AddRoleAsync(company, "reader", "reports:read");
+
+        var change = await InScopeAsync(sp => sp.GetRequiredService<MemberService>()
+            .ChangeRoleAsync(stale, company, worker, reader, TestContext.Current.CancellationToken));
+        var invite = await InScopeAsync(sp => sp.GetRequiredService<InvitationService>()
+            .SendAsync(stale, company, "new@acme.test", "NEW@ACME.TEST", user, TestContext.Current.CancellationToken));
+
+        // The role the endpoint read would have let both through; the role as it is under the lock does not.
+        Assert.Equal("permission_not_held", change.Error);
+        Assert.Equal("permission_not_held", invite.Error);
+        Assert.Equal(user, (await MembershipAsync(worker))!.RoleId);
         Assert.Equal(0, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));
     }
 

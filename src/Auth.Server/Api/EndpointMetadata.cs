@@ -1,4 +1,6 @@
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
+using Microsoft.OpenApi;
 
 namespace Auth.Server.Api;
 
@@ -14,6 +16,12 @@ public sealed record ErrorCodesMetadata(int Status, IReadOnlyList<string> Codes)
 /// <summary>The JSON body an endpoint reads, for the OpenAPI description only.</summary>
 public sealed record JsonRequestMetadata(Type Body);
 
+/// <summary>A cookie an endpoint reads as its request, for the OpenAPI description only.</summary>
+public sealed record CookieRequestMetadata(string Name, string Description);
+
+/// <summary>A header an endpoint sets on the response of a status, for the OpenAPI description only.</summary>
+public sealed record ResponseHeaderMetadata(int Status, string Name, JsonSchemaType Type, string Description);
+
 public static class EndpointMetadata
 {
     /// <summary>
@@ -25,6 +33,22 @@ public static class EndpointMetadata
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.WithMetadata(new JsonRequestMetadata(typeof(T)));
+    }
+
+    /// <summary>Documents that the endpoint reads the refresh cookie of ADR 0004 (<see cref="RefreshCookie"/>), not a body.</summary>
+    public static RouteHandlerBuilder ReadsRefreshCookie(this RouteHandlerBuilder builder, string description)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new CookieRequestMetadata(RefreshCookie.Name, description));
+    }
+
+    /// <summary>Documents the <c>Set-Cookie</c> of the refresh cookie on the response of <paramref name="status"/>.</summary>
+    public static RouteHandlerBuilder SetsRefreshCookie(this RouteHandlerBuilder builder, int status, string description)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new ResponseHeaderMetadata(status, "Set-Cookie", JsonSchemaType.String, description));
     }
 
     /// <summary>Documents an error status of the endpoint and the codes it carries.</summary>
@@ -55,7 +79,10 @@ public static class EndpointMetadata
 
         return builder
             .Produces<TooManyAttemptsBody>(StatusCodes.Status429TooManyRequests, "application/json")
-            .WithMetadata(new ErrorCodesMetadata(StatusCodes.Status429TooManyRequests, [TenancyErrors.TooManyAttempts]));
+            .WithMetadata(new ErrorCodesMetadata(StatusCodes.Status429TooManyRequests, [TenancyErrors.TooManyAttempts]))
+            .WithMetadata(new ResponseHeaderMetadata(
+                StatusCodes.Status429TooManyRequests, "Retry-After", JsonSchemaType.Integer,
+                "The seconds to wait before the next attempt: the same number as `retry_after_seconds` in the body."));
     }
 
     /// <summary>

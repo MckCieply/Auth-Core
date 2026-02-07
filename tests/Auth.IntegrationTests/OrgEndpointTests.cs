@@ -2,7 +2,9 @@ using System.Net;
 using System.Text;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Api;
+using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
@@ -101,6 +103,22 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
         using var after = await TenancyApi.Get(Client, OrgEndpoints.OrgPath, token);
         Assert.Equal("Acme Development", (await TenancyApi.ReadOkAsync(after)).GetProperty("name").GetString());
         Assert.Equal("Globex", await InDbAsync(async db => (await db.Companies.SingleAsync(c => c.Id == other, TestContext.Current.CancellationToken)).Name));
+    }
+
+    [Fact]
+    public async Task A_caller_demoted_before_the_lock_cannot_rename_the_company()   // the caller is read again under the lock, as on every write
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var boss = await AddMemberAsync(company, "boss@acme.test", "admin");
+        var stale = Actor.Of(await TenantOfAsync(boss));
+        await SetMemberRoleAsync(boss, await RoleIdAsync(company, "user"));   // demoted after the endpoint read them
+
+        using var scope = Factory.Services.CreateScope();
+        var renamed = await scope.ServiceProvider.GetRequiredService<CompanyService>()
+            .RenameAsync(stale, company, "Mine now", TestContext.Current.CancellationToken);
+
+        Assert.Equal("permissions_changed", renamed.Error);
+        Assert.Equal("Acme", await InDbAsync(async db => (await db.Companies.SingleAsync(c => c.Id == company, TestContext.Current.CancellationToken)).Name));
     }
 
     [Fact]

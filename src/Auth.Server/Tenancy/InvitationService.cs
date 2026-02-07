@@ -1,5 +1,6 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Email;
+using Auth.Server.Requests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -16,6 +17,7 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
     /// Invites an address to the company with a role: makes the invitation, applies the mail limit of the company and
     /// the address, and queues the mail — or refuses, and then changes nothing. Whether the address has an account, or
     /// belongs to another company, is not looked at: the answer is the same for every address outside this company.
+    /// An address that is not <see cref="EmailInput.IsInvitable">invitable</see> is <c>invalid_request</c>.
     /// </summary>
     /// <param name="email">The address as typed, which the account will be created with.</param>
     /// <param name="normalizedEmail">The address as the account lookup normalises it.</param>
@@ -25,6 +27,13 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentNullException.ThrowIfNull(email);
         ArgumentNullException.ThrowIfNull(normalizedEmail);
+
+        // Here, so that the company API and the operator refuse the same addresses: one that may stand for another
+        // account, or that would make the mail relay deliver to an internal host.
+        if (!EmailInput.IsInvitable(email))
+        {
+            return Outcome.Fail(TenancyErrors.InvalidRequest);
+        }
 
         var now = StorableTime.Now(clock);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

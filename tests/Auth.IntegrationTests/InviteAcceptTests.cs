@@ -351,6 +351,31 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
+    public async Task An_invitation_stored_for_a_look_alike_of_an_existing_address_is_an_invalid_token()   // defence in depth: sending refuses such an address
+    {
+        var company = await CreateCompanyAsync("Acme");
+        await CreateUserAsync("steve@acme.test", confirmed: true, member: false);
+        // A long s: a host with ICU normalises this address to the one of steve@acme.test. Made before the rule existed.
+        var (invite, token) = await MailedAsync(company, "\u017Fteve@acme.test");
+
+        using (var preview = await TenancyApi.Preview(Client, token))
+        {
+            await AssertInvalidTokenAsync(preview);
+        }
+
+        using (var accepted = await TenancyApi.Accept(Client, token, Password))
+        {
+            await AssertInvalidTokenAsync(accepted);
+        }
+
+        // Steve's password still holds (403: right password, no company) and nobody joined.
+        using var login = await LoginApi.Login(Client, "steve@acme.test", UserPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, login.StatusCode);
+        Assert.Empty(await NonSeedMembershipsAsync());
+        Assert.NotNull(await InviteAsync(invite));
+    }
+
+    [Fact]
     public async Task Accepting_confirms_an_unconfirmed_account_lifts_a_lockout_and_removes_its_other_links()   // spec 0005 → Effects
     {
         await CreateUserAsync(Address, confirmed: false, member: false);

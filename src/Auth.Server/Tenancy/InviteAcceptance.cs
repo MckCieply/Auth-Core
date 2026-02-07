@@ -2,6 +2,7 @@ using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
 using Auth.Server.Email;
+using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
@@ -23,7 +24,9 @@ public sealed class InviteAcceptance(
 {
     /// <summary>
     /// The company, address and role of a usable invitation; the token stays usable. Unknown, used, expired, cancelled and
-    /// replaced tokens are all <c>invalid_token</c>. An address that already belongs to a company is <c>already_member</c>.
+    /// replaced tokens are all <c>invalid_token</c>, and so is an invitation for an address that
+    /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An address that already belongs to a
+    /// company is <c>already_member</c>.
     /// </summary>
     public async Task<Outcome<InvitePreview>> PreviewAsync(string token, CancellationToken cancellationToken)
     {
@@ -38,7 +41,7 @@ public sealed class InviteAcceptance(
             where invite.TokenHash == hash && invite.ExpiresAt > now
             select new { invite.Email, invite.NormalizedEmail, CompanyName = company.Name, RoleName = role.Name })
             .FirstOrDefaultAsync(cancellationToken);
-        if (row is null)
+        if (row is null || EmailInput.MayStandForAnotherAddress(row.Email))
         {
             return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
         }
@@ -83,6 +86,12 @@ public sealed class InviteAcceptance(
         }
 
         var invite = consumed[0];
+
+        // Sending refuses such an address; one stored before that rule must not reach an account it may stand for.
+        if (EmailInput.MayStandForAnotherAddress(invite.Email))
+        {
+            return Refused(TenancyErrors.InvalidToken);
+        }
 
         // One address, one acceptance at a time: two invitations of two companies accepted at once must not make the
         // same person a member of both (the tables would allow it; this version does not).

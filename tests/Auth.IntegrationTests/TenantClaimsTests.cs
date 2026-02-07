@@ -1,7 +1,16 @@
 using System.Net;
+using System.Security.Claims;
+using System.Text.Json.Nodes;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
+using OpenIddict.Abstractions;
+using OpenIddict.Server;
 
 namespace Auth.IntegrationTests;
 
@@ -77,6 +86,68 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal(
             ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"],
             AccessTokens.Payload(session.AccessToken).Select(p => p.Key).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_refresh_token_never_carries_the_company_the_role_or_the_permissions()   // spec 0005 → Access token
+    {
+        var session = await SeedLoginAsync();
+        var refreshed = await SessionApi.RefreshOk(Client, session.RefreshToken);
+
+        foreach (var reference in new[] { session.RefreshToken, refreshed.RefreshToken })   // made by a login and by a refresh
+        {
+            var claims = await StoredRefreshTokenClaimsAsync(reference);
+
+            Assert.Equal((await Factory.SeedUserIdAsync()).ToString(), claims["sub"]!.GetValue<string>());   // the token was read
+            Assert.All(TenantClaims.Types, type => Assert.False(claims.ContainsKey(type), $"The refresh token carries '{type}'."));
+        }
+    }
+
+    [Fact]
+    public async Task The_claim_filter_takes_the_three_claims_out_of_a_refresh_token_and_leaves_them_in_an_access_token()
+    {
+        static OpenIddictServerEvents.GenerateTokenContext ContextFor(string tokenType)
+        {
+            var context = new OpenIddictServerEvents.GenerateTokenContext(new OpenIddictServerTransaction()) { TokenType = tokenType };
+            context.SecurityTokenDescriptor.Subject = new ClaimsIdentity(
+            [
+                new Claim(OpenIddictConstants.Claims.Subject, "someone"),
+                new Claim(TenantClaims.OrgId, Guid.NewGuid().ToString()),
+                new Claim(TenantClaims.Roles, """["admin"]"""),
+                new Claim(TenantClaims.Permissions, """["reports:read"]"""),
+            ]);
+            return context;
+        }
+
+        var refresh = ContextFor(OpenIddictConstants.TokenTypeIdentifiers.RefreshToken);
+        var access = ContextFor(OpenIddictConstants.TokenTypeIdentifiers.AccessToken);
+
+        await new AccessTokenClaimFilter().HandleAsync(refresh);
+        await new AccessTokenClaimFilter().HandleAsync(access);
+
+        Assert.Equal([OpenIddictConstants.Claims.Subject], refresh.SecurityTokenDescriptor.Subject.Claims.Select(c => c.Type));
+        Assert.Equal([OpenIddictConstants.Claims.Subject, .. TenantClaims.Types], access.SecurityTokenDescriptor.Subject.Claims.Select(c => c.Type));
+    }
+
+    /// <summary>
+    /// The claims of a refresh token as the service keeps them: the cookie holds only a reference, and its entry holds the
+    /// token itself, encrypted to the instance's key.
+    /// </summary>
+    private async Task<JsonObject> StoredRefreshTokenClaimsAsync(string reference)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
+        var entry = await tokens.FindByReferenceIdAsync(reference, TestContext.Current.CancellationToken)
+            ?? throw new InvalidOperationException("The refresh token is not stored.");
+        var payload = await tokens.GetPayloadAsync(entry, TestContext.Current.CancellationToken)
+            ?? throw new InvalidOperationException("The refresh token entry has no payload.");
+
+        var server = Factory.Services.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue;
+        var handler = new JsonWebTokenHandler();
+        var signed = handler.DecryptToken(
+            handler.ReadJsonWebToken(payload),
+            new TokenValidationParameters { TokenDecryptionKeys = [.. server.EncryptionCredentials.Select(c => c.Key)] });
+        return AccessTokens.Payload(signed);
     }
 
     [Fact]

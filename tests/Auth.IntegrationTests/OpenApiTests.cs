@@ -278,6 +278,92 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task Refresh_and_logout_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the two
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+
+        foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
+        {
+            var cookies = (operation["parameters"] as JsonArray ?? []).Where(p => p!["in"]!.GetValue<string>() == "cookie").ToList();
+            if (endpoint is "POST /auth/refresh" or "POST /auth/logout")
+            {
+                var cookie = Assert.Single(cookies)!;
+                Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
+                Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
+                Assert.Null(operation["requestBody"]);
+            }
+            else
+            {
+                Assert.Empty(cookies);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("POST /auth/login", "200")]
+    [InlineData("POST /auth/refresh", "200")]
+    [InlineData("POST /auth/logout", "204")]
+    public async Task The_answers_that_set_or_clear_the_refresh_cookie_say_so(string endpoint, string status)   // criterion 24
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+
+        var response = Operations(await DescriptionAsync(factory))[endpoint]["responses"]![status]!;
+
+        Assert.Contains("auth_rt", response["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        string[] setting = ["POST /auth/login 200", "POST /auth/refresh 200", "POST /auth/logout 204"];
+
+        foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
+        {
+            foreach (var (status, response) in operation["responses"]!.AsObject())
+            {
+                Assert.Equal(setting.Contains($"{endpoint} {status}"), response!["headers"]?["Set-Cookie"] is not null);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Every_429_carries_retry_after()   // criterion 24
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var limited = 0;
+
+        foreach (var (_, operation) in Operations(await DescriptionAsync(factory)))
+        {
+            if (operation["responses"]!["429"] is { } response)
+            {
+                var header = response["headers"]!["Retry-After"]!;
+                Assert.Equal("integer", header["schema"]!["type"]!.GetValue<string>());
+                Assert.Contains("retry_after_seconds", header["description"]!.GetValue<string>());
+                limited++;
+            }
+        }
+
+        Assert.Equal(5, limited);   // login, the two mail requests, invite and resend
+    }
+
+    [Fact]
+    public async Task The_description_names_no_server_taken_from_the_request()   // a Host header must not reach the document
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, DocumentUrl);
+        request.Headers.Host = "evil.example";
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("evil.example", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(JsonNode.Parse(text)!["servers"]);
+    }
+
+    [Fact]
     public async Task The_reset_and_accept_answers_name_the_password_rules()
     {
         await using var factory = new AuthAppFactory(postgres, keys);

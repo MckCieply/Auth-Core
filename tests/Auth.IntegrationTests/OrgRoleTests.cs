@@ -5,6 +5,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
@@ -176,6 +177,7 @@ public sealed class OrgRoleTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData(" Padded")]
     [InlineData("Padded ")]
     [InlineData("Ac\tme")]
+    [InlineData("admin\u200B")]   // a zero-width space: it would look like admin
     public async Task A_name_that_breaks_the_rules_is_a_400(string name)
     {
         var (_, _, token) = await CompanyWithAdminAsync();
@@ -658,15 +660,70 @@ public sealed class OrgRoleTests(PostgresFixture postgres, KeyMaterialFixture ke
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
     }
 
-    [Fact]
-    public async Task A_path_that_is_not_a_uuid_is_a_400()
+    [Theory]
+    [InlineData("not-a-uuid")]
+    [InlineData("{0}%20")]     // the id of a real role with white space around it is still not a UUID
+    [InlineData("%20{0}")]
+    [InlineData("{0}%09")]
+    public async Task A_path_that_is_not_a_uuid_is_a_400(string path)
     {
-        var (_, _, token) = await CompanyWithAdminAsync();
+        var (company, _, token) = await CompanyWithAdminAsync();
+        var id = string.Format(System.Globalization.CultureInfo.InvariantCulture, path, await RoleIdAsync(company, "user"));
 
-        using var replace = await TenancyApi.Send(Client, HttpMethod.Put, $"{RolesPath}/not-a-uuid", token, new { name = "X", permissions = Array.Empty<string>() });
-        using var delete = await TenancyApi.Send(Client, HttpMethod.Delete, $"{RolesPath}/not-a-uuid", token);
+        using var replace = await TenancyApi.Send(Client, HttpMethod.Put, $"{RolesPath}/{id}", token, new { name = "X", permissions = Array.Empty<string>() });
+        using var delete = await TenancyApi.Send(Client, HttpMethod.Delete, $"{RolesPath}/{id}", token);
 
         await TenancyApi.AssertErrorAsync(replace, HttpStatusCode.BadRequest, "invalid_request");
         await TenancyApi.AssertErrorAsync(delete, HttpStatusCode.BadRequest, "invalid_request");
+        Assert.Equal("user", (await RoleAsync(await RoleIdAsync(company, "user")))!.Name);
+    }
+
+    // ---- the lock
+
+    [Fact]
+    public async Task A_caller_demoted_before_the_lock_cannot_create_edit_or_delete_a_role()   // safety rule 2: the caller is read again under the lock
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var boss = await AddMemberAsync(company, "boss@acme.test", "admin");
+        var spare = await AddRoleAsync(company, "spare", "reports:read");
+        var stale = Actor.Of(await TenantOfAsync(boss));
+        await SetMemberRoleAsync(boss, await RoleIdAsync(company, "user"));   // demoted after the endpoint read them
+
+        var created = await InScopeAsync(sp => sp.GetRequiredService<RoleService>()
+            .CreateAsync(stale, company, "Auditor", ["reports:read"], TestContext.Current.CancellationToken));
+        var updated = await InScopeAsync(sp => sp.GetRequiredService<RoleService>()
+            .UpdateAsync(stale, company, spare, "Spare", ["reports:approve"], TestContext.Current.CancellationToken));
+        var deleted = await InScopeAsync(sp => sp.GetRequiredService<RoleService>()
+            .DeleteAsync(stale, company, spare, TestContext.Current.CancellationToken));
+
+        Assert.Equal("permissions_changed", created.Error);
+        Assert.Equal("permissions_changed", updated.Error);
+        Assert.Equal("permissions_changed", deleted.Error);
+        var role = Assert.IsType<CompanyRole>(await RoleAsync(spare));
+        Assert.Equal("spare", role.Name);
+        Assert.Equal(["reports:read"], role.Permissions);
+        Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.Name == "Auditor", TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task Rule_1_on_roles_is_judged_on_the_caller_as_read_again_under_the_lock()
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var keeper = await AddRoleAsync(company, "keeper", "roles:manage", "reports:read", "reports:approve");
+        var caller = await AddMemberAsync(company, "keeper@acme.test", "keeper");
+        var stale = Actor.Of(await TenantOfAsync(caller));
+        await SetRolePermissionsAsync(keeper, "roles:manage", "reports:read");   // still manages roles, no longer approves
+
+        var created = await InScopeAsync(sp => sp.GetRequiredService<RoleService>()
+            .CreateAsync(stale, company, "Approver", ["reports:approve"], TestContext.Current.CancellationToken));
+
+        Assert.Equal("permission_not_held", created.Error);
+        Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.Name == "Approver", TestContext.Current.CancellationToken)));
+    }
+
+    private async Task<T> InScopeAsync<T>(Func<IServiceProvider, Task<T>> work)
+    {
+        using var scope = Factory.Services.CreateScope();
+        return await work(scope.ServiceProvider);
     }
 }

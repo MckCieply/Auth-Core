@@ -11,6 +11,9 @@ public sealed class ManifestParserTests
           user:  [reports:read, reports:approve]
         """;
 
+    // Spelled out, so that the escapes the tests expect in a reason are not read as escapes of the test's own strings.
+    private const string Backslash = "\\";
+
     private static string Error(string yaml)
     {
         var result = ManifestParser.Parse(yaml);
@@ -203,6 +206,43 @@ public sealed class ManifestParserTests
             """));
         Assert.Null(ManifestParser.Parse($"default_roles:\n  {new string('a', 100)}: [\"*\"]\n").Error);
         Assert.Null(ManifestParser.Parse("default_roles:\n  Kierownik żółw: [\"*\"]\n").Error);
+    }
+
+    [Fact]
+    public void A_role_name_with_a_format_character_is_refused()
+    {
+        // A raw string: the YAML holds the escape of a zero-width space, which would make the role look like admin.
+        Assert.Contains("name", Error("""
+            default_roles:
+              admin: ["*"]
+              "admin\u200B": []
+            """));
+    }
+
+    [Fact]
+    public void A_refused_name_reaches_the_reason_with_its_line_breaks_and_control_characters_escaped()   // the reason is logged
+    {
+        // Raw strings: the YAML holds the escapes, which the parser turns into a line feed, an escape character and a
+        // line separator.
+        var permission = Error("""
+            permissions: ["bad\nline"]
+            default_roles:
+              admin: ["*"]
+            """);
+        var role = Error("""
+            default_roles:
+              "ad\emin": ["*"]
+            """);
+        var separated = Error("""
+            default_roles:
+              admin: ["*"]
+              "ad\Lmin": [nothing:here]
+            """);
+
+        Assert.All(new[] { permission, role, separated }, reason => Assert.DoesNotContain(reason, c => char.IsControl(c) || c == (char)0x2028));
+        Assert.Contains("'bad" + Backslash + "u000Aline'", permission);
+        Assert.Contains("'ad" + Backslash + "u001Bmin'", role);
+        Assert.Contains("'ad" + Backslash + "u2028min'", separated);
     }
 
     [Fact]

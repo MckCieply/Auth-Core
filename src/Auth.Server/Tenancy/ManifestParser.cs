@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Auth.Server.Requests;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
@@ -20,6 +22,9 @@ public static class ManifestParser
 
     private const int MaxPermissions = 500;
     private const int MaxDefaultRoles = 100;
+
+    // Spelled out, so that the escape written into a reason is not read as an escape of this file.
+    private const char Backslash = (char)0x5C;
 
     private static readonly IDeserializer Yaml = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
@@ -128,7 +133,36 @@ public static class ManifestParser
         return new ManifestParseResult(new Manifest(permissions, defaults), null);
     }
 
-    private static ManifestParseResult Fail(string error) => new(null, error);
+    private static ManifestParseResult Fail(string error) => new(null, Printable(error));
+
+    /// <summary>
+    /// The reason as it may be logged. It can quote a name from the file, and a name refused because it holds a line break
+    /// or an escape character must not forge a log line or drive a terminal: such characters (control and format
+    /// characters, line and paragraph separators, lone surrogates) are written as <c>\uXXXX</c> text.
+    /// </summary>
+    private static string Printable(string text)
+    {
+        var printable = new StringBuilder(text.Length);
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (char.IsSurrogatePair(text, i))
+            {
+                printable.Append(c).Append(text[++i]);
+            }
+            else if (char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.Surrogate)
+            {
+                printable.Append(CultureInfo.InvariantCulture, $"{Backslash}u{(int)c:X4}");
+            }
+            else
+            {
+                printable.Append(c);
+            }
+        }
+
+        return printable.ToString();
+    }
 
     // Public properties because the deserializer sets them; unknown keys are an error, so a typo is not an empty list.
     internal sealed class ManifestDocument

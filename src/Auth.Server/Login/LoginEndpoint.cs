@@ -93,7 +93,8 @@ public static class LoginEndpoint
             nameType: Claims.Name,
             roleType: Claims.Role);
 
-        // The token carries `sub` and nothing else: no email, name, role or scope.
+        // The access token carries `sub` and the tenancy claims below (`org_id`, `roles`, `permissions`), and nothing else:
+        // no email, name or scope.
         identity.SetClaim(Claims.Subject, user.Id.ToString());
         identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
 

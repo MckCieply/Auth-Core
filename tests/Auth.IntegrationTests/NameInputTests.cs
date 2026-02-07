@@ -18,6 +18,11 @@ public sealed class NameInputTests
     [InlineData("Ac\u0085me", false)]
     [InlineData("Ac\uFFFEme", false)]       // a noncharacter
     [InlineData("Ac\uFDD0me", false)]
+    [InlineData("admin\u200B", false)]     // a format character: a zero-width space would make it look like admin
+    [InlineData("ad\u202Emin", false)]     // a right-to-left override
+    [InlineData("\uFEFFAcme", false)]      // a byte order mark
+    [InlineData("Ac\u00ADme", false)]      // a soft hyphen
+    [InlineData("Ac\uDB40\uDC01me", false)]   // U+E0001, a format character outside the BMP
     public void Names_follow_the_rules(string name, bool valid)
     {
         Assert.Equal(valid, NameInput.IsValid(name));

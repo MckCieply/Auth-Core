@@ -1,9 +1,7 @@
 using Auth.Infrastructure.Identity;
-using Auth.Infrastructure.Persistence;
 using Auth.Server.Requests;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Server.Api;
 
@@ -50,11 +48,11 @@ public static class OrgEndpoints
             : access.Failure!;
     }
 
-    public static async Task<IResult> RenameAsync(HttpContext http, MembershipReader memberships, AuthDbContext db)
+    public static async Task<IResult> RenameAsync(HttpContext http, MembershipReader memberships, CompanyService companies)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(memberships);
-        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(companies);
 
         var access = await CompanyAccess.AuthorizeAsync(http, memberships, PermissionCatalog.OrgManage);
         if (access.Caller is not { } caller)
@@ -68,9 +66,8 @@ public static class OrgEndpoints
             return ApiResults.InvalidRequest();
         }
 
-        var name = fields[0];
-        await db.Companies.Where(c => c.Id == caller.CompanyId)
-            .ExecuteUpdateAsync(set => set.SetProperty(c => c.Name, name), http.RequestAborted);
-        return ApiResults.NoContent();
+        // Under the company lock, with the caller read again: they may have lost org:manage since the check above.
+        var outcome = await companies.RenameAsync(Actor.Of(caller), caller.CompanyId, fields[0], http.RequestAborted);
+        return outcome.Succeeded ? ApiResults.NoContent() : ApiResults.Refused(outcome);
     }
 }

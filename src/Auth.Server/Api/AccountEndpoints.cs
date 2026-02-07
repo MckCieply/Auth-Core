@@ -12,6 +12,10 @@ public static class AccountEndpoints
 {
     public const string HealthPath = "/auth/health";
 
+    private static readonly string RefreshCookieSet =
+        $"`{RefreshCookie.Name}`: the refresh token of the session, `HttpOnly`, `Secure`, `SameSite=Strict`, path `{RefreshCookie.Path}`, "
+        + "living as long as the session may still be renewed.";
+
     /// <summary>
     /// The endpoints of specs 0001–0004: login, refresh, logout, and the two flows by mail. Mapped here, with what each takes
     /// and answers, so that the OpenAPI description (spec 0005) says it all in one place. The metadata only describes: the
@@ -28,17 +32,25 @@ public static class AccountEndpoints
             .WithTags("Sessions")
             .ReadsJson<LoginRequest>()
             .Produces<LoginResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " It never appears in a body.")
             .ProducesError(StatusCodes.Status400BadRequest, "invalid_request")
             .ProducesError(StatusCodes.Status401Unauthorized, LoginEndpoint.InvalidCredentialsError)
             .ProducesError(StatusCodes.Status403Forbidden, AccountResults.EmailNotVerifiedError, AccountResults.NoMembershipError)
             .ProducesTooManyAttempts();
         app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync)
             .WithTags("Sessions")
+            .ReadsRefreshCookie(
+                "The refresh token set by the login or the last refresh. Missing, unknown, expired, revoked or used up: "
+                + "`401 invalid_grant`.")
             .Produces<RefreshResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up.")
             .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant");
         app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync)
             .WithTags("Sessions")
-            .Produces(StatusCodes.Status204NoContent);
+            .ReadsRefreshCookie("The refresh token whose session ends. Missing or unknown: the answer is the same `204`.")
+            .Produces(StatusCodes.Status204NoContent)
+            .SetsRefreshCookie(
+                StatusCodes.Status204NoContent, $"`{RefreshCookie.Name}` emptied, with `Max-Age=0`: the browser drops the cookie.");
 
         app.MapPost(
                 MailRequestEndpoint.ForgotPasswordPath,
