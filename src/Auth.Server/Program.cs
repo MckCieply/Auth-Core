@@ -2,6 +2,7 @@ using Auth.Infrastructure;
 using System.Text.Json;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
+using Auth.Server.Admin;
 using Auth.Server.Api;
 using Auth.Server.Email;
 using Auth.Server.Keys;
@@ -14,6 +15,12 @@ using Auth.Server.Tokens;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+
+// The operator's commands run the same binary without the host: no listener, no background service, no key material.
+if (args is ["admin", .. var adminArguments])
+{
+    return await AdminCli.RunAsync(adminArguments, Console.Out, Console.Error);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -82,5 +89,6 @@ app.MapPost(ResetPasswordEndpoint.Path, ResetPasswordEndpoint.HandleAsync);
 app.MapPost(VerifyEmailEndpoint.Path, VerifyEmailEndpoint.HandleAsync);
 
 app.Run();
+return 0;
 
 public partial class Program;

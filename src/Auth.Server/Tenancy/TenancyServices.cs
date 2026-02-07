@@ -20,6 +20,7 @@ public static class TenancyServices
         services.AddScoped<InviteAcceptance>();
         services.AddScoped<MemberService>();
         services.AddScoped<RoleService>();
+        services.AddScoped<OperatorCommands>();
         return services;
     }
 }

@@ -108,6 +108,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 
     public string DatabaseName { get; }
 
+    /// <summary>The connection string of this host's database, for a test that runs the operator CLI against it.</summary>
+    public string ConnectionString => _settings["ConnectionStrings:Auth"] ?? "";
+
     /// <summary>The manifest file of this host.</summary>
     public string ManifestPath { get; }
 
