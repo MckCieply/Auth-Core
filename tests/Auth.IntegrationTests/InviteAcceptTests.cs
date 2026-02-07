@@ -375,6 +375,66 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.NotNull(await InviteAsync(invite));
     }
 
+    [Theory]
+    [InlineData("\u03BCaria@acme.test", "\u00B5aria@acme.test")]   // Greek mu, and the micro sign: both upper-case to U+039C
+    [InlineData("kosta\u03C2@acme.test", "kosta\u03C3@acme.test")]  // a final sigma, and a sigma: both upper-case to U+03A3
+    [InlineData("\u03B8eo@acme.test", "\u03D1eo@acme.test")]       // theta, and the theta symbol
+    public async Task An_invitation_for_another_spelling_of_an_existing_account_cannot_take_it_over(string account, string invited)   // the link proves the invited mailbox only
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var owner = await CreateUserAsync(account, confirmed: true, member: false);
+        var (invite, token) = await MailedAsync(company, invited);
+
+        using (var preview = await TenancyApi.Preview(Client, token))
+        {
+            await AssertInvalidTokenAsync(preview);
+        }
+
+        using (var accepted = await TenancyApi.Accept(Client, token, Password))
+        {
+            await AssertInvalidTokenAsync(accepted);
+        }
+
+        // The account keeps its password (403: right password, no company), joins nothing, and the invitation stays.
+        using var login = await LoginApi.Login(Client, account, UserPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, login.StatusCode);
+        Assert.Empty(await NonSeedMembershipsAsync());
+        Assert.NotNull(await InviteAsync(invite));
+        Assert.Equal(account, (await UserAsync(account))!.Email);
+        Assert.Equal(owner.Id, (await UserAsync(account))!.Id);
+    }
+
+    [Fact]
+    public async Task Another_spelling_of_a_member_of_another_company_is_not_told_already_member()
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var globex = await CreateCompanyAsync("Globex");
+        await AddMemberAsync(globex, "\u03BCaria@globex.test", "user");
+        var (_, token) = await MailedAsync(company, "\u00B5aria@globex.test");
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        await AssertInvalidTokenAsync(preview);
+    }
+
+    [Fact]
+    public async Task An_invitation_in_other_ascii_capitals_reaches_the_existing_account()
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var steve = await CreateUserAsync("Steve@acme.test", confirmed: true, member: false);
+        var (_, token) = await MailedAsync(company, "steve@ACME.test");
+
+        using (var accepted = await TenancyApi.Accept(Client, token, Password))
+        {
+            await TenancyApi.AssertEmptyAsync(accepted, HttpStatusCode.NoContent);
+        }
+
+        var membership = Assert.Single(await NonSeedMembershipsAsync());
+        Assert.Equal(steve.Id, membership.UserId);
+        Assert.Equal("Steve@acme.test", (await UserAsync("steve@acme.test"))!.Email);
+        _ = await SessionApi.LoginAsync(Client, "Steve@acme.test", Password);
+    }
+
     [Fact]
     public async Task Accepting_confirms_an_unconfirmed_account_lifts_a_lockout_and_removes_its_other_links()   // spec 0005 → Effects
     {

@@ -250,6 +250,8 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
     [InlineData("joe@localhost")]           // a domain without a dot
     [InlineData("joe@intranet")]
     [InlineData("joe@10.0.0.5")]            // an IP address without its brackets
+    [InlineData("joe@intranet.\u00AD")]     // a soft hyphen, which IDNA drops: intranet. would be sent
+    [InlineData("joe@10.0.0.\uFF15")]       // a fullwidth 5, which IDNA maps: 10.0.0.5 would be sent
     public async Task An_address_that_could_stand_for_another_account_or_reach_an_internal_host_is_a_400(string email)
     {
         var (company, _, token) = await AcmeAsync();

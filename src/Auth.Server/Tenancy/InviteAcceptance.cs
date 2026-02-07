@@ -24,7 +24,8 @@ public sealed class InviteAcceptance(
 {
     /// <summary>
     /// The company, address and role of a usable invitation; the token stays usable. Unknown, used, expired, cancelled and
-    /// replaced tokens are all <c>invalid_token</c>, and so is an invitation for an address that
+    /// replaced tokens are all <c>invalid_token</c>, and so is an invitation whose address matches an existing account
+    /// that is not spelled the same (<see cref="EmailInput.IsSameAddress"/>), or that
     /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An address that already belongs to a
     /// company is <c>already_member</c>.
     /// </summary>
@@ -39,20 +40,29 @@ public sealed class InviteAcceptance(
             join company in db.Companies.AsNoTracking() on invite.CompanyId equals company.Id
             join role in db.CompanyRoles.AsNoTracking() on invite.RoleId equals role.Id
             where invite.TokenHash == hash && invite.ExpiresAt > now
-            select new { invite.Email, invite.NormalizedEmail, CompanyName = company.Name, RoleName = role.Name })
+            select new { invite.Email, CompanyName = company.Name, RoleName = role.Name })
             .FirstOrDefaultAsync(cancellationToken);
         if (row is null || EmailInput.MayStandForAnotherAddress(row.Email))
         {
             return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
         }
 
-        return await IsMemberAsync(row.NormalizedEmail, cancellationToken)
+        // The account the acceptance would act on. Another spelling that only normalises to the invited address is not
+        // the invited mailbox: acceptance refuses it, so the preview does too, and says nothing about that account.
+        var user = await users.FindByEmailAsync(row.Email);
+        if (user is not null && !EmailInput.IsSameAddress(user.Email, row.Email))
+        {
+            return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
+        }
+
+        return user is not null && await db.Memberships.AnyAsync(m => m.UserId == user.Id, cancellationToken)
             ? Outcome.Fail<InvitePreview>(TenancyErrors.AlreadyMember)
             : Outcome.Ok(new InvitePreview(row.CompanyName, row.Email, row.RoleName));
     }
 
     /// <summary>
-    /// Accepts the invitation. Refused with <c>invalid_token</c>, with <c>weak_password</c> (the broken rules are the value;
+    /// Accepts the invitation. An existing account is used only when its address is the invited one up to ASCII case
+    /// (<see cref="EmailInput.IsSameAddress"/>). Refused with <c>invalid_token</c>, with <c>weak_password</c> (the broken rules are the value;
     /// the token stays usable) or with <c>already_member</c> (the invitation stays usable until it expires).
     /// </summary>
     public async Task<Outcome<IReadOnlyList<string>>> AcceptAsync(string token, string password, CancellationToken cancellationToken)
@@ -87,7 +97,7 @@ public sealed class InviteAcceptance(
 
         var invite = consumed[0];
 
-        // Sending refuses such an address; one stored before that rule must not reach an account it may stand for.
+        // Sending refuses such an address (defence in depth; the check that decides is the one on the account below).
         if (EmailInput.MayStandForAnotherAddress(invite.Email))
         {
             return Refused(TenancyErrors.InvalidToken);
@@ -97,7 +107,14 @@ public sealed class InviteAcceptance(
         // same person a member of both (the tables would allow it; this version does not).
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({invite.NormalizedEmail}, 0))", cancellationToken);
 
+        // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
+        // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.
         var user = await users.FindByEmailAsync(invite.Email);
+        if (user is not null && !EmailInput.IsSameAddress(user.Email, invite.Email))
+        {
+            return Refused(TenancyErrors.InvalidToken);
+        }
+
         if (user is not null && await db.Memberships.AnyAsync(m => m.UserId == user.Id, cancellationToken))
         {
             return Refused(TenancyErrors.AlreadyMember);
@@ -136,12 +153,6 @@ public sealed class InviteAcceptance(
         await transaction.CommitAsync(CancellationToken.None);
         return new Outcome<IReadOnlyList<string>>([]);
     }
-
-    private Task<bool> IsMemberAsync(string normalizedEmail, CancellationToken cancellationToken) =>
-        (from user in db.Users
-         join membership in db.Memberships on user.Id equals membership.UserId
-         where user.NormalizedEmail == normalizedEmail
-         select membership.UserId).AnyAsync(cancellationToken);
 
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 

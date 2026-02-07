@@ -1,4 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text;
 using Microsoft.AspNetCore.Identity;
 using MimeKit;
 
@@ -76,6 +78,12 @@ public static class EmailInput
     /// or ends in a part of digits only (<c>joe@10.0.0.5</c>). Here a member, not an account, chooses where a mail goes,
     /// and a manager must not make the instance's mail relay deliver to an internal host.</item>
     /// </list>
+    /// The domain rule must hold for the domain the relay is given, not only for the one typed. The transport hands the
+    /// relay MimeKit's IDN-encoded form of the address or, to a relay that takes UTF-8 addresses, the address as typed,
+    /// which the relay then maps itself. IDNA drops some characters and maps others (<c>intranet.</c> plus a soft hyphen
+    /// becomes <c>intranet.</c>; a fullwidth 5 becomes 5), and how much of that is done depends on the host's IDN tables.
+    /// So the rule is applied to the typed domain and to MimeKit's encoded one, and a domain holding a character outside
+    /// ASCII that IDNA could drop or turn into a digit or a dot (<see cref="KeepsItsShapeThroughIdna"/>) is refused.
     /// </summary>
     public static bool IsInvitable(string email)
     {
@@ -87,28 +95,116 @@ public static class EmailInput
             return false;
         }
 
-        var labels = email[(at + 1)..].Split('.');
+        var domain = email[(at + 1)..];
+        return IsDomainName(domain)
+            && KeepsItsShapeThroughIdna(domain)
+            && EncodedDomainOf(email) is { } sent
+            && IsDomainName(sent);
+    }
+
+    /// <summary>A name with a dot between non-empty labels whose last label is not all digits; not a literal.</summary>
+    private static bool IsDomainName(string domain)
+    {
+        var labels = domain.Split('.');
         return labels.Length > 1
             && labels.All(label => label.Length > 0)
             && !labels[^1].All(char.IsAsciiDigit)
-            && !email[(at + 1)..].StartsWith('[');
+            && !domain.StartsWith('[');
     }
 
     /// <summary>
-    /// Whether the address holds a character outside ASCII that the account lookup may fold into an ASCII one, so that
-    /// the address may stand for another: <c>ſ</c> (U+017F) whose upper case is <c>S</c>, the Kelvin sign (U+212A) whose
-    /// lower case and canonical form are <c>K</c>, <c>İ</c> (U+0130) and <c>ı</c> (U+0131).
+    /// Whether every character of the domain outside ASCII is a letter or a combining mark that IDNA keeps. IDNA maps a
+    /// letter to letters, but it drops format characters and variation selectors, and maps fullwidth forms, other digits
+    /// and other dots to ASCII digits and dots: such a character could turn the domain into one the rule refuses.
+    /// </summary>
+    private static bool KeepsItsShapeThroughIdna(string domain)
+    {
+        foreach (var rune in domain.EnumerateRunes())
+        {
+            if (rune.IsAscii)
+            {
+                continue;
+            }
+
+            var value = rune.Value;
+            var ignored = value is 0x034F or (>= 0x180B and <= 0x180F) or (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0100 and <= 0xE01EF);
+            var widthForm = value is >= 0xFF00 and <= 0xFFEF;
+            var kept = Rune.GetUnicodeCategory(rune) is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter
+                or UnicodeCategory.TitlecaseLetter or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter
+                or UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark;
+            if (ignored || widthForm || !kept)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>The domain of MimeKit's IDN-encoded form of the address; <see langword="null"/> when there is none.</summary>
+    private static string? EncodedDomainOf(string email)
+    {
+        if (!MailboxAddress.TryParse(email, out var mailbox))
+        {
+            return null;
+        }
+
+        try
+        {
+            var encoded = mailbox.GetAddress(idnEncode: true);
+            return encoded[(encoded.LastIndexOf('@') + 1)..];
+        }
+        catch (ArgumentException)
+        {
+            // A domain IDNA cannot encode cannot be mailed either.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether an account's stored address is the invited address itself: equal character for character, except that the
+    /// ASCII letters A–Z and a–z match regardless of case. Nothing else is folded.
     /// <para>
-    /// This is how an account would be taken over. Accepting an invitation finds an existing account by the normalised
-    /// address and gives it the password the person chose. On a host with ICU the normaliser upper-cases
-    /// <c>ſteve@corp.test</c> to the normalised address of <c>steve@corp.test</c>, while the link goes to the mailbox of
-    /// <c>ſteve@corp.test</c>: a manager who can read that mailbox would set the password of steve's account. So such an
-    /// address is never invited, and an invitation stored for one is never accepted.
+    /// The account lookup matches by the normalised address (NFC, then <see cref="string.ToUpperInvariant()"/>), and that
+    /// folds different addresses together: the micro sign and Greek mu, final and plain sigma, a decomposed and a composed
+    /// letter, and more on hosts with ICU. A link proves only the mailbox it was sent to, so accepting an invitation may
+    /// act on an existing account only when this holds; otherwise one address could set the password of another's account.
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> would not do: it folds through the same case tables (µ equals μ).
     /// </para>
+    /// </summary>
+    public static bool IsSameAddress(string? stored, string invited)
+    {
+        ArgumentNullException.ThrowIfNull(invited);
+
+        if (stored is null || stored.Length != invited.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < stored.Length; i++)
+        {
+            if (AsciiLower(stored[i]) != AsciiLower(invited[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+
+        static char AsciiLower(char c) => c is >= 'A' and <= 'Z' ? (char)(c + ('a' - 'A')) : c;
+    }
+
+    /// <summary>
+    /// Whether the address holds a character outside ASCII whose case is an ASCII letter, so that it reads as an ASCII
+    /// address: <c>ſ</c> (U+017F) whose upper case is <c>S</c>, the Kelvin sign (U+212A) whose lower case is <c>k</c>,
+    /// and <c>İ</c> (U+0130) and <c>ı</c> (U+0131), which .NET does not fold but other software may.
     /// <para>
-    /// The four are named, and not only found through the casing tables, because .NET folds <c>ſ</c> only where ICU is
-    /// present and folds neither <c>İ</c> nor <c>ı</c> at all, while other software on the way of a mail may; the rule
-    /// must be the same on every host. No string normalisation is used: the container runs with invariant globalisation.
+    /// This is defence in depth, not the protection against taking over an account: that is <see cref="IsSameAddress"/>,
+    /// at acceptance. A list like this one cannot be complete (the normaliser also folds µ into μ, ς into σ, a decomposed
+    /// letter into a composed one…); it only keeps an invitation to the most obvious look-alikes of ASCII addresses from
+    /// being sent at all. The four are named, and not only found through the casing tables, because .NET folds <c>ſ</c>
+    /// only where ICU is present, and the rule must be the same on every host. No string normalisation is used: the
+    /// container runs with invariant globalisation.
     /// </para>
     /// </summary>
     public static bool MayStandForAnotherAddress(string email)
