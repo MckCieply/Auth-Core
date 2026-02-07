@@ -15,6 +15,10 @@ login on a real phone, delivered over a six-week build.
 > ([spec 0003](docs/superpowers/specs/0003-lockout-and-abuse-resistance.md)).
 > Password reset and email verification by mail are in
 > ([spec 0004](docs/superpowers/specs/0004-email-flows.md)).
+> Companies, members, roles and invitations are in too: the access token carries `org_id`, `roles`
+> and `permissions`, the company API manages them, an operator CLI creates companies, and the whole
+> API is described in OpenAPI
+> ([spec 0005](docs/superpowers/specs/0005-tenancy-and-rbac.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).
 
 ## Quickstart (development)
@@ -30,10 +34,29 @@ scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart �
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
 scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
+scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 
 The stack includes a mail catcher; its inbox is at `http://localhost:8025`.
+
+The operator's commands are subcommands of the service's own binary, so they run from its image. With the
+stack up, create a company and invite its first admin (the invitation is mailed at the server's next poll,
+within a minute, and only while the server is running):
+
+```bash
+auth() { docker compose -f deploy/docker-compose.yml --env-file .env run --rm -T --no-deps auth admin "$@"; }
+auth create-org --name "Acme"                                    # prints the company id
+auth invite --org <id> --email boss@acme.test --role admin
+auth list-orgs                                                   # id, name, number of members
+auth remove-member --org <id> --email worker@acme.test [--force] # --force overrides last_manager
+```
+
+The commands work on the database with the service's configuration and never migrate it. The API is
+described at `http://localhost:8080/auth/openapi/v1.json`; in Development an interactive reference is at
+`http://localhost:8080/auth/scalar`. The product's permissions and default roles come from its manifest
+(`Auth:Manifest:Path`; `deploy/auth.yaml` in development): a broken file never stops the service, and
+`/auth/health` then says `Degraded`.
 
 Tests (integration, Postgres via Testcontainers — Docker must be running):
 
@@ -68,7 +91,7 @@ dotnet build -warnaserror && dotnet test
 
 .NET 10 LTS · C# 14 · ASP.NET Core Minimal APIs · ASP.NET Core Identity ·
 OpenIddict 7 · EF Core 10 · PostgreSQL 16 · MailKit · YamlDotNet ·
-System.CommandLine · xUnit v3 + Testcontainers.
+Microsoft.AspNetCore.OpenApi · Scalar.AspNetCore (Development only) · xUnit v3 + Testcontainers.
 
 ## Repository layout (planned)
 

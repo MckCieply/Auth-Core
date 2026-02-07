@@ -57,7 +57,7 @@ maintenance. Versions are pinned in `Directory.Packages.props` at bootstrap.
 | Rate limiting       | Built-in `Microsoft.AspNetCore.RateLimiting`                  | Per-IP and per-account limits on login, forgot and reset        |
 | Email               | `MailKit`; Mailpit in dev and tests                          | Microsoft's recommended SMTP client; templates as `.resx` for PL/EN |
 | Manifest            | `YamlDotNet`                                                   | Parses `auth.yaml`                                              |
-| Admin CLI           | `System.CommandLine`, subcommands of the same binary          | One image: `auth-server admin create-org ...`                   |
+| Admin CLI           | Four hand-parsed subcommands of the same binary (no library; spec 0005) | One image: `auth-server admin create-org ...`        |
 | API docs            | Built-in `Microsoft.AspNetCore.OpenApi` + `Scalar.AspNetCore` (dev only) | OpenAPI document for typed clients later                        |
 | Logging and health  | Built-in `ILogger` (JSON console), built-in health checks     | OpenTelemetry comes after the MVP                              |
 | Container           | `mcr.microsoft.com/dotnet/aspnet:10.0` chiseled image, non-root | Small image, no shell, smaller attack surface                  |

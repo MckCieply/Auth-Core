@@ -1,4 +1,4 @@
-# Local development stack: PostgreSQL, a mail catcher and the auth service.
+# Local development stack: PostgreSQL, a mail catcher and the auth service (with the development manifest, deploy/auth.yaml).
 #
 # Compose looks for .env next to this file (deploy/), not in the repo root, so always pass the
 # repo-root file explicitly (the e2e script does this for you):
@@ -52,12 +52,15 @@ services:
       Auth__DevSeed__UnverifiedEmail: ${AUTH_DEV_SEED_UNVERIFIED_EMAIL:-}
       Auth__DevSeed__UnverifiedPassword: ${AUTH_DEV_SEED_UNVERIFIED_PASSWORD:-}
       Auth__Email__Smtp__Host: mailpit
+      # The product's manifest (spec 0005): its permissions and the default roles of a new company. A product mounts its own.
+      Auth__Manifest__Path: /etc/auth-core/auth.yaml
       Auth__Keys__SigningCertificatePath: /run/secrets/auth/signing.crt
       Auth__Keys__SigningKeyPath: /run/secrets/auth/signing.key
       Auth__Keys__EncryptionCertificatePath: /run/secrets/auth/encryption.crt
       Auth__Keys__EncryptionKeyPath: /run/secrets/auth/encryption.key
     volumes:
       - ../.secrets:/run/secrets/auth:ro
+      - ./auth.yaml:/etc/auth-core/auth.yaml:ro
     # No healthcheck: the chiseled image has no shell or curl. scripts/e2e-login.sh polls /auth/health from the host.
 
 volumes:
