@@ -296,11 +296,46 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
     [Fact]
     public async Task A_connection_string_never_reaches_the_output()
     {
-        var run = await RunAgainstAsync("Host=127.0.0.1;Port=1;Database=x;Username=u;Password=SECRET-MARKER;Timeout=2", Factory.ManifestPath, ["list-orgs"]);
+        // EF Core logs a failed connection, with the server, the database and a stack trace, and a console logger would write
+        // that to the process's own error stream, not to the writer the command was given: so both are watched.
+        var processError = new StringWriter(CultureInfo.InvariantCulture);
+        var realError = Console.Error;
+        Console.SetError(processError);
+        Run run;
+        try
+        {
+            run = await RunAgainstAsync("Host=127.0.0.1;Port=1;Database=secretdb-marker;Username=u;Password=SECRET-MARKER;Timeout=2", Factory.ManifestPath, ["list-orgs"]);
+        }
+        finally
+        {
+            Console.SetError(realError);
+        }
 
         Assert.Equal(3, run.Exit);
-        Assert.DoesNotContain("SECRET-MARKER", run.Out + run.Error);
-        Assert.DoesNotContain("127.0.0.1", run.Out + run.Error);
+        foreach (var text in new[] { run.Out + run.Error, processError.ToString() })
+        {
+            Assert.DoesNotContain("SECRET-MARKER", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Password", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("secretdb-marker", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("127.0.0.1", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("   at ", text, StringComparison.Ordinal);   // no stack trace
+        }
+        Assert.Matches(@"^error: failed \(\w+\)$", run.Error.Trim());   // the type name, nothing else
+    }
+
+    [Fact]
+    public async Task A_logged_error_of_the_service_reaches_the_operator_as_one_line_without_its_exception()
+    {
+        _ = Factory.Services;
+        File.WriteAllText(Factory.ManifestPath, "default_roles:\n  user: [reports:write]\n");
+
+        var run = await RunAgainstAsync(Factory.ConnectionString, Factory.ManifestPath, ["list-orgs"]);
+
+        Assert.Equal(0, run.Exit);
+        var lines = run.Error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var line = Assert.Single(lines);
+        Assert.StartsWith("log: Error Auth.Server.Tenancy.ManifestActivator: ", line, StringComparison.Ordinal);
+        Assert.Contains("reports:write", line, StringComparison.Ordinal);
     }
 
     [Fact]

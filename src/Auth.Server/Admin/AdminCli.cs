@@ -47,9 +47,10 @@ public static class AdminCli
         {
             // An empty argument list: the operator's own words (--force, --name) are not configuration.
             var builder = WebApplication.CreateBuilder([]);
+            // No console logger: it writes to the process's own error stream, and EF Core logs a failed connection there with
+            // the server, the database and a stack trace. This provider decides for itself, whatever the configured rules say.
             builder.Logging.ClearProviders();
-            builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
-            builder.Logging.SetMinimumLevel(LogLevel.Warning);
+            builder.Logging.AddProvider(new OperatorLogProvider(error));
             // Before the registrations below, which read the configuration as they are made.
             configure?.Invoke(builder);
             builder.Services.AddAuthPersistence(builder.Configuration);
@@ -131,5 +132,44 @@ public static class AdminCli
             : "";
         await error.WriteLineAsync($"error: {outcome.Error}{wait}");
         return Refused;
+    }
+
+    /// <summary>
+    /// The service's own warnings and errors (a manifest that was not used, with the reason) as one line each on the error
+    /// stream, <c>log: Error Category: message</c>. Nothing else: not another library's categories, and never an exception,
+    /// whose text can quote the connection string and whose stack trace is not for the operator.
+    /// </summary>
+    private sealed class OperatorLogProvider(TextWriter error) : ILoggerProvider
+    {
+        private readonly object _gate = new();
+
+        public ILogger CreateLogger(string categoryName) => new OperatorLogger(categoryName, error, _gate);
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class OperatorLogger(string category, TextWriter error, object gate) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) =>
+            logLevel is >= LogLevel.Warning and not LogLevel.None && category.StartsWith("Auth.", StringComparison.Ordinal);
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            var message = formatter(state, null).ReplaceLineEndings(" ");
+            lock (gate)
+            {
+                error.WriteLine($"log: {logLevel} {category}: {message}");
+            }
+        }
     }
 }
