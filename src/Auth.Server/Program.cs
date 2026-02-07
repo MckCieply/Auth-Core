@@ -33,6 +33,7 @@ builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, bui
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+builder.Services.AddAuthOpenApi();
 builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.
@@ -74,19 +75,9 @@ app.UseNoStoreForTenancyPaths();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapHealthChecks("/auth/health");
+app.MapAccountApi();
 app.MapTenancyApi();
-app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
-app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
-app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
-app.MapPost(MailRequestEndpoint.ForgotPasswordPath,
-    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
-        MailRequestEndpoint.HandleAsync(MailKind.PasswordReset, http, normalizer, requests, signal));
-app.MapPost(MailRequestEndpoint.VerifyEmailRequestPath,
-    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
-        MailRequestEndpoint.HandleAsync(MailKind.EmailVerification, http, normalizer, requests, signal));
-app.MapPost(ResetPasswordEndpoint.Path, ResetPasswordEndpoint.HandleAsync);
-app.MapPost(VerifyEmailEndpoint.Path, VerifyEmailEndpoint.HandleAsync);
+app.MapAuthOpenApi();
 
 app.Run();
 return 0;

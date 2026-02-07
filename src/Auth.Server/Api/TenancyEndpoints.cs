@@ -15,22 +15,24 @@ public static class TenancyEndpoints
 
         app.MapGet(OrgEndpoints.MePath, OrgEndpoints.MeAsync)
             .RequireAuthorization()
+            .WithTags("Company")
             .Produces<MeResponse>()
             .ProducesGuarded();
 
         app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)
+            .WithTags("Invitations")
             .ReadsJson<PreviewInviteRequest>()
             .Produces<InvitePreviewResponse>()
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
         app.MapPost(InviteEndpoints.AcceptPath, InviteEndpoints.AcceptAsync)
+            .WithTags("Invitations")
             .ReadsJson<AcceptInviteRequest>()
             .Produces(StatusCodes.Status204NoContent)
-            .Produces<WeakPasswordBody>(StatusCodes.Status400BadRequest, "application/json")
-            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
+            .ProducesPasswordError(TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
 
-        var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization();
+        var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 
         company.MapGet("", OrgEndpoints.GetAsync)
             .Produces<OrgResponse>()
@@ -51,13 +53,13 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyInOrg, TenancyErrors.InvitePending)
-            .ProducesError(StatusCodes.Status429TooManyRequests, TenancyErrors.TooManyAttempts)
+            .ProducesTooManyAttempts()
             .ProducesGuarded();
         company.MapPost("invites/{id}/resend", OrgInviteEndpoints.ResendAsync)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
-            .ProducesError(StatusCodes.Status429TooManyRequests, TenancyErrors.TooManyAttempts)
+            .ProducesTooManyAttempts()
             .ProducesGuarded();
         company.MapDelete("invites/{id}", OrgInviteEndpoints.CancelAsync)
             .Produces(StatusCodes.Status204NoContent)

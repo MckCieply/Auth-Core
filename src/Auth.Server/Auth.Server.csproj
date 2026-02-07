@@ -12,6 +12,8 @@
     <PackageReference Include="OpenIddict.AspNetCore" />
     <PackageReference Include="MailKit" />
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
   </ItemGroup>
 
   <ItemGroup>

@@ -22,5 +22,9 @@
     <PackageVersion Include="MailKit" Version="4.18.1" />
     <!-- Manifest (plan 0005, Task 1). MIT; no dependencies on net10.0. -->
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+    <!-- OpenAPI description (plan 0005, Task 14). Both MIT. The first brings Microsoft.OpenApi 2.12; the second has no
+         dependencies on net10.0 and is mapped in Development only. -->
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.17.13" />
   </ItemGroup>
 </Project>
