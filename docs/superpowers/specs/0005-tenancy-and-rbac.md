@@ -545,7 +545,8 @@ manifest is the exception above, because it comes from the product.
     removals of the last two managers by each other leave one manager (the one that comes
     second is `403 permissions_changed`). Through the member endpoints only the operator
     reaches `last_manager`, since a caller who may manage members cannot touch their own
-    membership; a role edit by someone who manages roles but not members reaches it too.
+    membership; a role edit reaches it only for a caller who holds every permission of the
+    role (Decision 19), so a caller who manages roles but not members never does.
 17. Safety rule 3: changing one's own role or removing oneself is `409
     cannot_change_self`.
 18. Roles: create, rename, change permissions and delete work within the catalog;
@@ -719,3 +720,70 @@ All resolved while building (plan 0005); each item stays, with what was found.
 - That the existing e2e scripts still pass once **the seed users are members** of the
   development company. *Resolved: they do (`e2e-login.sh` and `e2e-refresh.sh` need
   `PyJWT[crypto]` on the machine that runs them, as before).*
+
+## As built (owner, 2026-02-08)
+
+Recorded after implementation and local verification (plan 0005,
+[acceptance map](../plans/0005-acceptance-map.md)). What entered this stage stays in it;
+this section records it rather than rewriting the decisions above. One sentence was
+reworded: criterion 16 no longer says that a role edit by someone who manages roles but
+not members reaches `last_manager` — Decision 19 refuses such an edit first, with
+`permission_not_held`.
+
+**Contract as built.** As specified, with these readings of what the spec left open:
+
+- An id in a path or a body is exactly 36 characters in `8-4-4-4-12` form; white space
+  around it makes it `400 invalid_request`.
+- A body of a role may list at most 500 permissions (the 8 KiB body holds about as many);
+  more is `400 invalid_request`.
+- A `404` or `405` outside `/auth/me`, `/auth/org` and `/auth/invites` keeps the
+  framework's headers, as in spec 0004; the `no-store` rule of the Contract is about those
+  three prefixes.
+- The OpenAPI description declares the refresh cookie as the input of refresh and logout,
+  `Set-Cookie` on the answers that set or clear it, and `Retry-After` on every `429`; it
+  names no server.
+
+**Behaviour added after verification** (owner decisions of 2026-02-07, and fixes):
+
+- **An invitation reaches an existing account only under that account's own address,**
+  apart from the case of `A`–`Z`. Identity finds accounts by a normalised address, and on
+  some hosts different addresses normalise alike (`ſteve` and `steve`; the micro sign and
+  the Greek mu; a final and a plain sigma; a decomposed and a composed letter). Without
+  this rule a manager who controls the mailbox of a look-alike could set the password of
+  someone else's account by accepting. Any other match is the uniform `invalid_token`
+  at preview and accept, and nothing changes. The cost: an account spelled `Żaneta@…` is
+  not reached by an invitation to `żaneta@…`; the inviter types the address as the account
+  spells it.
+- An invitation is not sent (`400 invalid_request`, API and CLI) to an address holding an
+  obvious look-alike of an ASCII letter (the long s, the Kelvin sign, the dotted capital I,
+  the dotless small i), or whose domain — as typed or as it reaches the relay — is a
+  literal (`[10.0.0.5]`), has no dot (`localhost`) or ends in digits: a manager must not
+  make the relay deliver to internal hosts.
+- Company and role names refuse Unicode format characters (a zero-width space, a
+  right-to-left override), in the API and in the manifest: a role must not be able to
+  look like another.
+- Renaming the company runs under the company lock and re-reads the caller, like every
+  other change of a company.
+- Accepting ends the login streak of the address also when it has no account yet
+  (Effects, step 2).
+- The operator CLI writes only the service's own warnings and errors to its error stream,
+  one line each, without the exception: a database failure never shows a host, a port, a
+  database name or a stack trace.
+
+**Residual risks found in verification** — accepted:
+
+- Cancelling an invitation whose mail is being sent waits for the send (at most 20 s)
+  while it holds the company's lock; other changes of that company wait with it.
+- A fullwidth or Cyrillic look-alike of an address (`Ａbc@…`, `аbc@…`) can still be
+  invited: it normalises to another address, so it never reaches the account it imitates,
+  but a reader may mistake it.
+- `/auth/health` also answers `POST`, and a JSON body declared `charset=utf-16` is read
+  (both from earlier slices; left to the hardening slice).
+- A domain written as a hexadecimal IPv4 form (`127.0x1`) passes the domain rule of
+  invitations; a relay that resolves names through the system resolver would deliver it
+  to a local host.
+
+**Known gaps, owned elsewhere:** company deletion (the cascades from `Companies` would meet
+the `Restrict` key from memberships to roles); per-IP rate limiting (spec 0003, Decision 6);
+the second development seed user's role is chosen from the manifest, not from the stored
+role.
