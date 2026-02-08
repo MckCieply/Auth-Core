@@ -13281,4 +13281,13 @@ None. Every question of the earlier drafts is decided above.
 
 ## As built
 
-(Written after implementation and verification, as in plan 0004.)
+Implemented and verified locally. Tasks 1–15 were built as written here: every code block
+compiled and passed the analyzers unchanged (the blocks had been run in a scratch copy
+before implementation). What changed after the plan — four fixes after the task reviews
+(the bearer token from the header only, one helper that ends every session, the operator
+CLI's error stream, the `permission_not_held` declarations) and two rounds of fixes after
+the verifiers (look-alike and internal invitation addresses, format characters in names,
+exact ids, the rename under the lock, the description's cookie and headers) — is listed in
+the [acceptance map](0005-acceptance-map.md) ("Plan-vs-implementation notes", "Local
+verification log") and in spec 0005 → "As built". 935 tests pass (829 planned), and the
+five e2e scripts pass on a clean stack.
