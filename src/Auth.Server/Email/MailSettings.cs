@@ -45,6 +45,9 @@ public sealed class MailSettings
 
     public required Uri VerifyEmailUrl { get; init; }
 
+    /// <summary>The product's invitation screen (spec 0005): the link of an invitation mail is this URL plus <c>token</c>.</summary>
+    public required Uri AcceptInviteUrl { get; init; }
+
     public required string FromAddress { get; init; }
 
     public required SmtpSettings Smtp { get; init; }
@@ -56,6 +59,7 @@ public static class MailSettingsLoader
     public const string LocaleKey = "Auth:App:Locale";
     public const string ResetPasswordUrlKey = "Auth:App:FrontendUrls:ResetPassword";
     public const string VerifyEmailUrlKey = "Auth:App:FrontendUrls:VerifyEmail";
+    public const string AcceptInviteUrlKey = "Auth:App:FrontendUrls:AcceptInvite";
     public const string FromKey = "Auth:Email:From";
     public const string SmtpHostKey = "Auth:Email:Smtp:Host";
     public const string SmtpPortKey = "Auth:Email:Smtp:Port";
@@ -125,6 +129,7 @@ public static class MailSettingsLoader
             Locale = locale,
             ResetPasswordUrl = FrontendUrl(configuration, ResetPasswordUrlKey, isDevelopment),
             VerifyEmailUrl = FrontendUrl(configuration, VerifyEmailUrlKey, isDevelopment),
+            AcceptInviteUrl = FrontendUrl(configuration, AcceptInviteUrlKey, isDevelopment),
             FromAddress = from,
             Smtp = new SmtpSettings
             {

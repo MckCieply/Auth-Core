@@ -1,16 +1,26 @@
 using Auth.Infrastructure;
+using System.Text.Json;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
+using Auth.Server.Admin;
+using Auth.Server.Api;
 using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+
+// The operator's commands run the same binary without the host: no listener, no background service, no key material.
+if (args is ["admin", .. var adminArguments])
+{
+    return await AdminCli.RunAsync(adminArguments, Console.Out, Console.Error);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +29,12 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
-builder.Services.AddHealthChecks();
+// JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
+// property names already are.
+builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
+builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+builder.Services.AddAuthOpenApi();
+builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.
 builder.Services.TryAddSingleton(TimeProvider.System);
@@ -50,21 +65,21 @@ if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
     await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database.MigrateAsync();
 }
 
+// Which manifest is active: the product's file, or the last valid one. Never a reason to stop.
+await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lifetime.ApplicationStopping);
+
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
-app.MapHealthChecks("/auth/health");
-app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync);
-app.MapPost(RefreshRequestHandler.RefreshPath, RefreshEndpoint.HandleAsync);
-app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync);
-app.MapPost(MailRequestEndpoint.ForgotPasswordPath,
-    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
-        MailRequestEndpoint.HandleAsync(MailKind.PasswordReset, http, normalizer, requests, signal));
-app.MapPost(MailRequestEndpoint.VerifyEmailRequestPath,
-    (HttpContext http, ILookupNormalizer normalizer, MailRequestStore requests, MailDispatchSignal signal) =>
-        MailRequestEndpoint.HandleAsync(MailKind.EmailVerification, http, normalizer, requests, signal));
-app.MapPost(ResetPasswordEndpoint.Path, ResetPasswordEndpoint.HandleAsync);
-app.MapPost(VerifyEmailEndpoint.Path, VerifyEmailEndpoint.HandleAsync);
+// Before authentication, so that the 401 of a missing or invalid token is marked never to be stored too.
+app.UseNoStoreForTenancyPaths();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapAccountApi();
+app.MapTenancyApi();
+app.MapAuthOpenApi();
 
 app.Run();
+return 0;
 
 public partial class Program;

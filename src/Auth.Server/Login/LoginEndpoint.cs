@@ -4,6 +4,7 @@ using Auth.Infrastructure.Identity;
 using Auth.Server.Account;
 using Auth.Server.Lockout;
 using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
@@ -23,7 +24,9 @@ namespace Auth.Server.Login;
 /// with ASP.NET Core Identity and either asks OpenIddict to issue the token (<see cref="Results.SignIn"/>) or returns
 /// the uniform <c>401 invalid_credentials</c>. Every attempt is counted first (<see cref="LoginStreakStore"/>); during
 /// a cooldown it is refused with <c>429</c> before the account is looked up or the password evaluated. The success body is reshaped by <see cref="LoginResponseShaper"/>.
-/// A correct password for an account whose email is not confirmed is refused with <c>403 email_not_verified</c>.
+/// A correct password for an account whose email is not confirmed is refused with <c>403 email_not_verified</c>, and
+/// one for an account that belongs to no company with <c>403 no_membership</c>; an access token carries the company,
+/// the role and its permissions as the database says at that moment (spec 0005).
 /// </summary>
 public static class LoginEndpoint
 {
@@ -31,7 +34,7 @@ public static class LoginEndpoint
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, LoginStreakStore streaks,
-        DecoyPasswordHash decoy)
+        DecoyPasswordHash decoy, MembershipReader memberships)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
@@ -39,6 +42,7 @@ public static class LoginEndpoint
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(streaks);
         ArgumentNullException.ThrowIfNull(decoy);
+        ArgumentNullException.ThrowIfNull(memberships);
 
         var request = http.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The login endpoint was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
@@ -78,12 +82,19 @@ public static class LoginEndpoint
             return AccountResults.EmailNotVerified();
         }
 
+        // Likewise an account that belongs to no company (spec 0005): it has nothing to put into a token.
+        if (await memberships.ReadAsync(user.Id, http.RequestAborted) is not { } tenant)
+        {
+            return AccountResults.NoMembership();
+        }
+
         var identity = new ClaimsIdentity(
             authenticationType: TokenValidationParameters.DefaultAuthenticationType,
             nameType: Claims.Name,
             roleType: Claims.Role);
 
-        // The token carries `sub` and nothing else: no email, name, role or scope.
+        // The access token carries `sub` and the tenancy claims below (`org_id`, `roles`, `permissions`), and nothing else:
+        // no email, name or scope.
         identity.SetClaim(Claims.Subject, user.Id.ToString());
         identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
 
@@ -91,10 +102,13 @@ public static class LoginEndpoint
         // whose login was still in flight when the change was committed, carries the old stamp and cannot refresh.
         identity.SetClaim(SessionPolicy.StampClaim, user.SecurityStamp);
 
+        // The company, the role and what it grants, read from the database now.
+        TenantClaims.Apply(identity, tenant);
+
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
-        // `sub` is the whole access token; the session start stays in the refresh token only.
-        principal.SetDestinations(static claim => claim.Type == Claims.Subject ? [Destinations.AccessToken] : []);
+        // `sub` and the tenancy claims make the access token; the session start stays in the refresh token only.
+        principal.SetDestinations(TenantClaims.DestinationsOf);
         principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
         http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
 

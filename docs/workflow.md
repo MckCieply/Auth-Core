@@ -63,9 +63,16 @@ drives; each step is a Sonnet agent unless noted.
    "Open questions for owner" — never left scattered. **The spec is the source of
    truth.**
 3. **Plan** — from the spec, write an implementation plan the Superpowers way
-   (`writing-plans`): ordered, verifiable steps with checkpoints.
+   (`writing-plans`): ordered, verifiable steps with checkpoints. The plan carries
+   the code of every task, written on paper: the planner may probe a risky point,
+   but does not build the plan in a scratch copy, and the plan is never generated
+   from one.
 4. **Implement** — a Sonnet agent executes the plan (`executing-plans` /
-   `subagent-driven-development`). Implementation only; it does not grade itself.
+   `subagent-driven-development`), one implementer per task, which writes the
+   task's code, runs it and fixes what breaks. Implementation only; it does not
+   grade itself. The two steps stay separate on purpose: one planner gets the code
+   generally right; an implementer per task has the room to get the details right.
+   The orchestrator never applies code in an implementer's place.
 5. **Verify** — verification agents run against the spec, locally, before the
    merge. See [Verification](#verification). A stage is done only when every
    verifier passes.

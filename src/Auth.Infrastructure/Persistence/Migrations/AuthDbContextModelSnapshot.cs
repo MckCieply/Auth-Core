@@ -87,6 +87,73 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.ActiveManifest", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("StoredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ActiveManifests");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.Company", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Companies");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.CompanyRole", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.PrimitiveCollection<string[]>("Permissions")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("CompanyRoles");
+                });
+
             modelBuilder.Entity("Auth.Infrastructure.Persistence.EmailToken", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -110,6 +177,55 @@ namespace Auth.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("EmailTokens");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.Invite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("InvitedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InvitedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("TokenHash")
+                        .HasColumnType("bytea");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("InvitedBy");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "NormalizedEmail")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "RoleId");
+
+                    b.ToTable("Invites");
                 });
 
             modelBuilder.Entity("Auth.Infrastructure.Persistence.LoginStreak", b =>
@@ -149,6 +265,9 @@ namespace Auth.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
+
+                    b.Property<Guid?>("InviteId")
+                        .HasColumnType("uuid");
 
                     b.Property<short>("Kind")
                         .HasColumnType("smallint");
@@ -192,6 +311,27 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.HasIndex("LastAcceptedAt");
 
                     b.ToTable("MailRequestLimits");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.Membership", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId", "CompanyId");
+
+                    b.HasIndex("CompanyId", "RoleId");
+
+                    b.ToTable("Memberships");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -532,12 +672,64 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("OpenIddictTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.CompanyRole", b =>
+                {
+                    b.HasOne("Auth.Infrastructure.Persistence.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Auth.Infrastructure.Persistence.EmailToken", b =>
                 {
                     b.HasOne("Auth.Infrastructure.Identity.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.Invite", b =>
+                {
+                    b.HasOne("Auth.Infrastructure.Persistence.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("InvitedBy")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Auth.Infrastructure.Persistence.CompanyRole", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "RoleId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.Membership", b =>
+                {
+                    b.HasOne("Auth.Infrastructure.Persistence.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Auth.Infrastructure.Persistence.CompanyRole", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId", "RoleId")
+                        .HasPrincipalKey("CompanyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

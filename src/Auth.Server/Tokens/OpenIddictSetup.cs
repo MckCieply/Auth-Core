@@ -4,6 +4,7 @@ using Auth.Server.Login;
 using Auth.Server.Sessions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
+using OpenIddict.Validation.AspNetCore;
 
 namespace Auth.Server.Tokens;
 
@@ -103,7 +104,21 @@ public static class OpenIddictSetup
                 options.UseAspNetCore()
                     .EnableTokenEndpointPassthrough()
                     .DisableTransportSecurityRequirement();
+            })
+            // The company API takes the service's own access tokens as a consumer would: signature against the
+            // instance's keys, issuer, audience and expiry. Without AddAudiences a token for another product would pass.
+            .AddValidation(options =>
+            {
+                options.UseLocalServer();
+                // The spec takes the token only from the Authorization header; a token in a URL lands in logs.
+                options.UseAspNetCore()
+                    .DisableAccessTokenExtractionFromQueryString()
+                    .DisableAccessTokenExtractionFromBodyForm();
+                options.AddAudiences(tokens.Audience);
             });
+
+        services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        services.AddAuthorization();
 
         return services;
     }

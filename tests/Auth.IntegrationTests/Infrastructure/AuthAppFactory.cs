@@ -1,6 +1,7 @@
 using Auth.Infrastructure.Identity;
 using Auth.Server.Email;
 using Auth.Server.Seeding;
+using Auth.Server.Tenancy;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -19,6 +20,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     private string? _environment;
     private TimeProvider? _clock;
     private readonly List<Action<IServiceCollection>> _serviceOverrides = [];
+    private readonly string _manifestDirectory;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -49,6 +51,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.LocaleKey] = "en";
         _settings[MailSettingsLoader.ResetPasswordUrlKey] = DefaultResetUrl;
         _settings[MailSettingsLoader.VerifyEmailUrlKey] = DefaultVerifyUrl;
+        _settings[MailSettingsLoader.AcceptInviteUrlKey] = DefaultInviteUrl;
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
@@ -60,6 +63,12 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.SmtpPasswordKey] = "";
         _settings[DevUserSeeder.UnverifiedEmailKey] = "";
         _settings[DevUserSeeder.UnverifiedPasswordKey] = "";
+        // The manifest: a file of this host's own, so that a test changes it without touching another's.
+        _manifestDirectory = Directory.CreateDirectory(
+            Path.Combine(Path.GetTempPath(), "auth-core-manifest-" + Guid.NewGuid().ToString("N"))).FullName;
+        ManifestPath = Path.Combine(_manifestDirectory, "auth.yaml");
+        File.WriteAllText(ManifestPath, DefaultManifest);
+        _settings[ManifestSettings.PathKey] = ManifestPath;
     }
 
     /// <summary>Default development seed credentials; the password satisfies Identity's default policy.</summary>
@@ -67,9 +76,18 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 
     public const string DefaultSeedPassword = "Correct-Horse-Battery-1";
 
+    /// <summary>The manifest every test host starts with: the example of spec 0005.</summary>
+    public const string DefaultManifest = """
+        permissions: [reports:read, reports:approve, templates:manage]
+        default_roles:
+          admin: ["*"]
+          user: [reports:read, reports:approve]
+        """;
+
     public const string DefaultAppName = "Auth-Core Test";
     public const string DefaultResetUrl = "https://app.example.com/reset";
     public const string DefaultVerifyUrl = "https://app.example.com/verify";
+    public const string DefaultInviteUrl = "https://app.example.com/invite";
     public const string DefaultFrom = "no-reply@example.com";
 
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
@@ -89,6 +107,26 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     }
 
     public string DatabaseName { get; }
+
+    /// <summary>The connection string of this host's database, for a test that runs the operator CLI against it.</summary>
+    public string ConnectionString => _settings["ConnectionStrings:Auth"] ?? "";
+
+    /// <summary>The manifest file of this host.</summary>
+    public string ManifestPath { get; }
+
+    /// <summary>Replaces the content of the manifest file; it is read when the host starts.</summary>
+    public AuthAppFactory WithManifest(string yaml)
+    {
+        File.WriteAllText(ManifestPath, yaml);
+        return this;
+    }
+
+    /// <summary>Removes the manifest file, as if the product had not shipped one.</summary>
+    public AuthAppFactory WithoutManifestFile()
+    {
+        File.Delete(ManifestPath);
+        return this;
+    }
 
     public AuthAppFactory WithSetting(string key, string? value)
     {
@@ -145,6 +183,15 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         // minutes after the test. Without this the suite runs out of server connections as it grows.
         await using var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]);
         NpgsqlConnection.ClearPool(connection);
+
+        try
+        {
+            Directory.Delete(_manifestDirectory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // A temporary directory that cannot be removed is not a failure of the test.
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

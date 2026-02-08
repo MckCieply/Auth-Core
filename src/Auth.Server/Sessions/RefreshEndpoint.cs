@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
+using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -15,17 +16,18 @@ namespace Auth.Server.Sessions;
 /// <summary>
 /// The pass-through half of <c>POST /auth/refresh</c>. By the time it runs, OpenIddict has validated the refresh
 /// token from the cookie (unknown, expired, revoked and reused tokens never get here). This endpoint checks that the
-/// user still exists and asks OpenIddict to issue the next pair of tokens.
+/// user still exists and is still a member of a company, and asks OpenIddict to issue the next pair of tokens.
 /// </summary>
 public static class RefreshEndpoint
 {
     public static async Task<IResult> HandleAsync(
-        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock)
+        HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, MembershipReader memberships)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(memberships);
 
         var result = await http.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         var subject = result.Principal?.GetClaim(Claims.Subject);
@@ -50,6 +52,13 @@ public static class RefreshEndpoint
             return InvalidGrant();
         }
 
+        // Someone who is no longer a member has no session (spec 0005 → Effects of removing a member), and everyone else
+        // gets the company, role and permissions as the database says now: a role change reaches the next token here.
+        if (await memberships.ReadAsync(user.Id, http.RequestAborted) is not { } tenant)
+        {
+            return InvalidGrant();
+        }
+
         // Start from the refresh token's own claims, so OpenIddict's internal ones (the authorization id that makes
         // the family) carry over to the new tokens.
         var identity = new ClaimsIdentity(
@@ -58,10 +67,11 @@ public static class RefreshEndpoint
             nameType: Claims.Name,
             roleType: Claims.Role);
         identity.SetClaim(Claims.Subject, user.Id.ToString());
+        TenantClaims.Apply(identity, tenant);
 
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
-        principal.SetDestinations(static claim => claim.Type == Claims.Subject ? [Destinations.AccessToken] : []);
+        principal.SetDestinations(TenantClaims.DestinationsOf);
         principal.SetRefreshTokenLifetime(lifetime);
         http.Items[RefreshCookie.LifetimeItemKey] = lifetime;
 

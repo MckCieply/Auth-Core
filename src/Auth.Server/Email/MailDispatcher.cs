@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Server.Email;
@@ -10,7 +11,9 @@ namespace Auth.Server.Email;
 /// transaction with the row locked: issue a token, compose the mail and send it. Only such rows (and rows an hour
 /// old, which are dropped) are handled singly: requests that need no mail and arrive during the pass wait for the
 /// bulk delete of the next one. The token is committed only once the server has accepted the mail, so a failed
-/// attempt leaves the earlier link in force and no clear token is ever stored (Decision 13).
+/// attempt leaves the earlier link in force and no clear token is ever stored (Decision 13). An invitation request
+/// (spec 0005) names an invitation, not an account: its mail goes to the address on the invitation, the token is
+/// issued into the invitation, and the request is never dropped for want of an account.
 /// </summary>
 public sealed partial class MailDispatcher(
     IServiceScopeFactory scopes, TimeProvider clock, MailComposer composer, IMailTransport transport, ILogger<MailDispatcher> logger)
@@ -43,6 +46,7 @@ public sealed partial class MailDispatcher(
     {
         var now = StorableTime.Now(clock);
         var passwordReset = (short)MailKind.PasswordReset;
+        var invitation = (short)MailKind.Invitation;
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -51,6 +55,7 @@ public sealed partial class MailDispatcher(
             DELETE FROM "MailRequests" WHERE "Id" IN (
                 SELECT r."Id" FROM "MailRequests" r
                 WHERE r."NextAttemptAt" <= {now}
+                  AND r."Kind" <> {invitation}
                   AND NOT EXISTS (
                       SELECT 1 FROM "AspNetUsers" u
                       WHERE u."NormalizedEmail" = r."NormalizedEmail"
@@ -77,15 +82,17 @@ public sealed partial class MailDispatcher(
         // is never handled one by one ahead of the real mails. SKIP LOCKED: a second instance takes another row
         // instead of waiting for this one.
         var passwordReset = (short)MailKind.PasswordReset;
+        var invitation = (short)MailKind.Invitation;
         var due = await db.MailRequests
             .FromSql($"""
                 SELECT r.* FROM "MailRequests" r
                 WHERE (r."NextAttemptAt" <= {now}
-                       AND EXISTS (
-                           SELECT 1 FROM "AspNetUsers" u
-                           WHERE u."NormalizedEmail" = r."NormalizedEmail"
-                             AND u."Email" IS NOT NULL
-                             AND (r."Kind" = {passwordReset} OR NOT u."EmailConfirmed")))
+                       AND (r."Kind" = {invitation}
+                            OR EXISTS (
+                                SELECT 1 FROM "AspNetUsers" u
+                                WHERE u."NormalizedEmail" = r."NormalizedEmail"
+                                  AND u."Email" IS NOT NULL
+                                  AND (r."Kind" = {passwordReset} OR NOT u."EmailConfirmed"))))
                    OR r."RequestedAt" <= {givenUp}
                 ORDER BY r."NextAttemptAt", r."Id"
                 LIMIT 1
@@ -106,12 +113,13 @@ public sealed partial class MailDispatcher(
             return true;
         }
 
-        var user = await db.Users.AsNoTracking()
-            .OrderBy(u => u.Id)
-            .FirstOrDefaultAsync(u => u.NormalizedEmail == request.NormalizedEmail, cancellationToken);
-        if (user?.Email is null || (request.Kind == MailKind.EmailVerification && user.EmailConfirmed))
+        // What it takes to make this request's mail, or nothing when there is no mail to make any more.
+        var makeMail = request.Kind == MailKind.Invitation
+            ? await PrepareInvitationAsync(db, request, now, cancellationToken)
+            : await PrepareAccountMailAsync(db, request, now, cancellationToken);
+        if (makeMail is null)
         {
-            // The account went away, or was confirmed, after the pass began.
+            // The account went away, or was confirmed, or the invitation was cancelled, after the pass began.
             await RemoveAsync(db, request, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return true;
@@ -125,9 +133,7 @@ public sealed partial class MailDispatcher(
 
         try
         {
-            var token = await EmailTokens.IssueAsync(db, user.Id, request.Kind, now, cancellationToken);
-            var mail = composer.Compose(request.Kind, user.Email, token);
-            await transport.SendAsync(mail, cancellationToken);
+            await transport.SendAsync(await makeMail(), cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -146,6 +152,56 @@ public sealed partial class MailDispatcher(
         await RemoveAsync(db, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>The mail of a reset or a verification: to the stored address of the account, with a token issued to it.</summary>
+    private async Task<Func<Task<ComposedMail>>?> PrepareAccountMailAsync(
+        AuthDbContext db, MailRequest request, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var user = await db.Users.AsNoTracking()
+            .OrderBy(u => u.Id)
+            .FirstOrDefaultAsync(u => u.NormalizedEmail == request.NormalizedEmail, cancellationToken);
+        if (user?.Email is null || (request.Kind == MailKind.EmailVerification && user.EmailConfirmed))
+        {
+            return null;
+        }
+
+        return async () =>
+        {
+            var token = await EmailTokens.IssueAsync(db, user.Id, request.Kind, now, cancellationToken);
+            return composer.Compose(request.Kind, user.Email, token);
+        };
+    }
+
+    /// <summary>
+    /// The mail of an invitation (spec 0005): to the address on the invitation, which may have no account, with a token
+    /// issued to the invitation. The invitation row is locked, so that cancelling or accepting it waits for the mail.
+    /// </summary>
+    private async Task<Func<Task<ComposedMail>>?> PrepareInvitationAsync(
+        AuthDbContext db, MailRequest request, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (request.InviteId is not { } inviteId)
+        {
+            return null;
+        }
+
+        var invites = await db.Invites
+            .FromSql($"""SELECT * FROM "Invites" WHERE "Id" = {inviteId} FOR UPDATE""")
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        if (invites.Count == 0)
+        {
+            return null;
+        }
+
+        var invite = invites[0];
+        var companyName = await db.Companies.AsNoTracking().Where(c => c.Id == invite.CompanyId).Select(c => c.Name).SingleAsync(cancellationToken);
+        var roleName = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).SingleAsync(cancellationToken);
+        return async () =>
+        {
+            var token = await InviteTokens.IssueAsync(db, invite.Id, now, cancellationToken);
+            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, roleName);
+        };
     }
 
     private static async Task RemoveAsync(AuthDbContext db, MailRequest request, CancellationToken cancellationToken)

@@ -2,7 +2,9 @@ using System.Text.RegularExpressions;
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Email;
+using Auth.Server.Seeding;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -53,13 +55,31 @@ public abstract partial class MailTestBase : SessionTestBase
         Assert.True(decision.Allowed, $"The mail limit refused the request; wait {decision.RetryAfter} on the test clock.");
     }
 
-    protected async Task<ApplicationUser> CreateUserAsync(string email, bool confirmed, string password = UserPassword)
+    /// <summary>
+    /// Makes an account. Since spec 0005 an account that belongs to no company cannot log in, so by default the account
+    /// joins the development company with its role <c>user</c> (when the host has one); pass <paramref name="member"/>
+    /// <see langword="false"/> for an account that belongs nowhere.
+    /// </summary>
+    protected async Task<ApplicationUser> CreateUserAsync(string email, bool confirmed, string password = UserPassword, bool member = true)
     {
         using var scope = Factory.Services.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var user = new ApplicationUser { UserName = email, Email = email, EmailConfirmed = confirmed };
         var result = await users.CreateAsync(user, password);
         Assert.True(result.Succeeded, string.Join(", ", result.Errors.Select(e => e.Code)));
+
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var role = member
+            ? await db.CompanyRoles.AsNoTracking().FirstOrDefaultAsync(
+                r => r.NormalizedName == "USER" && db.Companies.Any(c => c.Id == r.CompanyId && c.Name == DevUserSeeder.DefaultOrgName),
+                TestContext.Current.CancellationToken)
+            : null;
+        if (role is not null)
+        {
+            db.Memberships.Add(new Membership { UserId = user.Id, CompanyId = role.CompanyId, RoleId = role.Id, JoinedAt = StorableTime.Now(Clock) });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
         return user;
     }
 

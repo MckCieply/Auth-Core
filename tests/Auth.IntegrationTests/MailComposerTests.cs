@@ -14,6 +14,7 @@ public sealed class MailComposerTests
             Locale = locale,
             ResetPasswordUrl = new Uri(reset),
             VerifyEmailUrl = new Uri("https://app.example.com/verify"),
+            AcceptInviteUrl = new Uri("https://app.example.com/invite"),
             FromAddress = "no-reply@example.com",
             Smtp = new SmtpSettings { Host = "smtp.invalid", Port = 587, Security = SmtpSecurity.StartTls },
         });

@@ -1,0 +1,13 @@
+# The development manifest: what the product declares to Auth-Core (spec 0005 -> Manifest).
+#
+# permissions    the permissions the product's code checks. Three more are built in and always in the catalog:
+#                members:manage, roles:manage and org:manage (they guard the company API itself).
+# default_roles  the roles every new company starts with a copy of. After that its roles are its own.
+#                "*" stands for every permission of the catalog. At least one default role must hold
+#                members:manage or "*", so that the first admin of a company can manage it.
+#
+# A broken file never stops the service: the last valid manifest stays active and /auth/health says "Degraded".
+permissions: [documents:read, documents:write, documents:approve]
+default_roles:
+  admin: ["*"]
+  user: [documents:read, documents:write]

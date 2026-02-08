@@ -12,6 +12,7 @@ public static class AccountResults
     public const string InvalidTokenError = "invalid_token";
     public const string WeakPasswordError = "weak_password";
     public const string EmailNotVerifiedError = "email_not_verified";
+    public const string NoMembershipError = "no_membership";
 
     /// <summary>202: the request was taken. Says nothing about whether a mail will follow.</summary>
     public static IResult Accepted() => new NoStoreResult(StatusCodes.Status202Accepted, null);
@@ -32,7 +33,11 @@ public static class AccountResults
     public static IResult EmailNotVerified() =>
         new NoStoreResult(StatusCodes.Status403Forbidden, new { error = EmailNotVerifiedError });
 
-    private sealed class NoStoreResult(int statusCode, object? body) : IResult
+    /// <summary>403: the password is right and the email confirmed, but the account belongs to no company (spec 0005).</summary>
+    public static IResult NoMembership() =>
+        new NoStoreResult(StatusCodes.Status403Forbidden, new { error = NoMembershipError });
+
+    internal sealed class NoStoreResult(int statusCode, object? body) : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext)
         {

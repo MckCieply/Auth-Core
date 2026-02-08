@@ -5,4 +5,5 @@ public enum MailKind : short
 {
     PasswordReset = 1,
     EmailVerification = 2,
+    Invitation = 3,
 }

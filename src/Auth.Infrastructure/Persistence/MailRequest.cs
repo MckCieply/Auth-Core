@@ -12,6 +12,13 @@ public sealed class MailRequest
 
     public required string NormalizedEmail { get; init; }
 
+    /// <summary>
+    /// The invitation a <see cref="MailKind.Invitation"/> request is for; <see langword="null"/> for the other kinds.
+    /// Deliberately not a foreign key: cancelling an invitation must not wait for a mail that is being sent, so a
+    /// request whose invitation is gone is dropped by the dispatcher instead.
+    /// </summary>
+    public Guid? InviteId { get; init; }
+
     public required DateTimeOffset RequestedAt { get; init; }
 
     /// <summary>Failed sends so far.</summary>
