@@ -79,8 +79,81 @@ company and address is made for the run.
 
 ## Plan-vs-implementation notes
 
-(Filled in by the orchestrator after implementation: every name or behaviour that differed from the plan, per task.)
+Tasks 1–15 were built from the plan's code blocks unchanged; each task's commit was built
+with warnings as errors and the whole suite, and reviewed against the spec. What changed
+after the plan, in the order it was done:
+
+- **Task 6 review.** OpenIddict's validation also took the access token from the
+  `access_token` query parameter and from a form body; the spec takes it from the
+  `Authorization` header only. Both extractions are turned off
+  (`fix(tenancy): take the bearer token from the Authorization header only`, 4 tests).
+- **Task 9 review.** Accepting an invitation repeated the "end every session" block of the
+  password reset; both now use one helper (`AccountSessions`), and accepting also ends the
+  login streak of an address that has no account yet, as spec → Effects, step 2 says
+  (`refactor(account): one place ends every session; …`, 1 test).
+- **Task 8 review.** Resend and cancel lacked safety rule 1 and the re-read of the caller
+  under the lock; the plan adds both in Task 11, as built (confirmed by the Task 11 review).
+- **Task 13 review.** The CLI's console logger put the database host, port and name and a
+  stack trace on the operator's error stream when the database was unreachable, and the
+  test meant to catch it read only the injected writers. The CLI now logs only `Auth.*`
+  warnings and errors, one line each, without the exception
+  (`fix(admin): keep connection details and stack traces off the operator's error stream`,
+  1 new and 1 strengthened test).
+- **Tasks 11 and 12 reviews.** Resend, cancel, `DELETE` member and `DELETE` role can answer
+  `403 permission_not_held` but did not declare it; declared after Task 14 added the
+  description (`fix(openapi): declare permission_not_held on every route that can answer
+  it`, 8 test rows).
+- **Verification rounds 1 and 2.** See the log below.
+
+Test count: 829 planned; 935 at the end (843 after the task-review fixes, 909 after round 1,
+935 after round 2).
 
 ## Local verification log
 
-(Filled in by the orchestrator after the three verifiers have run.)
+Three local verifiers ran per [`docs/workflow.md`](../../workflow.md#verification): realization
+vs spec and API/e2e on Sonnet, security on Opus. Each e2e run brought the stack up from
+`down -v` under a compose project of its own.
+
+| Round | Realization vs spec | API / e2e | Security | Fix commit |
+| ----- | ------------------- | --------- | -------- | ---------- |
+| 1 | **FAIL** — 843/843; I-1 row 6 of this map held criterion 15; I-2 the description lacked the refresh cookie, `Set-Cookie` and `Retry-After`; I-3 the unreadable-manifest leg untested; I-4 the refresh token's claims untested; I-5 the re-read of the caller untested on resend, cancel and the role changes; I-6 a clause of criterion 16 that Decision 19 made unreachable (owner) | PASS — five scripts ALL PASS; padded ids accepted (`Guid.TryParseExact` trims); the header of `e2e-tenancy.sh` claimed more than it checks | PASS with minors — M1 an invitation to a look-alike address (`ſteve@…`) could reach an existing account on hosts with ICU; M2 the rename outside the lock; M3 domain literals and dotless domains invitable; M4 the description's server taken from `Host`; M5 format characters in names; M6 a refused manifest name logged raw | `fix(tenancy): findings of the first verification round` |
+| 2 | PASS — 909/909; I-1 to I-5 addressed | PASS — five scripts ALL PASS; every refusal decided by the owner observed live | **FAIL** — N1 (Important): the look-alike takeover still open for pairs no list of characters covers (micro sign and Greek mu, final sigma, decomposed letters), because acceptance found the account by its normalised address; N2 the domain rule bypassable through what the IDN step drops or maps | `fix(tenancy): an invitation reaches an existing account only under its own address` |
+| 3 | — | — | PASS — N1 and N2 closed (an exhaustive single-character check finds no other match; MailKit 4.18.1 checked against a fake relay with and without SMTPUTF8); one minor left: a hexadecimal IPv4 form (`joe@127.0x1`) passes the domain rule | — |
+
+### Owner decisions after round 1 (2026-02-07)
+
+The owner took the orchestrator's recommendation on each escalated point: criterion 16 is
+reworded (spec 0005 → "As built"); invitation addresses that are domain literals or have a
+dotless domain are refused (`400 invalid_request`); format characters are refused in company
+and role names; a `404` outside `/auth/me`, `/auth/org` and `/auth/invites` keeps the
+framework's headers (the contract scopes `no-store` to those prefixes, as in spec 0004);
+`/auth/health` answering `POST` and a JSON body declared `charset=utf-16` are left to the
+hardening slice.
+
+### Rulings by the orchestrator during implementation
+
+- The three verifiers stood in for the skill's final whole-branch review (the repository's
+  workflow is binding), and the per-task reviews' minors were triaged by the realization
+  verifier: five "must fix" (I-3, I-4, I-5, I-6, I-2), the rest "can wait" (below).
+- Two plan-mandated gaps were left to the task of the plan that closes them (rule 1 and the
+  re-read on resend and cancel: Task 11) or fixed after the task that rewrites the file
+  (the `permission_not_held` declarations: after Task 14).
+- Acceptance is fail-closed on non-ASCII case: an existing account spelled `Żaneta@…` is not
+  reached by an invitation to `żaneta@…` (`invalid_token`); the inviter types the address as
+  the account spells it.
+
+### Deferred / follow-ups (not fixed in this slice, by design)
+
+- Test gaps: some neighbouring pairs of the order of checks (404/rule 1, rule 1/
+  `role_name_taken`, `role_name_taken`/`last_manager`); a parallel rule-2 test for role edits;
+  `RoleBody` edge cases (8 KiB, content type, 500/501 permissions); the CLI's flag form
+  `--org --force`; the pruning test does not dispatch afterwards; constraint names in the
+  `DbUpdateException` assertions.
+- Small things: `Manifest.FromJson` throws on a stored row `{}` (needs a hand-edited
+  database); the development seeder's role choice reads the manifest, not the stored role;
+  the cascades from `Companies` would meet the `Restrict` key from memberships to roles
+  if company deletion is ever built; the role lookup plus rule 1 appears in two services;
+  the CLI looks a role up before the address check (`not_found` where the API says `400`);
+  cancelling waits for an in-flight send of that invitation while holding the company lock.
+- A domain written as a hexadecimal IPv4 form (`127.0x1`) passes the domain rule of invitations (security round 3, minor).
+- Residual risks: in spec 0005 → "As built".
