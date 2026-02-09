@@ -102,6 +102,7 @@ strings):
 from auth_core_fastapi import AuthCore, Principal
 
 auth = AuthCore(issuer=..., audience=..., jwks_url=...)
+auth.install(app)
 
 @app.get("/api/me")
 def me(user: Principal = Depends(auth.current_user)): ...
@@ -112,7 +113,9 @@ def add(user: Principal = Depends(auth.require_permission("notes:write"))): ...
 
 `require_permission` checks the token's `permissions` only. It never calls
 Auth-Core: an endpoint trusts a valid token for its lifetime, as spec 0005
-(Decisions 4 and 12) accepts.
+(Decisions 4 and 12) accepts. `auth.install(app)`, once at startup, is what turns the
+dependencies' refusals into the responses below: FastAPI gives a dependency no way to send an
+empty-body `401`. Without it the status codes and headers are right, and the bodies are FastAPI's own.
 
 **A token is valid** when all of these hold:
 
@@ -169,7 +172,7 @@ logged at debug level with the reason only.
 
 The company is always the token's `org_id`. A request never names a company, so no
 request can reach another company's notes; another company's note is a `404`, as in
-spec 0005.
+spec 0005. A request body over 16 KiB is `400 {"error":"invalid_request"}` too, as a resource limit.
 
 **Manifest.** `samples/notes-api/auth.yaml`, read by Auth-Core in the overlay:
 
@@ -315,7 +318,8 @@ product. It names no product. Steps, each pointing at the sample's file:
 **Residual risks:**
 
 - A member demoted or removed keeps the token's permissions at the product's
-  endpoints for up to 10 minutes. Accepted in spec 0005.
+  endpoints for up to 15 minutes: the token's 10 minutes plus the 5 minutes of clock skew
+  the package allows after `exp` (Decision 9). Accepted in spec 0005.
 - A product that sets `jwks_url` to an address an attacker controls accepts the
   attacker's tokens. The guide says to use HTTPS or an internal network address only.
 
