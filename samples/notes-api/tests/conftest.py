@@ -3,7 +3,6 @@
 import base64
 import os
 import time
-import uuid
 
 import jwt
 import pytest
@@ -89,7 +88,3 @@ def client(settings, engine, auth) -> TestClient:
 
 def headers(signer: Signer, org_id: str = COMPANY_A, permissions=("notes:read", "notes:write"), sub: str = "user-1") -> dict:
     return {"Authorization": "Bearer " + signer.token(org_id, list(permissions), sub)}
-
-
-def new_id() -> str:
-    return str(uuid.uuid4())

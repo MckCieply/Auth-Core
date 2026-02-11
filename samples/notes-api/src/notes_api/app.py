@@ -1,7 +1,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import timezone
 
 from auth_core_fastapi import AuthCore, AuthError, Principal
 from fastapi import Depends, FastAPI, Request
@@ -123,7 +123,7 @@ async def _read_text(request: Request) -> str:
             raise InvalidRequest()
     try:
         document = json.loads(bytes(body))
-    except ValueError:
+    except (ValueError, RecursionError):  # not JSON, or nested deeper than the parser can follow
         raise InvalidRequest() from None
     value = document.get("text") if isinstance(document, dict) else None
     if not isinstance(value, str) or not 1 <= len(value) <= MAX_TEXT_CHARACTERS:

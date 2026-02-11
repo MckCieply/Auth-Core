@@ -235,6 +235,17 @@ def test_a_body_over_the_size_cap_is_a_400_even_when_its_text_is_good(client, si
         assert session.scalar(select(func.count()).select_from(Note)) == 0
 
 
+def test_a_deeply_nested_body_under_the_size_cap_is_a_400(client, signer, engine):
+    body = b"[" * 16000  # under the cap, but deeper than the JSON parser can follow
+
+    response = client.post("/api/notes", content=body, headers={**headers(signer), "Content-Type": "application/json"})
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "invalid_request"}
+    with Session(engine) as session:
+        assert session.scalar(select(func.count()).select_from(Note)) == 0
+
+
 def test_a_body_under_the_size_cap_may_carry_other_members(client, signer):
     body = json.dumps({"text": "x", "pad": "y" * 10000}).encode()
     assert len(body) < 16 * 1024
