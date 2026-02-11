@@ -8,6 +8,9 @@
 .idea/
 .vscode/
 .claude/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
 
 # Never ship local secrets or environment files into the build context.
 .secrets/

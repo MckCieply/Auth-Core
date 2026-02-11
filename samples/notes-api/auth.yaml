@@ -1,0 +1,10 @@
+# The manifest of the "notes" sample: what the product declares to Auth-Core (spec 0005 -> Manifest).
+#
+# permissions    what the product's code checks. The package guards GET /api/notes with notes:read and
+#                POST /api/notes with notes:write (src/notes_api/app.py).
+# default_roles  the roles every new company starts with a copy of. "*" stands for every permission of the catalog.
+permissions: [notes:read, notes:write]
+default_roles:
+  admin:  ["*"]
+  user:   [notes:read, notes:write]
+  viewer: [notes:read]

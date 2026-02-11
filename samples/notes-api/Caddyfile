@@ -1,0 +1,17 @@
+# One origin for the browser: /auth is Auth-Core, /api is the notes service. Plain HTTP, development only.
+{
+	admin off
+	auto_https off
+}
+
+http://:8088 {
+	handle /auth/* {
+		reverse_proxy auth:8080
+	}
+	handle /api/* {
+		reverse_proxy notes-api:8000
+	}
+	handle {
+		respond "not found" 404
+	}
+}
