@@ -19,6 +19,10 @@ login on a real phone, delivered over a six-week build.
 > and `permissions`, the company API manages them, an operator CLI creates companies, and the whole
 > API is described in OpenAPI
 > ([spec 0005](docs/superpowers/specs/0005-tenancy-and-rbac.md)).
+> A first consumer is built in this repository: a generic Python package for FastAPI backends (`clients/python/`), a small
+> sample product that uses it (`samples/notes-api/`) and an integration guide
+> ([spec 0006](docs/superpowers/specs/0006-python-consumer-package.md),
+> [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md)).
 > Implementation follows the milestones in [`docs/design.md`](docs/design.md).
 
 ## Quickstart (development)
@@ -57,6 +61,23 @@ described at `http://localhost:8080/auth/openapi/v1.json`; in Development an int
 `http://localhost:8080/auth/scalar`. The product's permissions and default roles come from its manifest
 (`Auth:Manifest:Path`; `deploy/auth.yaml` in development): a broken file never stops the service, and
 `/auth/health` then says `Degraded`.
+
+The sample product "notes" and a proxy that puts Auth-Core and the sample on one origin are a compose overlay on the same
+stack. `scripts/e2e-notes.sh` starts it (it needs `NOTES_DB_PASSWORD` in `.env`) and drives it through the proxy at
+`http://localhost:8088`, in about three minutes:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
+scripts/e2e-notes.sh
+```
+
+The Python package (`clients/python/`) and the sample have tests that need no Docker (Python 3.12):
+
+```bash
+python -m venv .venv && . .venv/bin/activate        # .venv/Scripts/activate on Windows
+pip install -e "clients/python[test]" -r samples/notes-api/requirements.txt
+(cd clients/python && python -m pytest -q) && (cd samples/notes-api && python -m pytest -q)
+```
 
 Tests (integration, Postgres via Testcontainers — Docker must be running):
 
@@ -103,6 +124,8 @@ auth-service/
   src/Auth.Cli/                 admin CLI
   tests/Auth.IntegrationTests/  WebApplicationFactory + Testcontainers
   clients/python/               FastAPI package
+  samples/notes-api/            the "notes" sample product: FastAPI, PostgreSQL, a compose overlay with Caddy
+  docs/integration/             guides for products that use Auth-Core
   docs/adr/  docs/threat-model.md
   deploy/docker-compose.example.yml
   auth.example.yaml
@@ -115,6 +138,8 @@ auth-service/
 - [`docs/adr/`](docs/adr/) — architecture decision records.
 - [`docs/workflow.md`](docs/workflow.md) — development workflow: model policy,
   plugins, the spec-driven flow, branch and PR rules.
+- [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md) — connecting a Python (FastAPI) product, step
+  by step, with the sample as the worked example.
 
 ## License
 
