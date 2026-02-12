@@ -4,7 +4,8 @@
 #
 # Relative paths in this file are resolved from deploy/ (the directory of the FIRST -f file), not from here.
 # Needs NOTES_DB_PASSWORD in .env (see .env.example). The browser's origin is http://localhost:8088:
-#   /auth -> Auth-Core, /api -> the notes service. Neither of them is published on a port of its own.
+#   /auth -> Auth-Core, /api -> the notes service. The notes service publishes no port; Auth-Core's own port stays
+#   published on loopback by the base file (development only).
 services:
   notes-db-init:
     # One-shot and idempotent: creates the login "notes" and the database "notes" on the stack's PostgreSQL server,

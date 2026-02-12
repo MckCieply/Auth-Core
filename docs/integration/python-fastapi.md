@@ -80,8 +80,10 @@ your product accepts.
 Two FastAPI dependencies, each giving a `Principal` (`sub`, `org_id`, `roles` as a tuple, `permissions` as a frozenset):
 
 ```python
+from fastapi import Depends
 from auth_core_fastapi import Principal
 
+# `app` and `auth` are the objects of step 3
 @app.get("/api/me")
 def me(user: Principal = Depends(auth.current_user)): ...
 
@@ -179,8 +181,9 @@ docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --e
 
 What the overlay does, and what yours must do:
 
-- **A proxy** (Caddy) on one port, routing `/auth/*` to Auth-Core and `/api/*` to your backend. Auth-Core and your backend
-  publish no port of their own; only the proxy is reachable.
+- **A proxy** (Caddy) on one port, routing `/auth/*` to Auth-Core and `/api/*` to your backend. Your backend publishes
+  no port and is reachable only through the proxy. Auth-Core's own port is published on the loopback interface, for
+  development only; in production only the proxy faces the network.
 - **Auth-Core's issuer is the origin the browser uses** (`Auth__Tokens__Issuer: http://localhost:8088/auth` in the
   overlay), and its audience is yours (`Auth__Tokens__Audience`). The backend gets the same two values and fetches the keys
   over the internal network (`AUTH_JWKS_URL: http://auth:8080/auth/.well-known/jwks.json`).
@@ -207,8 +210,8 @@ auth invite --org <company-id> --email boss@acme.test --role admin
 The invitation is mailed (in development, to the mail catcher at `http://localhost:8025`) at the server's next poll,
 within a minute. The mail links to the screen of your frontend that accepts it; accepting sets the person's password and
 makes them the company's admin. From then on the admin invites, re-roles and removes members and defines roles through
-`/auth/org/...`, with no operator. [`scripts/e2e-notes.sh`](../../scripts/e2e-notes.sh) does all of this over HTTP, steps
-3 to 5.
+`/auth/org/...`, with no operator. [`scripts/e2e-notes.sh`](../../scripts/e2e-notes.sh) does all of this, its steps 3 to 5: the
+operator's part (create the company, invite its first admin) with the CLI, the rest over HTTP.
 
 ## 8. What your frontend must handle
 
