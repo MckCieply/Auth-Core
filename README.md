@@ -67,6 +67,7 @@ stack. `scripts/e2e-notes.sh` starts it (it needs `NOTES_DB_PASSWORD` in `.env`)
 `http://localhost:8088`, in about three minutes:
 
 ```bash
+export COMPOSE_PROJECT_NAME=auth-core-notes   # the script's own compose project; the stack above is auth-core
 docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
 scripts/e2e-notes.sh
 ```

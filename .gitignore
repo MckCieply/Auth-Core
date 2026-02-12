@@ -39,6 +39,11 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+*.egg-info/
+/clients/python/build/
+/clients/python/dist/
+/samples/*/build/
+/samples/*/dist/
 
 # Local secrets (signing/encryption key material)
 .secrets/

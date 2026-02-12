@@ -23,9 +23,13 @@
 # first time the service starts, so a volume of an earlier stack that used another manifest makes step 1 fail):
 #   cp .env.example .env                  # then set real local values (git-ignored); NOTES_DB_PASSWORD too
 #   scripts/dev-keys.sh                   # dev signing/encryption keys into .secrets/ (git-ignored)
+#   export COMPOSE_PROJECT_NAME=auth-core-notes   # the script's own project name (see below); set it for the down -v too
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
 #   scripts/e2e-notes.sh                  # this script: brings the stack up (builds the images), then drives it
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
+# The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it), not as "auth-core"
+# that deploy/docker-compose.yml names: its containers and volumes stay apart from a development stack of the same
+# clone, and the down -v above removes only them. (Host ports 8088, 8080 and 8025 are still shared: stop the other stack.)
 # The earlier e2e scripts run on the stack WITHOUT the overlay (deploy/docker-compose.yml alone), as before.
 #
 # Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
@@ -42,6 +46,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://localhost:8088}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
+# deploy/docker-compose.yml names the project "auth-core", which every other stack of the clone uses; run apart from them
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-notes}"
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
@@ -218,6 +224,7 @@ print(json.dumps(body))
 cli() {
   CLI_EXIT=0
   CLI_OUT="$("${compose[@]}" run --rm -T --no-deps auth admin "$@" 2> "$tmp/cli.err")" || CLI_EXIT=$?
+  if [[ "$CLI_EXIT" != "0" ]]; then cat "$tmp/cli.err" >&2; fi
   CLI_OUT="${CLI_OUT//$'\r'/}"
 }
 
@@ -343,8 +350,8 @@ expect_status "step 5: the same person adds a note after the refresh" 201
 pass "step 5: after the role change and a refresh, the same person adds a note (201); the token issued before the change was still a viewer's"
 
 # --- Step 6: Auth-Core down, the sample holds no keys ----------------------------------------------------------------------
+AUTH_STOPPED=1  # before the stop: a stop that fails halfway must still end with Auth-Core started again
 "${compose[@]}" stop auth > "$tmp/stop.log" 2>&1 || { cat "$tmp/stop.log" >&2; fail "step 6: could not stop Auth-Core"; }
-AUTH_STOPPED=1
 "${compose[@]}" restart notes-api > "$tmp/restart.log" 2>&1 || { cat "$tmp/restart.log" >&2; fail "step 6: could not restart the sample"; }
 wait_ok "$BASE_URL/api/health" 60 || fail "step 6: the sample did not come back within 60s (it must start while Auth-Core is down)"
 call GET /api/notes "" "$tmp/viewer.auth"

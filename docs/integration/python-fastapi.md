@@ -9,7 +9,7 @@ What you get: your backend trusts Auth-Core's access tokens with a few lines of 
 the permissions of every caller, and never calls Auth-Core to find out. Users log in, refresh and manage their company
 through Auth-Core's own API ([spec 0005](../superpowers/specs/0005-tenancy-and-rbac.md)); your product only checks tokens.
 
-Needs: Python 3.12, FastAPI 0.115 or newer, PostgreSQL (for the data steps), Docker with Compose (for the stack).
+Needs: Python 3.12, FastAPI 0.142 or newer, PostgreSQL (for the data steps), Docker with Compose (for the stack).
 
 ## 1. Install the package at a tag
 
@@ -66,6 +66,9 @@ from auth_core_fastapi import AuthCore
 auth = AuthCore(issuer=settings.auth_issuer, audience=settings.auth_audience, jwks_url=settings.auth_jwks_url)
 auth.install(app)  # makes the 401, 403 and 503 of the dependencies the responses described in step 4
 ```
+
+`auth.install(app)` covers only the app it is called on: call it on each mounted sub-app (`app.mount(...)`) whose endpoints
+use the dependencies.
 
 Creating the object makes **no network call**: your product starts even while Auth-Core is down. The keys are fetched on
 first use, kept in memory, fetched again after 5 minutes, and at once (but at most every 10 seconds) when a token names
@@ -144,6 +147,8 @@ startup by [`src/notes_api/db.py`](../../samples/notes-api/src/notes_api/db.py))
    A row of another company is answered exactly as a row that does not exist (`404`), so ids reveal nothing.
 3. **Writes set it from the token**, whatever the body says. Unique constraints that should hold per company include
    `org_id`.
+
+The sample's list endpoint returns every note of the company with no paging. A real product should page its lists.
 
 A product that **already has data** takes one more step, because the old rows belong to nobody yet. Create the first
 company with the CLI (step 7), which prints its id, and give that id to the migration that adds the column, so that the

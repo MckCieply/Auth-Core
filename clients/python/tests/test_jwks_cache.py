@@ -265,6 +265,31 @@ def test_a_request_that_holds_its_key_does_not_wait_for_a_fetch_that_is_running(
     assert slow.fetches == 2
 
 
+def test_a_request_that_lacks_its_key_gives_up_waiting_for_a_fetch_that_runs_too_long(key1, clock):
+    slow = SlowJwks(key1)
+    cache = JwksCache(JWKS_URL, clock=clock, fetch=slow, timeout=0.3)  # the wait is bounded as the fetch is
+    fetching = threading.Thread(target=lambda: cache.key_for("k1"))
+    fetching.start()
+    assert slow.started.wait(10)
+    safety = threading.Timer(3, slow.release.set)  # frees the fetch should the waiter wait without bound
+    safety.start()
+
+    started = time.perf_counter()
+    try:
+        with pytest.raises(KeysUnavailable):
+            cache.key_for("k1")
+        waited = time.perf_counter() - started
+    finally:
+        safety.cancel()
+        slow.release.set()
+        fetching.join(10)
+
+    assert waited < 2
+    assert slow.fetches == 1
+    assert cache.key_for("k1") is not None  # the fetch that ran too long still filled the cache when it ended
+    assert slow.fetches == 1
+
+
 # --- the real fetch, against a server on 127.0.0.1 ------------------------------------------------------------------------
 
 

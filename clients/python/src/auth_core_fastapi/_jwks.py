@@ -78,7 +78,8 @@ class JwksCache:
 
     A fetch happens on first use, when the keys are older than `ttl`, and when a token names a `kid` that is not
     held, but never twice within `min_interval` (a failed fetch counts). A failed fetch keeps the keys already held.
-    One fetch runs at a time; a request that finds its key held never waits for it.
+    One fetch runs at a time; a request that finds its key held never waits for it, and one that lacks its key waits
+    for the running fetch no longer than `timeout` (then the keys are unavailable).
     """
 
     def __init__(
@@ -111,8 +112,9 @@ class JwksCache:
             # Held but old: one request renews the keys, the others carry on with what they hold.
             if not self._lock.acquire(blocking=False):
                 return held.key
-        else:
-            self._lock.acquire()
+        elif not self._lock.acquire(timeout=self._timeout):
+            # A fetch is running and the keys are not there: wait for it no longer than the fetch itself may take.
+            raise KeysUnavailable()
         try:
             self._renew(kid)
             found = self._snapshot.keys.get(kid)
