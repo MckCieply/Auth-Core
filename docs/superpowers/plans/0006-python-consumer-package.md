@@ -4456,5 +4456,18 @@ decision of the owner.
 
 ## As built
 
-(Written after implementation and verification, as in plans 0004 and 0005.)
+Implemented and verified locally. Tasks 1-9 were built from this plan, one implementer per task; each task's commit
+was reviewed against the spec before the next began. What changed after the task reviews: a deeply nested JSON body
+answers `400 invalid_request` in the sample (Task 5), and the guide and the overlay comment no longer say that Auth-Core
+publishes no port (Task 8). The review of the whole branch led to one fix wave (the key cache no longer waits for a fetch
+that runs too long, the package's version floors and its single-sourced version, the e2e script's project name, the
+`.gitignore`, two sentences of the guide, the map). Four rounds of fixes followed the verifiers: the key cache (a request
+that lacks its key is answered `503` at once while a fetch runs, no proxy and no redirect in the fetch, `aud` a string,
+held keys that expire after 24 hours, a clock that raises, a positive `min_interval`); the sample (JSON `404`, `405` and
+`503` shapes, a `500` logged by its class alone, the health check logging the start and the end of an outage); the overlay
+and the image (Caddy and PostgreSQL hardening, digests, hash-pinned packages and build tool); and the e2e script and the
+guide. They are listed in the [acceptance map](0006-acceptance-map.md) ("Plan-vs-implementation notes", "Local
+verification log") and in [spec 0006](../specs/0006-python-consumer-package.md), "As built". 206 package tests and 97
+sample tests pass (131 and 57 planned); the 935 .NET tests are unchanged; `scripts/e2e-notes.sh` and the five earlier
+e2e scripts pass on a clean stack.
 
