@@ -150,7 +150,8 @@ shortly" and keeps the user signed in. The package never answers
 - They are fetched again after 5 minutes, and at once when a token names an unknown
   `kid` (key rotation), but at most once every 10 seconds.
 - A failed fetch keeps the keys already held, so tokens signed by known keys keep
-  working while Auth-Core is down.
+  working while Auth-Core is down. Held keys are kept for at most 24 hours after the
+  last successful fetch; after that the answer is `503` until a fetch works (Decision 10).
 - A token whose `kid` is still unknown is a `401` when the latest fetch succeeded,
   and a `503` when it failed (whether that fetch ran for this request or within the
   10 seconds before it).
@@ -300,6 +301,8 @@ product. It names no product. Steps, each pointing at the sample's file:
 9. **The clock skew is 5 minutes**, the same as Auth-Core's own validation, so a
    backend and Auth-Core agree on when a token has expired. Tests of an expired token
    use one that expired more than 5 minutes ago.
+10. **Held keys expire 24 hours after the last successful fetch** (owner, 2026-02-13).
+    A long Auth-Core outage must not let a removed or rotated key work forever.
 
 ## Deferred / follow-ups
 
