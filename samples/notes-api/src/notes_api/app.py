@@ -153,7 +153,7 @@ class _Outage:
     """Whether the health check last found the database away, so that an outage is logged when it begins and not at every call.
 
     The compose healthcheck calls `/api/health` every few seconds: a database that stays away would fill the log with one
-    line per call. One line says it began (the class only, as everywhere), one says it is back. The notes endpoints do not
+    line per call. One line says it began (the class only, as everywhere), one says it is back (both at WARNING: that is the level of the container's log). The notes endpoints do not
     use this: each of their requests logs its own failure. The health check runs in the thread pool, hence the lock.
     """
 
@@ -173,7 +173,7 @@ class _Outage:
             ended = self._is_down
             self._is_down = False
         if ended:
-            log.info("the database answers again")
+            log.warning("the database answers again")  # a warning too: the container logs at WARNING, and the operator must see the end
 
 
 class _InternalErrors:

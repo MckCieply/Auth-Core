@@ -181,6 +181,21 @@ def test_the_health_check_logs_again_when_the_database_fails_after_it_has_recove
     ]
 
 
+def test_both_ends_of_an_outage_are_logged_at_the_level_the_container_runs_with(settings, engine, auth, caplog, monkeypatch):
+    """In the container the `notes_api` logger is at WARNING (uvicorn configures only its own loggers): an INFO recovery would never show."""
+    client, state = switchable_database(settings, engine, auth, monkeypatch)
+    assert logging.getLogger("notes_api.app").getEffectiveLevel() == logging.WARNING  # the default: no `caplog.at_level` below
+
+    state["up"] = False
+    assert client.get("/api/health").status_code == 503
+    assert client.get("/api/health").status_code == 503
+    state["up"] = True
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/health").status_code == 200
+
+    assert health_lines(caplog) == ["the database did not answer (OperationalError)", "the database answers again"]
+
+
 def test_a_healthy_database_leaves_no_line_in_the_log_from_the_health_check(client, caplog):
     with caplog.at_level(logging.DEBUG):
         assert client.get("/api/health").status_code == 200
