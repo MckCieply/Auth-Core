@@ -505,6 +505,130 @@ def test_a_request_that_lacks_its_key_is_unavailable_at_once_while_a_fetch_runs(
     assert cache.key_for("k1") is not None
 
 
+def test_after_the_first_fetch_has_ended_a_cold_cache_is_unavailable_at_once_while_a_fetch_runs(key1, clock):  # Ruling V7
+    """No fetch has ever worked, and the first one failed: the fetch that retries must not make the others wait again."""
+    slow = SlowJwks(key1)
+    slow.fails = True
+    cache = JwksCache(JWKS_URL, clock=clock, fetch=slow, timeout=3)
+    slow.release.set()
+    with pytest.raises(KeysUnavailable):
+        cache.key_for("k1")  # the first fetch has ended, and failed
+    slow.release.clear()
+    slow.started.clear()
+    clock.advance(10)
+    outcomes = []
+
+    def retry():
+        try:
+            cache.key_for("k1")
+        except KeysUnavailable:
+            outcomes.append("unavailable")
+
+    retrying = threading.Thread(target=retry)
+    retrying.start()
+    assert slow.started.wait(10)
+
+    try:
+        started = time.perf_counter()
+        with pytest.raises(KeysUnavailable):
+            cache.key_for("k1")
+        waited = time.perf_counter() - started
+    finally:
+        slow.release.set()
+        retrying.join(10)
+
+    assert waited < 1  # the retry is held open until the test lets go, and the 3 s of waiting are not spent
+    assert outcomes == ["unavailable"]
+    assert slow.fetches == 2
+
+
+def test_the_requests_that_wait_for_the_first_fetch_are_woken_when_it_ends(key1):  # criterion 5, Decision 7
+    """Not when each one's own limit runs out: the 4 s limit of the waiters is far longer than the 0.3 s fetch."""
+    slow = SlowJwks(key1)
+    cache = JwksCache(JWKS_URL, fetch=slow, timeout=4)
+    results = []
+    threads = run_in_threads(8, lambda: results.append(cache.key_for("k1") is not None))
+    assert slow.started.wait(10)
+    time.sleep(0.2)  # the seven others are waiting by now
+
+    slow.release.set()
+    released = time.perf_counter()
+    for thread in threads:
+        thread.join(10)
+
+    assert time.perf_counter() - released < 1.5
+    assert results == [True] * 8
+
+
+def test_a_clock_that_raises_after_a_fetch_does_not_leave_the_cache_waiting_for_a_fetch_that_has_ended(key1):
+    """The flag that says "a fetch is running" is cleared whatever happens, so that no request is ever turned away for it."""
+    clock_fails = []
+    fetches = []
+
+    def clock():
+        if clock_fails:
+            raise OSError("the clock does not answer")
+        return 1000.0
+
+    def fetch(url, timeout):
+        fetches.append(1)
+        if len(fetches) == 1:
+            clock_fails.append(True)  # the clock breaks while the first fetch runs, and is read when it returns
+        return {"keys": [key1.jwk]}
+
+    cache = JwksCache(JWKS_URL, clock=clock, fetch=fetch, timeout=0.5)
+    with pytest.raises(OSError):
+        cache.key_for("k1")
+    clock_fails.clear()
+
+    started = time.perf_counter()
+    assert cache.key_for("k1") is not None  # a fetch of its own, not a wait for the one that ended
+
+    assert time.perf_counter() - started < 0.4
+    assert len(fetches) == 2
+
+
+def test_a_worker_that_ends_on_something_that_is_not_an_exception_is_a_failed_fetch(monkeypatch):
+    def leave(*args):
+        raise SystemExit  # not an `Exception`: nothing of the worker's `except` takes it
+
+    monkeypatch.setattr(_jwks, "_download", leave)
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)  # the worker's end is expected: no warning for it
+
+    started = time.perf_counter()
+    with pytest.raises(RuntimeError, match="without an answer"):
+        _jwks.fetch_jwks("http://auth.test/jwks", 5)
+
+    assert time.perf_counter() - started < 2  # the caller was told at once, it did not wait for the deadline
+
+
+def test_a_key_older_than_24_hours_is_not_served_while_a_fetch_runs(key1, clock):  # Decision 10
+    slow = SlowJwks(key1)
+    cache = warm(slow, clock, key1)
+    clock.advance(24 * 3600)  # 24 hours and 10 seconds after the last good fetch
+    outcomes = []
+
+    def renew():
+        try:
+            outcomes.append(cache.key_for("k1") is not None)
+        except KeysUnavailable:
+            outcomes.append("unavailable")
+
+    renewing = threading.Thread(target=renew)
+    renewing.start()
+    assert slow.started.wait(10)
+
+    try:
+        with pytest.raises(KeysUnavailable):
+            cache.key_for("k1")  # the key is still in memory, and a fetch is running: it is not used
+    finally:
+        slow.release.set()
+        renewing.join(10)
+
+    assert outcomes == [True]
+    assert cache.key_for("k1") is not None  # and the fetch that worked restored it
+
+
 # --- the real fetch, against a server on 127.0.0.1 ------------------------------------------------------------------------
 
 
@@ -603,10 +727,10 @@ def test_the_deadline_reaches_the_cache_as_an_unavailable_key_set(server):  # cr
 
 @pytest.mark.parametrize("variable", ["HTTP_PROXY", "http_proxy"])
 def test_the_fetch_ignores_proxy_environment_variables(server, monkeypatch, variable):
+    """The variable is set after the module is imported: the rule is made where each fetch is made, so this guards it."""
     for name in ("HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(variable, "http://127.0.0.1:9")  # a proxy nobody listens at
-    monkeypatch.setattr(urllib.request, "_opener", None)  # urllib reads the variables when it first builds its opener
 
     assert JwksCache(server.url).key_for("k1") is not None
     assert server.requests == 1

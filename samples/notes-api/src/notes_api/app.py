@@ -12,9 +12,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 from starlette.requests import ClientDisconnect
+from starlette.routing import Match
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .db import Note, make_engine, upgrade_database
 from .settings import Settings
@@ -56,6 +59,7 @@ def create_app(
     )
     auth.install(app)
     _install_error_shapes(app)
+    app.add_middleware(_InternalErrors)  # added first: the innermost of the middlewares, so that its answer passes the others
 
     @app.middleware("http")
     async def never_stored(request: Request, call_next):
@@ -140,25 +144,62 @@ def _not_found() -> JSONResponse:
     return _error(404, "not_found")
 
 
+class _InternalErrors:
+    """Whatever the handlers did not take: logged by its class alone, answered with the 500 here, and not raised again.
+
+    The framework's own last layer logs a traceback, with the message of the exception, and re-raises it for the server to
+    log again: the message of a database or a driver can hold a statement or a value. So the 500 is answered before that.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def watching_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, watching_send)
+        except Exception as exc:
+            log.error("unexpected error (%s)", type(exc).__name__)  # the class only: no message, no traceback
+            if not started:
+                await _error(500, "internal_error")(scope, receive, send)
+            # else: the answer is on its way and cannot be changed. The server ends it, and says so without a traceback.
+
+
+def _allowed_methods(request: Request) -> str:
+    """Every method of the path, from all the routes that have it: the framework names those of the first one only."""
+    methods: set[str] = set()
+    for route in request.app.router.routes:
+        match, _ = route.matches(request.scope)
+        if match in (Match.FULL, Match.PARTIAL):
+            methods.update(getattr(route, "methods", None) or ())
+    return ", ".join(sorted(methods))
+
+
 def _install_error_shapes(app: FastAPI) -> None:
     async def http_error(request: Request, exc: HTTPException):
         if exc.status_code == 404:
             return _error(404, "not_found")
         if exc.status_code == 405:
-            return _error(405, "method_not_allowed", headers={k: v for k, v in (exc.headers or {}).items()})
+            return _error(405, "method_not_allowed", headers={"Allow": _allowed_methods(request)})
         return await http_exception_handler(request, exc)
 
-    async def database_error(request: Request, exc: DBAPIError):
+    async def database_error(request: Request, exc: Exception):
         log.warning("the database did not answer (%s)", type(exc).__name__)  # the class only: no statement, no value
         return _error(503, "database_unavailable")
 
-    async def unexpected_error(request: Request, exc: Exception):
-        log.error("unexpected error (%s)", type(exc).__name__)
-        return _error(500, "internal_error")
-
     app.add_exception_handler(HTTPException, http_error)
     app.add_exception_handler(DBAPIError, database_error)
-    app.add_exception_handler(Exception, unexpected_error)
+    app.add_exception_handler(PoolTimeout, database_error)  # no connection came free in time: the database is as good as away
 
 
 async def _read_text(request: Request) -> str:

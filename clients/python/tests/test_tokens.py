@@ -162,6 +162,26 @@ def test_a_time_claim_that_is_not_a_json_number_is_a_401(client, key1, claim, va
     assert_unauthorized(client.get("/me", headers=bearer(key1.token(**{claim: value}))))
 
 
+@pytest.mark.parametrize("claim", ["exp", "iat", "nbf"])
+@pytest.mark.parametrize("value", ["1.5", "1e3", "NaN", "Infinity"])
+def test_a_time_claim_written_as_text_is_a_401_even_when_it_looks_like_a_float(client, key1, claim, value):  # criterion 3
+    assert_unauthorized(client.get("/me", headers=bearer(key1.token(**{claim: value}))))
+
+
+def test_time_claims_that_are_json_floats_are_accepted(client, key1):  # criterion 3: "JSON numbers", not only integers
+    now = time.time()  # with a fraction of a second, as a float
+
+    token = key1.token(iat=now - 5.5, exp=now + 600.25, nbf=now - 5.5)
+
+    assert client.get("/me", headers=bearer(token)).status_code == 200
+
+
+def test_a_float_expiry_in_the_past_is_still_a_401(client, key1):  # criterion 3
+    now = time.time()
+
+    assert_unauthorized(client.get("/me", headers=bearer(key1.token(iat=now - 2000.5, exp=now - 1000.5))))
+
+
 def test_a_not_before_in_the_past_is_accepted_and_one_in_the_future_is_a_401(client, key1):  # criterion 3
     now = int(time.time())
 

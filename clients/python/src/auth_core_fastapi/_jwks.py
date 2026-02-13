@@ -36,9 +36,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-# The key set is fetched from the address that was configured, and from nowhere else: no proxy named by the
-# environment (HTTP_PROXY and the like, nor the registry on Windows), and no redirect.
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+def _open(url: str, timeout: float) -> Any:
+    """The key set is fetched from the address that was configured, and from nowhere else: no proxy named by the
+    environment (HTTP_PROXY and the like, nor the registry on Windows), and no redirect.
+
+    The opener is built for each fetch (a fetch is every few minutes at most), so that the rule is made where the fetch is
+    made and not once at import, when the environment may be another one.
+    """
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+    return opener.open(url, timeout=timeout)
 
 
 def fetch_jwks(url: str, timeout: float) -> Any:
@@ -73,7 +79,7 @@ def fetch_jwks(url: str, timeout: float) -> Any:
 
 def _download(url: str, timeout: float, cancelled: threading.Event) -> Any:
     body = bytearray()
-    with _OPENER.open(url, timeout=timeout) as response:
+    with _open(url, timeout) as response:
         while chunk := response.read1(8192):  # what has arrived, not a wait for 8192 bytes
             if cancelled.is_set():
                 raise TimeoutError("the key set was not fetched in time")
@@ -96,10 +102,10 @@ class JwksCache:
     held, but never twice within `min_interval` (a failed fetch counts). A failed fetch keeps the keys already held,
     for `max_stale` after the last fetch that worked and no longer: then they are gone, and the keys are unavailable
     until a fetch works. The times are read from the clock after a fetch returns, so a slow fetch does not shorten them.
-    One fetch runs at a time. A request that holds its key never waits for it. Until the first fetch has worked, a
-    request waits for the fetch that is running, for `timeout` at most (then the keys are unavailable). Once a fetch has
-    worked, a request that lacks its key while a fetch is running finds the keys unavailable at once, so that a flood
-    of unknown `kid`s cannot hold the threads of the product while Auth-Core is slow.
+    One fetch runs at a time. A request that holds its key never waits for it. Until the first fetch has
+    ended, a request waits for it, for `timeout` at most (then the keys are unavailable). After that, when a fetch is
+    running and a request lacks its key, the keys are unavailable at once, whether the first fetch worked or not, so that
+    a flood of unknown `kid`s cannot hold the threads of the product while Auth-Core is slow.
     """
 
     def __init__(
@@ -125,6 +131,7 @@ class JwksCache:
         self._snapshot = _Snapshot({}, None)
         self._attempted_at: float | None = None
         self._last_ok = False
+        self._first_attempt_done = False  # a fetch has ended, whatever it came to: the cold waiters wait for this one only
         # `_cond` guards `_fetching` and the swap of the snapshot. It is held for a few instructions, never during a fetch, so
         # "a fetch is running" is exactly `_fetching`, and nothing else can make a request think so.
         self._cond = threading.Condition()
@@ -146,9 +153,12 @@ class JwksCache:
                     if snapshot.fetched_at is not None:
                         # Warm cache, a fetch is running and the key is not held: answer now, a thread is not worth holding.
                         raise KeysUnavailable()
-                    # Cold cache: no fetch has ever worked. The first requests of a product wait for the fetch that is
-                    # running, no longer than the fetch itself may take: nothing they could use is held, and a 503 would
-                    # greet the users of a product that has just started.
+                    # Cold cache: no fetch has ever worked. The requests of a product that has just started wait for the
+                    # first fetch that is running, no longer than the fetch itself may take: nothing they could use is
+                    # held, and a 503 would greet the users of a product that has just started. A later fetch of a cold
+                    # cache follows a failed one: it is answered at once, so that a hung Auth-Core holds no thread again.
+                    if self._first_attempt_done:
+                        raise KeysUnavailable()
                     if waited_since is None:
                         waited_since = time.monotonic()
                     remaining = self._timeout - (time.monotonic() - waited_since)
@@ -184,18 +194,22 @@ class JwksCache:
 
     def _fetch_and_store(self) -> None:  # called by the one request that set `_fetching`
         keys: dict[str, PyJWK] | None = None
+        finished_at: float | None = None
         try:
             try:
                 keys = _parse(self._fetch(self._url, self._timeout))
             except Exception as exc:  # any failure keeps the keys already held
                 log.warning("the key set could not be fetched (%s)", type(exc).__name__)
-        finally:
             finished_at = self._clock()  # after the fetch: a slow fetch does not shorten the age of the keys
+        finally:
+            # Whatever happened above, even a clock that raises: the flag is cleared and the waiters are woken.
             with self._cond:
-                self._attempted_at = finished_at
-                self._last_ok = keys is not None
-                if keys is not None:
-                    self._snapshot = _Snapshot(keys, finished_at)
+                if finished_at is not None:
+                    self._attempted_at = finished_at
+                    if keys is not None:
+                        self._snapshot = _Snapshot(keys, finished_at)
+                self._last_ok = keys is not None and finished_at is not None
+                self._first_attempt_done = True
                 self._fetching = False
                 self._cond.notify_all()
 

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 
 from conftest import ISSUER, headers
 from notes_api import db
@@ -33,15 +34,35 @@ def test_an_unknown_path_is_a_json_404_that_is_never_stored(client, path):
 
 @pytest.mark.parametrize(
     "method, path, allowed",
-    [("DELETE", "/api/notes", "GET"), ("PUT", "/api/notes/x", "GET"), ("POST", "/api/health", "GET")],
+    [
+        ("DELETE", "/api/notes", "GET, POST"),
+        ("PUT", "/api/notes", "GET, POST"),
+        ("PUT", "/api/notes/x", "GET"),
+        ("POST", "/api/health", "GET"),
+    ],
 )
-def test_a_method_that_is_not_allowed_is_a_json_405_with_the_allow_header(client, method, path, allowed):
+def test_a_method_that_is_not_allowed_is_a_json_405_that_lists_every_method_the_path_allows(client, method, path, allowed):
     response = client.request(method, path)
 
     assert response.status_code == 405
     assert response.json() == {"error": "method_not_allowed"}
     assert response.headers["cache-control"] == "no-store"
-    assert allowed in response.headers["allow"]  # the framework's header is kept
+    assert response.headers["allow"] == allowed
+
+
+def test_the_allow_header_of_every_route_lists_all_the_methods_of_its_path(client):
+    """Whatever the routes are: the methods of a path are all the methods of the routes that have that path."""
+    methods_of: dict[str, set[str]] = {}
+    for route in client.app.routes:
+        if getattr(route, "methods", None) and route.path.startswith("/api"):
+            methods_of.setdefault(route.path, set()).update(route.methods)
+    assert {"/api/notes", "/api/health"} <= set(methods_of)  # the routes were found
+
+    for path, methods in methods_of.items():
+        response = client.request("DELETE", path.replace("{note_id}", "x"))
+
+        assert response.status_code == 405, path
+        assert response.headers["allow"] == ", ".join(sorted(methods)), path
 
 
 def test_the_trailing_slash_is_not_redirected(client, signer):
@@ -74,26 +95,58 @@ def test_a_database_that_does_not_answer_is_a_503(broken_database, signer, metho
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_the_database_error_is_logged_by_its_class_and_not_by_its_text(broken_database, signer, caplog):
-    with caplog.at_level(logging.DEBUG):
-        broken_database.post("/api/notes", json={"text": "secret note text"}, headers=headers(signer))
+def test_the_database_error_is_logged_by_its_class_and_not_by_its_text(settings, engine, auth, signer, caplog, monkeypatch):
+    """The error carries a statement and a driver message, as a real one does: none of it is in the log."""
+    import notes_api.app as app_module
 
+    def fail(*args, **kwargs):
+        raise OperationalError("INSERT INTO secret_table VALUES (?)", ("secret note text",), Exception("driver says secret-driver-text"))
+
+    monkeypatch.setattr(app_module, "_insert", fail)
+    client = TestClient(create_app(settings, engine=engine, auth=auth, migrate=False))
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/api/notes", json={"text": "hello"}, headers=headers(signer))
+
+    assert response.status_code == 503
     assert "OperationalError" in caplog.text
-    assert "secret note text" not in caplog.text
-    assert "missing-directory" not in caplog.text
+    for text in ("secret_table", "secret note text", "secret-driver-text", "INSERT"):
+        assert text not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)  # no traceback attached to any record
+
+
+def test_the_connection_pool_running_out_is_a_503_like_a_database_that_does_not_answer(settings, engine, auth, signer, monkeypatch):
+    import notes_api.app as app_module
+
+    def fail(*args, **kwargs):
+        raise PoolTimeout("QueuePool limit of size 5 overflow 10 reached")
+
+    monkeypatch.setattr(app_module, "_insert", fail)
+    client = TestClient(create_app(settings, engine=engine, auth=auth, migrate=False))
+
+    response = client.post("/api/notes", json={"text": "hello"}, headers=headers(signer))
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "database_unavailable"}
 
 
 # --- anything else that goes wrong: 500, in the same shape ----------------------------------------------------------------
 
 
-def test_an_unexpected_error_is_a_json_500_that_is_never_stored(settings, engine, auth, signer, monkeypatch):
+def explode_on_insert(monkeypatch, message="the text of a note must not appear: hello"):
     import notes_api.app as app_module
 
     def explode(*args, **kwargs):
-        raise RuntimeError("the text of a note must not appear: hello")
+        raise RuntimeError(message)
 
     monkeypatch.setattr(app_module, "_view", explode)
-    client = TestClient(create_app(settings, engine=engine, auth=auth, migrate=False), raise_server_exceptions=False)
+
+
+def test_an_unexpected_error_is_a_json_500_that_is_never_stored(settings, engine, auth, signer, monkeypatch):
+    explode_on_insert(monkeypatch)
+    # The server's exceptions are raised in the test client's caller, as the framework re-raises what reaches its last layer:
+    # this one must not get that far, or the server logs the traceback and the message of it (the default of the client).
+    client = TestClient(create_app(settings, engine=engine, auth=auth, migrate=False))
 
     response = client.post("/api/notes", json={"text": "hello"}, headers=headers(signer))
 
@@ -102,6 +155,51 @@ def test_an_unexpected_error_is_a_json_500_that_is_never_stored(settings, engine
     assert response.headers["content-type"] == "application/json"
     assert response.headers["cache-control"] == "no-store"
     assert "hello" not in response.text
+
+
+def test_an_unexpected_error_is_logged_by_its_class_alone(settings, engine, auth, signer, caplog, monkeypatch):
+    explode_on_insert(monkeypatch, "secret-exception-text with a note: hello")
+    client = TestClient(create_app(settings, engine=engine, auth=auth, migrate=False))
+
+    with caplog.at_level(logging.DEBUG):
+        client.post("/api/notes", json={"text": "hello"}, headers=headers(signer))
+
+    errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert len(errors) == 1  # at error level, once
+    assert "RuntimeError" in errors[0].getMessage()
+    assert "secret-exception-text" not in caplog.text
+    assert "hello" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)  # no traceback attached to any record
+
+
+def test_an_error_after_the_answer_has_started_is_not_logged_with_its_text(settings, engine, auth, caplog):
+    """Nothing in the sample does this, but a handler that cannot send a 500 must not fall back to the framework's log."""
+    app = create_app(settings, engine=engine, auth=auth, migrate=False)
+
+    async def go():
+        sent = []
+
+        async def inner(scope, receive, send):
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            raise RuntimeError("secret-late-text")
+
+        async def send(message):
+            sent.append(message)
+
+        async def receive():
+            return {"type": "http.disconnect"}
+
+        from notes_api.app import _InternalErrors
+
+        await _InternalErrors(inner)({"type": "http", "method": "GET", "path": "/"}, receive, send)
+        return sent
+
+    with caplog.at_level(logging.DEBUG):
+        sent = asyncio.run(go())
+
+    assert [message["type"] for message in sent] == ["http.response.start"]  # no second answer on top of the first
+    assert "RuntimeError" in caplog.text
+    assert "secret-late-text" not in caplog.text
 
 
 # --- the body: stop reading at the cap, and a client that goes away is not an error ---------------------------------------

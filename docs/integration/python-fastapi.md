@@ -22,9 +22,11 @@ auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.0#sub
 
 Pin the tag: the package is versioned with the token contract. A git tag can be moved, so for production pin the install
 to the commit the tag points at (`@<40-character commit SHA>` in place of the tag name). The sample's
-[`requirements.txt`](../../samples/notes-api/requirements.txt) lists the rest of its dependencies and
-[`Dockerfile`](../../samples/notes-api/Dockerfile) installs the package from the clone (`clients/python`) instead of a
-tag, so that the sample builds from one clone with no GitHub.
+[`requirements.txt`](../../samples/notes-api/requirements.txt) lists the rest of its dependencies at exact versions (all
+of them, not only the ones it asks for) and [`Dockerfile`](../../samples/notes-api/Dockerfile) installs the package from the
+clone (`clients/python`) instead of a tag, so that the sample builds from one clone with no GitHub. The image installs
+[`requirements-image.txt`](../../samples/notes-api/requirements-image.txt), the same versions with the hash of each file
+(`pip install --require-hashes`): a product that builds an image can do the same.
 
 ## 2. Write your `auth.yaml`
 
