@@ -564,11 +564,12 @@ def test_a_clock_that_raises_after_a_fetch_does_not_leave_the_cache_waiting_for_
     """The flag that says "a fetch is running" is cleared whatever happens, so that no request is ever turned away for it."""
     clock_fails = []
     fetches = []
+    now = [1000.0]
 
     def clock():
         if clock_fails:
             raise OSError("the clock does not answer")
-        return 1000.0
+        return now[0]
 
     def fetch(url, timeout):
         fetches.append(1)
@@ -580,12 +581,94 @@ def test_a_clock_that_raises_after_a_fetch_does_not_leave_the_cache_waiting_for_
     with pytest.raises(OSError):
         cache.key_for("k1")
     clock_fails.clear()
+    now[0] += 11  # that attempt counted: the next one is not made before `min_interval` has passed
 
     started = time.perf_counter()
     assert cache.key_for("k1") is not None  # a fetch of its own, not a wait for the one that ended
 
     assert time.perf_counter() - started < 0.4
     assert len(fetches) == 2
+
+
+def test_an_attempt_whose_end_could_not_be_timed_still_counts_as_an_attempt(key1):  # R3-1
+    """The clock fails once, when the end of the first fetch is read. The attempt is counted from the clock reading made just
+    before it began, so `min_interval` holds and the waiters that its end wakes are answered, not sent on to a second attempt."""
+    clock_fails = []
+    fetches = []
+    started, release = threading.Event(), threading.Event()
+
+    def clock():
+        if clock_fails:
+            clock_fails.pop()
+            raise OSError("the clock does not answer")
+        return 1000.0
+
+    def fetch(url, timeout):
+        fetches.append(1)
+        started.set()
+        assert release.wait(10)
+        clock_fails.append(True)  # read by the fetching request when the fetch returns, by nobody before it
+        return {"keys": [key1.jwk]}
+
+    cache = JwksCache(JWKS_URL, clock=clock, fetch=fetch, timeout=4)
+    outcomes = []
+
+    def ask():
+        try:
+            cache.key_for("k1")
+            outcomes.append("key")
+        except KeysUnavailable:
+            outcomes.append("unavailable")
+        except OSError:
+            outcomes.append("clock")
+
+    threads = run_in_threads(5, ask)
+    assert started.wait(10)
+    time.sleep(0.2)  # the four others are waiting by now
+    release.set()
+    for thread in threads:
+        thread.join(10)
+
+    assert sorted(outcomes) == ["clock"] + ["unavailable"] * 4
+    assert len(fetches) == 1
+
+
+def test_an_attempt_that_ends_on_something_that_is_not_an_exception_still_counts_as_an_attempt():  # R3-1
+    """A `SystemExit` leaves the fetch (a timeout of an async framework does the like): the clock was never read for its end,
+    and the waiters that it wakes must be answered, not sent on to a second attempt that they would wait for again."""
+    fetches = []
+    started, release = threading.Event(), threading.Event()
+
+    def fetch(url, timeout):
+        fetches.append(1)
+        started.set()
+        assert release.wait(10)
+        raise SystemExit
+
+    cache = JwksCache(JWKS_URL, fetch=fetch, timeout=4)
+    outcomes = []
+
+    def ask():
+        try:
+            cache.key_for("k1")
+            outcomes.append("key")
+        except KeysUnavailable:
+            outcomes.append("unavailable")
+        except SystemExit:
+            outcomes.append("exit")
+
+    threads = run_in_threads(5, ask)
+    assert started.wait(10)
+    time.sleep(0.2)
+    release.set()
+    for thread in threads:
+        thread.join(10)
+
+    assert sorted(outcomes) == ["exit"] + ["unavailable"] * 4
+    assert len(fetches) == 1
+    with pytest.raises(KeysUnavailable):  # and the next request, inside `min_interval`, makes no attempt either
+        cache.key_for("k1")
+    assert len(fetches) == 1
 
 
 def test_a_worker_that_ends_on_something_that_is_not_an_exception_is_a_failed_fetch(monkeypatch):

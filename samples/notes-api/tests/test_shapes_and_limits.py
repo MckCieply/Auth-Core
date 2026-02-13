@@ -115,6 +115,19 @@ def test_the_database_error_is_logged_by_its_class_and_not_by_its_text(settings,
     assert all(record.exc_info is None for record in caplog.records)  # no traceback attached to any record
 
 
+@pytest.mark.parametrize("path", ["/api/health", "/api/notes"])
+def test_a_database_that_does_not_answer_is_logged_once_per_request_by_its_class_on_every_path(broken_database, signer, caplog, path):
+    """The health check and the notes endpoints answer the same 503; each request leaves one line, the class and nothing else."""
+    with caplog.at_level(logging.DEBUG):
+        first = broken_database.get(path, headers=headers(signer))
+        second = broken_database.get(path, headers=headers(signer))
+
+    assert (first.status_code, second.status_code) == (503, 503)
+    lines = [record.getMessage() for record in caplog.records if "did not answer" in record.getMessage()]
+    assert lines == ["the database did not answer (OperationalError)"] * 2
+    assert all(record.exc_info is None for record in caplog.records)
+
+
 def test_the_connection_pool_running_out_is_a_503_like_a_database_that_does_not_answer(settings, engine, auth, signer, monkeypatch):
     import notes_api.app as app_module
 

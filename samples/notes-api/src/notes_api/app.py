@@ -72,7 +72,8 @@ def create_app(
         try:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
-        except Exception:
+        except Exception as exc:
+            log.warning("the database did not answer (%s)", type(exc).__name__)  # as on the notes endpoints: the class only
             return _error(503, "database_unavailable")
         return {"status": "ok"}
 

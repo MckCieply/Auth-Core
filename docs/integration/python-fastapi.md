@@ -26,7 +26,8 @@ to the commit the tag points at (`@<40-character commit SHA>` in place of the ta
 of them, not only the ones it asks for) and [`Dockerfile`](../../samples/notes-api/Dockerfile) installs the package from the
 clone (`clients/python`) instead of a tag, so that the sample builds from one clone with no GitHub. The image installs
 [`requirements-image.txt`](../../samples/notes-api/requirements-image.txt), the same versions with the hash of each file
-(`pip install --require-hashes`): a product that builds an image can do the same.
+(`pip install --require-hashes`): a product that builds an image can do the same. The build tool of the package is pinned and hashed the same way
+([`requirements-build.txt`](../../samples/notes-api/requirements-build.txt)), and the package is built from it with `--no-build-isolation`.
 
 ## 2. Write your `auth.yaml`
 
@@ -230,6 +231,7 @@ operator's part (create the company, invite its first admin) with the CLI, the r
 | `401` | your backend | `POST /auth/refresh` (the cookie goes along by itself) and retry once. If the refresh is a `401` too, show the login screen. |
 | `403 {"error":"forbidden"}` | your backend | The user has no access to this: show "no access". Do not refresh. |
 | `503 {"error":"auth_unavailable"}` | your backend | Auth-Core cannot be reached and the backend holds no key for the token. Show "try again shortly" and keep the user signed in; do not log them out. |
+| `503 {"error":"database_unavailable"}` | your backend (the sample answers it when its own database does not answer, or has no free connection) | The data cannot be read or written just now; the user's sign-in is fine. Show "try again shortly" and retry after a moment; do not refresh the token and do not log them out. |
 | `403 {"error":"permissions_changed"}` | Auth-Core's company API (`/auth/org/...`) | The token still claims a permission the database no longer grants. Refresh and retry once. |
 
 Your backend never answers `permissions_changed`: it does not read the database.

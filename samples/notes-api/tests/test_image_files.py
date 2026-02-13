@@ -52,6 +52,36 @@ def test_the_dockerfile_installs_the_libraries_from_the_list_with_hashes_and_whe
     assert re.search(r"^COPY samples/notes-api/requirements-image\.txt \.$", dockerfile, re.MULTILINE)
 
 
+def test_the_build_tool_and_what_it_needs_are_pinned_and_hashed():
+    build = requirements("requirements-build.txt")
+
+    for name in ("hatchling", "packaging", "pathspec", "pluggy", "trove-classifiers"):  # hatchling and its dependencies
+        assert name in build
+    assert all(len(hashes) == 1 for _, hashes in build.values())  # pure Python: one wheel for every system
+    assert set(build).isdisjoint(requirements("requirements-image.txt"))  # what is built with is not what runs
+
+
+def test_the_version_of_the_build_tool_is_the_one_the_package_asks_for():
+    pyproject = (SAMPLE.parent.parent / "clients" / "python" / "pyproject.toml").read_text(encoding="utf-8")
+    asked = re.search(r'requires = \["hatchling==([0-9.]+)"\]', pyproject)
+
+    assert asked, "the build backend of the package is not pinned to one version"
+    assert requirements("requirements-build.txt")["hatchling"][0] == asked.group(1)
+
+
+def test_the_dockerfile_builds_the_package_from_the_pinned_build_tool_and_fetches_nothing_unpinned():
+    dockerfile = (SAMPLE / "Dockerfile").read_text(encoding="utf-8").replace("\\\n", " ")
+
+    assert re.search(r"^COPY samples/notes-api/requirements-build\.txt /tmp/requirements-build\.txt$", dockerfile, re.MULTILINE)
+    assert re.search(r"pip install --require-hashes --only-binary=:all: -r /tmp/requirements-build\.txt", dockerfile)
+    assert re.search(r"pip install --no-build-isolation --no-deps /tmp/auth-core-fastapi", dockerfile)
+    installs = re.findall(r"pip install [^&;\n]*", dockerfile)
+    assert len(installs) == 3  # the libraries, the build tool, the package: each one of the above, none other
+    for install in installs:
+        assert "--require-hashes" in install or "--no-build-isolation" in install, install
+    assert re.search(r"pip uninstall --yes hatchling packaging pathspec pluggy tomlkit trove-classifiers", dockerfile)  # not in the image
+
+
 def test_the_images_of_the_overlay_are_pinned_by_digest():
     compose = (SAMPLE / "compose.yml").read_text(encoding="utf-8")
     dockerfile = (SAMPLE / "Dockerfile").read_text(encoding="utf-8")

@@ -165,11 +165,12 @@ class JwksCache:
                     if remaining <= 0 or not self._cond.wait_for(lambda: not self._fetching, remaining):
                         raise KeysUnavailable()
                     continue  # the fetch has ended: look at what it left
-                if not self._should_fetch(kid, snapshot, self._clock()):
+                started_at = self._clock()
+                if not self._should_fetch(kid, snapshot, started_at):
                     return self._answer(kid)
                 self._fetching = True
             break
-        self._fetch_and_store()
+        self._fetch_and_store(started_at)
         with self._cond:
             return self._answer(kid)
 
@@ -192,7 +193,7 @@ class JwksCache:
             return False
         return not (kid in snapshot.keys and self._is_fresh(snapshot, now) and self._is_usable(snapshot, now))
 
-    def _fetch_and_store(self) -> None:  # called by the one request that set `_fetching`
+    def _fetch_and_store(self, started_at: float) -> None:  # called by the one request that set `_fetching`
         keys: dict[str, PyJWK] | None = None
         finished_at: float | None = None
         try:
@@ -202,12 +203,17 @@ class JwksCache:
                 log.warning("the key set could not be fetched (%s)", type(exc).__name__)
             finished_at = self._clock()  # after the fetch: a slow fetch does not shorten the age of the keys
         finally:
-            # Whatever happened above, even a clock that raises: the flag is cleared and the waiters are woken.
+            # Whatever happened above, even a clock that raises or a fetch that ends on something that is not an `Exception`: the
+            # attempt is recorded, the flag is cleared and the waiters are woken.
             with self._cond:
-                if finished_at is not None:
-                    self._attempted_at = finished_at
-                    if keys is not None:
-                        self._snapshot = _Snapshot(keys, finished_at)
+                # When the end of the attempt could not be timed, it counts from its start: that is a reading of the same clock,
+                # taken a moment before and known to have worked, and it needs no new read of a clock that may be failing. The
+                # interval then runs out at most `timeout` early, never late, and the waiters that this end wakes find the
+                # attempt recorded and are answered, not sent on to a second one. Only a time that was read after the fetch
+                # dates the keys: a fallback never makes them look newer than they are.
+                self._attempted_at = finished_at if finished_at is not None else started_at
+                if finished_at is not None and keys is not None:
+                    self._snapshot = _Snapshot(keys, finished_at)
                 self._last_ok = keys is not None and finished_at is not None
                 self._first_attempt_done = True
                 self._fetching = False

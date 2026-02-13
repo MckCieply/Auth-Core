@@ -21,11 +21,17 @@ RUN pip install --require-hashes --only-binary=:all: -r requirements-image.txt
 
 # The package, from this clone. A product installs it from a tag instead (docs/integration/python-fastapi.md). Its own
 # dependencies are in the list above, so none is fetched here (--no-deps; `pip check` fails the build if one is missing).
-# What is still fetched without a hash is its build tool, hatchling (pinned to one version in clients/python/pyproject.toml):
-# it is not part of the image afterwards.
+# Its build tool, hatchling, and what that needs are pinned and hashed too (requirements-build.txt, the same rules), and the
+# package is built with --no-build-isolation, so that pip fetches nothing of its own for the build. Those six are removed
+# afterwards: the image runs the sample, it does not build anything.
+COPY samples/notes-api/requirements-build.txt /tmp/requirements-build.txt
 COPY clients/python/pyproject.toml /tmp/auth-core-fastapi/pyproject.toml
 COPY clients/python/src /tmp/auth-core-fastapi/src
-RUN pip install --no-deps /tmp/auth-core-fastapi && pip check && rm -rf /tmp/auth-core-fastapi
+RUN pip install --require-hashes --only-binary=:all: -r /tmp/requirements-build.txt \
+    && pip install --no-build-isolation --no-deps /tmp/auth-core-fastapi \
+    && pip uninstall --yes hatchling packaging pathspec pluggy tomlkit trove-classifiers \
+    && pip check \
+    && rm -rf /tmp/auth-core-fastapi /tmp/requirements-build.txt
 
 COPY samples/notes-api/alembic.ini .
 COPY samples/notes-api/migrations migrations
