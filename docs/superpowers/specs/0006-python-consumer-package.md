@@ -316,7 +316,8 @@ product. It names no product. Steps, each pointing at the sample's file:
 - **A "no login" mode** in the package, for products that run both ways.
 - **Asking Auth-Core whether a token's permissions are still current** (the
   `permissions_changed` check of spec 0005 at a product's own endpoints).
-- **design.md:** a one-line note on Decisions 2 and 4, added with "As built".
+- **design.md:** a one-line note on Decisions 2 and 4, added with "As built". *Done: it is in the
+  list of "Week 4: first consumer, backend".*
 
 **Residual risks:**
 
@@ -364,3 +365,87 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
   `pyproject.toml`.
 - That **Python 3.12** is available locally for the tests (`python3` here is the
   Microsoft Store stub).
+
+## As built (owner, 2026-02-13)
+
+Recorded after implementation and local verification (plan 0006,
+[acceptance map](../plans/0006-acceptance-map.md)). What entered this stage stays in it;
+this section records it rather than rewriting the decisions above. Two sentences above are
+read as this section says: the support line of "Name and installation" (FastAPI 0.115, see
+the versions below) and the first case of "Keys" (what a request does while a fetch runs).
+
+**Contract as built.** As specified, with these readings of what the spec left open:
+
+- **While a fetch runs.** While a key-set fetch is running, a request whose key is not held
+  is answered `503 auth_unavailable` at once, though the latest completed fetch may have
+  succeeded (so a token with a brand-new `kid` can get one transient `503`). The only
+  requests that wait are those that arrive before the first fetch of a product has ended,
+  and they wait for that fetch for 5 seconds at most. A product whose first fetch failed
+  answers `503` at once until a fetch works.
+- **How the key set is fetched.** The key set is fetched directly from `jwks_url`: no proxy
+  (the environment variables and the Windows registry are ignored), no redirect (a `3xx` is
+  a failed fetch), `http` or `https` only. A product that must reach its key set through a
+  proxy cannot use one, so it uses an address it reaches directly. The 5-minute and
+  10-second rules count from the end of the last fetch, and a held key is also refused after
+  24 hours while a fetch runs.
+- **Token shape.** `aud` must be a string equal to the configured audience (Auth-Core writes
+  it as a string; a list is a `401`). `exp`, `iat` and `nbf`, when present, must be JSON
+  numbers, integers or fractions (numeric strings and booleans are a `401`). A future `nbf`
+  is a `401`, with the same 5 minutes of skew.
+- **The sample's error shapes.** Every answer of the sample is JSON and
+  `Cache-Control: no-store`. An unknown path is `404 not_found` (a trailing slash too, with
+  no redirect). A wrong method is `405 method_not_allowed` with an `Allow` header that lists
+  every method of the path. A database that does not answer, or a pool with no free
+  connection, is `503 database_unavailable` on the notes endpoints and on `/api/health`.
+  Anything else is `500 internal_error`, logged by its class alone, with no message and no
+  traceback. A body over the cap is `400` with `Connection: close`, read up to the cap only.
+  The connection to PostgreSQL times out at 5 seconds.
+- **Versions.** Supported: Python 3.12, FastAPI 0.142 or newer (tested on 0.142.2; the floor
+  is 0.142, and 0.115 was not tested) and `PyJWT[crypto]` 2.15 or newer. The package's build
+  backend is pinned (`hatchling==1.32.4`).
+- **The overlay.** Caddy is pinned at `2.11.7` by digest and runs as `10002:10002` with a
+  read-only root filesystem, `/data` and `/config` in memory, all capabilities dropped
+  except `NET_BIND_SERVICE` (the file capability of the image's binary; without it Caddy
+  does not start) and `no-new-privileges`. It waits for the sample's health check. The
+  sample's port is not published (Auth-Core's own `127.0.0.1:8080` stays published by the
+  base file). `notes-db-init` (`postgres:16-alpine` by digest) also runs
+  `REVOKE CONNECT ... FROM PUBLIC` on `auth`, `postgres` and `template1`, so the login
+  `notes` opens `notes` only. Those revokes persist in the volume if the overlay is
+  dropped, and the owner `auth` (a superuser) keeps its access. The `postgres` service of
+  the base file is still pinned by tag only.
+- **The e2e script.** `scripts/e2e-notes.sh` runs as the compose project `auth-core-notes`,
+  reads the expected issuer and audience from the sample's container, and also checks the
+  attributes of the refresh cookie (`Path=/auth`, `HttpOnly`, `Secure`, `SameSite=Strict`)
+  and that `aud` is a JSON string.
+- **Merge steps.** The tag `python-v0.1.0` must exist before the install line of the spec,
+  the guide and `requirements.txt` resolves; the guide advises pinning to the commit the tag
+  points at. `docs/design.md` has a one-line note on Decisions 2 and 4.
+- **The sample's image.** It installs from `requirements-image.txt`: all 24 packages at
+  exact versions, each with the hash of its Linux wheel (x86_64 and aarch64, Python 3.12),
+  with `pip install --require-hashes --only-binary=:all:`, then the package from the clone
+  with `--no-deps`, then `pip check`. The base image `python:3.12-slim` is pinned by digest.
+  `requirements.txt` has the same pins without hashes, so it installs on any system, and a
+  test keeps the two equal.
+
+**Added by the fixes after the third round of verification:**
+
+- `min_interval` of the key cache must be positive: `JwksCache` refuses 0, a negative
+  number and `nan`. The spec does not name the parameter and nothing needs 0; the default
+  stays 10 seconds.
+- `/api/health` logs a database outage once when it starts and once when it ends, both at
+  `WARNING` (the level the container's log runs at), and not at every call of the
+  healthcheck. The notes endpoints still log one line for each failed request.
+- The build tool's own dependencies are installed hash-pinned and removed from the image:
+  `requirements-build.txt` lists hatchling and the five packages it needs, with a hash each;
+  the package is built with `--no-build-isolation --no-deps`, and the six are uninstalled
+  afterwards.
+- The guide's table of the sample's answers lists `503 database_unavailable`.
+
+**Known limits:**
+
+- An asynchronous exception (a gevent or eventlet timeout) delivered between marking a fetch
+  as running and the `try` that ends it can leave the cache marked as fetching. This cannot
+  be closed in pure Python without a redesign. While the cache is warm, a request that lacks
+  its key is then answered `503` at once; a cold request waits for the fetch timeout at most.
+- The refresh cookie is `Secure`, so on plain-HTTP origins other than localhost browsers
+  drop it. HTTPS comes with the real deployment.
