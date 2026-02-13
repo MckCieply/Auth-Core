@@ -150,11 +150,13 @@ def _not_found() -> JSONResponse:
 
 
 class _Outage:
-    """Whether the health check last found the database away, so that an outage is logged when it begins and not at every call.
+    """Whether the health check last found the database away, so that an outage is logged when it begins and not at
+    every call.
 
     The compose healthcheck calls `/api/health` every few seconds: a database that stays away would fill the log with one
-    line per call. One line says it began (the class only, as everywhere), one says it is back (both at WARNING: that is the level of the container's log). The notes endpoints do not
-    use this: each of their requests logs its own failure. The health check runs in the thread pool, hence the lock.
+    line per call. One line says it began (the class only, as everywhere), one says it is back (both at WARNING: that is
+    the level of the container's log). The notes endpoints do not use this: each of their requests logs its own failure.
+    The health check runs in the thread pool, hence the lock.
     """
 
     def __init__(self) -> None:
@@ -173,7 +175,8 @@ class _Outage:
             ended = self._is_down
             self._is_down = False
         if ended:
-            log.warning("the database answers again")  # a warning too: the container logs at WARNING, and the operator must see the end
+            # a warning too: the container logs at WARNING, and the operator must see the end
+            log.warning("the database answers again")
 
 
 class _InternalErrors:
