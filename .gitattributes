@@ -1,2 +1,12 @@
 # Shell scripts run in bash on every platform (Git Bash on Windows, the container build): keep them LF.
 *.sh text eol=lf
+# Files that are copied or mounted into Linux containers: keep them LF as well.
+*.py text eol=lf
+*.ini text eol=lf
+*.mako text eol=lf
+*.txt text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Caddyfile text eol=lf
+Dockerfile text eol=lf

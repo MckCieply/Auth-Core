@@ -244,6 +244,8 @@ before release.
   - Python package: FastAPI dependency, JWKS cache, `require_permission`
   - speech-to-mail: `AUTH_MODE` switch, `org_id` on tables, `/auth` proxy in compose
   - First test on a real phone (cookies, proxy, iOS PWA)
+  - *As built (spec 0006):* slice 6 built the Python package and a sample product inside Auth-Core instead of changing
+    speech-to-mail (Decision 2); the real-phone test moved to the frontend slice (Decision 4).
 - **Week 5: first consumer, frontend.** Milestone: login on a phone works end to
   end.
   - Angular screens in Polish: login, reset, invite acceptance, verification
