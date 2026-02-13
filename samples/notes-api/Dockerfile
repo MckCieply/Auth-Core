@@ -12,13 +12,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# The libraries first (pinned, they change rarely), then the package, then the code of the sample: a change to the code
+# rebuilds the last layers only.
+COPY samples/notes-api/requirements.txt .
+RUN pip install -r requirements.txt
+
 # The package, from this clone. A product installs it from a tag instead (docs/integration/python-fastapi.md).
 COPY clients/python/pyproject.toml /tmp/auth-core-fastapi/pyproject.toml
 COPY clients/python/src /tmp/auth-core-fastapi/src
 RUN pip install /tmp/auth-core-fastapi && rm -rf /tmp/auth-core-fastapi
-
-COPY samples/notes-api/requirements.txt .
-RUN pip install -r requirements.txt
 
 COPY samples/notes-api/alembic.ini .
 COPY samples/notes-api/migrations migrations

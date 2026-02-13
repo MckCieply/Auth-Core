@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -114,6 +115,14 @@ class FakeJwks:
         return self.document
 
 
+def closed_port_url() -> str:
+    """A URL on 127.0.0.1 where nothing listens: a port that was bound, and is closed again."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}/jwks"
+
+
 class Clock:
     def __init__(self) -> None:
         self.now = 1000.0
@@ -156,13 +165,16 @@ class SlowJwks(FakeJwks):
 
 
 class JwksServer:
-    """Serves `document` at /jwks, after `delay` seconds, with `status`, one byte every `trickle` seconds if that is set."""
+    """Serves `document` at /jwks, after `delay` seconds, with `status`, one byte every `trickle` seconds if that is set.
+
+    With `redirect_to` set it answers every request with a 302 to that URL instead."""
 
     def __init__(self, document: dict) -> None:
         self.document = document
         self.status = 200
         self.delay = 0.0
         self.trickle = 0.0
+        self.redirect_to: str | None = None
         self.requests = 0
         server = self
 
@@ -173,6 +185,12 @@ class JwksServer:
             def do_GET(self):
                 server.requests += 1
                 time.sleep(server.delay)
+                if server.redirect_to:
+                    self.send_response(302)
+                    self.send_header("Location", server.redirect_to)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 body = json.dumps(server.document).encode()
                 self.send_response(server.status)
                 self.send_header("Content-Type", "application/json")

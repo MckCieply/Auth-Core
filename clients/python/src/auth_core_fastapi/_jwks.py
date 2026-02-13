@@ -8,13 +8,15 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from jwt import PyJWK, PyJWKSet
 
 log = logging.getLogger(__name__)
 
 TTL_SECONDS = 300.0  # the keys are fetched again after this long
-MIN_INTERVAL_SECONDS = 10.0  # at most one fetch, failed or not, in this long
+MIN_INTERVAL_SECONDS = 10.0  # at most one fetch, failed or not, in this long, counted from the end of the last one
+MAX_STALE_SECONDS = 24 * 3600.0  # held keys are used for no longer than this after the last fetch that worked
 TIMEOUT_SECONDS = 5.0
 MAX_BYTES = 1_048_576
 
@@ -25,6 +27,18 @@ class KeyUnknown(Exception):
 
 class KeysUnavailable(Exception):
     """The key is not held and the latest fetch failed: a 503, the user stays signed in."""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 3xx answer is not followed: it reaches the caller as an `HTTPError`, a failed fetch."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+# The key set is fetched from the address that was configured, and from nowhere else: no proxy named by the
+# environment (HTTP_PROXY and the like, nor the registry on Windows), and no redirect.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def fetch_jwks(url: str, timeout: float) -> Any:
@@ -41,7 +55,7 @@ def fetch_jwks(url: str, timeout: float) -> Any:
     def work() -> None:
         try:
             outcome["document"] = _download(url, timeout, cancelled)
-        except BaseException as exc:  # handed to the caller below
+        except Exception as exc:  # handed to the caller below
             outcome["error"] = exc
         finally:
             finished.set()
@@ -52,12 +66,14 @@ def fetch_jwks(url: str, timeout: float) -> Any:
         raise TimeoutError("the key set was not fetched in time")
     if "error" in outcome:
         raise outcome["error"]
+    if "document" not in outcome:  # the worker ended on something that is not an Exception
+        raise RuntimeError("the key set fetch ended without an answer")
     return outcome["document"]
 
 
 def _download(url: str, timeout: float, cancelled: threading.Event) -> Any:
     body = bytearray()
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+    with _OPENER.open(url, timeout=timeout) as response:
         while chunk := response.read1(8192):  # what has arrived, not a wait for 8192 bytes
             if cancelled.is_set():
                 raise TimeoutError("the key set was not fetched in time")
@@ -77,9 +93,13 @@ class JwksCache:
     """Keys by `kid`. Creating it makes no network call.
 
     A fetch happens on first use, when the keys are older than `ttl`, and when a token names a `kid` that is not
-    held, but never twice within `min_interval` (a failed fetch counts). A failed fetch keeps the keys already held.
-    One fetch runs at a time; a request that finds its key held never waits for it, and one that lacks its key waits
-    for the running fetch no longer than `timeout` (then the keys are unavailable).
+    held, but never twice within `min_interval` (a failed fetch counts). A failed fetch keeps the keys already held,
+    for `max_stale` after the last fetch that worked and no longer: then they are gone, and the keys are unavailable
+    until a fetch works. The times are read from the clock after a fetch returns, so a slow fetch does not shorten them.
+    One fetch runs at a time. A request that holds its key never waits for it. Until the first fetch has worked, a
+    request waits for the fetch that is running, for `timeout` at most (then the keys are unavailable). Once a fetch has
+    worked, a request that lacks its key while a fetch is running finds the keys unavailable at once, so that a flood
+    of unknown `kid`s cannot hold the threads of the product while Auth-Core is slow.
     """
 
     def __init__(
@@ -89,61 +109,95 @@ class JwksCache:
         ttl: float = TTL_SECONDS,
         min_interval: float = MIN_INTERVAL_SECONDS,
         timeout: float = TIMEOUT_SECONDS,
+        max_stale: float = MAX_STALE_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         fetch: Callable[[str, float], Any] = fetch_jwks,
     ) -> None:
+        if urlsplit(url).scheme not in ("http", "https"):
+            raise ValueError("the key set URL must be an http or https URL")
         self._url = url
         self._ttl = ttl
         self._min_interval = min_interval
         self._timeout = timeout
+        self._max_stale = max_stale
         self._clock = clock
         self._fetch = fetch
         self._snapshot = _Snapshot({}, None)
         self._attempted_at: float | None = None
         self._last_ok = False
-        self._lock = threading.Lock()
+        # `_cond` guards `_fetching` and the swap of the snapshot. It is held for a few instructions, never during a fetch, so
+        # "a fetch is running" is exactly `_fetching`, and nothing else can make a request think so.
+        self._cond = threading.Condition()
+        self._fetching = False
 
     def key_for(self, kid: str) -> Any:
-        snapshot = self._snapshot
-        held = snapshot.keys.get(kid)
-        if held is not None and self._is_fresh(snapshot, self._clock()):
-            return held.key
-        if held is not None:
-            # Held but old: one request renews the keys, the others carry on with what they hold.
-            if not self._lock.acquire(blocking=False):
+        waited_since: float | None = None
+        while True:
+            now = self._clock()
+            snapshot = self._snapshot
+            held = snapshot.keys.get(kid) if self._is_usable(snapshot, now) else None
+            if held is not None and self._is_fresh(snapshot, now):
                 return held.key
-        elif not self._lock.acquire(timeout=self._timeout):
-            # A fetch is running and the keys are not there: wait for it no longer than the fetch itself may take.
-            raise KeysUnavailable()
-        try:
-            self._renew(kid)
-            found = self._snapshot.keys.get(kid)
-            last_ok = self._last_ok
-        finally:
-            self._lock.release()
+            with self._cond:
+                snapshot = self._snapshot
+                if self._fetching:
+                    if held is not None:
+                        return held.key  # held but old: one request renews the keys, the others carry on with what they hold
+                    if snapshot.fetched_at is not None:
+                        # Warm cache, a fetch is running and the key is not held: answer now, a thread is not worth holding.
+                        raise KeysUnavailable()
+                    # Cold cache: no fetch has ever worked. The first requests of a product wait for the fetch that is
+                    # running, no longer than the fetch itself may take: nothing they could use is held, and a 503 would
+                    # greet the users of a product that has just started.
+                    if waited_since is None:
+                        waited_since = time.monotonic()
+                    remaining = self._timeout - (time.monotonic() - waited_since)
+                    if remaining <= 0 or not self._cond.wait_for(lambda: not self._fetching, remaining):
+                        raise KeysUnavailable()
+                    continue  # the fetch has ended: look at what it left
+                if not self._should_fetch(kid, snapshot, self._clock()):
+                    return self._answer(kid)
+                self._fetching = True
+            break
+        self._fetch_and_store()
+        with self._cond:
+            return self._answer(kid)
+
+    def _answer(self, kid: str) -> Any:  # called with `_cond` held
+        snapshot = self._snapshot
+        found = snapshot.keys.get(kid) if self._is_usable(snapshot, self._clock()) else None
         if found is not None:
             return found.key
-        raise KeyUnknown() if last_ok else KeysUnavailable()
+        raise KeyUnknown() if self._last_ok else KeysUnavailable()
 
     def _is_fresh(self, snapshot: _Snapshot, now: float) -> bool:
         return snapshot.fetched_at is not None and now - snapshot.fetched_at < self._ttl
 
-    def _renew(self, kid: str) -> None:  # called with the lock held
-        now = self._clock()
+    def _is_usable(self, snapshot: _Snapshot, now: float) -> bool:
+        """Held keys are used while the fetches fail, but not for longer than `max_stale` after the last good one."""
+        return snapshot.fetched_at is not None and now - snapshot.fetched_at < self._max_stale
+
+    def _should_fetch(self, kid: str, snapshot: _Snapshot, now: float) -> bool:  # called with `_cond` held
         if self._attempted_at is not None and now - self._attempted_at < self._min_interval:
-            return
-        snapshot = self._snapshot
-        if kid in snapshot.keys and self._is_fresh(snapshot, now):
-            return
-        self._attempted_at = now
+            return False
+        return not (kid in snapshot.keys and self._is_fresh(snapshot, now) and self._is_usable(snapshot, now))
+
+    def _fetch_and_store(self) -> None:  # called by the one request that set `_fetching`
+        keys: dict[str, PyJWK] | None = None
         try:
-            keys = _parse(self._fetch(self._url, self._timeout))
-        except Exception as exc:  # any failure keeps the keys already held
-            self._last_ok = False
-            log.warning("the key set could not be fetched (%s)", type(exc).__name__)
-            return
-        self._snapshot = _Snapshot(keys, now)
-        self._last_ok = True
+            try:
+                keys = _parse(self._fetch(self._url, self._timeout))
+            except Exception as exc:  # any failure keeps the keys already held
+                log.warning("the key set could not be fetched (%s)", type(exc).__name__)
+        finally:
+            finished_at = self._clock()  # after the fetch: a slow fetch does not shorten the age of the keys
+            with self._cond:
+                self._attempted_at = finished_at
+                self._last_ok = keys is not None
+                if keys is not None:
+                    self._snapshot = _Snapshot(keys, finished_at)
+                self._fetching = False
+                self._cond.notify_all()
 
 
 def _parse(document: Any) -> dict[str, PyJWK]:

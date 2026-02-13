@@ -38,18 +38,12 @@ def test_the_scheme_is_case_insensitive(client, key1, scheme):  # criterion 2
     assert response.status_code == 200
 
 
-def test_a_token_without_roles_or_permissions_is_valid_and_holds_none(client, key1):  # criterion 2
+def test_a_token_with_empty_roles_and_permissions_is_valid_and_holds_none(client, key1):  # criterion 2
     response = client.get("/me", headers=bearer(key1.token(roles=[], permissions=[])))
 
     assert response.status_code == 200
     assert response.json()["roles"] == []
     assert response.json()["permissions"] == []
-
-
-def test_an_audience_list_that_holds_the_configured_audience_is_valid(client, key1):  # criterion 2
-    response = client.get("/me", headers=bearer(key1.token(aud=["other-api", "notes-api"])))
-
-    assert response.status_code == 200
 
 
 def test_a_token_expired_less_than_five_minutes_ago_is_still_valid(client, key1):  # criterion 2, Decision 9
@@ -154,6 +148,25 @@ def test_a_wrong_issuer_is_a_401(client, key1):  # criterion 3
 
 def test_a_wrong_audience_is_a_401(client, key1):  # criterion 3
     assert_unauthorized(client.get("/me", headers=bearer(key1.token(aud="another-api"))))
+
+
+@pytest.mark.parametrize("aud", [["notes-api"], ["other-api", "notes-api"], []])
+def test_an_audience_that_is_a_list_is_a_401_even_when_it_holds_the_configured_one(client, key1, aud):  # criterion 3
+    """The audience must equal the configured one (spec 0006); Auth-Core writes it as a JSON string."""
+    assert_unauthorized(client.get("/me", headers=bearer(key1.token(aud=aud))))
+
+
+@pytest.mark.parametrize("claim", ["exp", "iat", "nbf"])
+@pytest.mark.parametrize("value", ["9999999999", "1", "", True, False, None, [1], {"n": 1}])
+def test_a_time_claim_that_is_not_a_json_number_is_a_401(client, key1, claim, value):  # criterion 3
+    assert_unauthorized(client.get("/me", headers=bearer(key1.token(**{claim: value}))))
+
+
+def test_a_not_before_in_the_past_is_accepted_and_one_in_the_future_is_a_401(client, key1):  # criterion 3
+    now = int(time.time())
+
+    assert client.get("/me", headers=bearer(key1.token(nbf=now - 10))).status_code == 200
+    assert_unauthorized(client.get("/me", headers=bearer(key1.token(nbf=now + 1000))))
 
 
 def test_a_token_expired_more_than_five_minutes_ago_is_a_401(client, key1):  # criterion 3, Decision 9

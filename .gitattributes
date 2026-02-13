@@ -4,6 +4,8 @@
 *.py text eol=lf
 *.ini text eol=lf
 *.mako text eol=lf
+*.txt text eol=lf
+*.toml text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 Caddyfile text eol=lf

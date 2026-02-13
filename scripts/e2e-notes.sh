@@ -54,7 +54,9 @@ tmp="$(mktemp -d)"
 AUTH_STOPPED=0
 cleanup() {
   # a run that dies during step 6 must not leave Auth-Core stopped
-  if [[ "$AUTH_STOPPED" == "1" ]]; then "${compose[@]}" start auth >/dev/null 2>&1 || true; fi
+  if [[ "$AUTH_STOPPED" == "1" ]]; then
+    "${compose[@]}" start auth > /dev/null || echo "WARNING: Auth-Core could not be started again: start it by hand (docker compose start auth)" >&2
+  fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -86,15 +88,15 @@ export E2E_PASSWORD="E2e-Passw0rd-$run"
 NOTE_TEXT="hello from run $run"
 export E2E_NOTE_TEXT="$NOTE_TEXT"
 
-wait_ok() { # wait_ok <url> <seconds>: waits until the URL answers 200
-  local i
-  for i in $(seq 1 "$2"); do
+wait_ok() { # wait_ok <url> <seconds>: waits until the URL answers 200, for <seconds> by the clock (plus one last try)
+  local deadline=$((SECONDS + $2))
+  while (( SECONDS < deadline )); do
     if [[ "$(curl -s -o /dev/null --max-time 3 -w '%{http_code}' "$1" || true)" == "200" ]]; then
       return 0
     fi
     sleep 1
   done
-  return 1
+  [[ "$(curl -s -o /dev/null --max-time 3 -w '%{http_code}' "$1" || true)" == "200" ]]
 }
 
 # call <method> <path> [body-file] [auth-header-file] -> sets HTTP_CODE and BODY; response headers in $tmp/hdr
@@ -113,8 +115,14 @@ header() { # value of a response header of the last response, CR stripped (empty
 # The python3 of some machines is a Windows interpreter, which ends its lines with CR LF: the helpers below that print a
 # value strip the CR, so that the value compares equal in bash.
 
-# val <python-expression-of-d>: evaluates it against the JSON of $BODY and prints the result
-val() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$1" <<< "$BODY" | tr -d '\r'; }
+# val <python-expression-of-d>: evaluates it against the JSON of $BODY and prints the result. The expression is the
+# script's own text: a value that came from the service under test is never put into it, it is read from os.environ.
+val() { python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$1" <<< "$BODY" | tr -d '\r'; }
+
+UUID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+uuid_or_fail() { # uuid_or_fail <what> <value>: a value of the service is used further on only when it is a UUID
+  [[ "$2" =~ $UUID_PATTERN ]] || fail "$1 is not a UUID"
+}
 
 # jwt_payload <auth-header-file>: the payload of the bearer token in the file, as JSON (the token is never printed)
 jwt_payload() {
@@ -165,8 +173,10 @@ login() {
 }
 
 keep_session() { # keep_session <name>: the access token of $BODY and the cookie of the last response
-  printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/$1.auth"
-  local pair
+  local access pair
+  access="$(val 'd["access_token"]')" || fail "the response for $1 holds no access_token"
+  [[ -n "$access" ]] || fail "the access_token for $1 is empty"
+  printf 'Authorization: Bearer %s\n' "$access" > "$tmp/$1.auth"
   pair="$({ grep -i '^set-cookie:[[:space:]]*auth_rt=[^;]' "$tmp/hdr" || true; } | head -n1 | tr -d '\r' | cut -d: -f2- | sed 's/^ *//' | cut -d';' -f1)"
   [[ -n "$pair" ]] || fail "the response set no auth_rt cookie for $1"
   printf 'Cookie: %s\n' "$pair" > "$tmp/$1.cookie"
@@ -188,8 +198,8 @@ mail_count() {
 
 # wait_mail <address> <count> <seconds>: waits until the catcher holds <count> mails for the address, then saves the newest
 wait_mail() {
-  local i id
-  for i in $(seq 1 "$3"); do
+  local id deadline=$((SECONDS + $3))
+  while (( SECONDS < deadline )); do
     if [[ "$(mail_count "$1")" == "$2" ]]; then
       id="$(python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages"][0]["ID"])' < "$tmp/search.json" | tr -d '\r')"
       curl -sS --max-time 10 "$MAILPIT_URL/api/v1/message/$id" -o "$tmp/mail.json"
@@ -236,13 +246,27 @@ wait_ok "$BASE_URL/api/health" 60 || fail "step 1: $BASE_URL/api/health (the sam
 wait_ok "$MAILPIT_URL/readyz" 60 || fail "step 1: $MAILPIT_URL/readyz did not return 200 within 60s (is the mailpit service up?)"
 SAMPLE_CONTAINER="$("${compose[@]}" ps -q notes-api)"
 [[ -n "$SAMPLE_CONTAINER" ]] || fail "step 1: the notes-api service is not running"
+# What the tokens must name is what the overlay configured the sample with (AUTH_ISSUER, AUTH_AUDIENCE), not a guess from BASE_URL.
+# Only these two variables are read: the container's environment also holds the database URL.
+sample_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SAMPLE_CONTAINER" | tr -d '\r' | { grep -E "^$1=" || true; } | head -n1 | cut -d= -f2-; }
+EXPECTED_ISSUER="$(sample_env AUTH_ISSUER)"
+EXPECTED_AUDIENCE="$(sample_env AUTH_AUDIENCE)"
+[[ -n "$EXPECTED_ISSUER" && -n "$EXPECTED_AUDIENCE" ]] || fail "step 1: the sample's AUTH_ISSUER or AUTH_AUDIENCE is not set"
 [[ -z "$(docker port "$SAMPLE_CONTAINER")" ]] || fail "step 1: the notes service publishes a port of its own; it must be reachable only through Caddy"
 
 login seed E2E_SEED_EMAIL E2E_SEED_PASSWORD
+# the refresh cookie as the browser gets it through the proxy: scoped to /auth and not readable by scripts
+cookie_line="$({ grep -i '^set-cookie:[[:space:]]*auth_rt=' "$tmp/hdr" || true; } | head -n1 | tr -d '\r')"
+cookie_attributes="$(printf '%s;' "$cookie_line" | tr 'A-Z' 'a-z' | tr -d ' ')"  # lower case, no spaces, a ; after each attribute
+for attribute in 'Path=/auth' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
+  wanted="$(printf '%s' "$attribute" | tr 'A-Z' 'a-z')"
+  [[ "$cookie_attributes" == *";$wanted;"* ]] || fail "step 1: the refresh cookie has no $attribute attribute"
+done
 BODY="$(jwt_payload "$tmp/seed.auth")"
 SEED_SUB="$(val 'd["sub"]')"
-expect_eq "step 1: issuer" "$(val 'd["iss"]')" "$BASE_URL/auth"
-expect_eq "step 1: audience" "$(val 'd["aud"]')" "notes-api"
+expect_eq "step 1: issuer" "$(val 'd["iss"]')" "$EXPECTED_ISSUER"
+expect_eq "step 1: audience (a JSON string)" "$(val 'd["aud"]')" "$EXPECTED_AUDIENCE"
+[[ "$(val 'type(d["aud"]).__name__')" == "str" ]] || fail "step 1: the audience of the token is not a JSON string"
 [[ "$(val '"notes:read" in d["permissions"] and "notes:write" in d["permissions"]')" == "True" ]] \
   || fail "step 1: the seed user's token does not carry notes:read and notes:write (a volume of an earlier stack? start from down -v)"
 A="$(val 'd["org_id"]')"
@@ -252,17 +276,21 @@ expect_status "step 1: GET /auth/org/roles" 200
   || fail "step 1: the development company's roles are not the default roles of the notes manifest (start from down -v)"
 USER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "user"][0]')"
 VIEWER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "viewer"][0]')"
+uuid_or_fail "step 1: the id of the role user" "$USER_ROLE"
+uuid_or_fail "step 1: the id of the role viewer" "$VIEWER_ROLE"
 export E2E_USER_ROLE="$USER_ROLE" E2E_VIEWER_ROLE="$VIEWER_ROLE"
 
 json_body "$tmp/note.json" "{'text': os.environ['E2E_NOTE_TEXT']}"
 call POST /api/notes "$tmp/note.json" "$tmp/seed.auth"
 expect_status "step 1: add a note" 201
 NOTE_ID="$(val 'd["id"]')"
+uuid_or_fail "step 1: the id of the note" "$NOTE_ID"
+export E2E_NOTE_ID="$NOTE_ID"
 expect_eq "step 1: the note's text" "$(val 'd["text"]')" "$NOTE_TEXT"
 expect_eq "step 1: the note's author" "$(val 'd["author_sub"]')" "$SEED_SUB"
 call GET /api/notes "" "$tmp/seed.auth"
 expect_status "step 1: list the notes" 200
-[[ "$(val 'any(n["id"] == "'"$NOTE_ID"'" for n in d)')" == "True" ]] || fail "step 1: the list does not hold the note just added"
+[[ "$(val 'any(n["id"] == os.environ["E2E_NOTE_ID"] for n in d)')" == "True" ]] || fail "step 1: the list does not hold the note just added"
 pass "step 1: the stack is up; the notes service publishes no port; SEED's token names the proxy's origin and carries notes:read and notes:write; a note was added (201) and is listed"
 
 # --- Step 2: no token, a changed signature, malformed headers ---------------------------------------------------------
@@ -325,7 +353,7 @@ expect_eq "step 4: the viewer's permissions" "$(val 'd["permissions"]')" "['note
 expect_eq "step 4: the viewer's company" "$(val 'd["org_id"]')" "$A"
 call GET /api/notes "" "$tmp/viewer.auth"
 expect_status "step 4: the viewer reads" 200
-[[ "$(val 'any(n["id"] == "'"$NOTE_ID"'" for n in d)')" == "True" ]] || fail "step 4: the viewer does not see the note of the company"
+[[ "$(val 'any(n["id"] == os.environ["E2E_NOTE_ID"] for n in d)')" == "True" ]] || fail "step 4: the viewer does not see the note of the company"
 call POST /api/notes "$tmp/note.json" "$tmp/viewer.auth"
 expect_error "step 4: the viewer adds a note" 403 forbidden
 [[ "$(header cache-control)" == *no-store* ]] || fail "step 4: the 403 is not marked no-store"
@@ -334,7 +362,8 @@ pass "step 4: the viewer of company A reads its notes (200) and cannot add one (
 # --- Step 5: the viewer becomes a user -----------------------------------------------------------------------------------
 call GET /auth/org/members "" "$tmp/seed.auth"
 expect_status "step 5: GET /auth/org/members" 200
-VIEWER_ID="$(val '[m["user_id"] for m in d["members"] if m["email"] == "'"$VIEWER_EMAIL"'"][0]')"
+VIEWER_ID="$(val '[m["user_id"] for m in d["members"] if m["email"] == os.environ["E2E_VIEWER_EMAIL"]][0]')"
+uuid_or_fail "step 5: the id of the viewer" "$VIEWER_ID"
 json_body "$tmp/role-user.json" "{'role_id': os.environ['E2E_USER_ROLE']}"
 call PUT "/auth/org/members/$VIEWER_ID/role" "$tmp/role-user.json" "$tmp/seed.auth"
 expect_status "step 5: change the viewer's role to user" 204 ""

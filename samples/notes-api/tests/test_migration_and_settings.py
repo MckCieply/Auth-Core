@@ -28,7 +28,7 @@ def test_the_migration_and_the_model_agree(tmp_path):
     upgrade_database(engine)
 
     with engine.connect() as connection:
-        differences = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        differences = compare_metadata(MigrationContext.configure(connection, opts={"compare_server_default": True}), Base.metadata)
 
     assert differences == []
 

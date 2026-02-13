@@ -66,7 +66,18 @@ def verify_token(token: str, keys: JwksCache, issuer: str, audience: str) -> Pri
         )
     except jwt.PyJWTError as exc:
         raise TokenRejected(type(exc).__name__) from None
+    _check_shape(claims, audience)
     return _principal(claims)
+
+
+def _check_shape(claims: dict, audience: str) -> None:
+    """What PyJWT lets through and the contract does not: `aud` is the configured string, not a list holding it, and
+    the time claims are JSON numbers, not numeric strings or booleans."""
+    if claims.get("aud") != audience or not isinstance(claims.get("aud"), str):
+        raise TokenRejected("audience")
+    for name in ("exp", "iat", "nbf"):
+        if name in claims and (isinstance(claims[name], bool) or not isinstance(claims[name], (int, float))):
+            raise TokenRejected("time_claim")
 
 
 def _principal(claims: dict) -> Principal:

@@ -57,6 +57,8 @@ def test_held_keys_keep_working_while_the_fetch_fails(client, jwks, clock, key1)
         clock.advance(301)
         assert client.get("/me", headers=bearer(key1.token())).status_code == 200
 
+    assert jwks.fetches == 4  # the renewal was tried each time, and each time failed
+
 
 def test_no_key_and_a_failing_key_set_is_a_503(client, jwks, key1):  # criterion 5
     jwks.fails = True
@@ -72,10 +74,27 @@ def test_an_unknown_kid_is_a_503_when_the_latest_fetch_failed_and_a_401_when_it_
     jwks.fails = True
     clock.advance(10)
     assert_unavailable(client.get("/me", headers=bearer(unknown)))
+    assert jwks.fetches == 2  # the 503 is the answer of a fetch that was tried
 
     jwks.fails = False
     clock.advance(10)
     assert_unauthorized(client.get("/me", headers=bearer(unknown)))
+    assert jwks.fetches == 3
+
+
+def test_a_known_key_is_a_503_once_the_keys_are_a_day_old_and_the_key_set_still_fails(client, jwks, clock, key1):  # criterion 5
+    assert client.get("/me", headers=bearer(key1.token())).status_code == 200
+    jwks.fails = True
+
+    clock.advance(24 * 3600 - 10)
+    assert client.get("/me", headers=bearer(key1.token())).status_code == 200
+
+    clock.advance(20)
+    assert_unavailable(client.get("/me", headers=bearer(key1.token())))
+
+    jwks.fails = False
+    clock.advance(10)
+    assert client.get("/me", headers=bearer(key1.token())).status_code == 200
 
 
 def test_a_token_that_is_invalid_for_another_reason_is_a_401_even_when_the_key_set_is_down(client, jwks, key1):  # criterion 5

@@ -20,7 +20,8 @@ its only dependencies are FastAPI and `PyJWT[crypto]`. In your `requirements.txt
 auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.0#subdirectory=clients/python
 ```
 
-Pin the tag: the package is versioned with the token contract. The sample's
+Pin the tag: the package is versioned with the token contract. A git tag can be moved, so for production pin the install
+to the commit the tag points at (`@<40-character commit SHA>` in place of the tag name). The sample's
 [`requirements.txt`](../../samples/notes-api/requirements.txt) lists the rest of its dependencies and
 [`Dockerfile`](../../samples/notes-api/Dockerfile) installs the package from the clone (`clients/python`) instead of a
 tag, so that the sample builds from one clone with no GitHub.
@@ -73,10 +74,12 @@ use the dependencies.
 Creating the object makes **no network call**: your product starts even while Auth-Core is down. The keys are fetched on
 first use, kept in memory, fetched again after 5 minutes, and at once (but at most every 10 seconds) when a token names
 a key the package does not know, which is how a key rotation reaches you. If a fetch fails the package keeps the keys it
-holds, so tokens signed by known keys keep working while Auth-Core is down.
+holds, so tokens signed by known keys keep working while Auth-Core is down, for at most 24 hours after the last fetch that
+worked; after that the answer is the `503` of step 8 until a fetch works.
 
 **Use HTTPS, or an address on a network you trust, for `jwks_url`.** Whoever controls that address controls which tokens
-your product accepts.
+your product accepts. The URL is fetched without proxies (the proxy environment variables are ignored) and without
+following redirects, so a proxy or a redirect cannot stand in for it.
 
 ## 4. Guard your endpoints
 

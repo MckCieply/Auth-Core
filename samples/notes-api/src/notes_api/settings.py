@@ -1,6 +1,6 @@
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -10,7 +10,7 @@ class Settings:
     auth_issuer: str  # the `iss` of the tokens, e.g. http://localhost:8088/auth
     auth_audience: str  # their `aud`
     auth_jwks_url: str | None  # where the keys are; unset means issuer + /.well-known/jwks.json
-    database_url: str
+    database_url: str = field(repr=False)  # it holds the password: whatever prints the settings must not print it
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":

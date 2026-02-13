@@ -4,7 +4,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import DateTime, Text, Uuid, create_engine
+from sqlalchemy import DateTime, Text, Uuid, create_engine, func
+from sqlalchemy.engine import make_url
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -26,19 +27,23 @@ class Note(Base):
     author_sub: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
     )
 
 
 def make_engine(database_url: str) -> Engine:
     # hide_parameters: an error message must not carry the text of a note into the log
-    return create_engine(database_url, pool_pre_ping=True, hide_parameters=True)
+    options: dict = {"pool_pre_ping": True, "hide_parameters": True}
+    if make_url(database_url).get_backend_name() == "postgresql":
+        options["connect_args"] = {"connect_timeout": 5}  # seconds: a database that is not there must not hold a thread
+    return create_engine(database_url, **options)
 
 
 def upgrade_database(engine: Engine) -> None:
     """Apply the Alembic migrations up to `head`. The service does this at startup."""
     config = Config(str(ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(ROOT / "migrations"))
+    # the configuration parser reads "%" as the start of an interpolation, so a path that holds one is written doubled
+    config.set_main_option("script_location", str(ROOT / "migrations").replace("%", "%%"))
     config.attributes["configure_logger"] = False  # the service's logging stays as it is
     with engine.connect() as connection:
         config.attributes["connection"] = connection

@@ -1,7 +1,6 @@
 """The dependencies against a key set served over real HTTP, and the event loop."""
 
 import asyncio
-import time
 
 import httpx
 import pytest
@@ -39,22 +38,25 @@ def test_an_unknown_kid_is_a_401_and_a_key_set_that_does_not_answer_is_a_503(ser
 
 def test_a_slow_fetch_does_not_block_the_event_loop(server, key1):
     """A request that waits for the key set must not hold up the others (the dependencies are plain `def`)."""
-    server.delay = 1.5
+    server.delay = 3
     app = build_app(AuthCore(ISSUER, AUDIENCE, server.url))
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            started = time.perf_counter()
             slow = asyncio.create_task(client.get("/me", headers=bearer(key1.token())))
-            await asyncio.sleep(0.3)  # the slow request is now inside the fetch
+            for _ in range(500):  # until the slow request is inside the fetch: the server has it
+                if server.requests:
+                    break
+                await asyncio.sleep(0.01)
+            requests_at_ping = server.requests
             await client.get("/ping")
-            ping_done = time.perf_counter() - started
+            slow_done_at_ping = slow.done()
             response = await slow
-            return ping_done, time.perf_counter() - started, response.status_code
+            return requests_at_ping, slow_done_at_ping, response.status_code
 
-    ping_done, slow_done, status = asyncio.run(scenario())
+    requests_at_ping, slow_done_at_ping, status = asyncio.run(scenario())
 
+    assert requests_at_ping == 1  # the server had the fetch before the ping was sent
+    assert not slow_done_at_ping  # and the ping was answered while the fetch was still running
     assert status == 200
-    assert slow_done > 1.4
-    assert ping_done < 0.8

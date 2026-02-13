@@ -10,6 +10,8 @@ services:
   notes-db-init:
     # One-shot and idempotent: creates the login "notes" and the database "notes" on the stack's PostgreSQL server,
     # or sets the password again when they exist. (An init script of the postgres image runs on a fresh volume only.)
+    # It also takes CONNECT on Auth-Core's database "auth" away from PUBLIC, so that the login "notes" cannot open it;
+    # the owner "auth" keeps its own access.
     image: postgres:16-alpine
     depends_on:
       postgres:
@@ -30,6 +32,7 @@ services:
         ALTER ROLE notes PASSWORD :'pw';
         SELECT 'CREATE DATABASE notes OWNER notes'
           WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'notes') \gexec
+        REVOKE CONNECT ON DATABASE auth FROM PUBLIC;
         SQL
 
   notes-api:
@@ -48,14 +51,30 @@ services:
     # Reachable from the other containers (Caddy), not published on the host.
     expose:
       - "8000"
+    healthcheck:
+      # Python's standard library, as the image has no curl. A 503 from the health endpoint is a failed check too.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   caddy:
-    image: caddy:2
+    image: caddy:2.11.7
+    # Not root: a fixed user, and the two directories Caddy writes to are in memory and writable by it.
+    user: "10002:10002"
+    tmpfs:
+      - /data:mode=1777
+      - /config:mode=1777
     depends_on:
       auth:
         condition: service_started
       notes-api:
-        condition: service_started
+        condition: service_healthy
     ports:
       # Loopback only, like every other port of this stack.
       - "127.0.0.1:8088:8088"

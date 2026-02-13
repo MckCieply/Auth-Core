@@ -1,6 +1,7 @@
 """The three endpoints and the health check: what a company sees, what it cannot reach, what is refused."""
 
 import json
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -141,6 +142,7 @@ def test_the_company_of_a_new_note_is_the_tokens_whatever_the_body_says(client, 
 def test_two_companies_keep_their_own_notes(client, signer):  # criterion 8
     add(client, signer, "a1", org_id=COMPANY_A)
     add(client, signer, "b1", org_id=COMPANY_B)
+    time.sleep(0.05)  # the clock of some systems ticks in 15 ms: two notes of one tick are listed in the order of their random ids
     add(client, signer, "a2", org_id=COMPANY_A)
 
     assert [n["text"] for n in client.get("/api/notes", headers=headers(signer, COMPANY_A)).json()] == ["a2", "a1"]
