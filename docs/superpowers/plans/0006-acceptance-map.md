@@ -23,9 +23,9 @@ mail catcher, the notes service and Caddy) over real HTTP, through the proxy.
 
 ## How the tests run
 
-- `cd clients/python && python -m pytest -q` — the package: 201 tests.
+- `cd clients/python && python -m pytest -q` — the package: 206 tests.
 - `cd samples/notes-api && python -m pytest -q` — the sample on SQLite in memory (the real migration builds the table):
-  93 tests. With `NOTES_TEST_DATABASE_URL=postgresql+psycopg://…` (an empty database) the same tests run on PostgreSQL,
+  97 tests. With `NOTES_TEST_DATABASE_URL=postgresql+psycopg://…` (an empty database) the same tests run on PostgreSQL,
   which is where the NUL character and a lone surrogate in a note are refused by the service and not by the database.
 - The e2e script needs Docker, the Auth-Core image and the code of spec 0005 (the company API and the operator CLI).
 
@@ -212,106 +212,94 @@ One line per task; where the commit differs from the plan text, the difference i
 
 ## Local verification log
 
-Verification round 1 (on commit 4a3ed88, before the fixes of round 1):
+Per [`docs/workflow.md`](../../workflow.md#verification), three local verifiers ran in each of the first three rounds:
+realization vs spec, API / e2e and security. After those, two scoped passes (one verifier each: spec, security and e2e of
+the changed files) checked the fixes. Each e2e run brought the stack up from `down -v` under a compose project of its own
+(`auth-core-s6verify`). The reports are `verify-spec-s6-r1.md` to `r3`, `verify-e2e-s6-r1.md` to `r3`,
+`verify-security-s6-r1.md` to `r3`, `verify-r3fix.md` and `verify-r4fix.md` in `.superpowers/sdd/0006-python-consumer-package/`.
 
-- e2e verifier: PASS. `scripts/e2e-notes.sh` and the five earlier e2e scripts all pass; .NET 935/935; the Python suites 132 (package) and
-  58 (sample). Logs in `.superpowers/sdd/0006-python-consumer-package/` (`verify-e2e-s6-r1.md`).
-- spec verifier: FAIL (a proxy environment variable broke 6 package tests; the FastAPI floor against the spec's 0.115; `aud` as a list;
-  a stale map; a misnamed test). Report: `verify-spec-s6-r1.md`.
-- security verifier: FAIL (one Medium: an unknown-`kid` flood held the thread pool through the bounded lock wait; Lows: `aud` list,
-  redirects and proxy variables in the key set fetch, `repr` of the settings, a 307 that reflects `Host`, the body drained past the cap,
-  no connect timeout, a mutable tag, Caddy as root, `eval` in the e2e script, numeric strings in `exp`/`iat`/`nbf`).
-  Report: `verify-security-s6-r1.md`.
-- The findings are fixed in commits 4a3ed88 to 4f1b07b (see "Plan-vs-implementation notes", "Verification round 1"). The FastAPI
-  floor is for the owner (spec "As built"). The e2e run on the changed overlay and the changed script was done in round 2 (below).
+| Round | Realization vs spec | API / e2e | Security | Fix commits |
+| ----- | ------------------- | --------- | -------- | ----------- |
+| 1 (on `4a3ed88`) | **FAIL** - package 132, sample 58; F1 a proxy environment variable broke 6 package tests; F2 the package's FastAPI floor (0.142) against the spec's 0.115 (owner); F3 `aud` as a list accepted; F4 a stale map; F5 a misnamed test; F6 a database failure answered as a plain `500` | PASS - `scripts/e2e-notes.sh` and the five earlier scripts ALL PASS; .NET 935/935; Python 132 and 58; probes through Caddy (unknown paths, traversal, bodies, ids, the shape of every `401`); non-blocking: an unknown path under `/api` answered FastAPI's `{"detail"}`, and the `Secure` refresh cookie on plain HTTP | **FAIL** - F1 (Medium) a flood of unknown `kid`s held the thread pool through the bounded lock wait; Lows F2 to F11: `aud` as a list, held keys never expiring, redirects and proxy variables in the key set fetch, the password in `repr(Settings)`, a `307` that reflects `Host`, a body read past its cap and no connect timeout, a mutable tag, Caddy as root and the `notes` login able to connect to the `auth` database, `eval` in the e2e script, numeric strings in `exp`, `iat` and `nbf` | `e4c2a6f` to `4f1b07b` |
+| 2 (on `4f1b07b`) | **FAIL** - package 180, sample 78 (also under a dead proxy); name check 133; N1 (blocking) the test of the "no proxy" rule passed with the rule removed; N2 to N7: `notify_all`, the non-`Exception` guard, a key over 24 hours during a fetch, float `exp` and `iat`, log tests that did not look for the message of the error, a stale map; every finding of round 1 addressed except the FastAPI floor | PASS - the six scripts ALL PASS (`e2e-refresh.sh` on its second attempt: the first died in step 4 with `curl: (7)`, a lost Docker port and not a race of the script; four later runs passed); .NET 935/935; 180 and 78; the changed overlay live (Caddy as uid 10002, the healthcheck, the `REVOKE`, the `404`, `405` and `503 database_unavailable` shapes, a body cut at the cap) | PASS with Lows - N1 the wait of a cold cache repeating every 15 seconds with a hung Auth-Core; N2 the "fetch running" flag left set when the clock raises; N3 the traceback and message of a `500` in the log; N4 `Allow` of the first route only; N5 `postgres` and `template1` open to the `notes` login, Caddy without `read_only` and `cap_drop`; N6 no transitive pins, hashes or digests | `4f1b07b` to `b1209ed` |
+| 3 (on `b1209ed`) | PASS - package 199, sample 88 (also under the dead proxy); name check 150; N1 to N7 addressed, each shown by a mutation; infos only | PASS - the six scripts ALL PASS (the `e2e-refresh.sh` failure did not reproduce in 4 runs); .NET 935/935; 199 and 88; Caddy `ReadonlyRootfs`, effective capabilities `0x400` only; the digests equal the local images; the image holds the 24 pins; a `500` shown live with no traceback; with a hung Auth-Core `/api/health` answers in 0.2 s; one information item: one log line for two `503`s | PASS - N1 to N6 closed (the probes run again); two new Lows: R3-1 an attempt whose end could not be timed did not count for the 10-second rule, R3-2 the build tool's own dependencies were not pinned; Infos R3-3 (a `min_interval` of 0, an asynchronous exception), R3-4, R3-5 | `b1209ed` to `d5e30ce` |
 
-After the fixes of round 1 (commit 4f1b07b):
+Scoped verification of the fixes:
 
-- Package: `cd clients/python && python -m pytest -q` - 180 passed; also 180 passed with `HTTP_PROXY` and `http_proxy` set to
-  `http://127.0.0.1:9` (a dead proxy).
-- Sample: `cd samples/notes-api && python -m pytest -q` - 78 passed, on SQLite in memory.
-- Sample on PostgreSQL 16: 57 passed, run in Task 5. That run predates the nested-body test and every test added since; it has not been
-  re-run.
-- Name check (the command of Task 9, step 2, in `.superpowers/sdd/0006-python-consumer-package/task-9-brief.md`): `checked 133 missing 0
-  unmapped 0` (150 after round 2, below).
-- `bash -n scripts/e2e-notes.sh` is clean, the file is LF with mode 100755; the grep for backslash-u escapes and non-ASCII characters in
-  `clients`, `samples` and `scripts` finds nothing in the files of this slice (two dashes in the comments of `scripts/e2e-tenancy.sh`, a
-  file of slice 5 that is the same as on main, are the only hits).
-- The guide's checks (Task 8, step 3): 8 numbered headings, every link and every path in a code span exists, no product name.
-- `docker compose -p auth-core-review-0006 --env-file <copy of .env.example> -f deploy/docker-compose.yml -f samples/notes-api/compose.yml config -q`
-  is clean (with the changed overlay). Caddy 2.11.7 as uid 10002 with tmpfs `/data` and `/config` validates the Caddyfile and answers.
-  The stack was not started: the e2e run of the changed overlay is for the next round.
-- The security probes of `.superpowers/sdd/0006-python-consumer-package/sec-probes/` were run again (`*.fix-r1.out`): the flood no longer
-  delays an unrelated endpoint, a redirect and a proxy variable are not followed, `aud` as a list and numeric-string time claims are 401,
-  the settings do not print the password, `/api/notes/` is a JSON 404, a 200 MiB chunked upload is cut after 4 MiB, an aborted body logs
-  no traceback. After V1b: the cold-start probes (`p3e_coldstart`, `p3d_threadpool` at delay 0) turn nobody away (120 of 120 valid
-  requests are 200 with one fetch; 120 of 120 unknown-kid requests are 401, 0 are 503), and the warm flood (`p3d_warm`) leaves an
-  unrelated endpoint at 0.00 to 0.01 s.
-- One test of the sample was flaky on Windows and is fixed: `test_notes.test_two_companies_keep_their_own_notes` created two notes in one
-  15 ms clock tick, so they were listed in the order of their random ids (seen once in about 30 runs with a dead `HTTP_PROXY`; it is not
-  related to the proxy). The test pauses 50 ms between the two writes.
+| Pass | Result | Evidence | Fix commits |
+| ---- | ------ | -------- | ----------- |
+| Fixes of round 3 (on `d5e30ce`, `verify-r3fix.md`) | PASS - L1 (Low, test), I1 and I2 (Info) | R3-1 closed (putting the old block back fails two tests); R3-2 closed (nine mutations of `test_image_files` caught, one not: L1); the guide and the `/api/health` log line right (live: `503` twice, class only, `200` within 8 seconds of the restart); `scripts/e2e-notes.sh` steps 1 to 6 PASS on a clean stack; the image holds the 24 pins and none of the build tool; package 201 and sample 93, also under the dead proxy; name check 156 | `d5e30ce` to `22201eb` |
+| Fixes of round 4 (on `22201eb`, `verify-r4fix.md`) | **FAIL** - M1 (Medium); L1 and I2 addressed | M1: the line "the database answers again" was logged at INFO, and in the container the sample's logger runs at WARNING, so the operator saw an outage begin and never end (live: one line, no recovery line); L1 and I2 shown by mutation; `scripts/e2e-notes.sh` ALL PASS with no `curl: (` in its log; no regression of the 10-second, 24-hour and cold-wait rules (probes run again); package 206 and sample 96, also under the dead proxy; name check 162 | `22201eb` to `e86e9ac` |
+| M1, fixed and re-reviewed | ADDRESSED | the recovery line is a WARNING, and one new test checks both ends of an outage at the level the container runs with (it failed before the change); sample 97; name check 163 | - |
 
-Verification round 2 (on commit 4f1b07b):
+### What was fixed, by round
 
-- e2e verifier: PASS. `scripts/e2e-notes.sh` and the five earlier scripts pass (`e2e-refresh.sh` on the second attempt, see below); .NET 935/935;
-  the Python suites 180 (package) and 78 (sample). Report: `verify-e2e-s6-r2.md`.
-- security verifier: PASS with Lows (N1 the cold-cache wait repeating every 15 s with a hung Auth-Core, N2 the flag left set when the
-  clock raises, N3 the traceback and message of a 500 in the log, N4 the `Allow` header, N5 `postgres` and `template1` open to the
-  login `notes` and Caddy without `read_only`/`cap_drop`/`no-new-privileges`, N6 no transitive pins, hashes or digests). Report:
-  `verify-security-s6-r2.md`.
-- spec verifier: FAIL, one blocking finding (N1: the test for the "no proxy" rule passed with the rule removed, the opener being built
-  at import); Lows N2 to N7 (untested `notify_all`, the non-Exception guard, a key over 24 hours during a fetch, float `exp`/`iat`, the
-  sample's log tests, a stale map). Report: `verify-spec-s6-r2.md`.
-- All of them are fixed in the changes of round 2 (see "Plan-vs-implementation notes", "Verification round 2, fixes"); report:
-  `verify-fix-r2-report.md`. The flake of `e2e-refresh.sh` (its first attempt died in step 4 with `curl: (7)` on port 8080, 16 s after
-  a successful request; four later runs passed) is not a race of the script: step 3 polls the health endpoint after the restart and
-  its refresh passed, so the script does not change.
+The details are in "Plan-vs-implementation notes" above.
 
-After the fixes of round 2:
+- **Round 1.** The key cache: a request whose `kid` is not held does not wait for a running fetch (`503` at once; a cold cache
+  waits for the first fetch); no proxy and no redirect in the fetch, `http` and `https` only; `aud` must be a string; `exp`,
+  `iat` and `nbf` must be JSON numbers; held keys expire 24 hours after the last good fetch (owner). The sample: no password in
+  `repr(Settings)`, no trailing-slash redirect, the body read only up to its cap, a connect timeout, JSON `404`, `405` and `503`
+  with `no-store`. The overlay: Caddy at a pinned tag as a non-root user, the `notes` login refused on `auth`, a healthcheck that
+  Caddy waits for. The e2e script: no `eval` of a value of the service, the cookie's attributes checked, the clock counts the
+  waits. The test that failed under a proxy variable, the misnamed test, the stale map.
+- **Round 2.** The proxy test fails when the rule is removed (the opener is built for each fetch); a cold cache waits only for the
+  first attempt (ruling V7); the flag "a fetch is running" cannot be left set by a clock that raises; five test gaps closed
+  (`notify_all`, a worker that ends on something that is not an `Exception`, a key over 24 hours during a fetch, float time
+  claims, log tests that carry the text of an error). The sample answers a `500` itself and logs its class alone, a pool that runs
+  out is a `503`, `Allow` lists every method of the path. `postgres` and `template1` closed to the `notes` login, Caddy with a
+  read-only root filesystem, no capabilities but one and no new privileges. Images by digest; the sample's 24 packages at exact
+  versions and, for the image, with hashes; the package's build backend pinned.
+- **Round 3.** An attempt whose end could not be timed still counts for the 10-second rule (R3-1). The build tool and what it
+  needs are pinned, hashed and removed from the image (R3-2). `/api/health` logs a database that does not answer. The guide lists
+  `503 database_unavailable`. The polling of `wait_mail` no longer prints `curl`'s errors.
+- **Round 4.** The test of the build tool's pins names `tomlkit` (L1). `/api/health` logs an outage once when it begins and once
+  when it ends, not at every call (I1). `JwksCache` refuses a `min_interval` that is not positive (I2). The end of an outage is
+  logged at WARNING, the level of the container's log (M1).
 
-- Package: `cd clients/python && python -m pytest -q` - 199 passed, also under a dead `HTTP_PROXY`, `http_proxy` and `HTTPS_PROXY`
-  (`http://127.0.0.1:9`). Sample: 88 passed on SQLite, also under the dead proxy, and 88 passed on PostgreSQL 16 (a throwaway container;
-  this run is current, unlike the one of Task 5).
-- Mutations (each new test fails when what it guards is removed): `ProxyHandler({})` removed, the first-attempt flag ignored, `notify_all`
-  removed, the old order of the `finally` (flag cleared after the clock read), `BaseException` back in the worker, the
-  non-Exception guard removed, `_is_usable` dropped from the first lookup of `key_for`, floats refused, the 500 handler logging the text or
-  the traceback, the 500 raised again, `Allow` of the first route only, no handler for the pool timeout.
-- Name check: `checked 150 missing 0 unmapped 0`. `bash -n` is clean for `scripts/e2e-notes.sh` and `scripts/e2e-refresh.sh` (neither changed).
-  No backslash-u escape and no non-ASCII character in the files of this round. `docker compose ... config -q` is clean with the overlay.
-- Throwaway containers (no stack): `notes-db-init`'s SQL run twice on PostgreSQL 16 (the login `notes` is refused on `auth`, `postgres` and
-  `template1`, connects to `notes`; the superuser `auth` connects to all; `pg_isready` accepts); Caddy with `read_only`, `cap_drop: ALL` and
-  `no-new-privileges` fails to start without `cap_add: NET_BIND_SERVICE` and runs as uid 10002 with it; the sample's image built from
-  `requirements-image.txt` with `--require-hashes` (a wrong hash stops it) and removed.
-- Probes (`*.fix-r2.out` in `sec-probes/`): `p11_cold_hung_e2e` - the stall of `/api/health` is once, at the start (5.06 s), and none after
-  (round 2 had 5.06 s, 4.97 s and 3.97 s at t = 0, 15 and 31 s); `p8_r2_sample_errors` - 0 tracebacks and none of the injected secrets in the log
-  (round 2: 21 tracebacks, each secret 5 times), `Allow: GET, POST` on `/api/notes`, a pool timeout is a 503.
-- Not run: the e2e stack with the changed overlay (Docker stack, for the next verification).
+### Final state
 
-Verification round 3 (on commit b1209ed):
+- Package: 206 tests. Sample: 97 tests on SQLite, also under a dead `HTTP_PROXY`, `http_proxy` and `HTTPS_PROXY`. .NET: 935/935
+  (last run in round 3; `src/`, `tests/` and `deploy/docker-compose.yml` are the same as on `main`).
+- Name check (Task 9, step 2, in `.superpowers/sdd/0006-python-consumer-package/task-9-brief.md`): `checked 163 missing 0 unmapped 0`.
+- `scripts/e2e-notes.sh` steps 1 to 6 and the five earlier scripts pass on a clean stack (the five last ran in round 3, and
+  `scripts/e2e-notes.sh` in the scoped pass on `22201eb`; the change after that pass is one log level and one test).
+- The sample on PostgreSQL 16 (a throwaway `postgres:16-alpine`, `NOTES_TEST_DATABASE_URL` set): 97 passed, final state.
+- `bash -n scripts/e2e-notes.sh` is clean; the file is LF with mode 100755. No backslash-u escape in the files of the last passes.
+  The guide's checks (Task 8, step 3) hold: 8 headings, every link and path exists, no product name.
 
-- e2e verifier: PASS (`verify-e2e-s6-r3.md`): `scripts/e2e-notes.sh` and the five earlier scripts pass (the `e2e-refresh.sh` flake did not
-  reproduce in 4 runs); .NET 935/935; the Python suites 199 and 88. Spec verifier: PASS (`verify-spec-s6-r3.md`); security verifier: PASS
-  (`verify-security-s6-r3.md`) with two new Lows (R3-1, R3-2) and Infos, no Critical, High or Medium.
-- The Lows and the one e2e information item are fixed in the changes above (see "Verification round 3, fixes"); report:
-  `verify-fix-r3-report.md`.
+### Owner decisions during verification
 
-After the fixes of round 3:
+- Every finding is fixed at once, Low and Info included, unless the fix contradicts the spec.
+- Held keys expire 24 hours after the last successful fetch (spec Decision 10).
+- The package's build backend is pinned (`hatchling==1.32.4`).
+- A small third and a small fourth round after the PASS verdicts.
+- The FastAPI floor (0.142) and the other readings in spec 0006 -> "As built" (A1 to A9).
 
-- Package: `cd clients/python && python -m pytest -q` - 201 passed, also under a dead `HTTP_PROXY`, `http_proxy` and `HTTPS_PROXY`
-  (`http://127.0.0.1:9`). Sample: 93 passed on SQLite, also under the dead proxy.
-- Name check: `checked 156 missing 0 unmapped 0`. No backslash-u escape in the files of this round. The guide's checks hold (8 headings, every
-  link and path exists, no product name). `docker compose -p auth-core-review-0006 ... config -q` is clean.
-- One throwaway image build of the sample (see above), removed. The e2e stack was not started in this round.
+### Rulings by the orchestrator during implementation
 
-Verification of the fixes of round 3, scoped (on commit d5e30ce, `verify-r3fix.md`): PASS. R3-1 closed (a mutation putting the old block back fails
-two tests), R3-2 closed (nine mutations of `test_image_files` caught, one not: L1), the guide and the `/api/health` log line right (live: 503 twice,
-class only, 200 within 8 s of the restart), the Python suites 201 and 93 also under the dead proxy, name check `checked 156 missing 0 unmapped 0`,
-`scripts/e2e-notes.sh` steps 1 to 6 PASS on a clean stack (one transient `curl: (7)` on port 8025 while Mailpit started), the image of the sample
-holds the 24 pins and none of the build tool. New findings: L1 (Low, test), I1 and I2 (Info); no Critical, High or Medium.
+- Tasks 7 and 9 were built and checked statically first; their e2e run waited for the code of spec 0005 (the company API and
+  the operator CLI), and the branch was verified on top of it.
+- Final review: one fix wave (the wait of the key cache, the package's floors and version, the e2e script's project name, the
+  `.gitignore`, the guide's two sentences, the map). Not done then: the shape of the `404` and `405` (done in round 1, by the
+  owner's rule) and the package's readme and licence metadata (the repository has no licence decision).
+- V1 and V1b: a request whose `kid` is not held does not wait for a running fetch; on a cold cache it waits for the first fetch.
+  V2: no proxy and no redirect in the key set fetch. V3: `aud` is a string, as Auth-Core writes it. V4: the cheap Lows in the
+  same round. V5: the deferral of Lows to the hardening slice, withdrawn by the owner. V6: the FastAPI floor is recorded in the
+  spec's "As built". V7: a cold cache waits only for the first attempt.
 
-After the fixes of round 4 (the changes above; report: `verify-fix-r4-report.md`):
+### Deferred / follow-ups (not fixed in this slice)
 
-- Package: 206 passed (201 before). Sample: 97 passed (93 before). Both also under a dead `HTTP_PROXY`, `http_proxy` and `HTTPS_PROXY` (`http://127.0.0.1:9`).
-- Name check: `checked 163 missing 0 unmapped 0`. No backslash-u escape in the files of this pass. `bash -n scripts/e2e-notes.sh` is clean; the file is LF and mode 100755.
-- Mutations: the `tomlkit` pin dropped from `requirements-build.txt` fails `test_the_build_tool_and_what_it_needs_are_pinned_and_hashed`; the new
-  tests of `/api/health` and of `min_interval` failed before the changes (see "Verification round 4, fixes"). The stack was not started in this pass.
+- An asynchronous exception (a gevent or eventlet timeout) delivered between marking a fetch as running and its `try` can leave
+  the cache marked as fetching. It cannot be closed in pure Python without a redesign; spec 0006 -> "As built", "Known limits".
+- The refresh cookie is `Secure`, so on plain-HTTP origins other than localhost browsers drop it. The test on a real phone and
+  HTTPS on the proxy belong to the frontend slice.
+- Readme and licence metadata of the package.
+- The base file's `postgres` and `mailpit` images are pinned by tag, and the `notes` database keeps PostgreSQL's default
+  `CONNECT` for `PUBLIC` (only the login `notes` and the owner `auth` exist). The `REVOKE`s on `auth`, `postgres` and
+  `template1` stay in the volume if the overlay is dropped.
+- With a hung Auth-Core, the one request that runs the first fetch waits for the fetch timeout (5 seconds); every other request,
+  and `/api/health`, answers at once.
+- The tag `python-v0.1.0` is made at merge; the install line of the spec, the guide and `requirements.txt` resolve only after it.
+- Not tested: FastAPI versions below 0.142 and the Windows registry proxy setting.
+- Residual risks: in spec 0006 -> "Deferred / follow-ups" and "As built".
