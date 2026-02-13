@@ -839,3 +839,13 @@ def test_a_key_set_url_that_is_not_http_or_https_is_refused(url):
 @pytest.mark.parametrize("url", ["http://auth.test/jwks", "https://auth.test/jwks"])
 def test_http_and_https_key_set_urls_are_accepted(url):
     JwksCache(url)
+
+@pytest.mark.parametrize("min_interval", [0, 0.0, -1, float("nan")])
+def test_a_min_interval_that_is_not_positive_is_refused(min_interval):
+    """Without a pause between fetches, a woken waiter could find that another request has already started the next one."""
+    with pytest.raises(ValueError, match="min_interval"):
+        JwksCache("http://auth.test/jwks", min_interval=min_interval)
+
+
+def test_a_small_positive_min_interval_is_accepted():
+    JwksCache("http://auth.test/jwks", min_interval=0.001)

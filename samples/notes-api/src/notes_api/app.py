@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import timezone
@@ -67,14 +68,17 @@ def create_app(
         response.headers.setdefault("Cache-Control", "no-store")
         return response
 
+    outage = _Outage()
+
     @app.get("/api/health")
     def health():
         try:
             with engine.connect() as connection:
                 connection.execute(text("SELECT 1"))
         except Exception as exc:
-            log.warning("the database did not answer (%s)", type(exc).__name__)  # as on the notes endpoints: the class only
+            outage.down(exc)  # logged once, when the outage begins: the healthcheck calls this every few seconds
             return _error(503, "database_unavailable")
+        outage.up()
         return {"status": "ok"}
 
     @app.get("/api/notes")
@@ -143,6 +147,33 @@ def _error(status: int, error: str, headers: dict[str, str] | None = None) -> JS
 
 def _not_found() -> JSONResponse:
     return _error(404, "not_found")
+
+
+class _Outage:
+    """Whether the health check last found the database away, so that an outage is logged when it begins and not at every call.
+
+    The compose healthcheck calls `/api/health` every few seconds: a database that stays away would fill the log with one
+    line per call. One line says it began (the class only, as everywhere), one says it is back. The notes endpoints do not
+    use this: each of their requests logs its own failure. The health check runs in the thread pool, hence the lock.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._is_down = False
+
+    def down(self, exc: Exception) -> None:
+        with self._lock:
+            began = not self._is_down
+            self._is_down = True
+        if began:
+            log.warning("the database did not answer (%s)", type(exc).__name__)
+
+    def up(self) -> None:
+        with self._lock:
+            ended = self._is_down
+            self._is_down = False
+        if ended:
+            log.info("the database answers again")
 
 
 class _InternalErrors:

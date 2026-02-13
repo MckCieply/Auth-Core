@@ -191,8 +191,8 @@ refresh() {
 
 # --- the mail catcher ---------------------------------------------------------------------------------------------
 
-mail_count() {
-  curl -sS --max-time 10 -G "$MAILPIT_URL/api/v1/search" --data-urlencode "query=to:$1" -o "$tmp/search.json"
+mail_count() { # prints the count; prints nothing and fails when the catcher does not answer: wait_mail polls, and its own message says what failed
+  curl -s --max-time 10 -G "$MAILPIT_URL/api/v1/search" --data-urlencode "query=to:$1" -o "$tmp/search.json" || return 1  # no curl error text: while the catcher starts, the first tries are refused
   python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages_count"])' < "$tmp/search.json" | tr -d '\r'
 }
 

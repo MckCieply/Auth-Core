@@ -99,7 +99,7 @@ class JwksCache:
     """Keys by `kid`. Creating it makes no network call.
 
     A fetch happens on first use, when the keys are older than `ttl`, and when a token names a `kid` that is not
-    held, but never twice within `min_interval` (a failed fetch counts). A failed fetch keeps the keys already held,
+    held, but never twice within `min_interval`, which must be greater than 0 (a failed fetch counts). A failed fetch keeps the keys already held,
     for `max_stale` after the last fetch that worked and no longer: then they are gone, and the keys are unavailable
     until a fetch works. The times are read from the clock after a fetch returns, so a slow fetch does not shorten them.
     One fetch runs at a time. A request that holds its key never waits for it. Until the first fetch has
@@ -121,6 +121,9 @@ class JwksCache:
     ) -> None:
         if urlsplit(url).scheme not in ("http", "https"):
             raise ValueError("the key set URL must be an http or https URL")
+        if not min_interval > 0:  # also refuses nan
+            # With no pause, a waiter that a fetch's end wakes could find the next fetch already started by another request, and wait again.
+            raise ValueError("min_interval must be greater than 0")
         self._url = url
         self._ttl = ttl
         self._min_interval = min_interval

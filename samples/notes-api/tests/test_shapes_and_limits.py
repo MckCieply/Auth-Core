@@ -115,17 +115,92 @@ def test_the_database_error_is_logged_by_its_class_and_not_by_its_text(settings,
     assert all(record.exc_info is None for record in caplog.records)  # no traceback attached to any record
 
 
-@pytest.mark.parametrize("path", ["/api/health", "/api/notes"])
-def test_a_database_that_does_not_answer_is_logged_once_per_request_by_its_class_on_every_path(broken_database, signer, caplog, path):
-    """The health check and the notes endpoints answer the same 503; each request leaves one line, the class and nothing else."""
+def test_a_database_that_does_not_answer_is_logged_once_per_request_by_its_class_on_the_notes_endpoints(broken_database, signer, caplog):
+    """Each request to a notes endpoint leaves one line, the class and nothing else (the health check logs once per outage: below)."""
     with caplog.at_level(logging.DEBUG):
-        first = broken_database.get(path, headers=headers(signer))
-        second = broken_database.get(path, headers=headers(signer))
+        first = broken_database.get("/api/notes", headers=headers(signer))
+        second = broken_database.get("/api/notes", headers=headers(signer))
 
     assert (first.status_code, second.status_code) == (503, 503)
     lines = [record.getMessage() for record in caplog.records if "did not answer" in record.getMessage()]
     assert lines == ["the database did not answer (OperationalError)"] * 2
     assert all(record.exc_info is None for record in caplog.records)
+
+
+def switchable_database(settings, engine, auth, monkeypatch):
+    """A client whose database can be taken away and given back: `state["up"]`."""
+    state = {"up": True}
+    real_connect = engine.connect
+
+    def connect(*args, **kwargs):
+        if not state["up"]:
+            raise OperationalError("SELECT 1", (), Exception("driver says secret-driver-text"))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "connect", connect)
+    return TestClient(create_app(settings, engine=engine, auth=auth, migrate=False)), state
+
+
+def health_lines(caplog):
+    return [record.getMessage() for record in caplog.records if record.name.startswith("notes_api")]
+
+
+def test_the_health_check_logs_a_database_that_does_not_answer_once_per_outage(settings, engine, auth, caplog, monkeypatch):
+    """The compose healthcheck calls it every 5 seconds: a long outage must not fill the log, one line says it began."""
+    client, state = switchable_database(settings, engine, auth, monkeypatch)
+    state["up"] = False
+
+    with caplog.at_level(logging.DEBUG):
+        responses = [client.get("/api/health") for _ in range(3)]
+
+    assert [response.status_code for response in responses] == [503, 503, 503]  # every call still says so
+    assert [response.json() for response in responses] == [{"error": "database_unavailable"}] * 3
+    assert health_lines(caplog) == ["the database did not answer (OperationalError)"]
+    assert "secret-driver-text" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_the_health_check_logs_again_when_the_database_fails_after_it_has_recovered(settings, engine, auth, caplog, monkeypatch):
+    client, state = switchable_database(settings, engine, auth, monkeypatch)
+
+    with caplog.at_level(logging.DEBUG):
+        state["up"] = False
+        assert client.get("/api/health").status_code == 503
+        assert client.get("/api/health").status_code == 503
+        state["up"] = True
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/health").status_code == 200  # up again: nothing more
+        state["up"] = False
+        assert client.get("/api/health").status_code == 503
+        assert client.get("/api/health").status_code == 503
+
+    assert health_lines(caplog) == [
+        "the database did not answer (OperationalError)",
+        "the database answers again",
+        "the database did not answer (OperationalError)",
+    ]
+
+
+def test_a_healthy_database_leaves_no_line_in_the_log_from_the_health_check(client, caplog):
+    with caplog.at_level(logging.DEBUG):
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/health").status_code == 200
+
+    assert health_lines(caplog) == []
+
+
+def test_the_notes_endpoints_keep_logging_once_per_request_while_the_health_check_stays_quiet(settings, engine, auth, signer, caplog, monkeypatch):
+    client, state = switchable_database(settings, engine, auth, monkeypatch)
+    state["up"] = False
+
+    with caplog.at_level(logging.DEBUG):
+        client.get("/api/health")
+        client.get("/api/health")  # quiet: the outage is already told
+        client.get("/api/notes", headers=headers(signer))
+        client.get("/api/notes", headers=headers(signer))
+
+    # one from the first health call, one from each notes request: the notes endpoints do not share the health state
+    assert len(health_lines(caplog)) == 3
 
 
 def test_the_connection_pool_running_out_is_a_503_like_a_database_that_does_not_answer(settings, engine, auth, signer, monkeypatch):

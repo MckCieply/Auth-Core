@@ -5,6 +5,11 @@ from pathlib import Path
 
 SAMPLE = Path(__file__).resolve().parent.parent
 
+# The build tool and everything it needs, listed once: hatchling 1.32.4 and its five dependencies. The pins of
+# requirements-build.txt and the uninstall line of the Dockerfile must be exactly this set, so a dropped pin, a dropped
+# uninstall or an extra name fails the test. (Changing the version of hatchling may change the set: change it here.)
+BUILD_TOOL = frozenset({"hatchling", "packaging", "pathspec", "pluggy", "tomlkit", "trove-classifiers"})
+
 
 def requirements(name: str) -> dict[str, tuple[str, list[str]]]:
     """name -> (version, hashes) of every requirement in the file; a line that is not an exact pin fails the test."""
@@ -55,8 +60,7 @@ def test_the_dockerfile_installs_the_libraries_from_the_list_with_hashes_and_whe
 def test_the_build_tool_and_what_it_needs_are_pinned_and_hashed():
     build = requirements("requirements-build.txt")
 
-    for name in ("hatchling", "packaging", "pathspec", "pluggy", "trove-classifiers"):  # hatchling and its dependencies
-        assert name in build
+    assert set(build) == BUILD_TOOL  # hatchling and its dependencies: no pin missing, none unknown
     assert all(len(hashes) == 1 for _, hashes in build.values())  # pure Python: one wheel for every system
     assert set(build).isdisjoint(requirements("requirements-image.txt"))  # what is built with is not what runs
 
@@ -79,7 +83,9 @@ def test_the_dockerfile_builds_the_package_from_the_pinned_build_tool_and_fetche
     assert len(installs) == 3  # the libraries, the build tool, the package: each one of the above, none other
     for install in installs:
         assert "--require-hashes" in install or "--no-build-isolation" in install, install
-    assert re.search(r"pip uninstall --yes hatchling packaging pathspec pluggy tomlkit trove-classifiers", dockerfile)  # not in the image
+    uninstalled = re.findall(r"pip uninstall --yes ([^&;\n]*)", dockerfile)
+    assert len(uninstalled) == 1
+    assert set(uninstalled[0].split()) == BUILD_TOOL  # all of it is removed from the image, and nothing else
 
 
 def test_the_images_of_the_overlay_are_pinned_by_digest():
