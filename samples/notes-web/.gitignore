@@ -1,0 +1,11 @@
+/node_modules
+/dist
+/.angular
+/out-tsc
+/coverage
+/test-results
+/playwright-report
+/blob-report
+npm-debug.log
+.DS_Store
+Thumbs.db
