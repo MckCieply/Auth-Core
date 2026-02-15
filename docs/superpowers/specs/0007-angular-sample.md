@@ -48,12 +48,18 @@ sign out, reload       -> /login
 scripts/e2e-web.sh     -> every Playwright test passes in Chromium and WebKit
 ```
 
+The same app is also served on `https://localhost:8443`, with a certificate from
+Caddy's internal authority. WebKit (Safari's engine) needs it: it keeps the refresh
+cookie, which is always `Secure`, but does not send it back over plain HTTP, not even
+to `localhost` (Decision 9).
+
 ## In scope
 
 - **The sample app** in `samples/notes-web/`: Angular 21, the screens below, the
   sign-in pieces in `src/app/auth/`.
 - **A third compose overlay**, `samples/notes-web/compose.yml`, that serves the built
-  app from Caddy on the same origin as `/auth` and `/api`.
+  app from Caddy on the same origin as `/auth` and `/api`, over HTTP on `:8088` and
+  over HTTPS on `:8443`.
 - **A development server setup**: `ng serve` on `http://localhost:4200` with a proxy
   for `/auth` and `/api` to the stack on `:8088`.
 - **Unit tests** of the sign-in pieces, run with `ng test` and no Docker.
@@ -64,7 +70,7 @@ scripts/e2e-web.sh     -> every Playwright test passes in Chromium and WebKit
 ## Out of scope / Deferred
 
 See [Deferred / follow-ups](#deferred--follow-ups). Not built here: the test on a real
-phone, HTTPS on the local proxy (unless WebKit needs it, see "To verify"), a PWA
+phone, a certificate trusted by the browser for the local proxy, a PWA
 (manifest, service worker, install to the home screen), self-service sign-up (Auth-Core
 has no endpoint for it), screens for company admins (invitations, members, roles),
 switching companies, a reusable npm package, Polish texts, and any change to
@@ -83,7 +89,7 @@ them in one place. The routes match the links Auth-Core puts in its mails.
 | `/forgot` | Email. On `202` always the same answer: "If an account exists for this address, we sent a link." `429`: "Wait N seconds before asking again." |
 | `/reset?token=` | New password, twice. `weak_password`: the rules not met, one line each. `invalid_token`: "This link has expired or was already used." with a link to `/forgot`. On `204`: "Password changed. Sign in." with a link to `/login`. No sign-in follows: Auth-Core has ended every session. |
 | `/verify?token=` | Calls `POST /auth/email/verify` on opening. `204`: "Email confirmed." with a link to `/login`. `invalid_token`: "This link has expired or was already used." and a form to send a new one. |
-| `/invite?token=` | First `POST /auth/invites/preview`: "Join **{org_name}** as **{role}**" and the email, not editable. Then the password, twice, and `POST /auth/invites/accept`. The screen always says "This sets the password for {email}.", because for an existing account the call replaces the password. `409 already_member`: "This account already belongs to a company." `invalid_token`: as on `/reset`. On `204`: `/login`, with the email filled in. |
+| `/invite?token=` | First `POST /auth/invites/preview`: "Join **{org_name}** as **{role}**" and the email, not editable. Then the password, twice, and `POST /auth/invites/accept`. The screen always says "This sets the password for {email}.", because for an existing account the call replaces the password. `409 already_member`: "This account already belongs to a company." `invalid_token`: "This invitation has expired or was already used. Ask for a new one." On `204`: `/login`, with the email filled in. |
 | `/notes` | Guarded. A header with the email, company and role from `GET /auth/me`, and "Sign out". The company's notes, newest first, and a form to add one. The form is shown only when `/auth/me` lists `notes:write`. |
 
 - `/` redirects to `/notes`. An unknown route redirects to `/notes`.
@@ -121,8 +127,12 @@ It handles the answers to those requests:
 | `401` | One refresh, then the request again, once. Requests that get `401` while a refresh is running wait for that refresh instead of starting another. |
 | `401` from that refresh | The token is dropped; the person goes to `/login?returnUrl=<the current path>`. |
 | `403 {"error":"forbidden"}` | "You don't have access to this." No refresh. |
-| `403 {"error":"permissions_changed"}` | One refresh, so the new token carries the current role, then the request again, once. |
+| `403 {"error":"permissions_changed"}` | One refresh, so the new token carries the current role, then `/auth/me` again and the request again, once. |
 | `503 {"error":"auth_unavailable"}` | A bar: "Try again shortly." The person stays signed in. |
+
+A refresh that fails with anything other than `401` (no network, `5xx`) keeps the token and shows "Can't reach the server. Try again shortly." A `401` on the retried request is passed to the caller as it is. A `401` on a request sent with a token that has since been renewed is retried with the new token, without another refresh.
+
+The bar has a "Dismiss" button and is cleared by a sign-in. Counts in texts use the singular for 1 ("1 minute").
 
 There is no refresh ahead of expiry: a token is renewed only after a `401`, which
 costs one extra request about every 10 minutes.
@@ -162,32 +172,44 @@ with no UI library. The app needs no `zone.js`.
 `samples/notes-api/compose.yml`, which stay unchanged, so the e2e scripts of specs
 0001–0006 run as before. The overlay:
 
-- replaces the `caddy` service's image with one built from `samples/notes-web/Dockerfile`,
-  still on `http://localhost:8088` (loopback only);
-- gives it the sample's `Caddyfile`: `/auth/*` to Auth-Core, `/api/*` to the notes
-  service, every other path to the built app, with an unknown path answered by
-  `index.html`;
+- replaces the `caddy` service with one built from `samples/notes-web/Dockerfile`, under
+  its own image name (`notes-web-caddy:local`; without an `image` of its own, Compose
+  would tag the build as `caddy:2`);
+- gives it the sample's `Caddyfile`, mounted at the same path, so it replaces the one
+  of `samples/notes-api/compose.yml`. The same routes on both listeners: `/auth/*` to
+  Auth-Core, `/api/*` to the notes service, every other path to the built app, with an
+  unknown path answered by `index.html`;
+- listens on `http://localhost:8088` as before, and on `https://localhost:8443` with a
+  certificate from Caddy's internal authority (`tls internal`), both on loopback only;
 - sets Auth-Core's mail links to `http://localhost:8088/reset`, `/verify` and
-  `/invite` (`Auth:App:FrontendUrls:*`).
+  `/invite` (`Auth:App:FrontendUrls:ResetPassword`, `VerifyEmail`, `AcceptInvite`).
+
+The token issuer stays `http://localhost:8088/auth`, as in spec 0006. It is a name the
+notes service compares with the token, not the address the browser used, so a session
+started on `:8443` works the same.
 
 **Headers on the app's responses** (not on `/auth` and `/api`, which set their own):
 
 | Header | Value |
 | --- | --- |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`, plus a `style-src` from "To verify" |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-<n>'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
 | `Referrer-Policy` | `no-referrer`, because the mail links carry a token in the URL |
 | `X-Content-Type-Options` | `nosniff` |
-| `Cache-Control` on `index.html` | `no-cache`; hashed files may be cached |
+| `Cache-Control` | `no-cache` on every response that is `index.html`, including the answer to an unknown path; hashed `.js` and `.css` files may be cached |
 
-The build turns off critical-CSS inlining, so no inline script or style is needed by
-the build itself.
+`<n>` is new for every response. Angular adds component styles as `<style>` elements
+while it runs; they carry the nonce, which Caddy writes into `index.html`
+(`<app-root ngCspNonce="…">`, filled by Caddy's `templates` from the request's id) and
+into the header. `'self'` is still needed for the build's stylesheet. There is no
+`'unsafe-inline'`. The build turns off critical-CSS inlining, so `index.html` holds no
+inline script, style or event handler.
 
 ### Development server
 
 `ng serve` on `http://localhost:4200`, with `proxy.conf.json` sending `/auth` and
 `/api` to `http://localhost:8088`. The browser still sees one origin, so the refresh
-cookie works. It is for working on the screens; the tests run against the built app
-on `:8088`.
+cookie works in Chrome. It is for working on the screens; the tests run against the
+built app on `:8443`.
 
 ### Tests
 
@@ -201,9 +223,11 @@ on `:8088`.
 - The guard: `returnUrl` values `//evil.example`, `/\evil.example`,
   `https://evil.example` and `javascript:…` all end on `/notes`; `/notes?x=1` is kept.
 
-**Playwright** (`e2e/`), against `http://localhost:8088`, in two projects: Chromium
-(desktop) and WebKit (an iPhone device profile). Mail is read from Mailpit's API.
-A test that changes a password uses its own invited user, never the seeded admin.
+**Playwright** (`e2e/`), against `https://localhost:8443` with the local certificate
+accepted (`ignoreHTTPSErrors`), in two projects: Chromium (desktop) and WebKit
+(`iPhone 15`). Mail is read from Mailpit's API. A mail link points at `:8088`; a test
+takes its `token` and opens the same path on the test origin. A test that changes a
+password uses its own invited user, never the seeded admin.
 
 1. Sign in as the admin; a wrong password shows the message.
 2. A reload keeps the session; after sign-out a reload shows `/login`.
@@ -283,6 +307,13 @@ product. Steps, each pointing at the sample's file:
 8. **Packages, pinned:** Angular, its CLI and build 21.1.4; TypeScript 5.9.3; RxJS
    7.8.2; tslib; Vitest 4.0.18 and jsdom 28.0.0; Playwright 1.58.2 with its Chromium
    and WebKit; the `node:24-alpine` image.
+9. **The local proxy also speaks HTTPS, for WebKit.** The technical trial showed that
+   WebKit keeps a `Secure` cookie set over `http://localhost` but never sends it back,
+   so a session cannot survive a reload there. Auth-Core always sets `Secure`, and that
+   stays. Caddy therefore also serves `https://localhost:8443` with `tls internal`
+   (no new package), and the tests run there. The certificate is not trusted by the
+   browser; Playwright accepts it, a person sees a warning. This was agreed with
+   Decision 4 as the fallback if WebKit refused the cookie.
 
 Design choices made with them, not departures:
 
@@ -329,19 +360,29 @@ Per [`docs/workflow.md`](../../workflow.md) — verifiers run locally before mer
 
 ## To verify during implementation
 
-- **WebKit and the `Secure` cookie on `http://localhost`.** If Playwright's WebKit on
-  Windows does not keep the `auth_rt` cookie over plain HTTP, the tests use
-  `https://localhost` from Caddy's `tls internal` (no new package), with Playwright
-  ignoring the local certificate; the issuer then follows the test origin.
-- **`style-src`.** Angular adds component styles as `<style>` elements at run time.
-  Find whether a nonce can be served from a static Caddy setup (`ngCspNonce` or
-  Angular's `autoCsp`); if not, `style-src 'self' 'unsafe-inline'`, and the spec's
-  "As built" says so.
-- **Overriding the `caddy` service** from a third compose file: the image, the build
-  and the mounted `Caddyfile` replace those of `samples/notes-api/compose.yml`.
+Settled by the technical trial (2026-02-15), recorded for the plan:
+
+- WebKit drops the `Secure` cookie over plain HTTP on `localhost` and `127.0.0.1`, and
+  keeps it over HTTPS with an untrusted certificate (Decision 9). Chromium keeps it on
+  both.
+- The style nonce works from static Caddy: `templates` on `text/html`, the request's
+  `{http.request.uuid}` in the header, and in `index.html` the template written with
+  backticks (`` {{placeholder `http.request.uuid`}} ``), because the build rewrites double
+  quotes inside the attribute. With `style-src 'self'` alone Angular's styles are
+  refused in both browsers; with the nonce there is no violation.
+- In a third compose file `build` does not replace `image`, so the overlay names its
+  own image; a volume at the same target replaces the earlier one; `environment` is
+  merged; relative paths resolve from `deploy/`.
+- `ng new` 21.1.4 with `--zoneless --ssr=false --style css --test-runner vitest` gives
+  no `zone.js`; `ng test` runs on jsdom with no browser download. The scaffold writes
+  caret ranges older than Decision 8, so the versions are pinned by hand.
+
+Still to verify:
+
+- **Caddy's `tls internal` in the container** for the site `localhost`, published on
+  `127.0.0.1:8443`, with no attempt to install its root into a trust store.
 - **The mail links** reach the app through `Auth:App:FrontendUrls:*` set by the
-  overlay's environment, and Auth-Core accepts those URLs (no `token` parameter, no
-  fragment).
+  overlay's environment (plain `http` is accepted in Development only).
 - **The unverified seed user** (`AUTH_DEV_SEED_UNVERIFIED_*`) is created on the stack
   the e2e script starts, and Mailpit's API gives the latest mail for an address.
 - **Angular 21.1.4 with Vitest 4.0.18:** the default unit-test builder runs with jsdom
