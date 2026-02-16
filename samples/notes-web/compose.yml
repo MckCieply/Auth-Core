@@ -1,0 +1,29 @@
+# The "notes" frontend on top of the development stack and the notes sample. Use it with both:
+#
+#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f samples/notes-web/compose.yml \
+#     --env-file .env up -d --build
+#
+# Relative paths in this file are resolved from deploy/ (the directory of the FIRST -f file), not from here.
+# The browser's origin is http://localhost:8088 (and https://localhost:8443 with a certificate that a browser does not trust):
+#   /auth -> Auth-Core, /api -> the notes service, everything else -> the built app. Both ports are on loopback only.
+services:
+  caddy:
+    # Replaces the plain proxy of samples/notes-api/compose.yml. Without its own image name Compose would tag this build
+    # "caddy:2", the name of the image it is built on.
+    image: notes-web-caddy:local
+    build:
+      context: ../samples/notes-web
+      dockerfile: Dockerfile
+    ports:
+      # Added to the 8088 of the notes overlay. Loopback only, like every other port of this stack.
+      - "127.0.0.1:8443:8443"
+    volumes:
+      # The same container path as in the notes overlay: this mount replaces that Caddyfile.
+      - ../samples/notes-web/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  auth:
+    environment:
+      # The links in Auth-Core's mails open the screens of this app (plain http is accepted in Development only).
+      Auth__App__FrontendUrls__ResetPassword: http://localhost:8088/reset
+      Auth__App__FrontendUrls__VerifyEmail: http://localhost:8088/verify
+      Auth__App__FrontendUrls__AcceptInvite: http://localhost:8088/invite

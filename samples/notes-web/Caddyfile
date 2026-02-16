@@ -1,0 +1,56 @@
+# One origin for the browser, on two listeners with the same routes:
+#   http://localhost:8088   development; the mail links point here
+#   https://localhost:8443  the same app with a certificate from Caddy's own authority (not trusted by a browser: a
+#                           person sees a warning, Playwright accepts it). WebKit needs HTTPS to send the refresh
+#                           cookie back, which Auth-Core always sets Secure.
+# /auth is Auth-Core, /api is the notes service, everything else is the built app. Development only.
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	# No HTTP/3: its UDP port is not published, and a browser must not try it.
+	servers {
+		protocols h1 h2
+	}
+}
+
+(routes) {
+	handle /auth/* {
+		reverse_proxy auth:8080
+	}
+	handle /api/* {
+		reverse_proxy notes-api:8000
+	}
+	# The app. The headers are here and not on /auth and /api, which set their own.
+	handle {
+		root * /srv
+		encode gzip
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{http.request.uuid}'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+			Referrer-Policy no-referrer
+			X-Content-Type-Options nosniff
+		}
+		# Every answer that is index.html is revalidated, an unknown path included. Only a .js, .css or .ico file that
+		# exists (hashed by the build) may be cached.
+		@revalidate not {
+			path *.js *.css *.ico
+			file
+		}
+		header @revalidate Cache-Control no-cache
+		try_files {path} /index.html
+		# Fills in {{placeholder `http.request.uuid`}} of index.html: the nonce of the style elements Angular adds.
+		templates {
+			mime text/html
+		}
+		file_server
+	}
+}
+
+http://:8088 {
+	import routes
+}
+
+https://localhost:8443 {
+	tls internal
+	import routes
+}
