@@ -43,3 +43,57 @@ export async function signedInAs(
   ctrl.expectOne('/auth/me').flush(me);
   await loaded;
 }
+
+function root(fixture: ComponentFixture<unknown>): HTMLElement {
+  return fixture.nativeElement as HTMLElement;
+}
+
+function find<T extends Element>(fixture: ComponentFixture<unknown>, selector: string): T {
+  const element = root(fixture).querySelector<T>(selector);
+  if (element === null) {
+    throw new Error(`nothing matches ${selector} in: ${pageText(fixture)}`);
+  }
+  return element;
+}
+
+/** All the text on the page, white space collapsed. */
+export function pageText(fixture: ComponentFixture<unknown>): string {
+  return (root(fixture).textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/** Types into an input or a text area the way a person does: the value, then the event the form listens for. */
+export function typeInto(fixture: ComponentFixture<unknown>, selector: string, value: string): void {
+  const field = find<HTMLInputElement | HTMLTextAreaElement>(fixture, selector);
+  field.value = value;
+  field.dispatchEvent(new Event('input'));
+}
+
+/**
+ * Like typeInto, but the value arrives exactly as given. A browser (and jsdom) strips the white space around the value of an
+ * input of type email, so a test of what the page does with spaces around an address must make the field a plain text field
+ * first.
+ */
+export function typeRaw(fixture: ComponentFixture<unknown>, selector: string, value: string): void {
+  const field = find<HTMLInputElement | HTMLTextAreaElement>(fixture, selector);
+  if (field instanceof HTMLInputElement) {
+    field.type = 'text';
+  }
+  field.value = value;
+  field.dispatchEvent(new Event('input'));
+}
+
+export function submitForm(fixture: ComponentFixture<unknown>, selector = 'form'): void {
+  find<HTMLFormElement>(fixture, selector).dispatchEvent(new Event('submit'));
+}
+
+export function clickOn(fixture: ComponentFixture<unknown>, selector: string): void {
+  find<HTMLElement>(fixture, selector).click();
+}
+
+export function has(fixture: ComponentFixture<unknown>, selector: string): boolean {
+  return root(fixture).querySelector(selector) !== null;
+}
+
+export function valueOf(fixture: ComponentFixture<unknown>, selector: string): string {
+  return find<HTMLInputElement>(fixture, selector).value;
+}
