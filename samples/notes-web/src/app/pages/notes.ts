@@ -1,10 +1,10 @@
 import { DatePipe } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { AuthService } from '../auth/auth.service';
+import { AuthService, errorCode } from '../auth/auth.service';
 import { texts } from '../texts';
 
 interface Note {
@@ -15,6 +15,14 @@ interface Note {
 }
 
 const MAX_NOTE_CHARACTERS = 1000;
+
+/**
+ * True for a 503 {"error":"auth_unavailable"}: the notes service cannot reach Auth-Core. The interceptor shows the bar "Try again
+ * shortly." for that answer (spec 0007, session table), so the screen adds no sentence of its own next to it.
+ */
+function isAuthUnavailable(error: unknown): boolean {
+  return error instanceof HttpErrorResponse && error.status === 503 && errorCode(error) === 'auth_unavailable';
+}
 
 /** True for what the service sends as a note: the view shows the text and the time, and tracks the id. */
 function isNote(value: unknown): value is Note {
@@ -58,7 +66,9 @@ function isNote(value: unknown): value is Note {
         }
       }
       @if (loadFailed()) {
-        <p class="error" role="alert">{{ somethingWrong }}</p>
+        @if (!authUnavailable()) {
+          <p class="error" role="alert">{{ somethingWrong }}</p>
+        }
       } @else if (loaded() && notes().length === 0) {
         <p class="status">{{ t.empty }}</p>
       }
@@ -89,6 +99,8 @@ export class NotesPage implements OnInit {
   protected readonly notes = signal<Note[]>([]);
   protected readonly loaded = signal(false);
   protected readonly loadFailed = signal(false);
+  // The list failed because of auth_unavailable: the bar of the interceptor says it, not this screen.
+  protected readonly authUnavailable = signal(false);
   protected readonly addError = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly signingOut = signal(false);
@@ -125,8 +137,9 @@ export class NotesPage implements OnInit {
         void this.load();
       }
       this.form.reset();
-    } catch {
-      this.addError.set(this.somethingWrong);
+    } catch (error) {
+      // auth_unavailable: the bar says it. What was typed stays, so the person can send it again.
+      this.addError.set(isAuthUnavailable(error) ? null : this.somethingWrong);
     } finally {
       this.busy.set(false);
     }
@@ -151,11 +164,13 @@ export class NotesPage implements OnInit {
       const listed = new Set(list.map((note) => note.id));
       this.notes.set([...this.added.filter((note) => !listed.has(note.id)), ...list]);
       this.loadFailed.set(false);
+      this.authUnavailable.set(false);
       this.loaded.set(true);
-    } catch {
+    } catch (error) {
       // Nothing of an older list is kept next to the message, only what this page added itself.
       this.notes.set(this.added);
       this.loadFailed.set(true);
+      this.authUnavailable.set(isAuthUnavailable(error));
     }
   }
 }

@@ -66,25 +66,39 @@ scripts/e2e-web.sh        # starts the stack under its own compose project name,
 ## Known advisories
 
 The Angular packages are pinned at 21.1.4 ([Decision 8 and 13](../../docs/superpowers/specs/0007-angular-sample.md)), and
-`npm audit --omit=dev` reports 6 high advisories against them: `@angular/core`, `common`, `compiler`, `forms`,
-`platform-browser` and `router` (the last three only through the first three). Seen on 2026-10-06, they are of these kinds:
+`npm audit --omit=dev --json` reports 6 high-severity packages against them (seen on 2026-10-06; every advisory is fixed in the
+21.2 line, 21.2.25 at the time). Per package, by advisory id (GHSA) and kind:
 
-- cross-site scripting through i18n attribute bindings and i18n event-handler attributes, and sanitisation bypasses in templates
-  (two-way property bindings, attribute namespaces, directive host bindings), in `@angular/compiler` and `@angular/core`;
-- denial of service through memory use in the date and number formatting of `@angular/common` (`formatDate`, `digitsInfo`);
-- information leaks and cache poisoning in `HttpTransferCache`, which exists for server-side rendering.
+- `@angular/core`: GHSA-prjf-86w9-mfqv, GHSA-g93w-mfhg-p222 and GHSA-jj27-h5hq-8x99 (cross-site scripting through i18n, i18n
+  attribute bindings and i18n event-handler attributes); GHSA-f3m7-gqxr-g87x (sanitisation bypass, template and attribute
+  namespaces); GHSA-692r-grfm-v8x7 (the same for dynamic components); GHSA-hh8m-fm6v-7cvg (sanitisation bypass through directive
+  host bindings); GHSA-rgjc-h3x7-9mwg (DOM clobbering and response-cache poisoning in client hydration).
+- `@angular/compiler`: GHSA-g93w-mfhg-p222, GHSA-jj27-h5hq-8x99, GHSA-f3m7-gqxr-g87x and GHSA-hh8m-fm6v-7cvg (as above), and
+  GHSA-58w9-8g37-x9v5 (sanitisation bypass in two-way property bindings).
+- `@angular/common`: GHSA-48r7-hpm6-gfxm (denial of service by memory use in `formatDate`), GHSA-p3vc-36g9-x9gr (the same in
+  `digitsInfo`, the number formatting); GHSA-39pv-4j6c-2g6v, GHSA-q6f4-qqrg-jv6x, GHSA-jhpw-976m-542j and GHSA-p297-fm68-3q8c
+  (cache-key weakness, credentialed requests cached, cache-key ambiguity and a bypass in `HttpTransferCache`: information leaks and
+  cache poisoning, only with server-side rendering).
+- `@angular/router`: GHSA-ff3f-86qr-9cv3 (server-side rendering: denial of service by numeric matrix parameters in a URL), and it is
+  flagged for `core`, `common` and `platform-browser` too.
+- `@angular/platform-browser` and `@angular/forms`: no advisory of their own; flagged only because they depend on the packages
+  above.
 
-This sample uses no i18n, no server-side rendering (so no `HttpTransferCache`), no dynamic attribute or host bindings, and
-every text goes through interpolation; the `Content-Security-Policy` of the proxy is a second line. The versions are not
-changed here: moving to a fixed 21.2 release is a follow-up. A product that copies the sign-in pieces should install a fixed
-release of its own.
+What the sample uses of that, and what it does not. It **does** use the date pipe (`formatDate`) in the notes list, with the fixed
+format `'medium'`, on a `created_at` that the screen checks is a date before it shows the list; and one attribute binding,
+`[attr.maxlength]` on the note field, bound to a constant (1000), never to data. It does **not** use i18n, server-side rendering
+or hydration (so no `HttpTransferCache`), dynamic components, two-way property bindings, namespaced attributes, directive host
+bindings or the number pipes; every text from a server goes through interpolation, never as HTML. The `Content-Security-Policy` of
+the proxy is a second line. The versions are not changed here: moving to a fixed 21.2 release is a follow-up. A product that copies
+the sign-in pieces should install a fixed release of its own.
 
 ## Things to know
 
 - The bar above the screens (`Try again shortly.`, `You don't have access to this.`, `Can't reach the server. Try again shortly.`) has no timer:
   dismiss it, or it goes with the next sign-in.
-- The proxy answers only to `localhost` and `127.0.0.1` (another Host name gets a 421), and a path with a file extension that
-  is not in the build (`/missing.js`) is a 404, not the app.
+- The proxy answers only to `localhost` and `127.0.0.1` (another Host name gets a 421), and a path whose last segment has a dot
+  that is not a file of the build (`/missing.js`, and also a route such as `/notes/john.doe`) is a 404, not the app; `/notes/john-doe`
+  and `/a.b/c` are routes. `/auth` and `/api` are matched in lower case only.
 - `scripts/e2e-web.sh` removes `test-results/` (screenshots of failed tests show the page) when it ends; `E2E_KEEP_RESULTS=1` keeps it.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.

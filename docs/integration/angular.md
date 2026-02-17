@@ -23,9 +23,12 @@ it. There is no CORS: the app, Auth-Core and your API are on one origin behind a
 The sample's proxy is Caddy: [`samples/notes-web/Caddyfile`](../../samples/notes-web/Caddyfile) sends `/auth/*` to Auth-Core,
 `/api/*` to the product's service and every other path to the built app, with `index.html` as the answer to a path with no file
 extension (the router owns those paths). A path with an extension that is not in the build (`/missing.js`) is a `404`: a broken
-build then shows as an error, and a browser never runs HTML as a script. The sample's proxy answers only to the host names it is
-reached by (`localhost` and `127.0.0.1`) and turns off the file server's canonical-URI redirects, which could be made to redirect to
-another site; your proxy should answer only to the names of your product, and not redirect on a path it has rewritten. The compose overlay that builds and runs it is
+build then shows as an error, and a browser never runs HTML as a script. The rule looks at the last segment of the path: a route of your
+app whose last segment has a dot (`/notes/john.doe`) is a `404` too, so keep dots out of the last segment of a route (put the value in
+a query, `/notes?name=john.doe`, or end the path in a slash); a dot in an earlier segment (`/a.b/c`) is fine. `/auth` and `/api` are
+matched in lower case only. The sample's proxy answers only to the host names it is reached by (`localhost` and `127.0.0.1`) and turns
+off the file server's canonical-URI redirects, which could be made to redirect to another site; your proxy should answer only to the
+names of your product, and not redirect on a path it has rewritten. The compose overlay that builds and runs it is
 [`samples/notes-web/compose.yml`](../../samples/notes-web/compose.yml).
 
 While you work on the screens, `ng serve` can stand in for the proxy:

@@ -22,8 +22,9 @@
 # Chromium and WebKit (npx playwright install chromium webkit, once), curl, docker compose, and the host ports 8088, 8443,
 # 8080 and 8025 free. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD, AUTH_DEV_SEED_UNVERIFIED_EMAIL,
 # AUTH_DEV_SEED_UNVERIFIED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
-# Env: COMPOSE_PROJECT_NAME (default auth-core-web; a name must start with auth-core-web, because the script runs `down -v` on
-# it: the development stack, "auth-core", and any other project are refused), E2E_PROJECTS, E2E_KEEP_STACK, E2E_KEEP_RESULTS,
+# Env: COMPOSE_PROJECT_NAME (default auth-core-web; a name must be auth-core-web or auth-core-web-<suffix> with a suffix of
+# a-z, 0-9 and -, because the script runs `down -v` on it: the development stack, "auth-core", and any other project are refused;
+# a project of that name that is running is refused too, so two runs never remove each other's stack: set another name), E2E_PROJECTS, E2E_KEEP_STACK, E2E_KEEP_RESULTS,
 # HTTP_URL, HTTPS_URL, MAILPIT_URL. Exits non-zero on the first failure; prints "PASS <project>" per project; never prints a
 # password, a token, a cookie or a mail body. samples/notes-web/test-results/ (a screenshot of each failed test shows the page:
 # emails, notes) is removed when the script ends, whatever the outcome; E2E_KEEP_RESULTS=1 keeps it for a look.
@@ -36,10 +37,15 @@ HTTPS_URL="${HTTPS_URL:-https://localhost:8443}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 PROJECTS="${E2E_PROJECTS:-chromium webkit}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-web}"
-# The script runs `down -v` on its project: only on a project of its own, whose name starts with auth-core-web. Never on the
-# development stack (auth-core) or on a project of something else.
-[[ "$COMPOSE_PROJECT_NAME" == auth-core-web* ]] \
-  || { echo "FAIL COMPOSE_PROJECT_NAME must start with auth-core-web: this script removes the volumes of its project; use such a name" >&2; exit 1; }
+# The script runs `down -v` on its project: only on a project of its own, named auth-core-web or auth-core-web-<suffix> (suffix of
+# lower-case letters, digits and hyphens). Never on the development stack (auth-core) or on a project of something else.
+[[ "$COMPOSE_PROJECT_NAME" =~ ^auth-core-web(-[a-z0-9-]+)?$ ]] \
+  || { echo "FAIL COMPOSE_PROJECT_NAME must be auth-core-web or auth-core-web-<suffix> (suffix: a-z, 0-9, -): this script removes the volumes of its project; use such a name" >&2; exit 1; }
+# A stack of that name that is running now (another run, another person) is not touched: the clean start below would remove it.
+if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" 2>/dev/null || true)" ]]; then
+  echo "FAIL a stack named $COMPOSE_PROJECT_NAME is running: this script would remove it (down -v); pick another name, e.g. COMPOSE_PROJECT_NAME=auth-core-web-mine $0" >&2
+  exit 1
+fi
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"

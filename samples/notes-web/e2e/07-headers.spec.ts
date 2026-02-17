@@ -58,6 +58,45 @@ test('a path without an extension is a route of the app: it gets index.html', as
   }
 });
 
+test('a route whose last segment has a dot is a 404, and one without is the app (Decision 14)', async ({ page }) => {
+  const dotted = await page.request.get('/notes/a.b');
+  expect(dotted.status()).toBe(404);
+  expect(await dotted.text()).not.toContain('<app-root');
+  const plain = await page.request.get('/notes/ab');
+  expect(plain.status()).toBe(200);
+  expect(await plain.text()).toContain('<app-root');
+});
+
+test('a Range request for a page of the app is answered in full: 200, no Content-Range, a length that matches', async ({ page }) => {
+  for (const path of ['/', '/notes', '/index.html']) {
+    const answer = await page.request.get(path, { headers: { Range: 'bytes=0-5' } });
+    expect(answer.status(), path).toBe(200);
+    expect(answer.headers()['content-range'], path).toBeUndefined();
+    const body = await answer.body();
+    expect(Number(answer.headers()['content-length']), path).toBe(body.length);
+    expect(body.toString('utf8'), path).toContain('<app-root');
+  }
+});
+
+test('/AUTH/x and /Api/x are paths of the app, not of the services: /auth and /api are matched in lower case', async ({ page }) => {
+  for (const path of ['/AUTH/x', '/Api/x', '/Auth/health']) {
+    const answer = await page.request.get(path);
+    expect(answer.status(), path).toBe(200);
+    expect(await answer.text(), path).toContain('<app-root');
+    expect(answer.headers()['content-security-policy'], path).toBeDefined();
+  }
+});
+
+test('a method other than GET and HEAD is a 405 on every path of the app, a missing file included', async ({ page }) => {
+  for (const method of ['POST', 'PUT', 'DELETE']) {
+    for (const path of ['/', '/notes/ab', '/missing.js', '/notes/a.b']) {
+      const answer = await page.request.fetch(path, { method });
+      expect(answer.status(), `${method} ${path}`).toBe(405);
+      expect(answer.headers()['allow'], `${method} ${path}`).toBe('GET, HEAD');
+    }
+  }
+});
+
 test('no answer of the app redirects to another site: the canonical-URI redirect is off', async ({ page }) => {
   const probes = [
     '/%5cevil.example/index.html/',

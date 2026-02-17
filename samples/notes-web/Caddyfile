@@ -23,12 +23,14 @@
 	handle @wrongHost {
 		respond "Misdirected request" 421
 	}
-	# /auth and /api themselves (no slash) are the services' too, not the app's: a matcher for the exact path and one for what is below it.
-	@auth path /auth /auth/*
+	# /auth and /api themselves (no slash) are the services' too, not the app's: the path is /auth or /api, or goes on after a slash.
+	# Case-sensitive (a plain `path` matcher is not): /AUTH/x and /Api/x are not the services', they are paths of the app, as the
+	# app's own calls (and the services) spell them in lower case.
+	@auth path_regexp ^/auth(/|$)
 	handle @auth {
 		reverse_proxy auth:8080
 	}
-	@api path /api /api/*
+	@api path_regexp ^/api(/|$)
 	handle @api {
 		reverse_proxy notes-api:8000
 	}
@@ -56,10 +58,18 @@
 		request_header @revalidate -If-None-Match
 		request_header @revalidate -If-Modified-Since
 		request_header @revalidate -If-Range
+		# A Range request for the page is answered in full too (200, not 206): the nonce makes the page longer than the file, so the
+		# Content-Range of a part would carry the length of the file and not the length of the answer.
+		request_header @revalidate -Range
 		# HEAD is answered as GET (the server drops the body): `templates` fills in nothing for HEAD, which would give the page a
 		# Content-Length of 0.
 		@head method HEAD
 		method @head GET
+		# The app answers GET and HEAD only: any other method gets a 405 on every path of the app, a path of a missing file included (the
+		# file server alone would answer 404 for a missing file and 405 for an existing one). HEAD has become GET above.
+		@other not method GET
+		header @other Allow "GET, HEAD"
+		respond @other 405
 		# A path with a file extension that is not in the build is a missing file: 404, so that a broken build shows as an error
 		# and a browser never runs HTML as a script. A path with no extension (or a slash at the end) is a route of the app.
 		@missing {

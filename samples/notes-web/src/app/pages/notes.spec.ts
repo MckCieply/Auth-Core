@@ -33,6 +33,22 @@ function textOf(fixture: { nativeElement: unknown }, selector: string): string |
   return (fixture.nativeElement as HTMLElement).querySelector(selector)?.textContent?.trim();
 }
 
+// With the interceptor of the app in front of the page.
+async function openWithInterceptor() {
+  TestBed.configureTestingModule({
+    providers: [provideRouter([]), provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()],
+  });
+  const ctrl = TestBed.inject(HttpTestingController);
+  const auth = TestBed.inject(AuthService);
+  await signedInAs(auth, ctrl);
+  const router = TestBed.inject(Router);
+  const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+  const navigateByUrl = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+  const fixture = TestBed.createComponent(NotesPage);
+  fixture.detectChanges();
+  return { fixture, ctrl, auth, navigate, navigateByUrl };
+}
+
 describe('NotesPage', () => {
   it('shows the email, company and role from /auth/me, and "Sign out"', async () => {
     const { fixture } = await open();
@@ -208,22 +224,7 @@ describe('NotesPage', () => {
   });
 
   describe('the notes service says 503 database_unavailable (try again, spec 0006)', () => {
-    // With the interceptor of the app in front of the page: a 503 that is not auth_unavailable must not sign the person out.
-    async function openWithInterceptor() {
-      TestBed.configureTestingModule({
-        providers: [provideRouter([]), provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()],
-      });
-      const ctrl = TestBed.inject(HttpTestingController);
-      const auth = TestBed.inject(AuthService);
-      await signedInAs(auth, ctrl);
-      const router = TestBed.inject(Router);
-      const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
-      const navigateByUrl = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
-      const fixture = TestBed.createComponent(NotesPage);
-      fixture.detectChanges();
-      return { fixture, ctrl, auth, navigate, navigateByUrl };
-    }
-
+    // A 503 that is not auth_unavailable must not sign the person out.
     it('on the list: "Something went wrong. Try again.", the header stays, the person stays signed in, no refresh', async () => {
       const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
       ctrl.expectOne('/api/notes').flush({ error: 'database_unavailable' }, status(503));
@@ -263,6 +264,59 @@ describe('NotesPage', () => {
     });
   });
 
+  describe('the notes service says 503 auth_unavailable (the bar of the interceptor is the message)', () => {
+    it('on the list: the bar "Try again shortly." and no sentence of the screen next to it, the header stays, no refresh', async () => {
+      const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
+      ctrl.expectOne('/api/notes').flush({ error: 'auth_unavailable' }, status(503));
+      await settle(fixture);
+      expect(auth.notice()).toBe('tryLater');
+      expect(pageText(fixture)).not.toContain('Something went wrong. Try again.');
+      expect(pageText(fixture)).not.toContain('No notes yet.');
+      expect(has(fixture, '[role="alert"]')).toBe(false);
+      expect(textOf(fixture, '[data-testid="me-email"]')).toBe('admin@example.test');
+      expect(auth.token()).toBe('tok');
+      ctrl.expectNone('/auth/refresh');
+      expect(navigate).not.toHaveBeenCalled();
+      expect(navigateByUrl).not.toHaveBeenCalled();
+    });
+
+    it('on adding a note: the bar and no sentence of the screen, what was typed is kept and can be sent again', async () => {
+      const { fixture, ctrl, auth } = await openWithInterceptor();
+      ctrl.expectOne('/api/notes').flush([newer, older]);
+      await settle(fixture);
+      typeInto(fixture, '#text', 'try me again');
+      submitForm(fixture);
+      ctrl.expectOne((request) => request.method === 'POST').flush({ error: 'auth_unavailable' }, status(503));
+      await settle(fixture);
+      expect(auth.notice()).toBe('tryLater');
+      expect(pageText(fixture)).not.toContain('Something went wrong. Try again.');
+      expect(has(fixture, '[role="alert"]')).toBe(false);
+      expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('try me again');
+      expect(pageText(fixture)).toContain('second note');
+      expect(auth.token()).toBe('tok');
+      submitForm(fixture);
+      ctrl
+        .expectOne((request) => request.method === 'POST')
+        .flush({ id: 'n3', text: 'try me again', author_sub: 'u1', created_at: day(3) }, status(201));
+      await settle(fixture);
+      expect(pageText(fixture)).toContain('try me again');
+    });
+
+    it('a list that is loaded after the failure shows the notes and takes nothing of the failure along', async () => {
+      const { fixture, ctrl } = await openWithInterceptor();
+      ctrl.expectOne('/api/notes').flush({ error: 'auth_unavailable' }, status(503));
+      await settle(fixture);
+      typeInto(fixture, '#text', 'saved but unreadable');
+      submitForm(fixture);
+      ctrl.expectOne((request) => request.method === 'POST').flush(null, status(201));
+      await settle(fixture);
+      ctrl.expectOne('/api/notes').flush([newer, older]);
+      await settle(fixture);
+      expect(pageText(fixture)).toContain('second note');
+      expect(pageText(fixture)).not.toContain('Something went wrong. Try again.');
+    });
+  });
+
   it('shows a note as text, never as HTML', async () => {
     const hostile = { id: 'n9', text: '<img src=x onerror="alert(1)"><b>bold</b>', author_sub: 'u', created_at: day(3) };
     const { fixture } = await open(adminMe, [hostile]);
@@ -274,7 +328,6 @@ describe('NotesPage', () => {
 
   describe('a list that cannot be loaded keeps the header and says so', () => {
     it.each([
-      ['a 503 auth_unavailable', { error: 'auth_unavailable' }, 503],
       ['a 403 forbidden', { error: 'forbidden' }, 403],
       ['a 502 page of HTML from a proxy', '<html>bad gateway</html>', 502],
       ['a 500', null, 500],

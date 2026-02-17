@@ -4,10 +4,12 @@
 //   2. every relative link of the guide ends at a file or directory that exists;
 //   3. every path in a code span (`samples/...`, `src/app/auth/...`, `Caddyfile`, ...) exists, from the repository root or
 //      from samples/notes-web;
+//   3b. every bare file name in a code span (`auth.guard.ts`, `pages/login.ts`, `texts.ts`) is the end of the path of a real file
+//      of the sample (under samples/notes-web, build output and packages left out) or a file of docs/integration;
 //   4. the guide names no product (it is written for any product).
 // Run it with `npm run check:docs` from samples/notes-web. Exit status 0 when every check passes, 1 otherwise.
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +23,27 @@ const STEPS = ['one origin', 'src/app/auth', 'which paths', 'mail links', "inter
 const PRODUCTS = [/speech[- ]to[- ]mail/i, /\bspeech\b/i, /stereo/i, /investing/i];
 // A code span is a path to check when it starts like one of these.
 const PATH_START = /^(samples\/|scripts\/|docs\/|src\/|e2e\/|tools\/|Caddyfile|compose\.yml|Dockerfile|proxy\.conf\.json|angular\.json|playwright\.config\.ts)/;
+
+// A bare file name in a code span: no folder of the repository in front, ends in one of these extensions, so `pages/login.ts` and
+// `texts.ts` are checked, while `.js`, `/missing.js` and `ng serve` are not.
+const BARE_FILE = /^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(ts|json|yml|md|mjs|html)$/;
+// Folders that hold no source of the sample.
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.angular', 'test-results', '.git']);
+
+/** The paths (with /) of every file under a folder, relative to it. */
+function filesUnder(folder, base = folder) {
+  const found = [];
+  for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (!SKIP_DIRS.has(entry.name)) {
+        found.push(...filesUnder(resolve(folder, entry.name), base));
+      }
+    } else {
+      found.push(relative(base, resolve(folder, entry.name)).split(sep).join('/'));
+    }
+  }
+  return found;
+}
 
 const problems = [];
 const problem = (text) => problems.push(text);
@@ -70,6 +93,20 @@ for (const match of prose.matchAll(/`([^`\n]+)`/g)) {
     spans.add(text);
   }
 }
+// 3b. Bare file names.
+const known = [...filesUnder(sample), ...filesUnder(resolve(repo, 'docs', 'integration'))];
+const bare = new Set();
+for (const match of prose.matchAll(/`([^`\n]+)`/g)) {
+  const text = match[1].trim();
+  if (!PATH_START.test(text) && BARE_FILE.test(text)) {
+    bare.add(text);
+  }
+}
+for (const name of bare) {
+  if (!known.some((path) => path === name || path.endsWith(`/${name}`))) {
+    problem(`the file name \`${name}\` is no file of samples/notes-web or docs/integration`);
+  }
+}
 for (const path of spans) {
   if (!existsSync(resolve(repo, path)) && !existsSync(resolve(sample, path))) {
     problem(`the path \`${path}\` exists neither from the repository root nor from samples/notes-web`);
@@ -90,4 +127,4 @@ if (problems.length > 0) {
   }
   process.exit(1);
 }
-console.log(`PASS the guide: ${headings.length} steps, ${links} links and ${spans.size} paths in code spans exist, no product named`);
+console.log(`PASS the guide: ${headings.length} steps, ${links} links and ${spans.size} paths and ${bare.size} file names in code spans exist, no product named`);
