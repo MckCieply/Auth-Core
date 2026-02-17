@@ -136,9 +136,10 @@ for project in $PROJECTS; do
   export E2E_UNVERIFIED_EMAIL="$UNVERIFIED_EMAIL" E2E_UNVERIFIED_PASSWORD="$UNVERIFIED_PASSWORD"
   export E2E_VIEWER_EMAIL="$VIEWER_EMAIL" E2E_RESETTER_EMAIL="$RESETTER_EMAIL"
   export E2E_USER_PASSWORD="$USER_PASSWORD" E2E_NEW_PASSWORD="$NEW_PASSWORD" E2E_SEEDED_NOTE="$SEEDED_NOTE"
-  # A failure message of Playwright can hold a mail link (the URL of a page.goto): its token is hidden on the way out.
+  # A failure message of Playwright can hold a mail link (the URL of a page.goto) and, in its call log, the value of a
+  # fill("...") (a typed password): both are hidden on the way out.
   # (pipefail is on: the exit status is Playwright's.)
-  (cd "$web" && npx playwright test --project="$project" 2>&1 | sed -E 's/token=[A-Za-z0-9_-]+/token=<hidden>/g') \
+  (cd "$web" && npx playwright test --project="$project" 2>&1 | sed -E -e 's/token=[A-Za-z0-9_-]+/token=<hidden>/g' -e 's/fill\("([^"\\]|\\.)*"\)/fill("<hidden>")/g') \
     || fail "$project: Playwright failed (E2E_KEEP_STACK=1 keeps the stack for a look)"
   pass "$project: every Playwright test passed on a clean stack"
 done

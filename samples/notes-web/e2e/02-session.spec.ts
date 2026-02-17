@@ -13,9 +13,10 @@ async function expectTokenNowhere(page: Page, token: string): Promise<void> {
       url: location.href,
     }),
   );
-  expect(places).not.toContain(token);
+  // Booleans, not the text: a failing assertion would print the text, and the text holds the token.
+  expect(places.includes(token), 'the access token is in storage, a cookie or the URL').toBe(false);
   // The refresh cookie is HttpOnly: script cannot read it either.
-  expect(places).not.toContain('auth_rt');
+  expect(places.includes('auth_rt'), 'the refresh cookie is readable by script').toBe(false);
 }
 
 test('a reload lands on the page that was open, signed in, with no sign-in screen in between', async ({ page }) => {
@@ -68,7 +69,9 @@ test('the refresh cookie is HttpOnly, Secure, SameSite=Strict and for /auth only
   const cookies = await page.context().cookies();
   const refresh = cookies.find((c) => c.name === 'auth_rt');
   expect(refresh).toBeDefined();
-  expect(refresh).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/auth' });
+  // Only the attributes, never the whole cookie: a failing assertion would print its value.
+  const { httpOnly, secure, sameSite, path } = refresh!;
+  expect({ httpOnly, secure, sameSite, path }).toEqual({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/auth' });
 });
 
 test('signing out ends the session for good: the cookie is gone and the notes are not reachable by the old page', async ({ page }) => {
