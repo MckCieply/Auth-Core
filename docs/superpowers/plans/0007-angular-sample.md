@@ -6574,4 +6574,19 @@ No open question is left for the owner.
 
 ## As built
 
-(Written after implementation and verification, as in plans 0004, 0005 and 0006.)
+Implemented and verified locally. Tasks 1-11 were built from this plan; each task's commit was reviewed against the spec before the
+next began, and the whole branch was reviewed once more before the live run. It was built as planned, with the departures that the
+[acceptance map](0007-acceptance-map.md) lists in "Plan-vs-implementation notes" (two new files, `pages/password-rules.ts` and
+`pages/required-text.ts`; a "Try again" button on `/verify` and `/invite`; the Caddy image and the `node` image pinned by digest; the Caddyfile
+and the Dockerfile; `tools/check-guide.mjs` in place of the one-off check of the guide) and its "Local verification log". Five decisions of
+the owner, taken during the build and written into the spec as Decisions 10 to 14, superseded text of this plan, which keeps its body:
+the interceptor is built from observables with a 30-second limit that cancels the request, not on promises (Decision 10); the mail token
+leaves the address bar through the router (`replaceUrl`), not through `history.replaceState` (Decision 11); the PostgreSQL health check in
+`deploy/docker-compose.yml` is changed by one line, where this plan expects the file unchanged (Decision 12); Angular stays at 21.1.4 with
+its advisories named in the sample's README (Decision 13); and a missing file with an extension is a `404`, where the Caddyfile of Task 8
+answers every unknown path with `index.html` (Decision 14). The spec's "As built" lists the behaviour the code has that the spec did not state, the
+known limits and the follow-ups ([spec 0007](../specs/0007-angular-sample.md), "As built"). Three rounds of verification and two rounds of fixes
+followed the reviews: the Caddyfile (a `421` for any other host, a `405` for any method but `GET` and `HEAD`, no canonical-URI redirect,
+case-sensitive `/auth` and `/api`), the session (a sign-in ends the old session, the guard drops `?token=`) and the guide check. 361 unit tests
+pass (no Docker needed) and 37 Playwright tests per browser, in Chromium and in WebKit; `scripts/e2e-notes.sh` and the five earlier e2e scripts
+pass on clean stacks.
