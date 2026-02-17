@@ -129,7 +129,7 @@ It handles the answers to those requests:
 | `401` | One refresh, then the request again, once. Requests that get `401` while a refresh is running wait for that refresh instead of starting another. |
 | `401` from that refresh | The token is dropped; the person goes to `/login?returnUrl=<the current path>`. |
 | `403 {"error":"forbidden"}` | "You don't have access to this." No refresh. |
-| `403 {"error":"permissions_changed"}` | One refresh, so the new token carries the current role, then `/auth/me` again and the request again, once. |
+| `403 {"error":"permissions_changed"}` | One refresh, so the new token carries the current role, then `/auth/me` again and, at the same time, the request again, once. |
 | `503 {"error":"auth_unavailable"}` | A bar: "Try again shortly." The person stays signed in. |
 
 A refresh that fails with anything other than `401` (no network, `5xx`) keeps the token and shows "Can't reach the server. Try again shortly." A `401` on the retried request is passed to the caller as it is. A `401` on a request sent with a token that has since been renewed is retried with the new token, without another refresh.
@@ -184,7 +184,8 @@ with no UI library. The app needs no `zone.js`.
 - gives it the sample's `Caddyfile`, mounted at the same path, so it replaces the one
   of `samples/notes-api/compose.yml`. The same routes on both listeners: `/auth/*` to
   Auth-Core, `/api/*` to the notes service, every other path to the built app, with an
-  unknown path answered by `index.html`;
+  unknown path answered by `index.html`, except a path with a file extension that is
+  not in the build, which is a `404` (Decision 14);
 - listens on `http://localhost:8088` as before, and on `https://localhost:8443` with a
   certificate from Caddy's internal authority (`tls internal`), both on loopback only;
 - sets Auth-Core's mail links to `http://localhost:8088/reset`, `/verify` and
@@ -332,6 +333,17 @@ product. Steps, each pointing at the sample's file:
     over the network at once (the notes sample's `notes-db-init`) could fail and stop
     `docker compose up`. The health check in `deploy/docker-compose.yml` now checks over
     TCP. This fixes a fault of slice 6 found here.
+13. **Angular stays at 21.1.4, with its known advisories written down** (owner,
+    2026-02-17). `npm audit` lists advisories against 21.1.4 (cross-site scripting
+    through i18n bindings, sanitisation bypasses in templates, denial of service in
+    the date and number pipes and in server-side rendering). The sample uses no i18n
+    and no server-side rendering. The versions stay as Decision 8 pins them; the
+    sample's README names the advisories, and moving to a fixed 21.2 release is a
+    follow-up.
+14. **A missing file is a `404`, a missing route is the app** (owner, 2026-02-17). A
+    path with a file extension that is not in the build (`/missing.js`) is answered
+    `404`, so a broken build shows as an error and the browser never runs HTML as a
+    script. A path without an extension is a route of the app and gets `index.html`.
 
 Design choices made with them, not departures:
 
@@ -349,6 +361,7 @@ Design choices made with them, not departures:
   spec 0005.
 - **A shared npm package** of the sign-in pieces → Beyond MVP ("SDKs: NuGet, npm").
 - **Synchronising sign-out across tabs** (for example with `BroadcastChannel`).
+- **Angular 21.2 with the security fixes** (Decision 13).
 - **design.md:** a one-line note on Decisions 2, 3, 5 and 6, added with "As built".
 
 **Residual risks:**
