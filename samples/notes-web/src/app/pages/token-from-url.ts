@@ -10,10 +10,16 @@ import { ActivatedRoute, Router } from '@angular/router';
  * a mail link is a full page load and the address bar never holds a token after the screen opens, so a second one cannot arrive.
  */
 export function takeTokenFromUrl(route: ActivatedRoute, router: Router): string | null {
-  const token = route.snapshot.queryParamMap.get('token');
-  // After the navigation that is running (this component is being built by it); an error of the second one changes nothing here.
-  void Promise.resolve().then(() =>
-    router.navigate([], { relativeTo: route, queryParams: { token: null }, queryParamsHandling: 'merge', replaceUrl: true }),
-  );
+  const params = route.snapshot.queryParamMap;
+  const token = params.get('token');
+  if (params.has('token')) {
+    // After the navigation that is running (this component is being built by it). One that fails changes nothing here: the token
+    // is read, the address bar keeps it, and the error is not worth an unhandled rejection (it holds no secret, and none is logged).
+    void Promise.resolve()
+      .then(() =>
+        router.navigate([], { relativeTo: route, queryParams: { token: null }, queryParamsHandling: 'merge', replaceUrl: true }),
+      )
+      .catch(() => undefined);
+  }
   return token === null || token === '' ? null : token;
 }

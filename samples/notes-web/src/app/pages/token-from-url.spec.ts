@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ActivatedRoute, Router, provideRouter } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { realLocation, settle } from '../../testing/helpers';
 import { takeTokenFromUrl } from './token-from-url';
@@ -67,6 +67,27 @@ describe('takeTokenFromUrl', () => {
     expect(built).toBe(1);
     expect(router.url).toBe('/reset');
     expect(window.location.search).toBe('');
+  });
+
+  it('a failed removal navigation is no unhandled rejection: the token was read all the same', async () => {
+    TestBed.configureTestingModule({ providers: [provideRouter([]), realLocation] });
+    const router = TestBed.inject(Router);
+    const failing = vi.spyOn(router, 'navigate').mockRejectedValue(new Error('navigation failed'));
+    const route = { snapshot: { queryParamMap: convertToParamMap({ token: 'abc123' }) } } as unknown as ActivatedRoute;
+    expect(takeTokenFromUrl(route, router)).toBe('abc123');
+    await settle();
+    expect(failing).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([['/reset'], ['/reset?other=1']])('%s has no token parameter: no navigation is queued', async (url) => {
+    history.replaceState(null, '', url);
+    TestBed.configureTestingModule({ providers: [provideRouter([{ path: 'reset', component: Probe }]), realLocation] });
+    const harness = await RouterTestingHarness.create();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate');
+    await harness.navigateByUrl(url, Probe);
+    await settle();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(read).toEqual([null]);
   });
 
   it('uses the first of two token parameters', async () => {

@@ -256,14 +256,14 @@ describe('authInterceptor', () => {
       expect(router.url).toBe('/notes');
     });
 
-    it('does nothing about a 401 when the session already ended', async () => {
+    it('a 401 when the session already ended: no refresh, no second request, and the person goes to /login', async () => {
       auth.dropSession();
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush(null, status(401));
       const error = await done;
       expect((error as HttpErrorResponse).status).toBe(401);
-      await settle();
       ctrl.expectNone('/auth/refresh');
+      await vi.waitFor(() => expect(router.url).toBe('/login?returnUrl=%2Fnotes'));
     });
   });
 
@@ -410,7 +410,7 @@ describe('authInterceptor', () => {
       expect(request.cancelled).toBe(true);
     });
 
-    it('a timeout while the refresh runs: no request again, and no /login when the refresh then says 401', async () => {
+    it('a timeout while the refresh runs: no request again, and when the refresh then says 401 the person still goes to /login', async () => {
       vi.useFakeTimers();
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       const first = ctrl.expectOne('/api/notes');
@@ -422,7 +422,9 @@ describe('authInterceptor', () => {
       expect(await done).toBeInstanceOf(TimeoutError);
       refreshRequest.flush({ error: 'invalid_grant' }, status(401));
       await vi.advanceTimersByTimeAsync(0);
-      expect(router.url).toBe('/notes');
+      // The session is over although the caller gave up: the person is not left on a page that no longer works.
+      expect(auth.token()).toBeNull();
+      await vi.waitFor(() => expect(router.url).toBe('/login?returnUrl=%2Fnotes'));
       ctrl.expectNone('/api/notes');
     });
 

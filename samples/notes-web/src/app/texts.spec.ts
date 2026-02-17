@@ -44,6 +44,10 @@ describe('texts', () => {
     expect(texts.invite.setsPassword('a@b.example')).toBe('This sets the password for a@b.example.');
   });
 
+  it('says the limit of a note', () => {
+    expect(texts.notes.tooLong(1000)).toBe('A note can be at most 1000 characters.');
+  });
+
   it('is plain English text: printable ASCII, no markup', () => {
     const all = leaves(texts, 'texts', []);
     expect(all.length).toBeGreaterThan(30);

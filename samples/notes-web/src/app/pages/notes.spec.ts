@@ -109,13 +109,14 @@ describe('NotesPage', () => {
       ctrl.expectNone('/api/notes');
     });
 
-    it('does not send a note of more than 1000 characters, and says it was not saved', async () => {
+    it('does not send a note of more than 1000 characters, and says the limit (a retry would not help)', async () => {
       const { fixture, ctrl } = await open();
       typeInto(fixture, '#text', 'x'.repeat(1001));
       submitForm(fixture);
       ctrl.expectNone('/api/notes');
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The note could not be saved. Try again.');
+      expect(pageText(fixture)).toContain('A note can be at most 1000 characters.');
+      expect(pageText(fixture)).not.toContain('Try again');
     });
 
     it('stops the field at 1000 characters, the same number the check uses', async () => {

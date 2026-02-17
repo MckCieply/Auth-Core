@@ -92,5 +92,6 @@ export const texts = {
     empty: 'No notes yet.',
     loadFailed: 'The notes could not be loaded. Try again.',
     addFailed: 'The note could not be saved. Try again.',
+    tooLong: (max: number): string => `A note can be at most ${max} characters.`,
   },
 };

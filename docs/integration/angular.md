@@ -137,8 +137,8 @@ Every other answer reaches the screen that asked, untouched: no refresh, and the
 service's own errors (`503 {"error":"database_unavailable"}` means "try again later", also `500`, `404` and `405`); the notes screen
 shows "The notes could not be loaded. Try again." or "The note could not be saved. Try again.". A call to your own origin that is not answered within 30
 seconds (`REQUEST_TIMEOUT_MS` in `auth.interceptor.ts`) fails the same way, so that no screen waits for ever; raise it for calls that
-take longer, such as an upload. Giving up cancels the request in flight and ends the whole chain (no late refresh, second try or
-redirect to `/login`): the interceptor is built from observables, not promises, for that reason; keep it so if you change it.
+take longer, such as an upload. Giving up cancels the request in flight and ends the whole chain (no second try; a refresh that was
+already running goes on, and if it ends the session the person still goes to `/login`): the interceptor is built from observables, not promises, for that reason; keep it so if you change it.
 
 The `403 permissions_changed` and `503 auth_unavailable` answers are what Auth-Core's company API and a product's backend (the Python
 package, for one) answer; see the specs [0005](../superpowers/specs/0005-tenancy-and-rbac.md) and

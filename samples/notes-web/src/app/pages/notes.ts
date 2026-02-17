@@ -47,8 +47,8 @@ function isNote(value: unknown): value is Note {
           <textarea id="text" rows="3" formControlName="text" [attr.maxlength]="maxCharacters"></textarea>
           <button type="submit" [disabled]="busy()">{{ t.add }}</button>
         </form>
-        @if (addFailed()) {
-          <p class="error" role="alert">{{ t.addFailed }}</p>
+        @if (addError(); as text) {
+          <p class="error" role="alert">{{ text }}</p>
         }
       }
       @if (loadFailed()) {
@@ -82,7 +82,7 @@ export class NotesPage implements OnInit {
   protected readonly notes = signal<Note[]>([]);
   protected readonly loaded = signal(false);
   protected readonly loadFailed = signal(false);
-  protected readonly addFailed = signal(false);
+  protected readonly addError = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly signingOut = signal(false);
   // The notes this page added, newest first. Whatever a list answer says, these are shown: the service has them.
@@ -101,12 +101,13 @@ export class NotesPage implements OnInit {
       return;
     }
     if (this.form.invalid) {
-      // Too long (the field stops typing at the limit, so only a pasted or scripted value gets here): say so, send nothing.
-      this.addFailed.set(true);
+      // Too long (the field stops typing at the limit, so only a pasted or scripted value gets here): say the limit, send nothing.
+      // A retry would not help, so this is not the "try again" text.
+      this.addError.set(this.t.tooLong(MAX_NOTE_CHARACTERS));
       return;
     }
     this.busy.set(true);
-    this.addFailed.set(false);
+    this.addError.set(null);
     try {
       const note = await firstValueFrom(this.http.post<unknown>('/api/notes', { text }));
       if (isNote(note)) {
@@ -118,7 +119,7 @@ export class NotesPage implements OnInit {
       }
       this.form.reset();
     } catch {
-      this.addFailed.set(true);
+      this.addError.set(this.t.addFailed);
     } finally {
       this.busy.set(false);
     }

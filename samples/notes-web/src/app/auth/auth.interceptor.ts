@@ -7,7 +7,7 @@ import {
 } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, catchError, defer, from, last, map, of, switchMap, tap, throwError, timeout } from 'rxjs';
+import { Observable, catchError, defer, from, last, of, switchMap, tap, throwError, timeout } from 'rxjs';
 import { AuthService, errorCode } from './auth.service';
 
 /** Paths that start like this get the access token. A product edits these two lists (guide, step 3). */
@@ -89,27 +89,31 @@ function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | nu
   return defer(() => {
     const current = auth.token();
     if (current === null) {
-      return of(false); // the session ended while this request was away
+      // The session ended while this request was away (a refresh that said 401 has dropped it, or the person signed out): the
+      // person goes to /login, which does nothing when they are there already.
+      goToLogin(router);
+      return of(false);
     }
     if (current !== sentWith) {
       return of(true); // another request renewed the token meanwhile
     }
-    // One refresh at a time: the service shares a running one. A caller that gives up stops waiting for it, the refresh goes on.
-    return from(auth.refresh()).pipe(
-      map((result) => {
-        if (result === 'ok') {
-          return true;
+    // One refresh at a time: the service shares a running one. What the answer means for the session (the bar, the way to /login)
+    // is done here, in the promise, not in an operator: it must happen even when this caller has given up (timeout) and has
+    // unsubscribed, or a session that ended would leave the person on a page that no longer works.
+    const renewed = auth.refresh().then((result) => {
+      if (result === 'ok') {
+        return true;
+      }
+      if (result === 'rejected') {
+        if (auth.token() === null) {
+          goToLogin(router); // not when a new sign-in happened while the refresh was away: that session is fine
         }
-        if (result === 'rejected') {
-          if (auth.token() === null) {
-            goToLogin(router); // not when a new sign-in happened while the refresh was away: that session is fine
-          }
-        } else {
-          auth.showNotice('unreachable');
-        }
-        return false;
-      }),
-    );
+      } else {
+        auth.showNotice('unreachable');
+      }
+      return false;
+    });
+    return from(renewed);
   });
 }
 
