@@ -11,7 +11,7 @@ test('the viewer the operator invited accepts from the mail, signs in, reads the
 
   // The script asked the operator CLI to invite this address as a viewer; the server sends the mail within a minute or two.
   await page.goto(await waitForLink(email, 'invite', 100_000));
-  await expect(page.getByTestId('invite-join')).toHaveText(/^Join .+ as viewer$/);
+  await expect(page.getByTestId('invite-join')).toHaveText(/^\s*Join .+ as viewer$/);
   await expect(page.getByLabel('Email')).toHaveValue(email);
   await expect(page.getByLabel('Email')).not.toBeEditable();
   await expect(page.getByText(`This sets the password for ${email}.`)).toBeVisible();

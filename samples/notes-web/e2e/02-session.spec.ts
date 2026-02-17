@@ -65,13 +65,24 @@ test('the access token is nowhere but in memory: not in storage, a cookie or the
 
 test('the refresh cookie is HttpOnly, Secure, SameSite=Strict and for /auth only', async ({ page }) => {
   const { email, password } = seed();
-  await signIn(page, email, password);
-  const cookies = await page.context().cookies();
-  const refresh = cookies.find((c) => c.name === 'auth_rt');
+  await openLogin(page);
+  const loginAnswer = page.waitForResponse((r) => new URL(r.url()).pathname === '/auth/login' && r.request().method() === 'POST');
+  await submitLogin(page, email, password);
+  const setCookies = ((await (await loginAnswer).allHeaders())['set-cookie'] ?? '').split('\n');
+  await expect(page).toHaveURL(/\/notes$/);
+
+  // What Auth-Core sets: the attributes of the Set-Cookie line, never the whole line (a failing assertion would print its value).
+  // SameSite is read here and not from context.cookies(): Playwright's WebKit reports "None" for a Strict cookie (seen with 1.58.2).
+  const line = setCookies.find((c) => c.startsWith('auth_rt='));
+  expect(line, 'the sign-in sets no refresh cookie').toBeDefined();
+  const attributes = line!.split(';').slice(1).map((a) => a.trim().toLowerCase());
+  expect(attributes).toEqual(expect.arrayContaining(['httponly', 'secure', 'samesite=strict', 'path=/auth']));
+
+  // What the browser holds: the same, apart from SameSite.
+  const refresh = (await page.context().cookies()).find((c) => c.name === 'auth_rt');
   expect(refresh).toBeDefined();
-  // Only the attributes, never the whole cookie: a failing assertion would print its value.
-  const { httpOnly, secure, sameSite, path } = refresh!;
-  expect({ httpOnly, secure, sameSite, path }).toEqual({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/auth' });
+  const { httpOnly, secure, path } = refresh!;
+  expect({ httpOnly, secure, path }).toEqual({ httpOnly: true, secure: true, path: '/auth' });
 });
 
 test('signing out ends the session for good: the cookie is gone and the notes are not reachable by the old page', async ({ page }) => {

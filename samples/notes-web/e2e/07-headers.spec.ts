@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { setting } from './support/env';
-import { signIn, signOut } from './support/session';
+import { signOut, submitLogin } from './support/session';
 
 const CSP =
   /^default-src 'self'; script-src 'self'; style-src 'self' 'nonce-([0-9a-f-]{36})'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'$/;
@@ -77,8 +77,11 @@ test('the style nonce works: every style element carries it, nothing is blocked,
   const nonce = CSP.exec(response?.headers()['content-security-policy'] ?? '')?.[1];
   expect(nonce).toBeDefined();
 
-  // Sign in and out: the screens, their styles and their calls all run under the policy.
-  await signIn(page, setting('E2E_SEED_EMAIL'), setting('E2E_SEED_PASSWORD'));
+  // Sign in and out in this same document (signIn() would load /login again, with a new nonce): the screens, their styles
+  // and their calls all run under the policy of this response.
+  await submitLogin(page, setting('E2E_SEED_EMAIL'), setting('E2E_SEED_PASSWORD'));
+  await expect(page).toHaveURL(/\/notes$/);
+  await expect(page.getByTestId('me-email')).toHaveText(setting('E2E_SEED_EMAIL'));
   await signOut(page);
 
   const styles = await page.evaluate(() =>
