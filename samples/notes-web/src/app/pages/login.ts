@@ -5,6 +5,7 @@ import { AccountApi } from '../account-api';
 import { safeReturnUrl } from '../auth/auth.guard';
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
+import { requiredText } from './required-text';
 
 /** The email an invitation screen passed on in the navigation state (it is never in the URL). */
 function startEmail(router: Router): string {
@@ -47,7 +48,7 @@ export class LoginPage {
   private readonly route = inject(ActivatedRoute);
 
   protected readonly form = inject(NonNullableFormBuilder).group({
-    email: [startEmail(this.router), Validators.required],
+    email: [startEmail(this.router), requiredText],
     password: ['', Validators.required],
   });
   protected readonly busy = signal(false);
@@ -66,12 +67,13 @@ export class LoginPage {
     this.canResend.set(false);
     const { email, password } = this.form.getRawValue();
     const result = await this.auth.login(email.trim(), password);
-    this.busy.set(false);
     if (result.ok) {
+      // The button stays off until the next page is open: a second Enter must not sign in twice.
       await this.router.navigateByUrl(safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl')));
     } else {
       this.show(result.failure);
     }
+    this.busy.set(false);
   }
 
   protected async resend(): Promise<void> {

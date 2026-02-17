@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # The "notes" frontend: node builds the app, Caddy serves it. The compose overlay builds it with this directory as the
-# context. By hand:  docker build -f samples/notes-web/Dockerfile samples/notes-web
+# context. The image holds the build only: the Caddyfile is mounted by the overlay (not copied in), so run it through the
+# overlay. By hand, `docker build -f samples/notes-web/Dockerfile samples/notes-web` only checks that the app builds.
 
 FROM node:24-alpine AS build
 ENV NG_CLI_ANALYTICS=false

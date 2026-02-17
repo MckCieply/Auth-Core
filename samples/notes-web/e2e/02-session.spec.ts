@@ -47,6 +47,9 @@ test('after sign-out a reload shows the sign-in, and the notes ask for it again'
 
 test('the access token is nowhere but in memory: not in storage, a cookie or the URL, after sign-in and after a refresh', async ({ page }) => {
   const { email, password } = seed();
+  // The address of every request the page makes: the token is in a header only, never in an address.
+  const requested: string[] = [];
+  page.on('request', (request) => requested.push(request.url()));
   await openLogin(page);
   const loginAnswer = page.waitForResponse((r) => r.url().endsWith('/auth/login') && r.request().method() === 'POST');
   await submitLogin(page, email, password);
@@ -61,6 +64,11 @@ test('the access token is nowhere but in memory: not in storage, a cookie or the
   await expect(page.getByTestId('me-email')).toHaveText(email);
   await expectTokenNowhere(page, second);
   await expectTokenNowhere(page, first);
+  expect(requested.length, 'no request was seen').toBeGreaterThan(5);
+  expect(
+    requested.some((url) => url.includes(first) || url.includes(second)),
+    'an access token is in the address of a request',
+  ).toBe(false);
 });
 
 test('the refresh cookie is HttpOnly, Secure, SameSite=Strict and for /auth only', async ({ page }) => {

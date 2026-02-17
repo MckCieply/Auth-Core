@@ -3,10 +3,10 @@ import { HttpClient, HttpErrorResponse, provideHttpClient, withInterceptors } fr
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { lastValueFrom } from 'rxjs';
+import { TimeoutError, lastValueFrom } from 'rxjs';
 import { vi } from 'vitest';
 import { adminMe, holdToken, settle } from '../../testing/helpers';
-import { authInterceptor, wantsToken } from './auth.interceptor';
+import { REQUEST_TIMEOUT_MS, authInterceptor, wantsToken } from './auth.interceptor';
 import { AuthService } from './auth.service';
 
 @Component({ template: '' })
@@ -34,7 +34,12 @@ describe('wantsToken', () => {
     'https://evil.example/api/notes',
     '//evil.example/api/notes',
     'https://app.example.evil.example/api/notes',
+    'https://app.example:8443/api/notes',
+    'http://app.example/api/notes',
     '/api/../auth/login',
+    '/api/%2e%2e/auth/login',
+    '/api/%2E%2E/auth/login',
+    '/api/.%2e/auth/login',
     'not a url at all %',
   ])('is false for %s', (url) => expect(wantsToken(url, origin)).toBe(false));
 });
@@ -44,13 +49,17 @@ describe('authInterceptor', () => {
   let ctrl: HttpTestingController;
   let auth: AuthService;
   let router: Router;
+  // A page whose guard keeps a navigation running until the test lets it go.
+  let openGate: (allowed: boolean) => void;
 
   beforeEach(async () => {
+    const gate = new Promise<boolean>((resolve) => (openGate = resolve));
     TestBed.configureTestingModule({
       providers: [
         provideRouter([
           { path: 'notes', component: Blank },
           { path: 'login', component: Blank },
+          { path: 'slow', component: Blank, canActivate: [() => gate] },
         ]),
         provideHttpClient(withInterceptors([authInterceptor])),
         provideHttpClientTesting(),
@@ -184,6 +193,21 @@ describe('authInterceptor', () => {
       expect(router.url).toBe('/notes');
     });
 
+    it('401 from the refresh while a navigation is running: /login remembers the page the person was on the way to', async () => {
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      ctrl.expectOne('/api/notes').flush(null, status(401));
+      await settle();
+      const refreshRequest = ctrl.expectOne('/auth/refresh');
+      const going = router.navigateByUrl('/slow');
+      await settle();
+      refreshRequest.flush({ error: 'invalid_grant' }, status(401));
+      await done;
+      await vi.waitFor(() => expect(router.url).toBe('/login?returnUrl=%2Fslow'));
+      openGate(true);
+      expect(await going).toBe(false);
+      expect(router.url).toBe('/login?returnUrl=%2Fslow');
+    });
+
     it('does not send a second request, and no second refresh, when the retried request gets a 401', async () => {
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush(null, status(401));
@@ -250,6 +274,27 @@ describe('authInterceptor', () => {
       expect(auth.notice()).toBeNull();
     });
 
+    it('permissions_changed on several requests at once: one refresh, one /auth/me, every request again', async () => {
+      const urls = ['/api/a', '/api/b', '/api/c'];
+      const calls = urls.map((url) => lastValueFrom(http.get(url)));
+      const first = urls.map((url) => ctrl.expectOne(url));
+      first.forEach((request) => request.flush({ error: 'permissions_changed' }, status(403)));
+      await settle();
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'new' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      for (const url of urls) {
+        const again = ctrl.expectOne(url);
+        expect(again.request.headers.get('Authorization')).toBe('Bearer new');
+        again.flush(url);
+      }
+      expect(await Promise.all(calls)).toEqual(urls);
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      ctrl.expectNone('/auth/me');
+      expect(auth.me()).toEqual(adminMe);
+    });
+
     it('permissions_changed on the retried request: no second refresh, no third request', async () => {
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush({ error: 'permissions_changed' }, status(403));
@@ -284,8 +329,55 @@ describe('authInterceptor', () => {
       expect((error as HttpErrorResponse).status).toBe(503);
       await settle();
       ctrl.expectNone('/auth/refresh');
-      expect(auth.notice()).toBe('try_later');
+      expect(auth.notice()).toBe('tryLater');
       expect(auth.token()).toBe('old');
+    });
+  });
+
+  describe('what the notes service answers when it cannot help (spec 0006)', () => {
+    it.each([
+      [503, { error: 'database_unavailable' }, 'database_unavailable: try again, not a sign-out'],
+      [500, { error: 'internal_error' }, 'internal_error'],
+      [404, { error: 'not_found' }, 'not_found'],
+      [405, { error: 'method_not_allowed' }, 'method_not_allowed'],
+    ])('%s %j (%s) reaches the caller: no refresh, the person stays signed in and on the page, no bar', async (code, body) => {
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      ctrl.expectOne('/api/notes').flush(body, status(code));
+      const error = await done;
+      expect((error as HttpErrorResponse).status).toBe(code);
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      expect(auth.token()).toBe('old');
+      expect(auth.notice()).toBeNull();
+      expect(router.url).toBe('/notes');
+    });
+  });
+
+  describe('a request that never answers', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it.each(['/api/notes', '/auth/login', '/auth/password/forgot'])('%s fails after the timeout, so no screen waits for ever', async (url) => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.get(url)).catch((error: unknown) => error);
+      ctrl.expectOne(url);
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1);
+      let settled = false;
+      void done.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      expect(auth.token()).toBe('old');
+      expect(router.url).toBe('/notes');
+    });
+
+    it('a request to another origin has no timeout of this app', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.get('https://other.example/data')).catch((error: unknown) => error);
+      const request = ctrl.expectOne('https://other.example/data');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS * 2);
+      request.flush('late');
+      expect(await done).toBe('late');
     });
   });
 

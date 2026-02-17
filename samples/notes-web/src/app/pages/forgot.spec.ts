@@ -60,6 +60,13 @@ describe('ForgotPage', () => {
     expect(pageText(fixture)).not.toContain(sent);
   });
 
+  it.each(['', ' ', '   ', ' 	 '])('sends nothing for an email of %j (nothing, or only spaces)', async (typed) => {
+    const { fixture, ctrl } = await open();
+    typeRaw(fixture, '#email', typed);
+    submitForm(fixture);
+    ctrl.expectNone('/auth/password/forgot');
+  });
+
   it('sends nothing for an empty email, and one request for a double submit', async () => {
     const { fixture, ctrl } = await open();
     submitForm(fixture);

@@ -38,13 +38,13 @@ function isNote(value: unknown): value is Note {
             <span data-testid="me-role">{{ person.roles.join(', ') }}</span>
           </p>
         }
-        <button type="button" data-testid="sign-out" (click)="signOut()">{{ t.signOut }}</button>
+        <button type="button" data-testid="sign-out" [disabled]="signingOut()" (click)="signOut()">{{ t.signOut }}</button>
       </header>
       <h1>{{ t.title }}</h1>
       @if (canWrite()) {
         <form [formGroup]="form" (ngSubmit)="add()" novalidate>
           <label for="text">{{ t.newNote }}</label>
-          <textarea id="text" rows="3" formControlName="text" maxlength="1000"></textarea>
+          <textarea id="text" rows="3" formControlName="text" [attr.maxlength]="maxCharacters"></textarea>
           <button type="submit" [disabled]="busy()">{{ t.add }}</button>
         </form>
         @if (addFailed()) {
@@ -69,6 +69,7 @@ function isNote(value: unknown): value is Note {
 })
 export class NotesPage implements OnInit {
   protected readonly t = texts.notes;
+  protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
@@ -83,6 +84,9 @@ export class NotesPage implements OnInit {
   protected readonly loadFailed = signal(false);
   protected readonly addFailed = signal(false);
   protected readonly busy = signal(false);
+  protected readonly signingOut = signal(false);
+  // The notes this page added, newest first. Whatever a list answer says, these are shown: the service has them.
+  private added: Note[] = [];
 
   ngOnInit(): void {
     if (this.me() === null) {
@@ -93,7 +97,12 @@ export class NotesPage implements OnInit {
 
   protected async add(): Promise<void> {
     const text = this.form.controls.text.value.trim();
-    if (this.busy() || text === '' || this.form.invalid) {
+    if (this.busy() || text === '') {
+      return;
+    }
+    if (this.form.invalid) {
+      // Too long (the field stops typing at the limit, so only a pasted or scripted value gets here): say so, send nothing.
+      this.addFailed.set(true);
       return;
     }
     this.busy.set(true);
@@ -101,6 +110,7 @@ export class NotesPage implements OnInit {
     try {
       const note = await firstValueFrom(this.http.post<unknown>('/api/notes', { text }));
       if (isNote(note)) {
+        this.added = [note, ...this.added];
         this.notes.update((list) => [note, ...list]);
       } else {
         // The service said yes but the body is not a note: it was saved, so ask for the list instead of guessing.
@@ -115,6 +125,10 @@ export class NotesPage implements OnInit {
   }
 
   protected async signOut(): Promise<void> {
+    if (this.signingOut()) {
+      return;
+    }
+    this.signingOut.set(true);
     await this.auth.logout();
     await this.router.navigateByUrl('/login');
   }
@@ -125,10 +139,14 @@ export class NotesPage implements OnInit {
       if (!Array.isArray(list) || !list.every(isNote)) {
         throw new Error('not a list of notes');
       }
-      this.notes.set(list);
+      // An answer that was asked for before a note was added does not take that note away.
+      const listed = new Set(list.map((note) => note.id));
+      this.notes.set([...this.added.filter((note) => !listed.has(note.id)), ...list]);
       this.loadFailed.set(false);
       this.loaded.set(true);
     } catch {
+      // Nothing of an older list is kept next to the message, only what this page added itself.
+      this.notes.set(this.added);
       this.loadFailed.set(true);
     }
   }

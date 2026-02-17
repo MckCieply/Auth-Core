@@ -21,6 +21,19 @@ describe('appConfig', () => {
     ctrl.verify();
   });
 
+  it("a /auth/me that answers 503 auth_unavailable at start keeps the bar 'Try again shortly.' of the interceptor", async () => {
+    const status = TestBed.inject(ApplicationInitStatus);
+    const ctrl = TestBed.inject(HttpTestingController);
+    ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok' });
+    await settle();
+    ctrl.expectOne('/auth/me').flush({ error: 'auth_unavailable' }, { status: 503, statusText: 'Service Unavailable' });
+    await status.donePromise;
+    const auth = TestBed.inject(AuthService);
+    expect(auth.token()).toBe('tok');
+    expect(auth.notice()).toBe('tryLater');
+    ctrl.verify();
+  });
+
   it('starts anonymous when the cookie is refused', async () => {
     const status = TestBed.inject(ApplicationInitStatus);
     const ctrl = TestBed.inject(HttpTestingController);

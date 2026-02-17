@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { acceptInviteByApi } from './support/api';
 import { setting } from './support/env';
-import { waitForLink } from './support/mail';
+import { openMailLink, waitForLink } from './support/mail';
 import { expectCleanAddressBar } from './support/page';
 import { submitLogin } from './support/session';
 
@@ -23,7 +23,7 @@ test('forgot, the link from the mail, a weak and then a good password, and a sig
   await expect(page.getByText('If an account exists for this address, we sent a link.')).toBeVisible();
 
   const link = await waitForLink(email, 'reset', MAIL_WAIT_MS);
-  await page.goto(link);
+  await openMailLink(page, link);
   await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
   expectCleanAddressBar(page);
 
@@ -51,7 +51,7 @@ test('forgot, the link from the mail, a weak and then a good password, and a sig
   await expect(page.getByTestId('me-email')).toHaveText(email);
 
   // The link is used up.
-  await page.goto(link);
+  await openMailLink(page, link);
   await page.getByLabel('New password').fill(newPassword);
   await page.getByLabel('Repeat the password').fill(newPassword);
   await page.getByRole('button', { name: 'Change password' }).click();

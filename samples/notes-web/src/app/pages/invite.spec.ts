@@ -185,4 +185,21 @@ describe('InvitePage', () => {
     submitForm(opened.fixture);
     opened.ctrl.expectOne('/auth/invites/accept').flush(null, status(204));
   });
+
+  it('after 204 the button stays off until the login screen is open: a second Enter does not post the used token again', async () => {
+    const opened = await open();
+    let arrive: (opened: boolean) => void = () => undefined;
+    opened.navigate.mockReturnValue(new Promise<boolean>((resolve) => (arrive = resolve)));
+    choose(opened, 'Joined-Passw0rd');
+    opened.ctrl.expectOne('/auth/invites/accept').flush(null, status(204));
+    await settle(opened.fixture);
+    const button = (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(button?.disabled).toBe(true);
+    submitForm(opened.fixture);
+    await settle(opened.fixture);
+    opened.ctrl.expectNone('/auth/invites/accept');
+    arrive(true);
+    await settle(opened.fixture);
+    expect(button?.disabled).toBe(false);
+  });
 });

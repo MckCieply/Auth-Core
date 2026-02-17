@@ -1,8 +1,18 @@
 import { texts } from './texts';
 
+// What the texts that carry a number or a name are called with: one, many, a lockout of minutes, an address.
+const SAMPLE_ARGUMENTS: readonly (number | string)[] = [1, 2, 61, 'a@b.example'];
+
 function leaves(value: unknown, path: string, into: [string, string][]): [string, string][] {
   if (typeof value === 'string') {
     into.push([path, value]);
+  } else if (typeof value === 'function') {
+    for (const argument of SAMPLE_ARGUMENTS) {
+      const text: unknown = (value as (argument: number | string) => unknown)(argument);
+      if (typeof text === 'string') {
+        into.push([`${path}(${argument})`, text]);
+      }
+    }
   } else if (typeof value === 'object' && value !== null) {
     for (const [key, inner] of Object.entries(value)) {
       leaves(inner, `${path}.${key}`, into);
@@ -37,6 +47,10 @@ describe('texts', () => {
   it('is plain English text: printable ASCII, no markup', () => {
     const all = leaves(texts, 'texts', []);
     expect(all.length).toBeGreaterThan(30);
+    // The texts that are functions are checked too, not skipped.
+    expect(all.map(([path]) => path)).toEqual(
+      expect.arrayContaining(['texts.common.waitSeconds(2)', 'texts.login.tooManyAttempts(61)', 'texts.invite.setsPassword(a@b.example)']),
+    );
     for (const [path, text] of all) {
       expect(text, path).toMatch(/^[\x20-\x7E]+$/);
       expect(text, path).not.toMatch(/[<>]/);

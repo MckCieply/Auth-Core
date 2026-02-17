@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { setting } from './support/env';
-import { waitForLink } from './support/mail';
+import { openMailLink, waitForLink } from './support/mail';
 import { expectCleanAddressBar, expectNoEmailInAddressBar } from './support/page';
 import { submitLogin } from './support/session';
 
@@ -10,7 +10,7 @@ test('the viewer the operator invited accepts from the mail, signs in, reads the
   const password = setting('E2E_USER_PASSWORD');
 
   // The script asked the operator CLI to invite this address as a viewer; the server sends the mail within a minute or two.
-  await page.goto(await waitForLink(email, 'invite', 100_000));
+  await openMailLink(page, await waitForLink(email, 'invite', 100_000));
   await expect(page.getByTestId('invite-join')).toHaveText(/^\s*Join .+ as viewer$/);
   await expect(page.getByLabel('Email')).toHaveValue(email);
   await expect(page.getByLabel('Email')).not.toBeEditable();

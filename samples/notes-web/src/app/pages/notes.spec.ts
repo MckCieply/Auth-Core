@@ -1,8 +1,9 @@
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { vi } from 'vitest';
+import { authInterceptor } from '../auth/auth.interceptor';
 import { AuthService, Me } from '../auth/auth.service';
 import { adminMe, clickOn, has, holdToken, pageText, settle, signedInAs, submitForm, typeInto, viewerMe } from '../../testing/helpers';
 import { NotesPage } from './notes';
@@ -108,11 +109,18 @@ describe('NotesPage', () => {
       ctrl.expectNone('/api/notes');
     });
 
-    it('does not send a note of more than 1000 characters', async () => {
+    it('does not send a note of more than 1000 characters, and says it was not saved', async () => {
       const { fixture, ctrl } = await open();
       typeInto(fixture, '#text', 'x'.repeat(1001));
       submitForm(fixture);
       ctrl.expectNone('/api/notes');
+      await settle(fixture);
+      expect(pageText(fixture)).toContain('The note could not be saved.');
+    });
+
+    it('stops the field at 1000 characters, the same number the check uses', async () => {
+      const { fixture } = await open();
+      expect((fixture.nativeElement as HTMLElement).querySelector('#text')?.getAttribute('maxlength')).toBe('1000');
     });
 
     it('sends a note of exactly 1000 characters', async () => {
@@ -138,6 +146,118 @@ describe('NotesPage', () => {
       await settle(fixture);
       expect(pageText(fixture)).toContain('The note could not be saved.');
       expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('precious words');
+    });
+  });
+
+  describe('a note that was just added and a list that was asked for before', () => {
+    // The page opens: the list is asked for, and the person adds a note before that answer arrives.
+    async function addBeforeTheList() {
+      TestBed.configureTestingModule({ providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()] });
+      const ctrl = TestBed.inject(HttpTestingController);
+      await signedInAs(TestBed.inject(AuthService), ctrl);
+      const fixture = TestBed.createComponent(NotesPage);
+      fixture.detectChanges();
+      const list = ctrl.expectOne('/api/notes');
+      typeInto(fixture, '#text', 'quick note');
+      submitForm(fixture);
+      ctrl
+        .expectOne((request) => request.method === 'POST')
+        .flush({ id: 'n3', text: 'quick note', author_sub: 'u1', created_at: day(3) }, status(201));
+      await settle(fixture);
+      return { fixture, list };
+    }
+    const shown = (fixture: { nativeElement: unknown }) =>
+      Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.note p'), (p) => p.textContent);
+
+    it('the late list does not take the added note away', async () => {
+      const { fixture, list } = await addBeforeTheList();
+      list.flush([newer, older]);
+      await settle(fixture);
+      expect(shown(fixture)).toEqual(['quick note', 'second note', 'first note']);
+    });
+
+    it('the late list that already holds the note shows it once', async () => {
+      const { fixture, list } = await addBeforeTheList();
+      list.flush([{ id: 'n3', text: 'quick note', author_sub: 'u1', created_at: day(3) }, newer, older]);
+      await settle(fixture);
+      expect(shown(fixture)).toEqual(['quick note', 'second note', 'first note']);
+    });
+
+    it('a late list that fails keeps the added note and says the rest could not be loaded', async () => {
+      const { fixture, list } = await addBeforeTheList();
+      list.flush('oops', status(500));
+      await settle(fixture);
+      expect(shown(fixture)).toEqual(['quick note']);
+      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+    });
+  });
+
+  it('a list that cannot be loaded again after an unreadable 201 shows no old list next to the message', async () => {
+    const { fixture, ctrl } = await open();
+    typeInto(fixture, '#text', 'saved but unreadable');
+    submitForm(fixture);
+    ctrl.expectOne('/api/notes').flush(null, status(201));
+    await settle(fixture);
+    ctrl.expectOne('/api/notes').flush('oops', status(500));
+    await settle(fixture);
+    expect(pageText(fixture)).toContain('The notes could not be loaded.');
+    expect(has(fixture, '.note')).toBe(false);
+    expect(pageText(fixture)).not.toContain('No notes yet.');
+  });
+
+  describe('the notes service says 503 database_unavailable (try again, spec 0006)', () => {
+    // With the interceptor of the app in front of the page: a 503 that is not auth_unavailable must not sign the person out.
+    async function openWithInterceptor() {
+      TestBed.configureTestingModule({
+        providers: [provideRouter([]), provideHttpClient(withInterceptors([authInterceptor])), provideHttpClientTesting()],
+      });
+      const ctrl = TestBed.inject(HttpTestingController);
+      const auth = TestBed.inject(AuthService);
+      await signedInAs(auth, ctrl);
+      const router = TestBed.inject(Router);
+      const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+      const navigateByUrl = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+      const fixture = TestBed.createComponent(NotesPage);
+      fixture.detectChanges();
+      return { fixture, ctrl, auth, navigate, navigateByUrl };
+    }
+
+    it('on the list: "The notes could not be loaded.", the header stays, the person stays signed in, no refresh', async () => {
+      const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
+      ctrl.expectOne('/api/notes').flush({ error: 'database_unavailable' }, status(503));
+      await settle(fixture);
+      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(textOf(fixture, '[data-testid="me-email"]')).toBe('admin@example.test');
+      expect(auth.token()).toBe('tok');
+      expect(auth.notice()).toBeNull();
+      ctrl.expectNone('/auth/refresh');
+      expect(navigate).not.toHaveBeenCalled();
+      expect(navigateByUrl).not.toHaveBeenCalled();
+    });
+
+    it('on adding a note: "The note could not be saved.", what was typed is kept, the person stays signed in, no refresh', async () => {
+      const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
+      ctrl.expectOne('/api/notes').flush([newer, older]);
+      await settle(fixture);
+      typeInto(fixture, '#text', 'try me again');
+      submitForm(fixture);
+      ctrl.expectOne((request) => request.method === 'POST').flush({ error: 'database_unavailable' }, status(503));
+      await settle(fixture);
+      expect(pageText(fixture)).toContain('The note could not be saved.');
+      expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('try me again');
+      expect(pageText(fixture)).toContain('second note');
+      expect(auth.token()).toBe('tok');
+      ctrl.expectNone('/auth/refresh');
+      expect(navigate).not.toHaveBeenCalled();
+      expect(navigateByUrl).not.toHaveBeenCalled();
+      // The same text can be sent again once the database is back.
+      submitForm(fixture);
+      ctrl
+        .expectOne((request) => request.method === 'POST')
+        .flush({ id: 'n3', text: 'try me again', author_sub: 'u1', created_at: day(3) }, status(201));
+      await settle(fixture);
+      expect(pageText(fixture)).not.toContain('The note could not be saved.');
+      expect(pageText(fixture)).toContain('try me again');
     });
   });
 
@@ -212,6 +332,18 @@ describe('NotesPage', () => {
       expect(auth.token()).toBeNull();
       expect(auth.me()).toBeNull();
       expect(navigateByUrl).toHaveBeenCalledWith('/login');
+    });
+
+    it('a second click while the first sign-out is on its way sends nothing, and the button is off', async () => {
+      const { fixture, ctrl, navigateByUrl } = await open();
+      clickOn(fixture, '[data-testid="sign-out"]');
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="sign-out"]')?.disabled).toBe(true);
+      clickOn(fixture, '[data-testid="sign-out"]');
+      ctrl.expectOne('/auth/logout').flush(null, status(204));
+      await settle(fixture);
+      ctrl.expectNone('/auth/logout');
+      expect(navigateByUrl).toHaveBeenCalledTimes(1);
     });
 
     it('goes to /login when the network fails', async () => {

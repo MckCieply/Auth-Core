@@ -40,6 +40,20 @@ test('every path that is index.html is revalidated, an unknown path and a missin
   }
 });
 
+test('the hashed .js and .css files of the build are not marked no-cache: they may be cached', async ({ page }) => {
+  const index = await (await page.request.get('/')).text();
+  const named = [/<script[^>]* src="([^"]+\.js)"/.exec(index)?.[1], /<link[^>]* href="([^"]+\.css)"/.exec(index)?.[1]];
+  expect(named.length).toBe(2);
+  for (const file of named) {
+    expect(file, 'index.html names no .js or .css file').toBeDefined();
+    const answer = await page.request.get(`/${(file as string).replace(/^\//, '')}`);
+    expect(answer.status(), file).toBe(200);
+    expect(answer.headers()['content-type'], file).toMatch(/javascript|css/);
+    expect(answer.headers()['cache-control'] ?? '', file).not.toContain('no-cache');
+    expect(answer.headers()['content-security-policy'], file).toBeDefined();
+  }
+});
+
 test('the file server serves nothing outside the build', async ({ page }) => {
   for (const path of ['/Caddyfile', '/etc/passwd', '/.env', '/Dockerfile']) {
     const answer = await page.request.get(path);

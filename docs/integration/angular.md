@@ -132,6 +132,12 @@ The interceptor handles the answers to the requests that carry the token:
 | `403 {"error":"permissions_changed"}` | One refresh, so that the new token carries the current role, then the request again, once. The person's details are asked again too. |
 | `503 {"error":"auth_unavailable"}` | A bar: "Try again shortly." The person stays signed in. |
 
+Every other answer reaches the screen that asked, untouched: no refresh, and the person stays signed in. That includes the notes
+service's own errors (`503 {"error":"database_unavailable"}` means "try again later", also `500`, `404` and `405`); the notes screen
+shows "The notes could not be loaded." or "The note could not be saved.". A call to your own origin that is not answered within 30
+seconds (`REQUEST_TIMEOUT_MS` in `auth.interceptor.ts`) fails the same way, so that no screen waits for ever; raise it for calls that
+take longer, such as an upload.
+
 The `403 permissions_changed` and `503 auth_unavailable` answers are what Auth-Core's company API and a product's backend (the Python
 package, for one) answer; see the specs [0005](../superpowers/specs/0005-tenancy-and-rbac.md) and
 [0006](../superpowers/specs/0006-python-consumer-package.md). The messages are drawn by the shell

@@ -80,6 +80,13 @@ describe('VerifyPage', () => {
       submitForm(fixture);
       ctrl.expectNone('/auth/email/verify/request');
     });
+
+    it('sends nothing for an address of only spaces', async () => {
+      const { fixture, ctrl } = await expired();
+      typeRaw(fixture, '#email', '   ');
+      submitForm(fixture);
+      ctrl.expectNone('/auth/email/verify/request');
+    });
   });
 
   it.each([

@@ -20,6 +20,9 @@ services:
     volumes:
       # The same container path as in the notes overlay: this mount replaces that Caddyfile.
       - ../samples/notes-web/Caddyfile:/etc/caddy/Caddyfile:ro
+      # No volume for /data on purpose: the notes overlay keeps /data and /config in memory (read-only root filesystem), so the
+      # certificate authority of `tls internal` is made again each time the container is created. The tests accept any
+      # certificate, and a person who accepted the warning meets it again after a recreate.
 
   auth:
     environment:

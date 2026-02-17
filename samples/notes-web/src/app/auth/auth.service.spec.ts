@@ -2,7 +2,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { adminMe, holdToken, settle, signedInAs } from '../../testing/helpers';
+import { adminMe, holdToken, settle, signedInAs, viewerMe } from '../../testing/helpers';
 import { AuthService, failureOf } from './auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -146,11 +146,17 @@ describe('AuthService', () => {
     it('never writes the token to localStorage, sessionStorage or a cookie', async () => {
       // Drives login itself, so that the token write of login is the one that is checked.
       const done = auth.login('admin@example.test', 'pw');
-      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'secret-token-value' });
+      const loginRequest = ctrl.expectOne('/auth/login');
+      loginRequest.flush({ status: 'authenticated', access_token: 'secret-token-value' });
       await settle();
-      ctrl.expectOne('/auth/me').flush(adminMe);
+      const meRequest = ctrl.expectOne('/auth/me');
+      meRequest.flush(adminMe);
       expect(await done).toEqual({ ok: true });
       expect(auth.token()).toBe('secret-token-value');
+      // Nor in the address bar or in the address of any request the service made.
+      expect(window.location.href).not.toContain('secret-token-value');
+      expect(loginRequest.request.urlWithParams).not.toContain('secret-token-value');
+      expect(meRequest.request.urlWithParams).not.toContain('secret-token-value');
       expect(JSON.stringify({ ...localStorage })).not.toContain('secret-token-value');
       expect(JSON.stringify({ ...sessionStorage })).not.toContain('secret-token-value');
       expect(document.cookie).not.toContain('secret-token-value');
@@ -184,6 +190,28 @@ describe('AuthService', () => {
       ctrl.expectOne('/auth/login').flush({ status: 'mfa_required' });
       expect(await done).toEqual({ ok: false, failure: { kind: 'other' } });
       expect(auth.token()).toBeNull();
+    });
+
+    it('is signed in even when /auth/me cannot be read: the notes screen asks for the person again', async () => {
+      const done = auth.login('a@b.example', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok-9' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush('oops', status(500));
+      expect(await done).toEqual({ ok: true });
+      expect(auth.token()).toBe('tok-9');
+      expect(auth.me()).toBeNull();
+    });
+
+    it('a /auth/me that never answers is given up after ten seconds: the sign-in does not hang', async () => {
+      vi.useFakeTimers();
+      const done = auth.login('a@b.example', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok-9' });
+      await vi.advanceTimersByTimeAsync(1);
+      ctrl.expectOne('/auth/me');
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await done).toEqual({ ok: true });
+      expect(auth.token()).toBe('tok-9');
+      expect(auth.me()).toBeNull();
     });
 
     it('clears an old notice when the person signs in', async () => {
@@ -271,6 +299,45 @@ describe('AuthService', () => {
     });
   });
 
+  describe('loadMe', () => {
+    it('one request for any number of callers that ask while it runs, then a new one', async () => {
+      await holdToken(auth, ctrl, 'tok');
+      const calls = [auth.loadMe(), auth.loadMe(), auth.loadMe()];
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      expect(await Promise.all(calls)).toEqual([true, true, true]);
+      expect(auth.me()).toEqual(adminMe);
+      const later = auth.loadMe();
+      ctrl.expectOne('/auth/me').flush(viewerMe);
+      expect(await later).toBe(true);
+      expect(auth.me()).toEqual(viewerMe);
+    });
+
+    it('a call after the person signed out and in again does not share the answer that was on its way', async () => {
+      await signedInAs(auth, ctrl, adminMe, 'old');
+      const stale = auth.loadMe();
+      const staleRequest = ctrl.expectOne('/auth/me');
+      auth.dropSession();
+      await holdToken(auth, ctrl, 'new');
+      const fresh = auth.loadMe();
+      const freshRequest = ctrl.expectOne('/auth/me');
+      staleRequest.flush(adminMe);
+      freshRequest.flush(viewerMe);
+      expect(await stale).toBe(false);
+      expect(await fresh).toBe(true);
+      expect(auth.me()).toEqual(viewerMe);
+    });
+
+    it('a failed call does not stop the next one', async () => {
+      await holdToken(auth, ctrl, 'tok');
+      const failed = auth.loadMe();
+      ctrl.expectOne('/auth/me').flush('oops', status(500));
+      expect(await failed).toBe(false);
+      const again = auth.loadMe();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      expect(await again).toBe(true);
+    });
+  });
+
   describe('a refresh that was on its way when the person signed out and in again', () => {
     it('401 does not drop the new session', async () => {
       await signedInAs(auth, ctrl, adminMe, 'old');
@@ -294,8 +361,8 @@ describe('AuthService', () => {
   describe('notices', () => {
     it('can be shown and cleared', () => {
       expect(auth.notice()).toBeNull();
-      auth.showNotice('try_later');
-      expect(auth.notice()).toBe('try_later');
+      auth.showNotice('tryLater');
+      expect(auth.notice()).toBe('tryLater');
       auth.clearNotice();
       expect(auth.notice()).toBeNull();
     });

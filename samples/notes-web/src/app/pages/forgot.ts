@@ -1,8 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
-import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AccountApi } from '../account-api';
 import { texts } from '../texts';
+import { requiredText } from './required-text';
 
 @Component({
   selector: 'app-forgot',
@@ -31,7 +32,7 @@ export class ForgotPage {
   protected readonly common = texts.common;
   private readonly account = inject(AccountApi);
 
-  protected readonly form = inject(NonNullableFormBuilder).group({ email: ['', Validators.required] });
+  protected readonly form = inject(NonNullableFormBuilder).group({ email: ['', requiredText] });
   protected readonly busy = signal(false);
   protected readonly sent = signal(false);
   protected readonly error = signal<string | null>(null);

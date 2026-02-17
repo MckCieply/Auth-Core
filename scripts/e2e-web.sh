@@ -22,7 +22,7 @@
 # Chromium and WebKit (npx playwright install chromium webkit, once), curl, docker compose, and the host ports 8088, 8443,
 # 8080 and 8025 free. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD, AUTH_DEV_SEED_UNVERIFIED_EMAIL,
 # AUTH_DEV_SEED_UNVERIFIED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
-# Env: COMPOSE_PROJECT_NAME (default auth-core-web, not the "auth-core" of a development stack nor the notes e2e's),
+# Env: COMPOSE_PROJECT_NAME (default auth-core-web; "auth-core", the development stack, is refused),
 # E2E_PROJECTS, E2E_KEEP_STACK, HTTP_URL, HTTPS_URL, MAILPIT_URL. Exits non-zero on the first failure; prints "PASS <project>"
 # per project; never prints a password, a token, a cookie or a mail body.
 set -euo pipefail
@@ -34,6 +34,9 @@ HTTPS_URL="${HTTPS_URL:-https://localhost:8443}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 PROJECTS="${E2E_PROJECTS:-chromium webkit}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-web}"
+# The script runs `down -v` on its project: never on the development stack, whose project is called auth-core.
+[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] \
+  || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack: this script removes its volumes; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
@@ -45,6 +48,10 @@ trap cleanup EXIT
 
 fail() { echo "FAIL $*" >&2; exit 1; }
 pass() { echo "PASS $*"; }
+
+# Everything of a tool's output that is passed on goes through this: a mail link (token=...) and the value of a Playwright
+# fill("...") (a typed password) are hidden.
+hide() { sed -E -e 's/token=[A-Za-z0-9_-]+/token=<hidden>/g' -e 's/fill\("([^"\\]|\\.)*"\)/fill("<hidden>")/g'; }
 
 env_get() { # read KEY from .env without executing it; strips one pair of surrounding quotes
   local line
@@ -88,7 +95,7 @@ json_field() { # json_field <name>: the string field <name> of the JSON on stdin
 
 cli() { # cli <args...>: the operator CLI, in the service's own image; stdout and stderr are kept out of the log
   "${compose[@]}" run --rm -T --no-deps auth admin "$@" > "$tmp/cli.out" 2> "$tmp/cli.err" \
-    || { cat "$tmp/cli.err" >&2; fail "the operator CLI failed: admin $1"; }
+    || { hide < "$tmp/cli.err" >&2; fail "the operator CLI failed: admin $1"; }
 }
 
 seed_stack() {
@@ -124,7 +131,17 @@ seed_stack() {
 for project in $PROJECTS; do
   echo "== $project: a clean stack (the first build takes a few minutes)..."
   "${compose[@]}" down -v > "$tmp/down.log" 2>&1 || true
-  "${compose[@]}" up -d --build > "$tmp/up.log" 2>&1 || { cat "$tmp/up.log" >&2; fail "$project: docker compose up failed"; }
+  # PostgreSQL first, until it answers over the network. On a fresh volume the image starts a temporary server that listens on its
+  # socket only, and the health check (pg_isready on the socket) passes during it: the one-shot notes-db-init, which connects
+  # over the network, would start too early and exit with 2. -h 127.0.0.1 is the check that the final server is up.
+  "${compose[@]}" up -d postgres > "$tmp/pg.log" 2>&1 || { hide < "$tmp/pg.log" >&2; fail "$project: docker compose up postgres failed"; }
+  pg_up=0
+  for _ in $(seq 1 90); do
+    if "${compose[@]}" exec -T postgres pg_isready -q -h 127.0.0.1 -U auth -d auth > /dev/null 2>&1; then pg_up=1; break; fi
+    sleep 1
+  done
+  [[ "$pg_up" == "1" ]] || fail "$project: PostgreSQL did not answer over the network within 90s"
+  "${compose[@]}" up -d --build > "$tmp/up.log" 2>&1 || { hide < "$tmp/up.log" >&2; fail "$project: docker compose up failed"; }
   wait_ok "$HTTP_URL/auth/health" 120 || fail "$project: $HTTP_URL/auth/health did not return 200 within 120s"
   wait_ok "$HTTP_URL/api/health" 60 || fail "$project: $HTTP_URL/api/health did not return 200 within 60s"
   wait_ok "$MAILPIT_URL/readyz" 60 || fail "$project: $MAILPIT_URL/readyz did not return 200 within 60s"
@@ -142,7 +159,7 @@ for project in $PROJECTS; do
   # A failure message of Playwright can hold a mail link (the URL of a page.goto) and, in its call log, the value of a
   # fill("...") (a typed password): both are hidden on the way out.
   # (pipefail is on: the exit status is Playwright's.)
-  (cd "$web" && npx playwright test --project="$project" 2>&1 | sed -E -e 's/token=[A-Za-z0-9_-]+/token=<hidden>/g' -e 's/fill\("([^"\\]|\\.)*"\)/fill("<hidden>")/g') \
+  (cd "$web" && npx playwright test --project="$project" 2>&1 | hide) \
     || fail "$project: Playwright failed (E2E_KEEP_STACK=1 keeps the stack for a look)"
   pass "$project: every Playwright test passed on a clean stack"
 done

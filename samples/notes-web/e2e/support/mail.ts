@@ -1,4 +1,5 @@
-import { mailpitUrl } from './env';
+import { Page } from '@playwright/test';
+import { MAIL_LINK_ORIGIN, mailpitUrl } from './env';
 
 export type LinkKind = 'reset' | 'verify' | 'invite';
 
@@ -11,6 +12,7 @@ const SUBJECT_STARTS: Record<LinkKind, string> = {
 interface MailSummary {
   ID: string;
   Subject: string;
+  To: { Address: string }[] | null;
 }
 
 interface Mail {
@@ -45,21 +47,41 @@ export async function waitForLink(to: string, kind: LinkKind, timeoutMs = 150_00
   }
 }
 
+/**
+ * Opens a link from waitForLink. A failed navigation must not print the link (Playwright puts the URL in its error, and the URL
+ * holds a token): the error here says only that it failed.
+ */
+export async function openMailLink(page: Page, link: string): Promise<void> {
+  try {
+    await page.goto(link);
+  } catch {
+    throw new Error('opening the link of a mail failed (not printed: the link holds a token)');
+  }
+}
+
 async function newestLink(to: string, kind: LinkKind): Promise<string | null> {
   const found = await getJson<{ messages: MailSummary[] }>(
     `${mailpitUrl()}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}`,
   );
-  const summary = found.messages.find((message) => message.Subject.startsWith(SUBJECT_STARTS[kind]));
+  // The search matches part of an address: the mail must be to this address and no other.
+  const summary = found.messages.find(
+    (message) =>
+      message.Subject.startsWith(SUBJECT_STARTS[kind]) &&
+      (message.To ?? []).some((recipient) => recipient.Address.toLowerCase() === to.toLowerCase()),
+  );
   if (summary === undefined) {
     return null;
   }
   const mail = await getJson<Mail>(`${mailpitUrl()}/api/v1/message/${summary.ID}`);
-  const match = new RegExp(`https?://localhost:8088/${kind}\\?token=([A-Za-z0-9_-]+)`).exec(mail.Text);
+  const match = new RegExp(`(https?://[^\\s/]+)/${kind}\\?token=([A-Za-z0-9_-]+)`).exec(mail.Text);
   if (match === null) {
     throw new Error(`the ${kind} mail for ${to} holds no link of the form /${kind}?token=...`);
   }
-  if (!mail.HTML.includes(match[1])) {
+  if (match[1] !== MAIL_LINK_ORIGIN) {
+    throw new Error(`the ${kind} mail for ${to} points at ${match[1]}, not at ${MAIL_LINK_ORIGIN}`);
+  }
+  if (!mail.HTML.includes(match[2])) {
     throw new Error(`the HTML part of the ${kind} mail for ${to} does not hold the token of its text part`);
   }
-  return `/${kind}?token=${match[1]}`;
+  return `/${kind}?token=${match[2]}`;
 }

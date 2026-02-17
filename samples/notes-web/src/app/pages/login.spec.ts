@@ -79,6 +79,47 @@ describe('LoginPage', () => {
     });
   });
 
+  it('the button stays off until the next page is open, so a second Enter does not sign in twice', async () => {
+    const opened = await open();
+    let arrive: (opened: boolean) => void = () => undefined;
+    opened.navigateByUrl.mockReturnValue(new Promise<boolean>((resolve) => (arrive = resolve)));
+    signIn(opened, 'admin@example.test', 'pw');
+    opened.ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok' });
+    await settle();
+    opened.ctrl.expectOne('/auth/me').flush(adminMe);
+    await settle(opened.fixture);
+    const button = (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(button?.disabled).toBe(true);
+    submitForm(opened.fixture);
+    opened.ctrl.expectNone('/auth/login');
+    arrive(true);
+    await settle(opened.fixture);
+    expect(button?.disabled).toBe(false);
+  });
+
+  it('lands on /notes: with the real router, a sign-in from /login ends on the notes screen', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([
+          { path: 'login', component: LoginPage },
+          { path: 'notes', component: Blank },
+        ]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    });
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/login', LoginPage);
+    const ctrl = TestBed.inject(HttpTestingController);
+    typeInto(harness.fixture, '#email', 'admin@example.test');
+    typeInto(harness.fixture, '#password', 'pw');
+    submitForm(harness.fixture);
+    ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok' });
+    await settle();
+    ctrl.expectOne('/auth/me').flush(adminMe);
+    await vi.waitFor(() => expect(TestBed.inject(Router).url).toBe('/notes'));
+  });
+
   it('401 invalid_credentials: "Wrong email or password."', async () => {
     const opened = await open();
     signIn(opened, 'admin@example.test', 'bad');
@@ -146,6 +187,21 @@ describe('LoginPage', () => {
       expect(has(fixture, '[data-testid="resend"]')).toBe(true);
     });
 
+    it('the button sends the address without the spaces around it, like the sign-in did', async () => {
+      const opened = await open();
+      typeRaw(opened.fixture, '#email', '  new@example.test  ');
+      typeInto(opened.fixture, '#password', 'pw');
+      submitForm(opened.fixture);
+      const login = opened.ctrl.expectOne('/auth/login');
+      expect(login.request.body).toEqual({ email: 'new@example.test', password: 'pw' });
+      login.flush({ error: 'email_not_verified' }, status(403));
+      await settle(opened.fixture);
+      clickOn(opened.fixture, '[data-testid="resend"]');
+      const request = opened.ctrl.expectOne('/auth/email/verify/request');
+      expect(request.request.body).toEqual({ email: 'new@example.test' });
+      request.flush(null, status(202));
+    });
+
     it('the button asks for a new link for the address in the form, and says so', async () => {
       const { fixture, ctrl } = await unverified();
       clickOn(fixture, '[data-testid="resend"]');
@@ -198,6 +254,14 @@ describe('LoginPage', () => {
       const opened = await open();
       signIn(opened, '', 'pw');
       signIn(opened, 'admin@example.test', '');
+      opened.ctrl.expectNone('/auth/login');
+    });
+
+    it('sends nothing for an email of only spaces', async () => {
+      const opened = await open();
+      typeRaw(opened.fixture, '#email', '    ');
+      typeInto(opened.fixture, '#password', 'pw');
+      submitForm(opened.fixture);
       opened.ctrl.expectNone('/auth/login');
     });
 

@@ -31,7 +31,8 @@
 			X-Content-Type-Options nosniff
 		}
 		# Every answer that is index.html is revalidated, an unknown path included. Only a .js, .css or .ico file that
-		# exists (hashed by the build) may be cached.
+		# exists (hashed by the build) may be cached. Any other file that exists (this build has none) is revalidated too: the
+		# safe side, and a product that adds fonts or images to the build adds their extensions to this list.
 		@revalidate not {
 			path *.js *.css *.ico
 			file

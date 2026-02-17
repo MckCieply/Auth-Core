@@ -100,9 +100,9 @@ export class InvitePage implements OnInit {
     }
     this.busy.set(true);
     const result = await this.account.acceptInvite(this.token, password);
-    this.busy.set(false);
     if (result.ok) {
-      // The email goes in the navigation state: it is never in the URL.
+      // The email goes in the navigation state: it is never in the URL. The button stays off until the login is open: the
+      // token is used up, and a second Enter would only post it again.
       await this.router.navigate(['/login'], { state: { email: invitation.email } });
     } else if (result.failure.kind === 'weak_password') {
       this.rules.set(result.failure.rules);
@@ -113,6 +113,7 @@ export class InvitePage implements OnInit {
     } else {
       this.error.set(this.common.somethingWrong);
     }
+    this.busy.set(false);
   }
 
   private async preview(token: string): Promise<void> {

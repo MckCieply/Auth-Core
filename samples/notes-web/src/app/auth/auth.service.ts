@@ -26,7 +26,7 @@ export type Failure =
 export type RefreshResult = 'ok' | 'rejected' | 'unavailable';
 
 /** The messages of the bar above the screens. */
-export type AuthNotice = 'unreachable' | 'try_later' | 'forbidden';
+export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden';
 
 export type LoginResult = { ok: true } | { ok: false; failure: Failure };
 
@@ -121,6 +121,8 @@ export class AuthService {
   private readonly meState = signal<Me | null>(null);
   private readonly noticeState = signal<AuthNotice | null>(null);
   private refreshing: Promise<RefreshResult> | null = null;
+  // The /auth/me that is on its way, and the session and token it was asked for.
+  private asking: { generation: number; token: string | null; answer: Promise<boolean> } | null = null;
   // Counts the sessions that ended in this tab: an answer that was on its way when the person signed out is never used.
   private generation = 0;
 
@@ -137,7 +139,8 @@ export class AuthService {
     if (result === 'unavailable') {
       this.noticeState.set('unreachable');
     } else if (result === 'ok' && !(await this.loadMe(REFRESH_TIMEOUT_MS)) && this.noticeState() === null) {
-      // The same ten seconds as the refresh: the app must not sit blank behind the initializer.
+      // The same ten seconds as the refresh: the app must not sit blank behind the initializer. Not when the interceptor has
+      // already set a bar of its own for this /auth/me (503 auth_unavailable: "Try again shortly."): that one is the better one.
       this.noticeState.set('unreachable');
     }
   }
@@ -155,7 +158,9 @@ export class AuthService {
     }
     this.accessToken.set(token);
     this.noticeState.set(null);
-    await this.loadMe();
+    // Signed in once there is a token, even when this answer cannot be read: the notes screen asks for the person again.
+    // Ten seconds, like the start: a sign-in must not hang behind an /auth/me that never answers.
+    await this.loadMe(REFRESH_TIMEOUT_MS);
     return { ok: true };
   }
 
@@ -171,7 +176,8 @@ export class AuthService {
 
   /**
    * Exchanges the refresh cookie for a new access token. Callers that ask while a refresh runs get that refresh:
-   * there is never more than one request at a time.
+   * there is never more than one request at a time. A refresh that started before the person signed out hands its callers
+   * 'rejected' when it ends, whatever the cookie said: the session it was for is gone (the interceptor then leaves the page alone).
    */
   refresh(): Promise<RefreshResult> {
     this.refreshing ??= this.exchange().finally(() => {
@@ -184,7 +190,22 @@ export class AuthService {
    * Asks GET /auth/me. True when an answer of the contract's shape was read. `giveUpAfterMs` ends the wait for an answer that
    * does not come (the start uses it); an answer that arrives after the person signed out is ignored.
    */
-  async loadMe(giveUpAfterMs?: number): Promise<boolean> {
+  loadMe(giveUpAfterMs?: number): Promise<boolean> {
+    // Several callers at once (a page of requests that all got 403 permissions_changed) share one request, as long as it is for
+    // the same session and the same token: the answer would be the same.
+    const token = this.accessToken();
+    if (this.asking === null || this.asking.generation !== this.generation || this.asking.token !== token) {
+      const answer = this.askMe(giveUpAfterMs).finally(() => {
+        if (this.asking?.answer === answer) {
+          this.asking = null;
+        }
+      });
+      this.asking = { generation: this.generation, token, answer };
+    }
+    return this.asking.answer;
+  }
+
+  private async askMe(giveUpAfterMs?: number): Promise<boolean> {
     const started = this.generation;
     try {
       const request = this.http.get<unknown>('/auth/me');

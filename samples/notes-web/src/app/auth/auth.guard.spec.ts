@@ -24,6 +24,11 @@ describe('safeReturnUrl', () => {
     '/\t/evil.example',
     '/\n/evil.example',
     '/notes\r\nSet-Cookie: x=1',
+    '/notes\rx',
+    '/notes\x00',
+    '/\x00notes',
+    '/notes\x7f',
+    '/' + 'a'.repeat(2048),
     '/' + 'a'.repeat(3000),
   ])('replaces %j by /notes', (value) => {
     expect(safeReturnUrl(value)).toBe('/notes');
@@ -36,6 +41,12 @@ describe('safeReturnUrl', () => {
 
   it.each(['/notes', '/notes?x=1', '/notes/5?x=1&y=2#top', '/'])('keeps %s', (value) => {
     expect(safeReturnUrl(value)).toBe(value);
+  });
+
+  it('keeps a value of exactly 2048 characters and replaces one of 2049', () => {
+    const longest = '/' + 'a'.repeat(2047);
+    expect(safeReturnUrl(longest)).toBe(longest);
+    expect(safeReturnUrl(longest + 'a')).toBe('/notes');
   });
 });
 

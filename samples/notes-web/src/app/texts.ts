@@ -30,7 +30,7 @@ export const texts = {
   // The bar above every screen. The keys are the notices of AuthService.
   notices: {
     unreachable: "Can't reach the server. Try again shortly.",
-    try_later: 'Try again shortly.',
+    tryLater: 'Try again shortly.',
     forbidden: "You don't have access to this.",
     dismiss: 'Dismiss',
   },

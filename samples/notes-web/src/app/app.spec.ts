@@ -24,7 +24,7 @@ describe('App', () => {
 
   it.each([
     ['unreachable', "Can't reach the server. Try again shortly."],
-    ['try_later', 'Try again shortly.'],
+    ['tryLater', 'Try again shortly.'],
     ['forbidden', "You don't have access to this."],
   ] as const)('shows the bar for the notice %s', async (notice, text) => {
     const { fixture, auth, root } = open();
@@ -35,7 +35,7 @@ describe('App', () => {
 
   it('lets the person dismiss the bar', async () => {
     const { fixture, auth, root } = open();
-    auth.showNotice('try_later');
+    auth.showNotice('tryLater');
     await settle(fixture);
     root.querySelector<HTMLButtonElement>('[data-testid="notice"] button')?.click();
     await settle(fixture);

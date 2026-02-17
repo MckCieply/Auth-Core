@@ -1,8 +1,9 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AccountApi } from '../account-api';
 import { texts } from '../texts';
+import { requiredText } from './required-text';
 import { takeTokenFromUrl } from './token-from-url';
 
 @Component({
@@ -47,7 +48,7 @@ export class VerifyPage implements OnInit {
   // Read once, here, and gone from the address bar from now on.
   private readonly token = takeTokenFromUrl(inject(ActivatedRoute));
 
-  protected readonly form = inject(NonNullableFormBuilder).group({ email: ['', Validators.required] });
+  protected readonly form = inject(NonNullableFormBuilder).group({ email: ['', requiredText] });
   protected readonly phase = signal<'working' | 'done' | 'invalid' | 'error'>(this.token === null ? 'invalid' : 'working');
   protected readonly busy = signal(false);
   protected readonly info = signal<string | null>(null);
