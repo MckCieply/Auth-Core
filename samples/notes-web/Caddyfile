@@ -66,8 +66,9 @@
 		@head method HEAD
 		method @head GET
 		# The app answers GET and HEAD only: any other method gets a 405 on every path of the app, a path of a missing file included (the
-		# file server alone would answer 404 for a missing file and 405 for an existing one). HEAD has become GET above.
-		@other not method GET
+		# file server alone would answer 404 for a missing file and 405 for an existing one). The matcher names HEAD too: `header` runs
+		# before `method` (Caddy's directive order), so at that point a HEAD request is still HEAD, and must not get an Allow header.
+		@other not method GET HEAD
 		header @other Allow "GET, HEAD"
 		respond @other 405
 		# A path with a file extension that is not in the build is a missing file: 404, so that a broken build shows as an error

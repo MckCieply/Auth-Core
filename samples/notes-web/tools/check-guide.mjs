@@ -4,8 +4,9 @@
 //   2. every relative link of the guide ends at a file or directory that exists;
 //   3. every path in a code span (`samples/...`, `src/app/auth/...`, `Caddyfile`, ...) exists, from the repository root or
 //      from samples/notes-web;
-//   3b. every bare file name in a code span (`auth.guard.ts`, `pages/login.ts`, `texts.ts`) is the end of the path of a real file
-//      of the sample (under samples/notes-web, build output and packages left out) or a file of docs/integration;
+//   3b. every bare file name in a code span (`auth.guard.ts`, `pages/login.ts`, `texts.ts`) is the path of a real file relative to
+//      src/app/auth, src/app, src or samples/notes-web (build output and packages left out) or a file of docs/integration, or
+//      the end of the path (after a `/`) of exactly one file; a name that fits several files and no base is ambiguous: a failure;
 //   4. the guide names no product (it is written for any product).
 // Run it with `npm run check:docs` from samples/notes-web. Exit status 0 when every check passes, 1 otherwise.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -93,8 +94,15 @@ for (const match of prose.matchAll(/`([^`\n]+)`/g)) {
     spans.add(text);
   }
 }
-// 3b. Bare file names.
-const known = [...filesUnder(sample), ...filesUnder(resolve(repo, 'docs', 'integration'))];
+// 3b. Bare file names. A name is a file when it is the path of a file relative to one of the folders the guide talks about (BASES,
+// the closest first: `auth.guard.ts` is in src/app/auth, `pages/login.ts` in src/app, `index.html` in src, a file of
+// docs/integration by its own name), or, failing that, the end of the path on a `/` boundary of exactly one file. A name that
+// ends the paths of several files and is none of them relative to a base is ambiguous: it fails, so a renamed file cannot hide
+// behind another of the same name.
+const BASES = ['src/app/auth', 'src/app', 'src', ''];
+const sampleFiles = filesUnder(sample);
+const docFiles = filesUnder(resolve(repo, 'docs', 'integration'));
+const everyFile = [...sampleFiles.map((path) => `samples/notes-web/${path}`), ...docFiles.map((path) => `docs/integration/${path}`)];
 const bare = new Set();
 for (const match of prose.matchAll(/`([^`\n]+)`/g)) {
   const text = match[1].trim();
@@ -103,8 +111,15 @@ for (const match of prose.matchAll(/`([^`\n]+)`/g)) {
   }
 }
 for (const name of bare) {
-  if (!known.some((path) => path === name || path.endsWith(`/${name}`))) {
+  const exact = BASES.some((base) => sampleFiles.includes(base === '' ? name : `${base}/${name}`)) || docFiles.includes(name);
+  if (exact) {
+    continue;
+  }
+  const ends = everyFile.filter((path) => path.endsWith(`/${name}`));
+  if (ends.length === 0) {
     problem(`the file name \`${name}\` is no file of samples/notes-web or docs/integration`);
+  } else if (ends.length > 1) {
+    problem(`the file name \`${name}\` is ambiguous (${ends.join(', ')}): write its path from src/app or from samples/notes-web`);
   }
 }
 for (const path of spans) {
