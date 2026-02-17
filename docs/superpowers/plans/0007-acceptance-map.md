@@ -60,8 +60,8 @@ backticks (the check of Task 11 reads either form).
 
 ## How the tests run
 
-- `cd samples/notes-web && npx ng test --watch=false` - the unit tests (Vitest on jsdom, no Docker, no browser).
-- `scripts/e2e-web.sh` - the Playwright tests against a clean stack, once for Chromium and once for WebKit; it needs Docker, the
+- `cd samples/notes-web && npx ng test --watch=false` - the unit tests (Vitest on jsdom, no Docker, no browser): 361 tests in 17 files.
+- `scripts/e2e-web.sh` - the Playwright tests (37 per browser) against a clean stack, once for Chromium and once for WebKit; it needs Docker, the
   images of the stack, Node 24 and Playwright's browsers.
 - The tests that read mail (`03`, `04`, `05`) wait for the mails the server sends at its next poll, up to 150 seconds each.
 
@@ -141,8 +141,164 @@ backticks (the check of Task 11 reads either form).
 
 ## Plan-vs-implementation notes
 
-(Filled in by the orchestrator after implementation: every name or behaviour that differed from the plan, per task.)
+One line per task, then the changes made after the tasks. Plan 0007 keeps its body, as plans 0001 to 0006 do; where it disagrees with the spec as
+amended (Decisions 10 to 14) the spec wins, and the plan's "As built" points here. Counts: 258 unit tests at the review of the whole branch, 361 at the
+end; 25 Playwright tests per browser on the first live run, 37 at the end.
+
+- Task 1 (commit 1035ea8): `texts.appName` was removed (nothing uses it; `index.html` keeps its own title). The texts spec has 5 tests, not the 4 the plan
+  text names. The key `try_later` of the notices became `tryLater` in the minor fixes (a9d31cc).
+- Task 2 (4b30ca3): as planned. Later changes to `auth.service.ts` are listed below: a sign-in ends the session that exists, `/auth/me` is asked once at a time
+  for one session, and the `/auth/me` of a sign-in gives up after 10 seconds like the one at start.
+- Task 3 (dafca1c): `403 permissions_changed` starts `/auth/me` and the second try together, as the plan has it; the spec's sentence was made to say "at the same
+  time" (086ec3f). The interceptor itself was rebuilt on observables (Decision 10, below).
+- Task 4 (7aa476f): the dead second test for a backslash in `safeReturnUrl` was dropped (the backslash test covers it), so the guard has one such test, not two.
+- Task 5 (0d3db3c): a new file `pages/required-text.ts` (a validator that refuses an email of only spaces) with its spec; the plan let such an email through as an
+  empty string. The sign-in button stays off until the next page is open, so a second Enter does not sign in twice.
+- Task 6 (12153ac): a new file `pages/password-rules.ts` (the `PasswordRules` component and `ruleText`) with its spec, used by `/reset` and `/invite`; the plan had the
+  rule lines written twice. A rule name that is also a property of every object (`constructor`) shows the fallback line. The token leaves the address bar through the
+  router, not through `history.replaceState` (Decision 11, below). After a server error `/verify` and `/invite` show a "Try again" button that asks again with the token
+  still held in memory; the plan left the person with no control, and a reload would then say the link was used up.
+- Task 7 (dd706b6): `isNote` checks every note that comes from the service; a list that holds anything else is a failed load, and a `2xx` answer to an add that is not
+  a note makes the page load the list again (the note was saved). A list answer that arrives after an add is merged with the notes the page added. "Sign out" is off while
+  it runs. The limit of 1000 characters is one constant (`MAX_NOTE_CHARACTERS`) for the check and for `maxlength`. A failed load or save says the common sentence
+  "Something went wrong. Try again." (owner), not two sentences of the screen; a note that is too long says the limit. On `503 auth_unavailable` the screen adds no
+  sentence of its own: the interceptor's bar is the whole message.
+- Task 8 (262ef16): the Caddyfile and the Dockerfile differ from the plan text in the ways listed under "Caddy and the image" below.
+- Task 9 (f6c976f, b684c3d): `scripts/e2e-web.sh` hides `token=...` and typed passwords in every output it passes on, and Playwright keeps no trace. After the review of the
+  whole branch it also exports `PLAYWRIGHT_NO_COPY_PROMPT=1`: without it a failed test writes an accessibility snapshot of the page, with the typed passwords, to
+  `test-results/`.
+- Task 10 (f1ee098): the mail helper takes the newest mail to exactly that recipient and checks the origin of the link against `MAIL_LINK_ORIGIN` (set by the
+  overlay, not derived from `HTTP_URL`); a failing `openMailLink` prints a fixed message and never the link; the test of `/verify` has a 180-second limit.
+- Task 11 (54c4e52): the guide says "Four screens (three of them open from a mail link), and the three settings"; the plan said "Three routes" over a table of four. The
+  one-off check of the guide in the plan's Task 11 is replaced by a committed one, `samples/notes-web/tools/check-guide.mjs`, run as `npm run check:docs` (see criterion 9).
+- First live run (b7e8014): three defects of the tests; the app and the stack were right. `04-invite` expected the join line to start with "Join"; the template gives it a leading
+  space. The style nonce test took the nonce from one response and compared it with the style elements of the next (a nonce is new for every response); it now
+  stays in one document. Playwright's WebKit on Windows reports `sameSite: "None"` for the Strict refresh cookie (HttpOnly, Secure and path are right), so `02-session`
+  checks `SameSite=Strict` on the `Set-Cookie` header of the sign-in answer, with `httponly`, `secure` and `path=/auth`, and keeps the browser's cookie for the other three
+  attributes. Both browsers pass; the header also shows that Auth-Core sends `Strict`.
+- The base moved (review of the whole branch, 40a4d59): the plan was written on the slice 6 tip before its last four commits. The branch was rebased onto the final slice 6
+  (and later onto `main`), so the overlay's `caddy` inherits user `10002:10002`, a read-only root filesystem, `/data` and `/config` in memory, all capabilities dropped but
+  `NET_BIND_SERVICE`, `no-new-privileges` and the image pinned by digest. The Dockerfile's last stage is `caddy:2.11.7` by digest, the same as the notes overlay (the plan says
+  `caddy:2`), with `COPY --chmod=u=rwX,go=rX` so that uid 10002 can read the build; `tls internal` works under that hardening (the authority lives in memory and is new at each start).
+- Other fixes of that review: a refresh `401` that lands after the person signed out and in again leaves the new session alone (the interceptor goes to `/login` only when no token is held).
+- Minor fixes (a9d31cc, 35 findings, owner's rule that every finding is fixed): every call to the app's own origin gives up after 30 seconds (`REQUEST_TIMEOUT_MS`; this became
+  Decision 10); `loadMe` is single-flight for a session; one `ownUrl()` helper in the interceptor; `goToLogin` remembers the page the person was on the way to; the texts
+  spec checks the function-valued texts; `scripts/e2e-web.sh` refuses the project name `auth-core`; the e2e mail helper checks the recipient exactly.
+- Decision 10, 30 seconds (84ab90a): the plan's interceptor is built on promises (`from(asyncFunction)`) and has only the 10 seconds of the start. The interceptor is now built from
+  observables (`defer`, `switchMap`, `timeout`), so that giving up after 30 seconds cancels the request in flight and stops the chain: no late refresh, second try or `/login`. The
+  shared refresh keeps its own 10 seconds and keeps running for the other callers. The plan's comment that `from(promise)` "loses the cancellation" no longer applies.
+- Decision 11, router `replaceUrl` (84ab90a): the plan's Architecture text, the code and tests of `token-from-url.ts` (Task 6) and the sentence of the guide use `history.replaceState`.
+  The code navigates with `replaceUrl` and `queryParamsHandling: 'merge'` from a microtask, only when `token` is in the query; the navigation keeps the component, so the screen
+  is not built twice and calls nothing twice; the promise is caught, so a failed navigation is no unhandled rejection. The unit tests of the pages use the browser's own location
+  (`realLocation` in `src/testing/helpers.ts`; the default mock hid `window.location`) and check `router.url` as well as the address bar. `goToLogin` never carries a target that has a `token`.
+- Decision 12, PostgreSQL health check (84ab90a): the plan says the base files stay unchanged (its Scope text, and the gate of Task 8 that expects an empty diff of
+  `deploy/docker-compose.yml`). The diff is one line: `pg_isready -h 127.0.0.1 -U auth -d auth`, with a comment. A workaround in `scripts/e2e-web.sh` that started PostgreSQL first was
+  removed. This fixes the fault of slice 6 that `notes-db-init` could exit with status 2 on a fresh volume, so `scripts/e2e-notes.sh` benefits too. The diffs of `samples/notes-api/`
+  and of every other file of `deploy/` stay empty.
+- Decision 13, Angular advisories: no code change. The versions stay as Decision 8 pins them; `samples/notes-web/README.md`, "Known advisories", lists them per package (the GHSA
+  ids and the kinds), says what the sample uses (the date pipe with the fixed format `'medium'` on a validated `created_at`; `[attr.maxlength]` bound to a constant) and what it does
+  not (i18n, server-side rendering or hydration, dynamic components, two-way bindings, host bindings, number pipes).
+- Decision 14, 404 for a missing file (2a19cce): the plan's Caddyfile answers every unknown path with `try_files {path} /index.html`. As built: no `try_files`; a path whose last segment has an
+  extension and is not a file in the build is a `404` (`@missing`), any other path that is not a file is rewritten to `/index.html` (`@route`).
+- Smaller fixes after the decisions (fcf4b6c): a refresh outcome (`/login` on `401`, the bar for "can't reach the server") is handled inside the refresh promise, so it happens
+  even when the caller has timed out and unsubscribed (the request is still not sent again); a note over 1000 characters says the limit.
+- Caddy and the image, as built after verification round 1 (2a19cce), round 2 (42c6092) and the last small fix (e749543); none of it is in the plan or the spec:
+  - The `node:24-alpine` build stage is pinned by digest, and the final image has `USER 10002:10002` (the plan has a floating tag and no `USER`).
+  - Host check: `localhost` and `127.0.0.1` only, `421` for any other `Host` on both listeners, `/auth` and `/api` included; a catch-all `https://:8443` site answers `421`, and a client
+    that asks for another TLS name gets no certificate (`default_sni localhost` for a client that connects by an address). `http://[::1]:8088` no longer works.
+  - `file_server { disable_canonical_uris }`. Its redirect to the "canonical" address turned `/%5cevil.example/index.html/` into a `Location` of `/\evil.example/index.html`, which a browser
+    reads as another site (an open redirect on the app's own origin, found by the security check). The five probes answer `200` with no `Location`, on both listeners.
+  - `/auth` and `/api` go to their services when the path is `/auth` or `/api` or goes on after a slash (a bare `/auth` is Auth-Core's `404`, not the app); the match is case-sensitive
+    (`path_regexp ^/auth(/|$)`), so `/AUTH/x` and `/Api/x` are paths of the app, and `/authx` and `/apix` are the app.
+  - A method other than `GET` and `HEAD` is a `405` with `Allow: GET, HEAD` on every path of the app, a missing file included; `HEAD` is answered as `GET` (`method @head GET`), so its
+    `Content-Length` is that of the page (503 bytes, not 0). The matcher is `not method GET HEAD`: `header` runs before `method` in Caddy's order, so a matcher that named `GET` only would
+    have put an `Allow` header on `HEAD` answers (e749543).
+  - A conditional request for `index.html` is answered in full: `If-None-Match`, `If-Modified-Since` and `If-Range` are removed (never a `304` that pairs a new nonce with an old copy), and so
+    is `Range` (a part would carry the length of the file, and the nonce makes the page longer). The hashed `.js` and `.css` keep their `ETag`, `304` and `206`.
+  - A path whose last segment has a dot is a `404`, so a route such as `/notes/john.doe` cannot be served; `/x.` and `/a.b/c` are routes, and a query or a slash at the end is the way out. The guide
+    and the README say so.
+- A sign-in ends the session that exists (`login()` drops it before it keeps the new token; the old person's details and a late `/auth/me` answer of the old session are gone; a failed sign-in
+  leaves the old session alone). Before the fix, a signed-in person who opened `/login` and signed in as someone else could see the old person's details under the new token (when the new `/auth/me` failed, or the old one answered late).
+- A request of a session that ended is not sent again with the next person's token (the interceptor compares the session counter, not only the token).
+- The guard and the redirects of `''` and `**` drop `token` from the query, so a mail link that points at a route the app does not have no longer puts the token into `returnUrl`; `returnUrl`
+  can then be `/notes` where the spec says "the current path".
+- A note whose `created_at` cannot be parsed fails the list (the date pipe would have thrown and stopped the page).
+- `scripts/e2e-web.sh`: the compose project must be `auth-core-web` or `auth-core-web-<suffix>` (a-z, 0-9, `-`), checked before any Docker command; the script refuses to start when a container of that
+  project is running (its clean start is a `down -v`, so two runs under one name removed each other's stack: seen once in round 1); `test-results/` is removed when the script ends (`E2E_KEEP_RESULTS=1` keeps it).
+- `samples/notes-web/tools/check-guide.mjs` and `npm run check:docs`: the seven step headings, every relative link, every path in a code span, every bare file name in a code span (resolved against
+  `src/app/auth`, `src/app`, `src`, the sample's root and `docs/integration`, or the end of exactly one file; a name that fits several files is ambiguous and fails), and no product named. Shown by mutation
+  on a copy: a renumbered heading, a broken link, a renamed file in a span and a product name each fail it.
+- The guide's step 4 has "Mind the logs": an access log of the app's host records `GET /reset?token=...`; the sample's Caddy writes no access log.
 
 ## Local verification log
 
-(Filled in by the orchestrator after the three verifiers have run.)
+Per [`docs/workflow.md`](../../workflow.md#verification), three local verifiers ran: realization vs spec, API / e2e and security. Before them came the live run of the plan's Task 11 (steps 5 and 7),
+the review of the whole branch and a re-review of its fixes. Verification ran in three rounds with two fix rounds between them, and a last small change for two Info findings. Every e2e run brought
+its stack up from `down -v` under a compose project name of its own: the web runs, the notes run and the five earlier scripts, each on a clean volume.
+In round 3 the realization and the security checks ran as one static pass, and the e2e check on its own.
+
+| Round | Realization vs spec | API / e2e | Security | Fix commits |
+| ----- | ------------------- | --------- | -------- | ----------- |
+| 1 (on `fcf4b6c`) | PASS with findings - 340 unit tests in 17 files; F1 (Important) the plan text contradicted Decisions 10 to 12 (owner: the plan keeps its body, its "As built" lists the departures); F2 two stale lines of this map; F3 the notes screen's own sentences for a failed load or save, which the spec does not name (owner: the common sentence); F4 a comment about `.ico`; F5 the order of `/auth/me` and the second try (the spec's sentence was made exact); F6 criterion 9 had no committed check | PASS - `scripts/e2e-web.sh` 26/26 in Chromium and 26/26 in WebKit; the Goal sequence by hand; `scripts/e2e-notes.sh` and the five earlier scripts pass; Caddy probes; degraded paths in both browsers; Info: a missing `.js` was answered with `index.html`, `HEAD /` had `Content-Length` 0, the notes service's `503` for a few seconds after Auth-Core restarts | **FAIL** - F1 (Important) the open redirect through the canonical-URI redirect of Caddy's file server; F2 (Important) `npm audit` lists 6 high advisories on Angular 21.1.4 (owner: Decision 13); F3 a sign-in kept the old session's details; F4 `?token=` carried into `returnUrl`; Info F5 to F13: a request of an ended session replayed with the new token, the logs record `?token=`, the `node` tag not pinned and no `USER`, `/auth` and `/api` without a slash, a `304` with a new nonce, an unparsable `created_at`, any `Host` accepted, screenshots in `test-results/`, the project name of the script | `086ec3f` (spec, Decisions 13 and 14 and the notes sentence), `2a19cce` |
+| 2 (on `2a19cce`) | PASS - 359 unit tests; its own findings of round 1 closed; R1-1 (Minor) the guide check ignored bare file names such as `auth.guard.ts`; Info: the README's list of advisories not exact, behaviour the spec does not state, a route with a dot in its last segment | PASS - `scripts/e2e-web.sh` 33/33 in each browser; Decision 14, the `421`, the nonce on 20 of 20 responses, no `Location` for the backslash, double-slash, `%2f` and `%09` paths; the six scripts pass; degraded paths | PASS - F1 to F13 closed, probes run again on an image of that commit; N1 (Minor) the README's advisory note inexact; Info: N2 a `Range` request for the page gave a `Content-Range` with the length of the file, N3 the script's name check was a prefix and two runs under one name removed each other's stack, N4 `/AUTH/x` was routed to Auth-Core | `42c6092` |
+| 3 (on `42c6092`) | PASS - one static pass for realization and security: 361 unit tests, `npm run check:docs` PASS; the README's list compared with `npm audit --omit=dev --json` id by id; four Info: R2-1 a `HEAD` answer probably carried `Allow`, R2-2 a blank list after the bar is dismissed, R2-3 a bare file name matched any file that ends so, R2-4 behaviour the spec does not state | PASS - `scripts/e2e-web.sh` 37/37 in Chromium and 37/37 in WebKit; the `405` on 30 of 30 probes, `Range` answered in full, the case-sensitive `/auth` and `/api`, the name rule and the refusal of a running stack; the six scripts pass; degraded paths | PASS (in the static pass) - no finding above Info; the changes of round 2 reviewed | `e749543` (R2-1 and R2-3) |
+
+The e2e checks of every round also ran these degraded paths, in Chromium and in WebKit (iPhone 15), on `https://localhost:8443`:
+
+- A reload with a valid cookie: `POST /auth/refresh` `200`, `/auth/me` `200`, `/api/notes` `200`, the navigations are `/notes` and `/notes` with no login screen between.
+- The notes database refusing connections (only that database): an add answers `503 database_unavailable`, the form says "Something went wrong. Try again.", the person stays on `/notes` and signed in, there is no
+  bar; a reload shows the header and the same sentence; with the database back an add works.
+- Auth-Core stopped and the notes service restarted (an empty key cache): `503 auth_unavailable`; the bar says "Try again shortly.", it is the only message on the screen, the header and the typed text stay, "Dismiss"
+  clears the bar. Reloading while Auth-Core is stopped: `POST /auth/refresh` answers `502` from Caddy, the bar says "Can't reach the server. Try again shortly." and the person is sent to `/login?returnUrl=%2Fnotes`. With
+  Auth-Core started again, `/notes` signs the person in from the cookie, which survived the restart.
+- Servers that never answer (`page.route` that holds the answer): `/api/notes` gives up at 30.2 to 31.7 seconds with the failure sentence and the person still signed in (Decision 10); `/auth/refresh` at start gives up at
+  10.1 to 10.7 seconds, with the bar and `/login?returnUrl=%2Fnotes`.
+- Sign-out, then a reload: `/login`; `/notes` after that goes to `/login?returnUrl=%2Fnotes`.
+
+### What was fixed, by round
+
+The details are in "Plan-vs-implementation notes" above and in the spec's "As built".
+
+- **Round 1.** Caddy: no canonical-URI redirect, a `404` for a missing file with an extension (Decision 14), a `421` for any other `Host`, `/auth` and `/api` without a slash, no `304` for the page, `HEAD` answered as
+  `GET`, the `node` image pinned by digest, `USER 10002:10002`. The app: a sign-in ends the old session, the guard and the catch-all routes drop `?token=`, a request of an ended session is not replayed, an unparsable
+  `created_at` fails the list, the notes screen uses the common failure sentence. The script: the project name rule and `test-results/` removed. The docs: the guide warns about access logs, the README lists the
+  advisories (Decision 13), `npm run check:docs` guards criterion 9.
+- **Round 2.** The guide check also resolves bare file names; the README's list of advisories is exact; a route with a dot in its last segment is a `404`, and the guide and README say so; `Range` for the page is answered
+  in full; the name rule is `auth-core-web(-[a-z0-9-]+)?` and a running stack of that name is never torn down; `/auth` and `/api` are matched in lower case only; a method other than `GET` and `HEAD` is a `405` on every path;
+  on `503 auth_unavailable` the notes screen shows only the bar (a list shows nothing of its own, an add keeps its text).
+- **Round 3.** The `405` matcher names `HEAD` too (a `HEAD` answer no longer carries `Allow`); a bare file name in the guide must be an exact path under a known base, or the end of exactly one file.
+
+### Final state
+
+- Unit tests: `cd samples/notes-web && npx ng test --watch=false` - 361 tests in 17 files, with no Docker running. `npx ng build` - 307.68 kB initial, no budget warning. `npx tsc -p e2e/tsconfig.json` - clean.
+- `npm run check:docs` - PASS: 7 steps, 26 links, 16 paths and 11 file names in code spans exist, no product named.
+- `scripts/e2e-web.sh`: 37/37 in Chromium and 37/37 in WebKit on a clean stack per browser (the last full run was on `42c6092`).
+- `scripts/e2e-notes.sh` (steps 1 to 6) and the five scripts of specs 0001 to 0005 (`e2e-login.sh`, `e2e-refresh.sh`, `e2e-lockout.sh`, `e2e-email.sh`, `e2e-tenancy.sh`) pass on clean volumes, unedited, in every round; `e2e-notes.sh`
+  was run with Python 3.12 first on the `PATH` (`python3` on this machine is the Microsoft Store stub). The one-line change of `deploy/docker-compose.yml` is therefore tested by all six scripts.
+- Caddy, probed live on `http://localhost:8088` and `https://localhost:8443` (the outputs differ only in the scheme and the nonces): the security headers and the `Content-Security-Policy` of the spec on every response of the app and none
+  on `/auth` and `/api`; a new nonce for each of 20 responses, the same in the header, in `<app-root ngcspnonce>` and on the module script; `Cache-Control: no-cache` on every answer that is `index.html`, none on the hashed files
+  (`ETag` and `304` work); traversal forms (`/../etc/passwd`, `%2e%2e`, `..%2f`, `%5c`, `/Caddyfile`, `/.git/config`, `/.env`, `/%00`) never return another file; the container runs as `10002:10002` on a read-only root, with
+  `/data` and `/config` in memory, every capability dropped but `NET_BIND_SERVICE`, and the ports are published on `127.0.0.1` only; no token in Caddy's log.
+- The last change, `e749543`, is one matcher of the Caddyfile and the guide check. It was shown on a standalone image run with the hardening of the overlay (`HEAD /` and `HEAD /notes` `200` with a length of 503 and no `Allow`;
+  `POST /` and `POST /notes` `405` with `Allow: GET, HEAD`; `HEAD /missing.js` `404`), and by `npm run check:docs` and the 361 unit tests. `scripts/e2e-web.sh` was then run once more on `e749543` from clean volumes: 37 passed in Chromium and 37 in WebKit, ALL PASS.
+- ASCII only and no backslash-u escape in the files of the last rounds; every test this map names exists (checked mechanically after each round).
+
+### Owner decisions during verification
+
+- Every finding is fixed at once, Low and Info included, unless the fix contradicts the spec (then it is a question to the owner).
+- The plan keeps its body; its "As built" lists the departures (verification round 1, F1).
+- Decision 10 (30 seconds), Decision 11 (the router forgets the mail token) and Decision 12 (the PostgreSQL health check over TCP) were taken after the minor fixes and are in the spec.
+- Decision 13: Angular stays at 21.1.4 with its advisories written down; the move to a fixed 21.2 release is a later commit.
+- Decision 14: a missing file with an extension is a `404`.
+- The notes screen says the common sentence "Something went wrong. Try again." for a failed load or save.
+- `403 permissions_changed` starts `/auth/me` and the second try together (the spec's sentence says so).
+
+### Deferred / follow-ups (not fixed in this slice)
+
+- Angular 21.2 with the security fixes (Decision 13). `npm audit` also lists advisories in the development dependencies (`vitest`, `piscina`, `vite` and others); none reaches the built app or the image.
+- The test on a real phone, on the first deployment with a real certificate (the checklist is step 7 of the guide). WebKit in Playwright is not Safari on a phone.
+- Right after Auth-Core starts again, the notes service answers `503 auth_unavailable` for a few seconds (its key cache asks again at most every 10 seconds, slice 6); the app shows the bar "Try again shortly." and the next
+  request works.
+- After the bar is dismissed, a notes list that was answered `503 auth_unavailable` shows nothing until it is asked for again (spec "As built").
+- `tools/check-guide.mjs` also reads untracked and ignored files of a developer's tree, which a clean checkout does not have.
+- A PWA, screens for company admins, a shared npm package and the synchronising of sign-out across tabs stay where the spec's "Deferred / follow-ups" puts them.
