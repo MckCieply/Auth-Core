@@ -362,7 +362,8 @@ Design choices made with them, not departures:
 - **A shared npm package** of the sign-in pieces → Beyond MVP ("SDKs: NuGet, npm").
 - **Synchronising sign-out across tabs** (for example with `BroadcastChannel`).
 - **Angular 21.2 with the security fixes** (Decision 13).
-- **design.md:** a one-line note on Decisions 2, 3, 5 and 6, added with "As built".
+- **design.md:** a one-line note on Decisions 1, 2, 3, 5 and 6, added with "As built". *Done: it is in the
+  list of "Week 5: first consumer, frontend".*
 
 **Residual risks:**
 
@@ -419,3 +420,139 @@ Still to verify:
 - **Angular 21.1.4 with Vitest 4.0.18:** the default unit-test builder runs with jsdom
   and no browser download.
 - **Node 24** builds the app locally and in `node:24-alpine`.
+
+## As built (owner, 2026-02-17)
+
+Recorded after implementation and local verification (plan 0007,
+[acceptance map](../plans/0007-acceptance-map.md)). What entered this stage stays in it;
+this section records it rather than rewriting the decisions above. Decisions 10 to 14 were
+taken during the build and are in the list above; the sentences of the Contract that they
+change were amended with them.
+
+**What was built.** The sample as specified, in `samples/notes-web/`: the six screens, the
+sign-in pieces in `src/app/auth/` (service, interceptor, guard), the third compose overlay
+with Caddy serving the built app on `http://localhost:8088` and `https://localhost:8443`, the
+development server setup, the unit tests (361 tests in 17 files, no Docker), the Playwright
+tests (37 per browser, in Chromium and in WebKit with the `iPhone 15` profile),
+`scripts/e2e-web.sh` and the guide `docs/integration/angular.md`. Besides what the spec lists,
+`samples/notes-web/tools/check-guide.mjs` (run as `npm run check:docs`) is the check of
+criterion 9: the seven step headings, every link, every path and file name in a code span, and
+no product named. The one change outside the sample is the health check of PostgreSQL in
+`deploy/docker-compose.yml` (Decision 12). Every acceptance criterion is mapped to its tests
+in the acceptance map; the e2e runs and the regression scripts pass on clean stacks.
+
+**Settled by the build** (the items of "To verify during implementation"): `tls internal`
+works for `localhost` in the container, with a read-only root filesystem and `/data` in memory
+(the authority is new at each start); the mail links reach the app through
+`Auth:App:FrontendUrls:*` set by the overlay; the unverified seed user exists on the stack the
+e2e script starts, and Mailpit's API gives the latest mail for an address; Vitest on jsdom runs
+with no browser download; Node 24 builds the app locally and in `node:24-alpine`.
+
+**Decisions taken during the build.** Decisions 10 to 14 above: the 30-second limit that cancels
+the request (the interceptor is built from observables), the router forgetting the mail token
+(`replaceUrl`), the PostgreSQL health check over TCP, the Angular 21.1.4 advisories written down,
+and a `404` for a missing file with an extension. They came from the owner's rulings on what the
+reviews and the verifiers found. One more ruling, not a Decision: the notes screen says the
+common sentence "Something went wrong. Try again." for a failed load or save (the `/notes` row
+of the screens table does not name an error text).
+
+**Behaviour in the code that the spec does not state:**
+
+- **A sign-in ends the session that exists.** `login()` drops the old session before it keeps the
+  new token, so the old person's details and a late `/auth/me` answer of the old session never
+  show under the new person; a failed sign-in leaves the old session alone. `/login` has no guard,
+  so a signed-in person can open it and sign in again.
+- **A request of an ended session is not replayed** with the next person's token after a `401`
+  or a `403 permissions_changed`.
+- **The guard drops `token`.** The guard and the redirects of `/` and of an unknown route drop a
+  `token` from the query, and the interceptor's redirect to `/login` never carries a target that
+  has one, so a mail link that points at a route the app does not have does not put the token
+  into `returnUrl`. `returnUrl` can then be `/notes` where the spec says "the current path".
+- **The notes screen.**
+  - A list that holds anything that is not a note, or a note whose `created_at` cannot be parsed,
+    is a failed load. A `2xx` answer to an add whose body is not a note makes the page load the
+    list again, because the note was saved. A list answer that arrives after an add is merged
+    with the notes the page added.
+  - A note of more than 1000 characters is not sent and the screen says the limit; the field stops
+    at 1000.
+  - **On `503 auth_unavailable` the screen adds nothing of its own**: no list, no "No notes yet",
+    no sentence and no retry. The interceptor's bar is the whole message, so that the person never
+    sees two. After the bar is dismissed, a list that was answered this way shows nothing, with the
+    add form below, until the page is loaded again; an add keeps what was
+    typed and can be sent again.
+  - `503 database_unavailable`, `500 internal_error`, `404` and `405` of the notes service reach
+    the screen as they are: no refresh, no sign-out, no bar.
+- **The mail-link screens.** After a server error `/verify` and `/invite` show a "Try again"
+  button that asks again with the token held in memory; the token is no longer in the address bar,
+  so a reload would say the link was used up.
+- **The forms.** An email is trimmed and a password is sent as typed; an email of only spaces sends
+  nothing; a double click or a double Enter sends one request; the button stays off until the next
+  page is open.
+- **Caddy.**
+  - Only `localhost` and `127.0.0.1` are answered; any other `Host` gets a `421` on both
+    listeners, `/auth` and `/api` included, and a client that asks for another TLS name gets no
+    certificate. `http://[::1]:8088` does not work.
+  - A method other than `GET` and `HEAD` gets `405` with `Allow: GET, HEAD` on every path of the
+    app, a missing file included; `HEAD` is answered as `GET`, with the length of the page.
+  - A conditional request or a `Range` request for a page of the app is answered in full (`200`,
+    never `304` or `206`): the page holds a nonce that is new for every response, and the nonce makes
+    it longer than the file. The hashed `.js` and `.css` keep `ETag`, `304` and `206`.
+  - The file server's canonical-URI redirect is off, because `/%5cevil.example/index.html/` turned
+    into a `Location` that a browser reads as another site. No answer of the app is a redirect.
+  - `/auth` and `/api` go to their services when the path is `/auth` or `/api` or goes on after a
+    slash, in lower case only; `/AUTH/x` and `/authx` are paths of the app.
+  - A path whose last segment has a dot is a `404` (the spec says "a path with a file extension"),
+    so a route such as `/notes/john.doe` cannot be served. `/x.` and `/a.b/c` are routes; a query
+    or a slash at the end is the way out. The guide and the README say so.
+  - The `node` and `caddy` images are pinned by digest and the image runs as `10002:10002`. The
+    overlay inherits the hardening of the notes overlay of spec 0006: a read-only root filesystem,
+    `/data` and `/config` in memory, every capability dropped but `NET_BIND_SERVICE`, and
+    `no-new-privileges`. The ports are published on `127.0.0.1` only.
+- **`scripts/e2e-web.sh`.** The compose project must be `auth-core-web` or `auth-core-web-<suffix>`
+  (a-z, 0-9, `-`), checked before any Docker command, and the script refuses to start when a
+  container of that project is running, because its clean start is a `down -v`. `test-results/` is
+  removed when the script ends (`E2E_KEEP_RESULTS=1` keeps it). It hides `token=...` and typed
+  passwords in every output it passes on, and exports `PLAYWRIGHT_NO_COPY_PROMPT=1` and no trace, so
+  that a failed test leaves no page snapshot with a typed password on disk.
+- **The README and the guide.** The README's "Known advisories" lists the Angular advisories per
+  package, with their ids and kinds, what the sample uses (the date pipe with the fixed format
+  `'medium'` on a validated `created_at`, `[attr.maxlength]` bound to a constant) and what it does not
+  (i18n, server-side rendering and hydration, dynamic components, two-way bindings, host bindings,
+  number pipes). The guide's step 4 warns that an access log of the app's host records the mail
+  link's `?token=` query.
+
+**Known limits:**
+
+- Angular, its CLI and build stay at 21.1.4 (Decision 8). `npm audit --omit=dev` lists 6 high
+  advisories against the six runtime packages (cross-site scripting through i18n bindings,
+  sanitisation bypasses in templates and host bindings, denial of service in the date and number
+  pipes and in server-side rendering, leaks of the transfer cache). The sample uses none of the
+  features they concern except the date pipe, with a fixed format and a validated date
+  (Decision 13). `npm audit` also lists advisories in the development dependencies (`vitest`,
+  `piscina`, `vite` and others); none reaches the built app or the image, which holds only Caddy and
+  the build output. The `Content-Security-Policy` is the second line of defence.
+- WebKit in Playwright is the engine with a phone's screen, not Safari on a phone: Safari may treat
+  cookies differently. Playwright's WebKit on Windows also reports `sameSite: "None"` for the Strict
+  refresh cookie, so the tests read `SameSite=Strict` from the `Set-Cookie` header of the sign-in
+  answer and check the other attributes on the browser's cookie.
+- The test on a real phone has not been done. The checklist of the guide's step 7 awaits the first
+  deployment with a real certificate.
+- The certificate on `https://localhost:8443` is not trusted by a browser. A person sees a
+  warning; Playwright accepts it. WebKit needs this origin, because it does not send the `Secure`
+  refresh cookie back over plain HTTP (Decision 9), so a person who tries the stack in Safari opens
+  `https://localhost:8443` and accepts the warning once.
+- Right after Auth-Core starts again, the notes service answers `503 auth_unavailable` for a few
+  seconds (its key cache asks again at most every 10 seconds, spec 0006). The app shows the bar
+  "Try again shortly." and the next request works.
+- The unit tests run on jsdom: the tests of the mail-link screens use the browser's own location, the others a
+  mock; what only a real browser shows is checked by the Playwright tests.
+- Chromium and WebKit are the only browsers tried. `tools/check-guide.mjs` also reads untracked
+  and ignored files of a developer's tree, which a clean checkout does not have.
+
+**Follow-ups** (in addition to "Deferred / follow-ups" above):
+
+- Move Angular to a fixed 21.2 release, in a later commit that also refreshes `package-lock.json`
+  and the README's advisory list (Decision 13).
+- The test on a real phone, on the first deployment, with the guide's checklist.
+- A product that needs routes with a dot in their last segment changes the `@missing` rule in the
+  `Caddyfile`.
