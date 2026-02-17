@@ -163,6 +163,27 @@ describe('authInterceptor', () => {
       await vi.waitFor(() => expect(router.url).toBe('/login?returnUrl=%2Fnotes'));
     });
 
+    it('a refresh 401 that lands after the person signed out and in again leaves the new session and the page alone', async () => {
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      ctrl.expectOne('/api/notes').flush(null, status(401));
+      await settle();
+      const refreshRequest = ctrl.expectOne('/auth/refresh');
+      const signingOut = auth.logout();
+      ctrl.expectOne('/auth/logout').flush(null, status(204));
+      await signingOut;
+      const signingIn = auth.login('admin@example.test', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'new' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      await signingIn;
+      refreshRequest.flush({ error: 'invalid_grant' }, status(401));
+      const error = await done;
+      expect((error as HttpErrorResponse).status).toBe(401);
+      await settle();
+      expect(auth.token()).toBe('new');
+      expect(router.url).toBe('/notes');
+    });
+
     it('does not send a second request, and no second refresh, when the retried request gets a 401', async () => {
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush(null, status(401));

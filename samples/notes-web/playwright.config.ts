@@ -16,7 +16,9 @@ export default defineConfig({
   use: {
     baseURL: process.env['E2E_BASE_URL'] ?? 'https://localhost:8443',
     ignoreHTTPSErrors: true,
-    // No trace: it would write the tokens and passwords of the run to disk.
+    // No trace: it would write the tokens and passwords of the run to disk. For the same reason scripts/e2e-web.sh sets
+    // PLAYWRIGHT_NO_COPY_PROMPT=1: a failed test would otherwise write an ARIA snapshot (error-context.md) that holds the
+    // value of every input, typed passwords included. Set it too when you run `npx playwright test` by hand.
     trace: 'off',
     screenshot: 'only-on-failure',
   },

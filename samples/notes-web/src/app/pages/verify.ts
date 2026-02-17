@@ -34,6 +34,7 @@ import { takeTokenFromUrl } from './token-from-url';
         }
         @case ('error') {
           <p class="error" role="alert">{{ common.somethingWrong }}</p>
+          <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
         }
       }
     </main>
@@ -54,6 +55,14 @@ export class VerifyPage implements OnInit {
 
   ngOnInit(): void {
     if (this.token !== null) {
+      void this.confirm(this.token);
+    }
+  }
+
+  /** The token is gone from the address bar but still held here: ask again with it. */
+  protected retry(): void {
+    if (this.token !== null) {
+      this.phase.set('working');
       void this.confirm(this.token);
     }
   }

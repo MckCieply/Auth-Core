@@ -64,7 +64,7 @@ scripts/e2e-web.sh        # starts the stack under its own compose project name,
 
 ## Things to know
 
-- The bar above the screens (`Try again shortly.`, `You don't have access to this.`, `Can't reach the server.`) has no timer:
+- The bar above the screens (`Try again shortly.`, `You don't have access to this.`, `Can't reach the server. Try again shortly.`) has no timer:
   dismiss it, or it goes with the next sign-in.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.

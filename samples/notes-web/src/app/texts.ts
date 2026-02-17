@@ -17,6 +17,7 @@ export const texts = {
     repeatPassword: 'Repeat the password',
     passwordsDiffer: 'The two passwords are not the same.',
     somethingWrong: 'Something went wrong. Try again.',
+    tryAgain: 'Try again',
     invalidLink: 'This link has expired or was already used.',
     askForNewLink: 'Ask for a new link',
     sendVerificationAgain: 'Send the verification link again',

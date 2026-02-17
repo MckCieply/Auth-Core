@@ -90,8 +90,8 @@ shows the cases.
 
 ## 4. Build the screens for the mail links, and point Auth-Core at them
 
-Auth-Core's mails carry a link to your app; you build the screens, it sends the mails. Three routes, and the three settings that say
-where they are (`Auth:App:FrontendUrls:ResetPassword`, `VerifyEmail` and `AcceptInvite`; as environment variables
+Auth-Core's mails carry a link to your app; you build the screens, it sends the mails. Four screens (three of them open from a mail
+link), and the three settings that say where the links go (`Auth:App:FrontendUrls:ResetPassword`, `VerifyEmail` and `AcceptInvite`; as environment variables
 `Auth__App__FrontendUrls__ResetPassword` and so on, see the `auth` service in
 [`compose.yml`](../../samples/notes-web/compose.yml)). Each link is that URL plus `?token=<43 characters>`. Outside Development the
 URLs must be `https`.
@@ -112,7 +112,8 @@ Three rules the sample follows, and you should too:
 - **The token leaves the address bar at once.** A screen reads `token` from the URL once and removes it with `history.replaceState`
   ([`pages/token-from-url.ts`](../../samples/notes-web/src/app/pages/token-from-url.ts)), so it stays out of the browser's history and
   of what a person copies. The page that is served has `Referrer-Policy: no-referrer` (step 6), so the token is not sent on as a
-  referrer either.
+  referrer either. The token stays in memory, so after a server error the verify and invite screens offer "Try again" with it: a reload
+  would find no token in the address bar and call the link used up.
 - **Password rules are Auth-Core's.** A `weak_password` answer names the rules not met (`too_short`, `requires_upper`,
   `requires_lower`, `requires_digit`); show one line each, and do not repeat the policy in your app. The reset and invite screens
   share one list of lines, [`pages/password-rules.ts`](../../samples/notes-web/src/app/pages/password-rules.ts).

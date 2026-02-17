@@ -85,7 +85,9 @@ async function tokenIsRenewed(auth: AuthService, router: Router, sentWith: strin
     return true;
   }
   if (result === 'rejected') {
-    goToLogin(router);
+    if (auth.token() === null) {
+      goToLogin(router); // not when a new sign-in happened while the refresh was away: that session is fine
+    }
   } else {
     auth.showNotice('unreachable');
   }

@@ -271,6 +271,26 @@ describe('AuthService', () => {
     });
   });
 
+  describe('a refresh that was on its way when the person signed out and in again', () => {
+    it('401 does not drop the new session', async () => {
+      await signedInAs(auth, ctrl, adminMe, 'old');
+      const refreshing = auth.refresh();
+      const refreshRequest = ctrl.expectOne('/auth/refresh');
+      const signingOut = auth.logout();
+      ctrl.expectOne('/auth/logout').flush(null, status(204));
+      await signingOut;
+      const signingIn = auth.login('admin@example.test', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'new' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      await signingIn;
+      refreshRequest.flush({ error: 'invalid_grant' }, status(401));
+      expect(await refreshing).toBe('rejected');
+      expect(auth.token()).toBe('new');
+      expect(auth.me()).toEqual(adminMe);
+    });
+  });
+
   describe('notices', () => {
     it('can be shown and cleared', () => {
       expect(auth.notice()).toBeNull();

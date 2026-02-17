@@ -24,7 +24,7 @@ import { takeTokenFromUrl } from './token-from-url';
             </p>
             <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
               <label for="email">{{ common.email }}</label>
-              <input id="email" type="email" [value]="invitation.email" readonly />
+              <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
               <p class="status">{{ t.setsPassword(invitation.email) }}</p>
               <label for="password">{{ common.newPassword }}</label>
               <input id="password" type="password" formControlName="password" autocomplete="new-password" />
@@ -46,6 +46,7 @@ import { takeTokenFromUrl } from './token-from-url';
         }
         @case ('error') {
           <p class="error" role="alert">{{ common.somethingWrong }}</p>
+          <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
         }
       }
     </main>
@@ -73,6 +74,14 @@ export class InvitePage implements OnInit {
 
   ngOnInit(): void {
     if (this.token !== null) {
+      void this.preview(this.token);
+    }
+  }
+
+  /** The token is gone from the address bar but still held here: ask again with it. */
+  protected retry(): void {
+    if (this.token !== null) {
+      this.phase.set('loading');
       void this.preview(this.token);
     }
   }

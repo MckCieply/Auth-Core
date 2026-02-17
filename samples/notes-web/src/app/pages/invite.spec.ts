@@ -137,6 +137,24 @@ describe('InvitePage', () => {
     expect(pageText(fixture)).toContain('Something went wrong. Try again.');
   });
 
+  it('"Try again" after a server error on the preview asks again with the token still held, and the form follows', async () => {
+    const { fixture, ctrl } = await open('?token=tok-i', 'wait');
+    ctrl.expectOne('/auth/invites/preview').flush('oops', status(500));
+    await settle(fixture);
+    expect(window.location.search).toBe('');
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="try-again"]');
+    expect(button?.textContent?.trim()).toBe('Try again');
+    button?.click();
+    fixture.detectChanges();
+    expect(pageText(fixture)).toContain('Opening your invitation...');
+    const again = ctrl.expectOne('/auth/invites/preview');
+    expect(again.request.body).toEqual({ token: 'tok-i' });
+    again.flush(preview);
+    await settle(fixture);
+    expect(has(fixture, 'form')).toBe(true);
+    expect(has(fixture, '[data-testid="try-again"]')).toBe(false);
+  });
+
   it('500 on accept: "Something went wrong. Try again.", and the form stays', async () => {
     const opened = await open();
     choose(opened, 'Joined-Passw0rd');

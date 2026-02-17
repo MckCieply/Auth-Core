@@ -16,6 +16,15 @@ interface Note {
 
 const MAX_NOTE_CHARACTERS = 1000;
 
+/** True for what the service sends as a note: the view shows the text and the time, and tracks the id. */
+function isNote(value: unknown): value is Note {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const note = value as Record<string, unknown>;
+  return typeof note['id'] === 'string' && typeof note['text'] === 'string' && typeof note['created_at'] === 'string';
+}
+
 @Component({
   selector: 'app-notes',
   imports: [ReactiveFormsModule, DatePipe],
@@ -90,8 +99,13 @@ export class NotesPage implements OnInit {
     this.busy.set(true);
     this.addFailed.set(false);
     try {
-      const note = await firstValueFrom(this.http.post<Note>('/api/notes', { text }));
-      this.notes.update((list) => [note, ...list]);
+      const note = await firstValueFrom(this.http.post<unknown>('/api/notes', { text }));
+      if (isNote(note)) {
+        this.notes.update((list) => [note, ...list]);
+      } else {
+        // The service said yes but the body is not a note: it was saved, so ask for the list instead of guessing.
+        void this.load();
+      }
       this.form.reset();
     } catch {
       this.addFailed.set(true);
@@ -107,11 +121,12 @@ export class NotesPage implements OnInit {
 
   private async load(): Promise<void> {
     try {
-      const list = await firstValueFrom(this.http.get<Note[]>('/api/notes'));
-      if (!Array.isArray(list)) {
-        throw new Error('not a list');
+      const list = await firstValueFrom(this.http.get<unknown>('/api/notes'));
+      if (!Array.isArray(list) || !list.every(isNote)) {
+        throw new Error('not a list of notes');
       }
       this.notes.set(list);
+      this.loadFailed.set(false);
       this.loaded.set(true);
     } catch {
       this.loadFailed.set(true);

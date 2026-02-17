@@ -81,6 +81,25 @@ describe('NotesPage', () => {
       expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('');
     });
 
+    it.each([
+      ['an empty body', null],
+      ['a body that is not a note', { ok: true }],
+      ['a note without an id', { text: 'x', created_at: day(3) }],
+    ])('a 201 with %s: the list is loaded again instead of inserting it', async (_name, body) => {
+      const { fixture, ctrl } = await open();
+      typeInto(fixture, '#text', 'saved but unreadable');
+      submitForm(fixture);
+      ctrl.expectOne('/api/notes').flush(body, status(201));
+      await settle(fixture);
+      const saved = { id: 'n3', text: 'saved but unreadable', author_sub: 'u1', created_at: day(3) };
+      ctrl.expectOne('/api/notes').flush([saved, newer, older]);
+      await settle(fixture);
+      const items = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.note p'), (p) => p.textContent);
+      expect(items).toEqual(['saved but unreadable', 'second note', 'first note']);
+      expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('');
+      expect(pageText(fixture)).not.toContain('The note could not be saved.');
+    });
+
     it('does not send a note of only spaces or an empty one', async () => {
       const { fixture, ctrl } = await open();
       submitForm(fixture);
@@ -153,6 +172,17 @@ describe('NotesPage', () => {
     it('a 200 that is not a list is the same failure', async () => {
       const { fixture } = await open(adminMe, { not: 'a list' });
       expect(pageText(fixture)).toContain('The notes could not be loaded.');
+    });
+
+    it.each([
+      ['null', [null]],
+      ['a number', [1]],
+      ['an object without an id', [{ text: 'no id', created_at: day(1) }]],
+      ['a good note and a bad one', [newer, { id: 'x' }]],
+    ])('a list with %s in it is the same failure, and shows nothing of it', async (_name, list) => {
+      const { fixture } = await open(adminMe, list);
+      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(has(fixture, '.note')).toBe(false);
     });
   });
 

@@ -136,6 +136,9 @@ for project in $PROJECTS; do
   export E2E_UNVERIFIED_EMAIL="$UNVERIFIED_EMAIL" E2E_UNVERIFIED_PASSWORD="$UNVERIFIED_PASSWORD"
   export E2E_VIEWER_EMAIL="$VIEWER_EMAIL" E2E_RESETTER_EMAIL="$RESETTER_EMAIL"
   export E2E_USER_PASSWORD="$USER_PASSWORD" E2E_NEW_PASSWORD="$NEW_PASSWORD" E2E_SEEDED_NOTE="$SEEDED_NOTE"
+  # Without this, a failed test leaves test-results/<test>/error-context.md: an ARIA snapshot of the page that holds the value
+  # of every input, a typed password included (Playwright 1.58.2 writes it unless this variable is set; workers inherit it).
+  export PLAYWRIGHT_NO_COPY_PROMPT=1
   # A failure message of Playwright can hold a mail link (the URL of a page.goto) and, in its call log, the value of a
   # fill("...") (a typed password): both are hidden on the way out.
   # (pipefail is on: the exit status is Playwright's.)

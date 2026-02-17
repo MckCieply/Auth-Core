@@ -92,6 +92,29 @@ describe('VerifyPage', () => {
     expect(pageText(fixture)).toContain('Something went wrong. Try again.');
   });
 
+  it('"Try again" after a server error asks again with the token still held, though it is gone from the address bar', async () => {
+    const { fixture, ctrl } = await open();
+    ctrl.expectOne('/auth/email/verify').flush('oops', status(500));
+    await settle(fixture);
+    expect(window.location.search).toBe('');
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="try-again"]');
+    expect(button?.textContent?.trim()).toBe('Try again');
+    button?.click();
+    fixture.detectChanges();
+    expect(pageText(fixture)).toContain('Confirming your email...');
+    const again = ctrl.expectOne('/auth/email/verify');
+    expect(again.request.body).toEqual({ token: 'tok-9' });
+    again.flush(null, status(204));
+    await settle(fixture);
+    expect(pageText(fixture)).toContain('Email confirmed.');
+    expect(has(fixture, '[data-testid="try-again"]')).toBe(false);
+  });
+
+  it('the invalid-link screen has no "Try again"', async () => {
+    const { fixture } = await open('');
+    expect(has(fixture, '[data-testid="try-again"]')).toBe(false);
+  });
+
   it.each(['', '?token=', '?other=1'])('a link with the query %j is an invalid link, with no request', async (query) => {
     const { fixture, ctrl } = await open(query);
     expect(pageText(fixture)).toContain(invalid);

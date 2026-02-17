@@ -233,7 +233,10 @@ export class AuthService {
       return 'ok';
     } catch (error) {
       if (error instanceof HttpErrorResponse && error.status === 401) {
-        this.dropSession();
+        if (this.generation === started) {
+          // Only the session this refresh was for is dropped: a person who signed out and in again meanwhile keeps the new one.
+          this.dropSession();
+        }
         return 'rejected';
       }
       return 'unavailable';
