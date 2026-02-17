@@ -97,6 +97,21 @@ describe('LoginPage', () => {
     expect(button?.disabled).toBe(false);
   });
 
+  it.each([
+    ['rejects', () => Promise.reject(new Error('navigation failed'))],
+    ['answers false', () => Promise.resolve(false)],
+  ])('the button is on again when the router %s', async (_name, answer) => {
+    const opened = await open();
+    opened.navigateByUrl.mockImplementation(answer);
+    signIn(opened, 'admin@example.test', 'pw');
+    opened.ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok' });
+    await settle();
+    opened.ctrl.expectOne('/auth/me').flush(adminMe);
+    await settle(opened.fixture);
+    const button = (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(button?.disabled).toBe(false);
+  });
+
   it('lands on /notes: with the real router, a sign-in from /login ends on the notes screen', async () => {
     TestBed.configureTestingModule({
       providers: [

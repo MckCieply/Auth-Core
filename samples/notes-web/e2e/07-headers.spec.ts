@@ -114,14 +114,16 @@ test.describe('a mail link leaves no token in the address bar once its screen is
   test('/reset', async ({ page }) => {
     await page.goto(`/reset?token=${token}`);
     await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
-    expect(new URL(page.url()).search).toBe('');
+    // The router removes it right after the screen opens (a navigation that replaces the history entry): wait for it.
+    await expect.poll(() => new URL(page.url()).search).toBe('');
     expect(page.url()).not.toContain(token);
   });
 
   test('/verify', async ({ page }) => {
     await page.goto(`/verify?token=${token}`);
     await expect(page.getByText('This link has expired or was already used.')).toBeVisible();
-    expect(new URL(page.url()).search).toBe('');
+    // The router removes it right after the screen opens (a navigation that replaces the history entry): wait for it.
+    await expect.poll(() => new URL(page.url()).search).toBe('');
     expect(page.url()).not.toContain(token);
   });
 
@@ -129,7 +131,8 @@ test.describe('a mail link leaves no token in the address bar once its screen is
     await page.goto(`/invite?token=${token}`);
     await expect(page.getByText('This invitation has expired or was already used. Ask for a new one.')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Ask for a new link' })).toHaveCount(0);
-    expect(new URL(page.url()).search).toBe('');
+    // The router removes it right after the screen opens (a navigation that replaces the history entry): wait for it.
+    await expect.poll(() => new URL(page.url()).search).toBe('');
     expect(page.url()).not.toContain(token);
   });
 });

@@ -1,9 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { has, pageText, settle, submitForm, typeInto, typeRaw } from '../../testing/helpers';
+import { has, pageText, settle, submitForm, typeInto, typeRaw, realLocation } from '../../testing/helpers';
 import { VerifyPage } from './verify';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -11,25 +11,30 @@ const invalid = 'This link has expired or was already used.';
 
 async function open(query = '?token=tok-9') {
   TestBed.configureTestingModule({
-    providers: [provideRouter([{ path: 'verify', component: VerifyPage }]), provideHttpClient(), provideHttpClientTesting()],
+    providers: [provideRouter([{ path: 'verify', component: VerifyPage }]), provideHttpClient(), provideHttpClientTesting(), realLocation],
   });
   history.replaceState(null, '', `/verify${query}`);
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl(`/verify${query}`, VerifyPage);
+  await settle(); // the navigation that takes the token out of the address bar lands first
   return { fixture: harness.fixture, ctrl: TestBed.inject(HttpTestingController) };
 }
 
 describe('VerifyPage', () => {
   afterEach(() => history.replaceState(null, '', '/'));
 
-  it('calls POST /auth/email/verify with the token on opening, and takes the token out of the address bar', async () => {
+  it('calls POST /auth/email/verify with the token on opening, once, and takes the token out of the address bar and the router', async () => {
     const { fixture, ctrl } = await open();
     const request = ctrl.expectOne('/auth/email/verify');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ token: 'tok-9' });
     expect(window.location.search).toBe('');
+    expect(window.location.href).not.toContain('tok-9');
+    expect(TestBed.inject(Router).url).toBe('/verify');
     expect(pageText(fixture)).toContain('Confirming your email...');
     request.flush(null, status(204));
+    await settle(fixture);
+    ctrl.expectNone('/auth/email/verify'); // the navigation that removed the token did not run the screen again
   });
 
   it('204: "Email confirmed." with a link to /login', async () => {

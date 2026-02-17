@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
-import { has, pageText, settle, submitForm, typeInto, valueOf } from '../../testing/helpers';
+import { has, pageText, settle, submitForm, typeInto, valueOf, realLocation } from '../../testing/helpers';
 import { InvitePage } from './invite';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -13,11 +13,12 @@ const preview = { org_name: 'Acme', email: 'new@acme.example', role: 'viewer' };
 
 async function open(query = '?token=tok-i', previewAnswer: 'ok' | 'wait' = 'ok') {
   TestBed.configureTestingModule({
-    providers: [provideRouter([{ path: 'invite', component: InvitePage }]), provideHttpClient(), provideHttpClientTesting()],
+    providers: [provideRouter([{ path: 'invite', component: InvitePage }]), provideHttpClient(), provideHttpClientTesting(), realLocation],
   });
   history.replaceState(null, '', `/invite${query}`);
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl(`/invite${query}`, InvitePage);
+  await settle(); // the navigation that takes the token out of the address bar lands first
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const ctrl = TestBed.inject(HttpTestingController);
   if (previewAnswer === 'ok') {
@@ -38,13 +39,17 @@ function choose({ fixture }: Opened, password: string, repeat = password): void 
 describe('InvitePage', () => {
   afterEach(() => history.replaceState(null, '', '/'));
 
-  it('asks for the preview with the token on opening, and takes the token out of the address bar', async () => {
+  it('asks for the preview with the token on opening, once, and takes the token out of the address bar and the router', async () => {
     const { ctrl } = await open('?token=tok-i', 'wait');
     const request = ctrl.expectOne('/auth/invites/preview');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ token: 'tok-i' });
     expect(window.location.search).toBe('');
+    expect(window.location.href).not.toContain('tok-i');
+    expect(TestBed.inject(Router).url).toBe('/invite');
     request.flush(preview);
+    await settle();
+    ctrl.expectNone('/auth/invites/preview'); // the navigation that removed the token did not run the screen again
   });
 
   it('shows "Join {company} as {role}", the email (not editable) and who the password is for', async () => {
@@ -184,6 +189,19 @@ describe('InvitePage', () => {
     choose(opened, 'Joined-Passw0rd');
     submitForm(opened.fixture);
     opened.ctrl.expectOne('/auth/invites/accept').flush(null, status(204));
+  });
+
+  it.each([
+    ['rejects', () => Promise.reject(new Error('navigation failed'))],
+    ['answers false', () => Promise.resolve(false)],
+  ])('the button is on again when the router %s', async (_name, answer) => {
+    const opened = await open();
+    opened.navigate.mockImplementation(answer);
+    choose(opened, 'Joined-Passw0rd');
+    opened.ctrl.expectOne('/auth/invites/accept').flush(null, status(204));
+    await settle(opened.fixture);
+    const button = (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+    expect(button?.disabled).toBe(false);
   });
 
   it('after 204 the button stays off until the login screen is open: a second Enter does not post the used token again', async () => {

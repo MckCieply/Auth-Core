@@ -58,7 +58,7 @@ export class InvitePage implements OnInit {
   private readonly account = inject(AccountApi);
   private readonly router = inject(Router);
   // Read once, here, and gone from the address bar from now on.
-  private readonly token = takeTokenFromUrl(inject(ActivatedRoute));
+  private readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
 
   protected readonly form = inject(NonNullableFormBuilder).group({
     password: ['', Validators.required],
@@ -103,7 +103,12 @@ export class InvitePage implements OnInit {
     if (result.ok) {
       // The email goes in the navigation state: it is never in the URL. The button stays off until the login is open: the
       // token is used up, and a second Enter would only post it again.
-      await this.router.navigate(['/login'], { state: { email: invitation.email } });
+      // When the router cannot open it (it answers false or fails) the person stays here and the button is on again.
+      try {
+        await this.router.navigate(['/login'], { state: { email: invitation.email } });
+      } catch {
+        // nothing to show: the password was set
+      }
     } else if (result.failure.kind === 'weak_password') {
       this.rules.set(result.failure.rules);
     } else if (result.failure.kind === 'invalid_token') {

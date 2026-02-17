@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AccountApi } from '../account-api';
 import { texts } from '../texts';
 import { PasswordRules } from './password-rules';
@@ -42,7 +42,7 @@ export class ResetPage {
   protected readonly common = texts.common;
   private readonly account = inject(AccountApi);
   // Read once, here, and gone from the address bar from now on.
-  private readonly token = takeTokenFromUrl(inject(ActivatedRoute));
+  private readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
 
   protected readonly form = inject(NonNullableFormBuilder).group({
     password: ['', Validators.required],

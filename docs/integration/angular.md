@@ -109,9 +109,10 @@ The screens are in [`src/app/pages/`](../../samples/notes-web/src/app/pages/); t
 
 Three rules the sample follows, and you should too:
 
-- **The token leaves the address bar at once.** A screen reads `token` from the URL once and removes it with `history.replaceState`
-  ([`pages/token-from-url.ts`](../../samples/notes-web/src/app/pages/token-from-url.ts)), so it stays out of the browser's history and
-  of what a person copies. The page that is served has `Referrer-Policy: no-referrer` (step 6), so the token is not sent on as a
+- **The token leaves the address bar at once.** A screen reads `token` from the URL once and removes it with a router navigation that replaces the
+  history entry (`replaceUrl`, [`pages/token-from-url.ts`](../../samples/notes-web/src/app/pages/token-from-url.ts)), so it stays out of
+  the browser's history, of what a person copies and of the router's own copy of the address (`router.url`). The navigation lands on the
+  same route, so the router keeps the screen and it makes no second call. The page that is served has `Referrer-Policy: no-referrer` (step 6), so the token is not sent on as a
   referrer either. The token stays in memory, so after a server error the verify and invite screens offer "Try again" with it: a reload
   would find no token in the address bar and call the link used up.
 - **Password rules are Auth-Core's.** A `weak_password` answer names the rules not met (`too_short`, `requires_upper`,
@@ -134,9 +135,10 @@ The interceptor handles the answers to the requests that carry the token:
 
 Every other answer reaches the screen that asked, untouched: no refresh, and the person stays signed in. That includes the notes
 service's own errors (`503 {"error":"database_unavailable"}` means "try again later", also `500`, `404` and `405`); the notes screen
-shows "The notes could not be loaded." or "The note could not be saved.". A call to your own origin that is not answered within 30
+shows "The notes could not be loaded. Try again." or "The note could not be saved. Try again.". A call to your own origin that is not answered within 30
 seconds (`REQUEST_TIMEOUT_MS` in `auth.interceptor.ts`) fails the same way, so that no screen waits for ever; raise it for calls that
-take longer, such as an upload.
+take longer, such as an upload. Giving up cancels the request in flight and ends the whole chain (no late refresh, second try or
+redirect to `/login`): the interceptor is built from observables, not promises, for that reason; keep it so if you change it.
 
 The `403 permissions_changed` and `503 auth_unavailable` answers are what Auth-Core's company API and a product's backend (the Python
 package, for one) answer; see the specs [0005](../superpowers/specs/0005-tenancy-and-rbac.md) and

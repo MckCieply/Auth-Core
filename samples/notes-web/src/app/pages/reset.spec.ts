@@ -1,9 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { has, pageText, settle, submitForm, typeInto } from '../../testing/helpers';
+import { has, pageText, settle, submitForm, typeInto, realLocation } from '../../testing/helpers';
 import { ResetPage } from './reset';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -11,11 +11,12 @@ const invalid = 'This link has expired or was already used.';
 
 async function open(query = '?token=tok-123') {
   TestBed.configureTestingModule({
-    providers: [provideRouter([{ path: 'reset', component: ResetPage }]), provideHttpClient(), provideHttpClientTesting()],
+    providers: [provideRouter([{ path: 'reset', component: ResetPage }]), provideHttpClient(), provideHttpClientTesting(), realLocation],
   });
   history.replaceState(null, '', `/reset${query}`);
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl(`/reset${query}`, ResetPage);
+  await settle(); // the navigation that takes the token out of the address bar lands first
   return { fixture: harness.fixture, ctrl: TestBed.inject(HttpTestingController) };
 }
 
@@ -37,10 +38,11 @@ function ruleLines(opened: Opened): (string | undefined)[] {
 describe('ResetPage', () => {
   afterEach(() => history.replaceState(null, '', '/'));
 
-  it('takes the token out of the address bar when it opens', async () => {
+  it('takes the token out of the address bar and out of the router when it opens', async () => {
     await open();
     expect(window.location.search).toBe('');
     expect(window.location.href).not.toContain('tok-123');
+    expect(TestBed.inject(Router).url).toBe('/reset');
   });
 
   it('sends the token it read and the new password exactly as typed', async () => {

@@ -131,16 +131,6 @@ seed_stack() {
 for project in $PROJECTS; do
   echo "== $project: a clean stack (the first build takes a few minutes)..."
   "${compose[@]}" down -v > "$tmp/down.log" 2>&1 || true
-  # PostgreSQL first, until it answers over the network. On a fresh volume the image starts a temporary server that listens on its
-  # socket only, and the health check (pg_isready on the socket) passes during it: the one-shot notes-db-init, which connects
-  # over the network, would start too early and exit with 2. -h 127.0.0.1 is the check that the final server is up.
-  "${compose[@]}" up -d postgres > "$tmp/pg.log" 2>&1 || { hide < "$tmp/pg.log" >&2; fail "$project: docker compose up postgres failed"; }
-  pg_up=0
-  for _ in $(seq 1 90); do
-    if "${compose[@]}" exec -T postgres pg_isready -q -h 127.0.0.1 -U auth -d auth > /dev/null 2>&1; then pg_up=1; break; fi
-    sleep 1
-  done
-  [[ "$pg_up" == "1" ]] || fail "$project: PostgreSQL did not answer over the network within 90s"
   "${compose[@]}" up -d --build > "$tmp/up.log" 2>&1 || { hide < "$tmp/up.log" >&2; fail "$project: docker compose up failed"; }
   wait_ok "$HTTP_URL/auth/health" 120 || fail "$project: $HTTP_URL/auth/health did not return 200 within 120s"
   wait_ok "$HTTP_URL/api/health" 60 || fail "$project: $HTTP_URL/api/health did not return 200 within 60s"

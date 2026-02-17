@@ -98,7 +98,7 @@ describe('NotesPage', () => {
       const items = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('.note p'), (p) => p.textContent);
       expect(items).toEqual(['saved but unreadable', 'second note', 'first note']);
       expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('');
-      expect(pageText(fixture)).not.toContain('The note could not be saved.');
+      expect(pageText(fixture)).not.toContain('The note could not be saved. Try again.');
     });
 
     it('does not send a note of only spaces or an empty one', async () => {
@@ -115,7 +115,7 @@ describe('NotesPage', () => {
       submitForm(fixture);
       ctrl.expectNone('/api/notes');
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The note could not be saved.');
+      expect(pageText(fixture)).toContain('The note could not be saved. Try again.');
     });
 
     it('stops the field at 1000 characters, the same number the check uses', async () => {
@@ -144,7 +144,7 @@ describe('NotesPage', () => {
       submitForm(fixture);
       ctrl.expectOne('/api/notes').flush({ error: 'invalid_request' }, status(400));
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The note could not be saved.');
+      expect(pageText(fixture)).toContain('The note could not be saved. Try again.');
       expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('precious words');
     });
   });
@@ -188,7 +188,7 @@ describe('NotesPage', () => {
       list.flush('oops', status(500));
       await settle(fixture);
       expect(shown(fixture)).toEqual(['quick note']);
-      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
     });
   });
 
@@ -200,7 +200,7 @@ describe('NotesPage', () => {
     await settle(fixture);
     ctrl.expectOne('/api/notes').flush('oops', status(500));
     await settle(fixture);
-    expect(pageText(fixture)).toContain('The notes could not be loaded.');
+    expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
     expect(has(fixture, '.note')).toBe(false);
     expect(pageText(fixture)).not.toContain('No notes yet.');
   });
@@ -222,11 +222,11 @@ describe('NotesPage', () => {
       return { fixture, ctrl, auth, navigate, navigateByUrl };
     }
 
-    it('on the list: "The notes could not be loaded.", the header stays, the person stays signed in, no refresh', async () => {
+    it('on the list: "The notes could not be loaded. Try again.", the header stays, the person stays signed in, no refresh', async () => {
       const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
       ctrl.expectOne('/api/notes').flush({ error: 'database_unavailable' }, status(503));
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
       expect(textOf(fixture, '[data-testid="me-email"]')).toBe('admin@example.test');
       expect(auth.token()).toBe('tok');
       expect(auth.notice()).toBeNull();
@@ -235,7 +235,7 @@ describe('NotesPage', () => {
       expect(navigateByUrl).not.toHaveBeenCalled();
     });
 
-    it('on adding a note: "The note could not be saved.", what was typed is kept, the person stays signed in, no refresh', async () => {
+    it('on adding a note: "The note could not be saved. Try again.", what was typed is kept, the person stays signed in, no refresh', async () => {
       const { fixture, ctrl, auth, navigate, navigateByUrl } = await openWithInterceptor();
       ctrl.expectOne('/api/notes').flush([newer, older]);
       await settle(fixture);
@@ -243,7 +243,7 @@ describe('NotesPage', () => {
       submitForm(fixture);
       ctrl.expectOne((request) => request.method === 'POST').flush({ error: 'database_unavailable' }, status(503));
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The note could not be saved.');
+      expect(pageText(fixture)).toContain('The note could not be saved. Try again.');
       expect((fixture.nativeElement as HTMLElement).querySelector<HTMLTextAreaElement>('#text')?.value).toBe('try me again');
       expect(pageText(fixture)).toContain('second note');
       expect(auth.token()).toBe('tok');
@@ -256,7 +256,7 @@ describe('NotesPage', () => {
         .expectOne((request) => request.method === 'POST')
         .flush({ id: 'n3', text: 'try me again', author_sub: 'u1', created_at: day(3) }, status(201));
       await settle(fixture);
-      expect(pageText(fixture)).not.toContain('The note could not be saved.');
+      expect(pageText(fixture)).not.toContain('The note could not be saved. Try again.');
       expect(pageText(fixture)).toContain('try me again');
     });
   });
@@ -284,14 +284,14 @@ describe('NotesPage', () => {
       fixture.detectChanges();
       ctrl.expectOne('/api/notes').flush(body, status(code));
       await settle(fixture);
-      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
       expect(textOf(fixture, '[data-testid="me-email"]')).toBe('admin@example.test');
       expect(pageText(fixture)).not.toContain('No notes yet.');
     });
 
     it('a 200 that is not a list is the same failure', async () => {
       const { fixture } = await open(adminMe, { not: 'a list' });
-      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
     });
 
     it.each([
@@ -301,7 +301,7 @@ describe('NotesPage', () => {
       ['a good note and a bad one', [newer, { id: 'x' }]],
     ])('a list with %s in it is the same failure, and shows nothing of it', async (_name, list) => {
       const { fixture } = await open(adminMe, list);
-      expect(pageText(fixture)).toContain('The notes could not be loaded.');
+      expect(pageText(fixture)).toContain('The notes could not be loaded. Try again.');
       expect(has(fixture, '.note')).toBe(false);
     });
   });

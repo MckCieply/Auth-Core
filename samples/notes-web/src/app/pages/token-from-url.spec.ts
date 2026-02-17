@@ -1,37 +1,77 @@
-import { convertToParamMap } from '@angular/router';
+import { Component } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { ActivatedRoute, Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
+import { realLocation, settle } from '../../testing/helpers';
 import { takeTokenFromUrl } from './token-from-url';
 
-const route = (params: Record<string, string | string[]>) => ({ snapshot: { queryParamMap: convertToParamMap(params) } });
+let built = 0;
+let read: (string | null)[] = [];
+
+@Component({ template: '' })
+class Probe {
+  constructor() {
+    built += 1;
+    read.push(takeTokenFromUrl(TestBed.inject(ActivatedRoute), TestBed.inject(Router)));
+  }
+}
+
+async function open(url: string) {
+  TestBed.configureTestingModule({ providers: [provideRouter([{ path: 'reset', component: Probe }]), realLocation] });
+  history.replaceState(null, '', url);
+  const harness = await RouterTestingHarness.create();
+  await harness.navigateByUrl(url, Probe);
+  await settle();
+  await harness.fixture.whenStable();
+  return { harness, router: TestBed.inject(Router) };
+}
 
 describe('takeTokenFromUrl', () => {
+  beforeEach(() => {
+    built = 0;
+    read = [];
+  });
   afterEach(() => history.replaceState(null, '', '/'));
 
-  it('returns the token and takes it out of the address bar', () => {
-    history.replaceState(null, '', '/reset?token=abc123');
-    expect(takeTokenFromUrl(route({ token: 'abc123' }))).toBe('abc123');
+  it('returns the token and takes it out of the address bar and out of the router', async () => {
+    const { router } = await open('/reset?token=abc123');
+    expect(read).toEqual(['abc123']);
     expect(window.location.search).toBe('');
     expect(window.location.pathname).toBe('/reset');
+    expect(window.location.href).not.toContain('abc123');
+    expect(router.url).toBe('/reset');
   });
 
-  it('keeps the history state the router put there', () => {
-    history.replaceState({ navigationId: 7 }, '', '/reset?token=abc123');
-    takeTokenFromUrl(route({ token: 'abc123' }));
-    expect(history.state).toEqual({ navigationId: 7 });
+  it('replaces the history entry instead of adding one', async () => {
+    const push = vi.spyOn(history, 'pushState');
+    await open('/reset?token=abc123');
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
   });
 
-  it('takes out a fragment too, and everything else in the query', () => {
-    history.replaceState(null, '', '/verify?token=abc123&x=1#frag');
-    takeTokenFromUrl(route({ token: 'abc123', x: '1' }));
-    expect(window.location.href.endsWith('/verify')).toBe(true);
+  it('keeps the screen: it is not built again and reads no token twice', async () => {
+    await open('/reset?token=abc123');
+    expect(built).toBe(1);
+    expect(read).toEqual(['abc123']);
   });
 
-  it.each([[{}], [{ token: '' }]])('is null for %j, and still cleans the address bar', (params) => {
-    history.replaceState(null, '', '/reset?token=');
-    expect(takeTokenFromUrl(route(params))).toBeNull();
+  it('keeps the other parts of the query', async () => {
+    const { router } = await open('/reset?token=abc123&x=1');
+    expect(router.url).toBe('/reset?x=1');
+    expect(window.location.href).not.toContain('abc123');
+  });
+
+  it.each([['/reset'], ['/reset?token=']])('is null for %s, and the screen stays', async (url) => {
+    const { router } = await open(url);
+    expect(read).toEqual([null]);
+    expect(built).toBe(1);
+    expect(router.url).toBe('/reset');
     expect(window.location.search).toBe('');
   });
 
-  it('uses the first of two token parameters', () => {
-    expect(takeTokenFromUrl(route({ token: ['first', 'second'] }))).toBe('first');
+  it('uses the first of two token parameters', async () => {
+    await open('/reset?token=first&token=second');
+    expect(read).toEqual(['first']);
+    expect(window.location.href).not.toContain('first');
   });
 });

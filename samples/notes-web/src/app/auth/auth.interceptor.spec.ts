@@ -60,6 +60,9 @@ describe('authInterceptor', () => {
           { path: 'notes', component: Blank },
           { path: 'login', component: Blank },
           { path: 'slow', component: Blank, canActivate: [() => gate] },
+          { path: 'reset', component: Blank, canActivate: [() => gate] },
+          { path: 'verify', component: Blank, canActivate: [() => gate] },
+          { path: 'invite', component: Blank, canActivate: [() => gate] },
         ]),
         provideHttpClient(withInterceptors([authInterceptor])),
         provideHttpClientTesting(),
@@ -223,6 +226,24 @@ describe('authInterceptor', () => {
       expect(auth.token()).toBe('new');
     });
 
+    it.each(['/reset?token=abc', '/verify?token=abc', '/invite?token=abc&x=1'])(
+      '401 from the refresh while a navigation to %s is running: /login does not carry the token, it falls back to the page the person is on',
+      async (target) => {
+        const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+        ctrl.expectOne('/api/notes').flush(null, status(401));
+        await settle();
+        const refreshRequest = ctrl.expectOne('/auth/refresh');
+        const going = router.navigateByUrl(target);
+        await settle();
+        refreshRequest.flush({ error: 'invalid_grant' }, status(401));
+        await done;
+        await vi.waitFor(() => expect(router.url).toBe('/login?returnUrl=%2Fnotes'));
+        expect(router.url).not.toContain('abc');
+        openGate(true);
+        await going;
+      },
+    );
+
     it('a refresh that fails for another reason shows the bar, keeps the token and hands over the original answer', async () => {
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush(null, status(401));
@@ -368,6 +389,71 @@ describe('authInterceptor', () => {
       await vi.advanceTimersByTimeAsync(2);
       expect(await done).toBeInstanceOf(TimeoutError);
       expect(auth.token()).toBe('old');
+      expect(router.url).toBe('/notes');
+    });
+
+    it('a timed-out request with the token is cancelled, so a late answer is never a result the caller was told failed', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.post('/api/notes', { text: 'x' })).catch((error: unknown) => error);
+      const request = ctrl.expectOne('/api/notes');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      expect(request.cancelled).toBe(true);
+    });
+
+    it('a request to /auth/login is cancelled by the timeout too', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.post('/auth/login', {})).catch((error: unknown) => error);
+      const request = ctrl.expectOne('/auth/login');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      expect(request.cancelled).toBe(true);
+    });
+
+    it('a timeout while the refresh runs: no request again, and no /login when the refresh then says 401', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      const first = ctrl.expectOne('/api/notes');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 5_000); // the 401 comes late: the refresh has less than its own ten seconds
+      first.flush(null, status(401));
+      await vi.advanceTimersByTimeAsync(0);
+      const refreshRequest = ctrl.expectOne('/auth/refresh');
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      refreshRequest.flush({ error: 'invalid_grant' }, status(401));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(router.url).toBe('/notes');
+      ctrl.expectNone('/api/notes');
+    });
+
+    it('a timeout while the refresh runs: when the refresh then succeeds the request is not sent again', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      const first = ctrl.expectOne('/api/notes');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 5_000); // the 401 comes late: the refresh has less than its own ten seconds
+      first.flush(null, status(401));
+      await vi.advanceTimersByTimeAsync(0);
+      const refreshRequest = ctrl.expectOne('/auth/refresh');
+      await vi.advanceTimersByTimeAsync(5_001);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      refreshRequest.flush({ access_token: 'new' });
+      await vi.advanceTimersByTimeAsync(0);
+      ctrl.expectNone('/api/notes');
+      expect(auth.token()).toBe('new');
+    });
+
+    it('a timeout during the second try cancels that request too, and nothing more is sent', async () => {
+      vi.useFakeTimers();
+      const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+      ctrl.expectOne('/api/notes').flush(null, status(401));
+      await vi.advanceTimersByTimeAsync(0);
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'new' });
+      await vi.advanceTimersByTimeAsync(0);
+      const again = ctrl.expectOne('/api/notes');
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1);
+      expect(await done).toBeInstanceOf(TimeoutError);
+      expect(again.cancelled).toBe(true);
+      ctrl.expectNone('/auth/refresh');
       expect(router.url).toBe('/notes');
     });
 

@@ -90,7 +90,7 @@ export const texts = {
     newNote: 'New note',
     add: 'Add note',
     empty: 'No notes yet.',
-    loadFailed: 'The notes could not be loaded.',
-    addFailed: 'The note could not be saved.',
+    loadFailed: 'The notes could not be loaded. Try again.',
+    addFailed: 'The note could not be saved. Try again.',
   },
 };

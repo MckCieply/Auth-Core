@@ -68,8 +68,13 @@ export class LoginPage {
     const { email, password } = this.form.getRawValue();
     const result = await this.auth.login(email.trim(), password);
     if (result.ok) {
-      // The button stays off until the next page is open: a second Enter must not sign in twice.
-      await this.router.navigateByUrl(safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl')));
+      // The button stays off until the next page is open: a second Enter must not sign in twice. When the router cannot open it
+      // (it answers false or fails) the person stays here and the button is on again.
+      try {
+        await this.router.navigateByUrl(safeReturnUrl(this.route.snapshot.queryParamMap.get('returnUrl')));
+      } catch {
+        // nothing to show: the sign-in itself worked
+      }
     } else {
       this.show(result.failure);
     }

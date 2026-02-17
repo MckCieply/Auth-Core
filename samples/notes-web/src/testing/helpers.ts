@@ -1,3 +1,4 @@
+import { APP_BASE_HREF, BrowserPlatformLocation, PlatformLocation } from '@angular/common';
 import { ComponentFixture } from '@angular/core/testing';
 import { HttpTestingController } from '@angular/common/http/testing';
 import { AuthService, Me } from '../app/auth/auth.service';
@@ -97,3 +98,12 @@ export function has(fixture: ComponentFixture<unknown>, selector: string): boole
 export function valueOf(fixture: ComponentFixture<unknown>, selector: string): string {
   return find<HTMLInputElement>(fixture, selector).value;
 }
+
+/**
+ * The browser's own address bar for the router. TestBed gives the router a mock one by default, which would hide whether the
+ * token of a mail link is really gone from `window.location`.
+ */
+export const realLocation = [
+  { provide: PlatformLocation, useClass: BrowserPlatformLocation },
+  { provide: APP_BASE_HREF, useValue: '/' },
+];
