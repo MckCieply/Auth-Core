@@ -18,7 +18,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auth -d auth"]
+      # Over TCP (-h): on a fresh volume the image runs a temporary init server that listens on its socket only and would pass a socket check.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U auth -d auth"]
       interval: 2s
       timeout: 3s
       retries: 30

@@ -1,0 +1,112 @@
+# One origin for the browser, on two listeners with the same routes:
+#   http://localhost:8088   development; the mail links point here
+#   https://localhost:8443  the same app with a certificate from Caddy's own authority (not trusted by a browser: a
+#                           person sees a warning, Playwright accepts it). WebKit needs HTTPS to send the refresh
+#                           cookie back, which Auth-Core always sets Secure.
+# /auth is Auth-Core, /api is the notes service, everything else is the built app. Development only.
+# The sites answer only the names a browser reaches them by (localhost and 127.0.0.1); any other Host gets a 421 (a name that
+# someone points at this machine must not get the app, nor Auth-Core).
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	# A client that connects by an IP address sends no server name: it gets the certificate of localhost (a browser warns anyway).
+	default_sni localhost
+	# No HTTP/3: its UDP port is not published, and a browser must not try it.
+	servers {
+		protocols h1 h2
+	}
+}
+
+(routes) {
+	@wrongHost not host localhost 127.0.0.1
+	handle @wrongHost {
+		respond "Misdirected request" 421
+	}
+	# /auth and /api themselves (no slash) are the services' too, not the app's: the path is /auth or /api, or goes on after a slash.
+	# Case-sensitive (a plain `path` matcher is not): /AUTH/x and /Api/x are not the services', they are paths of the app, as the
+	# app's own calls (and the services) spell them in lower case.
+	@auth path_regexp ^/auth(/|$)
+	handle @auth {
+		reverse_proxy auth:8080
+	}
+	@api path_regexp ^/api(/|$)
+	handle @api {
+		reverse_proxy notes-api:8000
+	}
+	# The app. The headers are here and not on /auth and /api, which set their own.
+	handle {
+		root * /srv
+		encode gzip
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{http.request.uuid}'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+			Referrer-Policy no-referrer
+			X-Content-Type-Options nosniff
+		}
+		# Every answer that is index.html is revalidated, an unknown path included. Only a .js, .css or .ico file that exists may
+		# be cached (the .js and .css files are hashed by the build, so a new build has new names; favicon.ico is not hashed and
+		# gets no Cache-Control of its own, so a browser may cache it as it sees fit). Any other file that exists (this build has
+		# none) is revalidated too: the safe side, and a product that adds fonts or images to the build adds their extensions here.
+		@revalidate not {
+			path *.js *.css *.ico
+			file
+		}
+		header @revalidate Cache-Control no-cache
+		# A conditional request for index.html is answered in full, never 304: the page holds a nonce that is new for every
+		# response, so an old copy must not be paired with the new nonce of the header. (Caddy's templates drop the ETag and the
+		# Last-Modified of a page they fill in, so a browser has no validator to send; this closes it for any other client.)
+		request_header @revalidate -If-None-Match
+		request_header @revalidate -If-Modified-Since
+		request_header @revalidate -If-Range
+		# A Range request for the page is answered in full too (200, not 206): the nonce makes the page longer than the file, so the
+		# Content-Range of a part would carry the length of the file and not the length of the answer.
+		request_header @revalidate -Range
+		# HEAD is answered as GET (the server drops the body): `templates` fills in nothing for HEAD, which would give the page a
+		# Content-Length of 0.
+		@head method HEAD
+		method @head GET
+		# The app answers GET and HEAD only: any other method gets a 405 on every path of the app, a path of a missing file included (the
+		# file server alone would answer 404 for a missing file and 405 for an existing one). The matcher names HEAD too: `header` runs
+		# before `method` (Caddy's directive order), so at that point a HEAD request is still HEAD, and must not get an Allow header.
+		@other not method GET HEAD
+		header @other Allow "GET, HEAD"
+		respond @other 405
+		# A path with a file extension that is not in the build is a missing file: 404, so that a broken build shows as an error
+		# and a browser never runs HTML as a script. A path with no extension (or a slash at the end) is a route of the app.
+		@missing {
+			path_regexp \.[^./]+$
+			not file
+		}
+		respond @missing "Not found" 404
+		@route {
+			not path_regexp \.[^./]+$
+			not file
+		}
+		rewrite @route /index.html
+		# Fills in {{placeholder `http.request.uuid`}} of index.html: the nonce of the style elements Angular adds.
+		templates {
+			mime text/html
+		}
+		# No canonical-URI redirects: they turn a path such as /%5cevil.example/index.html/ into a Location of /\evil.example/..., which a
+		# browser reads as another site. Nothing here needs them (the build has no directory but the root).
+		file_server {
+			disable_canonical_uris
+		}
+	}
+}
+
+http://:8088 {
+	import routes
+}
+
+https://localhost:8443, https://127.0.0.1:8443 {
+	tls internal
+	import routes
+}
+
+# Any other name on this port: a client that asks for another name gets no certificate; one that asks for localhost but sends
+# another Host header would otherwise get an empty 200.
+https://:8443 {
+	tls internal
+	respond "Misdirected request" 421
+}
