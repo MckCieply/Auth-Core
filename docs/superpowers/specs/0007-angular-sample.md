@@ -96,7 +96,9 @@ them in one place. The routes match the links Auth-Core puts in its mails.
 - The email filled in on `/login` after an invitation is passed in the router's
   navigation state, never in the URL.
 - `/reset`, `/verify` and `/invite` read `token` from the URL once and then remove it
-  from the address bar (`history.replaceState`), so it stays out of the history.
+  from the address bar with a router navigation that replaces the history entry
+  (`replaceUrl`), so it stays out of the history and out of the router's own copy of
+  the URL (Decision 11).
 - Password rules are checked by Auth-Core only. The screens show its `rules`; they do
   not repeat the policy.
 - A `400 invalid_request` or any other unexpected answer shows "Something went wrong.
@@ -134,6 +136,10 @@ A refresh that fails with anything other than `401` (no network, `5xx`) keeps th
 
 The bar has a "Dismiss" button and is cleared by a sign-in. Counts in texts use the singular for 1 ("1 minute").
 
+Every request to the app's own origin gives up after 30 seconds and is treated like no
+network (Decision 10); giving up cancels the request. The refresh and `/auth/me` at
+start keep their own 10 seconds.
+
 There is no refresh ahead of expiry: a token is renewed only after a `401`, which
 costs one extra request about every 10 minutes.
 
@@ -169,8 +175,8 @@ with no UI library. The app needs no `zone.js`.
 ### Compose overlay and proxy
 
 `samples/notes-web/compose.yml` is used on top of `deploy/docker-compose.yml` and
-`samples/notes-api/compose.yml`, which stay unchanged, so the e2e scripts of specs
-0001–0006 run as before. The overlay:
+`samples/notes-api/compose.yml`, which stay unchanged except for one fix in the base file
+(Decision 12), so the e2e scripts of specs 0001–0006 run as before. The overlay:
 
 - replaces the `caddy` service with one built from `samples/notes-web/Dockerfile`, under
   its own image name (`notes-web-caddy:local`; without an `image` of its own, Compose
@@ -314,6 +320,18 @@ product. Steps, each pointing at the sample's file:
    (no new package), and the tests run there. The certificate is not trusted by the
    browser; Playwright accepts it, a person sees a warning. This was agreed with
    Decision 4 as the fallback if WebKit refused the cookie.
+10. **Requests give up after 30 seconds** (owner, 2026-02-17). A server that never
+    answers would otherwise leave a screen busy for good; after 30 seconds the person
+    sees the same message as for no network and can try again.
+11. **The router forgets the mail token too** (owner, 2026-02-17). Removing it with a
+    router navigation (`replaceUrl`) instead of `history.replaceState` leaves no copy
+    in the router's state.
+12. **PostgreSQL is reported healthy only when it accepts network connections**
+    (owner, 2026-02-17). On a fresh volume the image's temporary init server answered
+    the local health check before the real server listened, so a service that connects
+    over the network at once (the notes sample's `notes-db-init`) could fail and stop
+    `docker compose up`. The health check in `deploy/docker-compose.yml` now checks over
+    TCP. This fixes a fault of slice 6 found here.
 
 Design choices made with them, not departures:
 
