@@ -251,6 +251,8 @@ before release.
   - Angular screens in Polish: login, reset, invite acceptance, verification
   - Interceptor, guard, silent refresh on PWA start
   - Playwright end-to-end tests
+  - *As built (spec 0007):* the frontend is a sample in this repository (`samples/notes-web`), in English, on Angular 21 and a plain
+    web page, not a PWA (Decisions 1, 2, 5 and 6); the real-phone test moved to the first deployment (Decision 3).
 - **Week 6: hardening and release.** Milestone: `v0.1.0` tagged.
   - Threat model (STRIDE), security headers, basic audit log
   - Key rotation plan, backup runbook, README
