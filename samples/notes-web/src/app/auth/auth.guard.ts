@@ -32,5 +32,10 @@ export function safeReturnUrl(value: string | null | undefined): string {
 export const authGuard: CanActivateFn = (_route, state) => {
   const auth = inject(AuthService);
   const router = inject(Router);
-  return auth.token() !== null || router.createUrlTree(['/login'], { queryParams: { returnUrl: state.url } });
+  if (auth.token() !== null) {
+    return true;
+  }
+  // A mail token (?token=) in the page asked for is never copied into the address of the login screen, nor followed after it.
+  const back = router.parseUrl(state.url).queryParamMap.has('token') ? DEFAULT_RETURN_URL : state.url;
+  return router.createUrlTree(['/login'], { queryParams: { returnUrl: back } });
 };

@@ -53,6 +53,7 @@ npx ng serve
 cd samples/notes-web
 npx ng test --watch=false      # unit tests: Vitest on jsdom, no Docker, no browser
 npx ng build                   # the production build
+npm run check:docs             # the integration guide: its seven steps, and every link and path in it exists (no Docker)
 ```
 
 The end-to-end tests run against the built app on `https://localhost:8443`, in Chromium and in WebKit (`iPhone 15`), with the
@@ -62,10 +63,29 @@ certificate accepted. They need Docker, Node 24 and Playwright's browsers (`npx 
 scripts/e2e-web.sh        # starts the stack under its own compose project name, runs both projects, stops the stack
 ```
 
+## Known advisories
+
+The Angular packages are pinned at 21.1.4 ([Decision 8 and 13](../../docs/superpowers/specs/0007-angular-sample.md)), and
+`npm audit --omit=dev` reports 6 high advisories against them: `@angular/core`, `common`, `compiler`, `forms`,
+`platform-browser` and `router` (the last three only through the first three). Seen on 2026-10-06, they are of these kinds:
+
+- cross-site scripting through i18n attribute bindings and i18n event-handler attributes, and sanitisation bypasses in templates
+  (two-way property bindings, attribute namespaces, directive host bindings), in `@angular/compiler` and `@angular/core`;
+- denial of service through memory use in the date and number formatting of `@angular/common` (`formatDate`, `digitsInfo`);
+- information leaks and cache poisoning in `HttpTransferCache`, which exists for server-side rendering.
+
+This sample uses no i18n, no server-side rendering (so no `HttpTransferCache`), no dynamic attribute or host bindings, and
+every text goes through interpolation; the `Content-Security-Policy` of the proxy is a second line. The versions are not
+changed here: moving to a fixed 21.2 release is a follow-up. A product that copies the sign-in pieces should install a fixed
+release of its own.
+
 ## Things to know
 
 - The bar above the screens (`Try again shortly.`, `You don't have access to this.`, `Can't reach the server. Try again shortly.`) has no timer:
   dismiss it, or it goes with the next sign-in.
+- The proxy answers only to `localhost` and `127.0.0.1` (another Host name gets a 421), and a path with a file extension that
+  is not in the build (`/missing.js`) is a 404, not the app.
+- `scripts/e2e-web.sh` removes `test-results/` (screenshots of failed tests show the page) when it ends; `E2E_KEEP_RESULTS=1` keeps it.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.
 - There is no PWA, no sign-up and no screen for company admins; see the deferred list of the spec.

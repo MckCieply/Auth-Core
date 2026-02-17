@@ -54,6 +54,7 @@ function send(
 ): Observable<HttpEvent<unknown>> {
   return defer(() => {
     const sentWith = auth.token();
+    const sentIn = auth.session;
     // Only the last event: a caller that asks for `observe: 'events'` (upload progress) gets the final response alone from the
     // requests this interceptor handles. A product that needs the progress events keeps them with an operator of its own.
     return next(withToken(req, sentWith)).pipe(
@@ -67,7 +68,7 @@ function send(
           announce(error, auth);
           return throwError(() => error);
         }
-        return tokenIsRenewed(auth, router, sentWith).pipe(
+        return tokenIsRenewed(auth, router, sentWith, sentIn).pipe(
           switchMap((renewed) => {
             if (!renewed) {
               return throwError(() => error);
@@ -85,13 +86,18 @@ function send(
 }
 
 /** True when the request may be sent again with the token the service holds now. */
-function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | null): Observable<boolean> {
+function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | null, sentIn: number): Observable<boolean> {
   return defer(() => {
     const current = auth.token();
     if (current === null) {
       // The session ended while this request was away (a refresh that said 401 has dropped it, or the person signed out): the
       // person goes to /login, which does nothing when they are there already.
       goToLogin(router);
+      return of(false);
+    }
+    if (auth.session !== sentIn) {
+      // The session this request was sent in has ended and someone else has signed in since: the request is the old person's and
+      // is never sent again with the new person's token. (A refresh keeps the session, so a renewed token is still the same one.)
       return of(false);
     }
     if (current !== sentWith) {

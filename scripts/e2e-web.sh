@@ -22,9 +22,11 @@
 # Chromium and WebKit (npx playwright install chromium webkit, once), curl, docker compose, and the host ports 8088, 8443,
 # 8080 and 8025 free. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD, AUTH_DEV_SEED_UNVERIFIED_EMAIL,
 # AUTH_DEV_SEED_UNVERIFIED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
-# Env: COMPOSE_PROJECT_NAME (default auth-core-web; "auth-core", the development stack, is refused),
-# E2E_PROJECTS, E2E_KEEP_STACK, HTTP_URL, HTTPS_URL, MAILPIT_URL. Exits non-zero on the first failure; prints "PASS <project>"
-# per project; never prints a password, a token, a cookie or a mail body.
+# Env: COMPOSE_PROJECT_NAME (default auth-core-web; a name must start with auth-core-web, because the script runs `down -v` on
+# it: the development stack, "auth-core", and any other project are refused), E2E_PROJECTS, E2E_KEEP_STACK, E2E_KEEP_RESULTS,
+# HTTP_URL, HTTPS_URL, MAILPIT_URL. Exits non-zero on the first failure; prints "PASS <project>" per project; never prints a
+# password, a token, a cookie or a mail body. samples/notes-web/test-results/ (a screenshot of each failed test shows the page:
+# emails, notes) is removed when the script ends, whatever the outcome; E2E_KEEP_RESULTS=1 keeps it for a look.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,14 +36,17 @@ HTTPS_URL="${HTTPS_URL:-https://localhost:8443}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 PROJECTS="${E2E_PROJECTS:-chromium webkit}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-web}"
-# The script runs `down -v` on its project: never on the development stack, whose project is called auth-core.
-[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] \
-  || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack: this script removes its volumes; use another name" >&2; exit 1; }
+# The script runs `down -v` on its project: only on a project of its own, whose name starts with auth-core-web. Never on the
+# development stack (auth-core) or on a project of something else.
+[[ "$COMPOSE_PROJECT_NAME" == auth-core-web* ]] \
+  || { echo "FAIL COMPOSE_PROJECT_NAME must start with auth-core-web: this script removes the volumes of its project; use such a name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
 cleanup() {
   if [[ "${E2E_KEEP_STACK:-0}" != "1" ]]; then "${compose[@]}" down -v >/dev/null 2>&1 || true; fi
+  # The screenshots of failed tests show the page (emails, notes): they do not stay on disk.
+  if [[ "${E2E_KEEP_RESULTS:-0}" != "1" ]]; then rm -rf "$web/test-results"; fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT

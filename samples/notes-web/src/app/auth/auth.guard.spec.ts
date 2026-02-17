@@ -73,6 +73,15 @@ describe('authGuard', () => {
     expect(router.serializeUrl(result as UrlTree)).toBe('/login?returnUrl=%2Fnotes%3Fpage%3D2');
   });
 
+  it.each(['/notes?token=abc', '/notes?a=1&token=abc&b=2', '/somewhere/else?token=abc'])(
+    'an anonymous person who asks for %s is sent to /login without the mail token in the address',
+    (url) => {
+      const result = run(url);
+      expect(result).toBeInstanceOf(UrlTree);
+      expect(router.serializeUrl(result as UrlTree)).toBe('/login?returnUrl=%2Fnotes');
+    },
+  );
+
   it('lets a person through when a token is held', async () => {
     await holdToken(auth, ctrl, 'tok');
     expect(run('/notes')).toBe(true);

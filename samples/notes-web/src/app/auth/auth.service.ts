@@ -156,6 +156,9 @@ export class AuthService {
     if (body?.status !== 'authenticated' || typeof token !== 'string' || token === '') {
       return { ok: false, failure: { kind: 'other' } };
     }
+    // A session that exists ends first (/login has no guard, so a signed-in person can sign in as someone else): what the old
+    // person asked for and is still on its way, an /auth/me or a request that gets a 401, is never used for the new one.
+    this.dropSession();
     this.accessToken.set(token);
     this.noticeState.set(null);
     // Signed in once there is a token, even when this answer cannot be read: the notes screen asks for the person again.
@@ -219,6 +222,11 @@ export class AuthService {
     } catch {
       return false;
     }
+  }
+
+  /** Counts the sessions that ended in this tab. A request that was sent in an older one is never sent again with a newer token. */
+  get session(): number {
+    return this.generation;
   }
 
   dropSession(): void {

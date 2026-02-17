@@ -196,6 +196,34 @@ describe('authInterceptor', () => {
       expect(router.url).toBe('/notes');
     });
 
+    it.each([
+      ['401', status(401), { error: 'unauthorized' }],
+      ['403 permissions_changed', status(403), { error: 'permissions_changed' }],
+    ])(
+      'a request of a session that ended, answered %s after someone else signed in, is not sent again with the new token',
+      async (_name, answer, body) => {
+        const done = lastValueFrom(http.post('/api/notes', { text: 'for the old person' })).catch((error: unknown) => error);
+        const first = ctrl.expectOne('/api/notes');
+        expect(first.request.headers.get('Authorization')).toBe('Bearer old');
+        const signingOut = auth.logout();
+        ctrl.expectOne('/auth/logout').flush(null, status(204));
+        await signingOut;
+        const signingIn = auth.login('other@example.test', 'pw');
+        ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'new' });
+        await settle();
+        ctrl.expectOne('/auth/me').flush(adminMe);
+        await signingIn;
+        first.flush(body, answer);
+        const error = await done;
+        expect((error as HttpErrorResponse).status).toBe(answer.status);
+        await settle();
+        ctrl.expectNone('/api/notes');
+        ctrl.expectNone('/auth/refresh');
+        expect(auth.token()).toBe('new');
+        expect(router.url).toBe('/notes');
+      },
+    );
+
     it('401 from the refresh while a navigation is running: /login remembers the page the person was on the way to', async () => {
       const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
       ctrl.expectOne('/api/notes').flush(null, status(401));

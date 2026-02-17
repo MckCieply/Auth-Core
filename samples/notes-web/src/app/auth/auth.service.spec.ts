@@ -214,6 +214,44 @@ describe('AuthService', () => {
       expect(auth.me()).toBeNull();
     });
 
+    it('signing in as someone else while signed in: the old person is gone, even when /auth/me of the new one fails', async () => {
+      await signedInAs(auth, ctrl, adminMe, 'tok-a');
+      const done = auth.login('viewer@example.test', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok-b' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush('oops', status(500));
+      expect(await done).toEqual({ ok: true });
+      expect(auth.token()).toBe('tok-b');
+      expect(auth.me()).toBeNull();
+      ctrl.verify();
+    });
+
+    it('signing in while the /auth/me of the old session is on its way: its late answer is not shown under the new person', async () => {
+      await signedInAs(auth, ctrl, adminMe, 'tok-a');
+      const late = auth.loadMe();
+      const lateRequest = ctrl.expectOne('/auth/me');
+      const done = auth.login('viewer@example.test', 'pw');
+      ctrl.expectOne('/auth/login').flush({ status: 'authenticated', access_token: 'tok-b' });
+      await settle();
+      const newRequest = ctrl.expectOne('/auth/me');
+      lateRequest.flush(adminMe);
+      expect(await late).toBe(false);
+      expect(auth.me()).toBeNull();
+      newRequest.flush(viewerMe);
+      expect(await done).toEqual({ ok: true });
+      expect(auth.me()).toEqual(viewerMe);
+      ctrl.verify();
+    });
+
+    it('a failed sign-in leaves the session that exists alone', async () => {
+      await signedInAs(auth, ctrl, adminMe, 'tok-a');
+      const done = auth.login('viewer@example.test', 'wrong');
+      ctrl.expectOne('/auth/login').flush({ error: 'invalid_credentials' }, status(401));
+      expect((await done).ok).toBe(false);
+      expect(auth.token()).toBe('tok-a');
+      expect(auth.me()).toEqual(adminMe);
+    });
+
     it('clears an old notice when the person signs in', async () => {
       auth.showNotice('unreachable');
       const done = auth.login('a@b.example', 'pw');

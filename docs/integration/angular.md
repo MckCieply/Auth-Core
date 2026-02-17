@@ -21,8 +21,11 @@ it. There is no CORS: the app, Auth-Core and your API are on one origin behind a
 (`/auth/...`, `/api/...`).
 
 The sample's proxy is Caddy: [`samples/notes-web/Caddyfile`](../../samples/notes-web/Caddyfile) sends `/auth/*` to Auth-Core,
-`/api/*` to the product's service and every other path to the built app, with `index.html` as the answer to a path that is not a
-file (the router owns those paths). The compose overlay that builds and runs it is
+`/api/*` to the product's service and every other path to the built app, with `index.html` as the answer to a path with no file
+extension (the router owns those paths). A path with an extension that is not in the build (`/missing.js`) is a `404`: a broken
+build then shows as an error, and a browser never runs HTML as a script. The sample's proxy answers only to the host names it is
+reached by (`localhost` and `127.0.0.1`) and turns off the file server's canonical-URI redirects, which could be made to redirect to
+another site; your proxy should answer only to the names of your product, and not redirect on a path it has rewritten. The compose overlay that builds and runs it is
 [`samples/notes-web/compose.yml`](../../samples/notes-web/compose.yml).
 
 While you work on the screens, `ng serve` can stand in for the proxy:
@@ -121,6 +124,12 @@ Three rules the sample follows, and you should too:
 - **Do not put an email in the URL.** After an invitation is accepted the sample opens `/login` with the address filled in, passed in
   the router's navigation state.
 
+**Mind the logs.** The address bar and the referrer are covered, but the request itself, `GET /reset?token=...`, still reaches your
+proxy and your web server, and most of them write the whole line to an access log, token included. Keep the proxy's and the server's
+access logs off for `/reset`, `/verify` and `/invite`, or have them scrub `token=` (the query string) from what they write, and keep any log
+that does hold one as private as a password. A token is single-use and expires, but one that is still valid in a log is a way into
+someone's account. (The sample's Caddy writes no access log.)
+
 ## 5. Handle the answers in the interceptor's table
 
 The interceptor handles the answers to the requests that carry the token:
@@ -135,7 +144,7 @@ The interceptor handles the answers to the requests that carry the token:
 
 Every other answer reaches the screen that asked, untouched: no refresh, and the person stays signed in. That includes the notes
 service's own errors (`503 {"error":"database_unavailable"}` means "try again later", also `500`, `404` and `405`); the notes screen
-shows "The notes could not be loaded. Try again." or "The note could not be saved. Try again.". A call to your own origin that is not answered within 30
+shows the common "Something went wrong. Try again." for a list or a save that failed. A call to your own origin that is not answered within 30
 seconds (`REQUEST_TIMEOUT_MS` in `auth.interceptor.ts`) fails the same way, so that no screen waits for ever; raise it for calls that
 take longer, such as an upload. Giving up cancels the request in flight and ends the whole chain (no second try; a refresh that was
 already running goes on, and if it ends the session the person still goes to `/login`): the interceptor is built from observables, not promises, for that reason; keep it so if you change it.

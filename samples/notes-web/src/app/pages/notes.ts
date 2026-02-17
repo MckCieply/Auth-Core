@@ -22,7 +22,13 @@ function isNote(value: unknown): value is Note {
     return false;
   }
   const note = value as Record<string, unknown>;
-  return typeof note['id'] === 'string' && typeof note['text'] === 'string' && typeof note['created_at'] === 'string';
+  // The time is shown by the date pipe, which throws on text that is no date: a note like that would take the whole list down.
+  return (
+    typeof note['id'] === 'string' &&
+    typeof note['text'] === 'string' &&
+    typeof note['created_at'] === 'string' &&
+    !Number.isNaN(new Date(note['created_at']).getTime())
+  );
 }
 
 @Component({
@@ -52,7 +58,7 @@ function isNote(value: unknown): value is Note {
         }
       }
       @if (loadFailed()) {
-        <p class="error" role="alert">{{ t.loadFailed }}</p>
+        <p class="error" role="alert">{{ somethingWrong }}</p>
       } @else if (loaded() && notes().length === 0) {
         <p class="status">{{ t.empty }}</p>
       }
@@ -69,6 +75,7 @@ function isNote(value: unknown): value is Note {
 })
 export class NotesPage implements OnInit {
   protected readonly t = texts.notes;
+  protected readonly somethingWrong = texts.common.somethingWrong;
   protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
@@ -119,7 +126,7 @@ export class NotesPage implements OnInit {
       }
       this.form.reset();
     } catch {
-      this.addError.set(this.t.addFailed);
+      this.addError.set(this.somethingWrong);
     } finally {
       this.busy.set(false);
     }

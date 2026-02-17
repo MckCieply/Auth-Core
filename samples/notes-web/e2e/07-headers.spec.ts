@@ -31,13 +31,87 @@ test('the nonce is new for every response and is the one in the page', async ({ 
   await expect(page.locator('app-root')).toHaveAttribute('ngcspnonce', secondNonce as string);
 });
 
-test('every path that is index.html is revalidated, an unknown path and a missing .js file included', async ({ page }) => {
-  for (const path of ['/', '/notes', '/no/such/page', '/missing.js', '/missing.css', '/index.html']) {
+test('every path that is index.html is revalidated, an unknown path included', async ({ page }) => {
+  for (const path of ['/', '/notes', '/no/such/page', '/index.html', '/x.', '/a.b/c', '/authx', '/apix']) {
     const answer = await page.request.get(path);
     expect(answer.status(), path).toBe(200);
     expect(answer.headers()['cache-control'], path).toBe('no-cache');
     expect(await answer.text(), path).toContain('<app-root');
   }
+});
+
+test('a path with a file extension that is not in the build is a 404, not the app (Decision 14)', async ({ page }) => {
+  for (const path of ['/missing.js', '/missing.css', '/missing.ico', '/robots.txt', '/a/b.map', '/.env']) {
+    const answer = await page.request.get(path);
+    expect(answer.status(), path).toBe(404);
+    expect(await answer.text(), path).not.toContain('<app-root');
+    expect(answer.headers()['x-content-type-options'], path).toBe('nosniff');
+  }
+});
+
+test('a path without an extension is a route of the app: it gets index.html', async ({ page }) => {
+  for (const path of ['/whatever', '/a/b/c', '/x.', '/a.b/c']) {
+    const answer = await page.request.get(path);
+    expect(answer.status(), path).toBe(200);
+    expect(answer.headers()['content-type'], path).toContain('text/html');
+    expect(await answer.text(), path).toContain('<app-root');
+  }
+});
+
+test('no answer of the app redirects to another site: the canonical-URI redirect is off', async ({ page }) => {
+  const probes = [
+    '/%5cevil.example/index.html/',
+    '/a/%5cevil.example/index.html/',
+    '/%2f%5cevil.example/index.html/',
+    '/%5cevil.example/',
+    '/index.html/',
+  ];
+  for (const path of probes) {
+    const answer = await page.request.get(path, { maxRedirects: 0 });
+    expect(answer.status(), path).not.toBeGreaterThanOrEqual(300);
+    expect(answer.headers()['location'], path).toBeUndefined();
+  }
+});
+
+test('/auth and /api without a slash go to their services, not to the app', async ({ page }) => {
+  for (const path of ['/auth', '/api']) {
+    const answer = await page.request.get(path, { maxRedirects: 0 });
+    expect(await answer.text(), path).not.toContain('<app-root');
+    expect(answer.headers()['content-security-policy'], path).toBeUndefined();
+    expect(answer.headers()['referrer-policy'], path).toBeUndefined();
+  }
+});
+
+test('a conditional request for a page of the app is answered in full, with the nonce of its own response', async ({ page }) => {
+  const nonceOf = (value: string | undefined) => CSP.exec(value ?? '')?.[1];
+  const conditions: Record<string, string>[] = [{ 'If-None-Match': '*' }, { 'If-Modified-Since': 'Wed, 01 Jan 2099 00:00:00 GMT' }];
+  for (const headers of conditions) {
+    for (const path of ['/', '/notes', '/index.html']) {
+      const answer = await page.request.get(path, { headers });
+      expect(answer.status(), path).toBe(200);
+      const nonce = nonceOf(answer.headers()['content-security-policy']);
+      expect(nonce, path).toBeDefined();
+      expect(await answer.text(), path).toContain(nonce as string);
+    }
+  }
+});
+
+test('the app answers only to localhost and 127.0.0.1: another Host is a 421, also for /auth and /api', async ({ page }) => {
+  for (const path of ['/', '/notes', '/auth/health', '/api/health']) {
+    const answer = await page.request.get(path, { headers: { Host: 'evil.example' } });
+    expect(answer.status(), path).toBe(421);
+    expect(await answer.text(), path).not.toContain('<app-root');
+  }
+});
+
+test('HEAD gets the headers of the page and its length, as GET does', async ({ page }) => {
+  const got = await page.request.get('/login');
+  const head = await page.request.head('/login');
+  expect(head.status()).toBe(200);
+  expect(head.headers()['content-length']).not.toBe('0');
+  expect(Number(head.headers()['content-length'])).toBe((await got.body()).length);
+  expect(head.headers()['content-security-policy']).toMatch(CSP);
+  expect(head.headers()['cache-control']).toBe('no-cache');
 });
 
 test('the hashed .js and .css files of the build are not marked no-cache: they may be cached', async ({ page }) => {
@@ -58,7 +132,9 @@ test('the file server serves nothing outside the build', async ({ page }) => {
   for (const path of ['/Caddyfile', '/etc/passwd', '/.env', '/Dockerfile']) {
     const answer = await page.request.get(path);
     const text = await answer.text();
-    expect(text, path).toContain('<app-root');
+    // The app for a path without an extension, a 404 for one with an extension (/.env): never the file.
+    expect([200, 404], path).toContain(answer.status());
+    expect(text.includes('<app-root') === (answer.status() === 200), path).toBe(true);
     expect(text, path).not.toContain('reverse_proxy');
     expect(text, path).not.toContain('root:');
   }
