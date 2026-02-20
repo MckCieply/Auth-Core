@@ -11,12 +11,15 @@ namespace Auth.Server.Api;
 /// is logged. Kestrel's own <c>500</c> would drop every header set so far, the security headers with them. A refresh that fails
 /// because the database cannot be reached (a transient <see cref="DbException"/>, a <see cref="TimeoutException"/> or a
 /// <see cref="SocketException"/> at any depth) is <c>503 {"error":"temporarily_unavailable"}</c> with <c>Retry-After: 5</c> and no
-/// cookie, so that the person stays signed in (Decision 4). A request the server itself rejected as malformed
-/// (<see cref="BadHttpRequestException"/>) and one the client has abandoned are left to the server.
+/// cookie, so that the person stays signed in (Decision 4). A request the server itself rejected while a body was read (a
+/// <see cref="BadHttpRequestException"/>: too large, or malformed chunks) is answered with the server's own status (<c>413</c>,
+/// <c>400</c>) and <c>{"error":"invalid_request"}</c>, logged as information: the client's fault, not ours. A request the client
+/// has abandoned is not answered, and an exception after the response has started ends the connection (it is logged here once).
 /// </summary>
 public sealed partial class ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandlingMiddleware> logger)
 {
     public const string InternalError = "internal_error";
+    public const string InvalidRequest = "invalid_request";
     public const string TemporarilyUnavailable = "temporarily_unavailable";
     public const int RefreshRetryAfterSeconds = 5;
 
@@ -32,17 +35,23 @@ public sealed partial class ErrorHandlingMiddleware(RequestDelegate next, ILogge
         {
             // The client went away: nobody is left to answer.
         }
-        catch (Exception exception) when (exception is not BadHttpRequestException)
+        catch (Exception exception)
         {
             if (context.Response.HasStarted)
             {
-                // Too late to say anything: leave it to the server, which ends the connection.
+                // Too late to say anything: end the connection. Not rethrown, so that the server does not log it a second time.
                 LogAfterStart(logger, exception);
-                throw;
+                context.Abort();
+                return;
             }
 
-            var outage = RefreshRequestHandler.IsRefreshPath(context.Request.Path) && IsTransientFailure(exception);
-            if (outage)
+            var rejected = exception as BadHttpRequestException;
+            var outage = rejected is null && RefreshRequestHandler.IsRefreshPath(context.Request.Path) && IsTransientFailure(exception);
+            if (rejected is not null)
+            {
+                LogRejected(logger, exception);
+            }
+            else if (outage)
             {
                 LogOutage(logger, exception);
             }
@@ -55,7 +64,11 @@ public sealed partial class ErrorHandlingMiddleware(RequestDelegate next, ILogge
             context.Response.Clear();
             context.Response.Headers[HeaderNames.CacheControl] = "no-store";
             context.Response.Headers[HeaderNames.Pragma] = "no-cache";
-            if (outage)
+            if (rejected is not null)
+            {
+                await Results.Json(new { error = InvalidRequest }, statusCode: rejected.StatusCode).ExecuteAsync(context);
+            }
+            else if (outage)
             {
                 context.Response.Headers[HeaderNames.RetryAfter] = RefreshRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 await Results.Json(new { error = TemporarilyUnavailable }, statusCode: StatusCodes.Status503ServiceUnavailable).ExecuteAsync(context);
@@ -104,16 +117,23 @@ public sealed partial class ErrorHandlingMiddleware(RequestDelegate next, ILogge
     [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception; answering 500 internal_error.")]
     private static partial void LogUnhandled(ILogger logger, Exception exception);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "The server rejected the request while its body was read; answering with the server's status and invalid_request.")]
+    private static partial void LogRejected(ILogger logger, Exception exception);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "A dependency could not be reached while refreshing a session; answering 503 temporarily_unavailable.")]
     private static partial void LogOutage(ILogger logger, Exception exception);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception after the response had started; the connection is ended.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Unhandled exception after the response had started; the connection is aborted.")]
     private static partial void LogAfterStart(ILogger logger, Exception exception);
 }
 
 public static class ErrorHandling
 {
-    /// <summary>Adds <see cref="ErrorHandlingMiddleware"/>. It must be the first middleware.</summary>
+    /// <summary>
+    /// Adds <see cref="ErrorHandlingMiddleware"/>. It must be the first of Auth-Core's own middleware, and <c>UseRouting</c> must come
+    /// after it: <c>WebApplication</c> puts routing in front of everything when the app does not call it, and an exception of the
+    /// route matcher would then escape the handler.
+    /// </summary>
     public static IApplicationBuilder UseErrorHandling(this IApplicationBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);

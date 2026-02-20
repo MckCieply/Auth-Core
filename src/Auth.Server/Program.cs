@@ -83,10 +83,12 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
 // The outermost handler and the headers come first: whatever the pipeline answers, a 404, a 429 or an exception included, has
-// them. Then the client address (the rate limiter and the audit log are about it) and the limiter: all before authentication,
-// because login is answered inside it.
+// them. Routing comes right after them: called here, it is not put in front of them by WebApplication, so that an exception of
+// the route matcher is answered by the handler too. Then the client address (the rate limiter and the audit log are about it)
+// and the limiter: all before authentication, because login is answered inside it.
 app.UseErrorHandling();
 app.UseSecurityHeaders();
+app.UseRouting();
 app.UseClientAddress(proxies);
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseAuthentication();

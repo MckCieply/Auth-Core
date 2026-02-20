@@ -26,16 +26,17 @@ public sealed class DatabaseOutage : IAsyncDisposable
         _upstreamHost = upstream.Host ?? "localhost";
         _upstreamPort = upstream.Port;
 
-        // Take a free port once and keep it for every Start.
-        var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        Port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
+        // Take a free port once and keep it for every Start. The listener that finds it is the first one that serves: it is not
+        // stopped and bound again, which would leave a window in which something else could take the port.
+        var first = new TcpListener(IPAddress.Loopback, 0);
+        first.Start();
+        Port = ((IPEndPoint)first.LocalEndpoint).Port;
+        _listener = first;
+        _ = Task.Run(() => AcceptAsync(first));
 
         upstream.Host = "127.0.0.1";
         upstream.Port = Port;
         ConnectionString = upstream.ConnectionString;
-        Start();
     }
 
     public int Port { get; }
@@ -125,6 +126,14 @@ public sealed class DatabaseOutage : IAsyncDisposable
             client.NoDelay = true;
             lock (_gate)
             {
+                // A Cut while this connection was being made: it must not carry traffic after it.
+                if (!ReferenceEquals(_listener, listener))
+                {
+                    client.Close();
+                    upstream.Close();
+                    return;
+                }
+
                 _connections.Add(client);
                 _connections.Add(upstream);
             }

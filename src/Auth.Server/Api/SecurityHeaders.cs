@@ -24,14 +24,16 @@ public static class SecurityHeaders
     {
         ArgumentNullException.ThrowIfNull(app);
 
+        // The interactive reference exists in Development only: elsewhere its path is a 404 like any other, with the strict policy.
+        var development = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment();
         return app.Use((context, next) =>
         {
-            context.Response.OnStarting(static state => Apply((HttpContext)state), context);
+            context.Response.OnStarting(() => Apply(context, development));
             return next(context);
         });
     }
 
-    private static Task Apply(HttpContext context)
+    private static Task Apply(HttpContext context, bool development)
     {
         var headers = context.Response.Headers;
         var path = context.Request.Path;
@@ -39,7 +41,7 @@ public static class SecurityHeaders
         headers["X-Frame-Options"] = "DENY";
         headers["Referrer-Policy"] = "no-referrer";
         headers["Cross-Origin-Resource-Policy"] = "same-origin";
-        headers["Content-Security-Policy"] = path.StartsWithSegments(OpenApiSetup.ReferencePath, StringComparison.OrdinalIgnoreCase)
+        headers["Content-Security-Policy"] = development && path.StartsWithSegments(OpenApiSetup.ReferencePath, StringComparison.OrdinalIgnoreCase)
             ? ScalarPolicy(context.Items.TryGetValue(ScalarOptions.NonceHttpContextItemKey, out var nonce) ? nonce as string : null)
             : ContentSecurityPolicy;
 

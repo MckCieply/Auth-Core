@@ -12,7 +12,9 @@ namespace Auth.Server.Sessions;
 /// <summary>
 /// Moves the refresh token of a successful token response out of the body and into the <c>auth_rt</c> cookie. The
 /// refresh token never reaches a response body (spec 0002, criterion 8). On <c>/auth/refresh</c> it also writes the
-/// response itself: <c>{"access_token"}</c> on success, one uniform <c>401 {"error":"invalid_grant"}</c> on failure.
+/// response itself: <c>{"access_token"}</c> on success; on failure one uniform <c>401 {"error":"invalid_grant"}</c>, except
+/// that a <c>server_error</c> (the service could not do its work, which is not the client's doing) is
+/// <c>503 {"error":"temporarily_unavailable"}</c> with <c>Retry-After: 5</c>, so that the person stays signed in.
 /// </summary>
 public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ApplyTokenResponseContext>
 {
@@ -85,8 +87,9 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
 
     /// <summary>
     /// Writes the refresh response itself, because OpenIddict's JSON writer indents its output and the contract is
-    /// the compact <c>{"access_token":"…"}</c> / <c>{"error":"invalid_grant"}</c>. It sets the same headers as that
-    /// writer and, like it, marks the request handled so nothing writes to the response a second time.
+    /// the compact <c>{"access_token":"…"}</c> / <c>{"error":"invalid_grant"}</c> / <c>{"error":"temporarily_unavailable"}</c>
+    /// (the last with its <c>Retry-After</c>, set by the caller). It sets the same headers as that writer and, like it,
+    /// marks the request handled so nothing writes to the response a second time.
     /// </summary>
     private static async ValueTask WriteCompactAsync(
         HttpResponse response, OpenIddictResponse body, OpenIddictServerEvents.ApplyTokenResponseContext context)
