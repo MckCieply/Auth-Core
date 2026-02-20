@@ -1,5 +1,7 @@
 using Auth.Infrastructure.Identity;
 using Auth.Server.Email;
+using Auth.Server.Network;
+using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Tenancy;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
@@ -63,6 +65,12 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.SmtpPasswordKey] = "";
         _settings[DevUserSeeder.UnverifiedEmailKey] = "";
         _settings[DevUserSeeder.UnverifiedPasswordKey] = "";
+        // The per-IP limiter is off in a test host, so that no test meets it by accident (the test server sends everything from one
+        // address, "unknown"); a test about it turns it on with WithSetting. Blank proxy lists count as unset, so that a variable of
+        // the machine cannot make a test host trust a proxy.
+        _settings[RateLimitSettings.EnabledKey] = "false";
+        _settings[ProxySettings.KnownNetworksKey] = "";
+        _settings[ProxySettings.KnownProxiesKey] = "";
         // The manifest: a file of this host's own, so that a test changes it without touching another's.
         _manifestDirectory = Directory.CreateDirectory(
             Path.Combine(Path.GetTempPath(), "auth-core-manifest-" + Guid.NewGuid().ToString("N"))).FullName;
@@ -140,6 +148,16 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings.Remove(key);
         return this;
     }
+
+    /// <summary>The header that names the client address of a request in a host made with <see cref="WithRemoteAddressHeader"/>.</summary>
+    public const string RemoteAddressHeader = "X-Test-Remote-Address";
+
+    /// <summary>
+    /// Lets a request say, in <see cref="RemoteAddressHeader"/>, which address it comes from: the test server has none. Call it in
+    /// the constructor of the test, before the host is built.
+    /// </summary>
+    public AuthAppFactory WithRemoteAddressHeader() =>
+        WithServices(services => services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, RemoteAddressFilter>());
 
     /// <summary>Replaces the host's clock, so a test can move time forward.</summary>
     public AuthAppFactory WithClock(TimeProvider clock)

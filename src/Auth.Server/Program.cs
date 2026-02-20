@@ -8,6 +8,8 @@ using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
+using Auth.Server.Network;
+using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
@@ -29,6 +31,11 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
+// Fail fast on a bad proxy list or a bad rate limit, naming the key (spec 0008).
+var proxies = ProxySettings.Load(builder.Configuration);
+builder.Services.AddSingleton(proxies);
+builder.Services.AddSingleton(RateLimitSettings.Load(builder.Configuration));
+builder.Services.AddSingleton<SlidingWindowLimiter>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
@@ -70,7 +77,11 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
-// Before authentication, so that the 401 of a missing or invalid token is marked never to be stored too.
+// The client address first (the rate limiter and the audit log are about it), then the limiter: both before authentication,
+// because login is answered inside it. The no-store rule runs before authentication too, so that the 401 of a missing or
+// invalid token is marked never to be stored.
+app.UseClientAddress(proxies);
+app.UseMiddleware<RateLimitMiddleware>();
 app.UseNoStoreForTenancyPaths();
 app.UseAuthentication();
 app.UseAuthorization();

@@ -19,6 +19,7 @@ public static class TenancyErrors
     public const string RoleInUse = "role_in_use";
     public const string RoleNameTaken = "role_name_taken";
     public const string TooManyAttempts = "too_many_attempts";
+    public const string TooManyRequests = "too_many_requests";
 
     public static int StatusOf(string error) => error switch
     {
@@ -27,7 +28,7 @@ public static class TenancyErrors
         NotFound => StatusCodes.Status404NotFound,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken
             => StatusCodes.Status409Conflict,
-        TooManyAttempts => StatusCodes.Status429TooManyRequests,
+        TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };
 }
