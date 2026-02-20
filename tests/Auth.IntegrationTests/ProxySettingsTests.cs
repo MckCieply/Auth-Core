@@ -61,14 +61,6 @@ public sealed class ProxySettingsTests
         Assert.Equal(2, settings.Proxies.Count);
     }
 
-    [Fact]
-    public void A_proxy_written_as_an_ipv4_mapped_address_is_the_ipv4_address()   // a plain remote would not match the mapped form
-    {
-        var settings = Load(new() { [ProxySettings.KnownProxiesKey + ":0"] = "::ffff:10.0.0.7" });
-
-        Assert.Equal([IPAddress.Parse("10.0.0.7")], settings.Proxies);
-    }
-
     [Theory]
     [InlineData(ProxySettings.KnownNetworksKey, "10.250.0.0")]       // no prefix length
     [InlineData(ProxySettings.KnownNetworksKey, "10.250.0.5/24")]    // bits set beyond the prefix: .NET 10 parses it and masks it to 10.250.0.0/24, we refuse it
@@ -86,6 +78,10 @@ public sealed class ProxySettingsTests
     [InlineData(ProxySettings.KnownNetworksKey, "10.250/16")]        // 10.250.0.0/16 written short
     [InlineData(ProxySettings.KnownNetworksKey, "0.0.0.0/0")]        // every address: trusting everyone
     [InlineData(ProxySettings.KnownNetworksKey, "::/0")]
+    [InlineData(ProxySettings.KnownProxiesKey, "::ffff:10.0.0.7")]          // an IPv4 proxy is written as IPv4
+    [InlineData(ProxySettings.KnownNetworksKey, "::ffff:0.0.0.0/96")]       // every IPv4 client of a dual-stack listener
+    [InlineData(ProxySettings.KnownNetworksKey, "::ffff:10.250.0.0/120")]
+    [InlineData(ProxySettings.KnownNetworksKey, "::/64")]                   // a range that holds the whole mapped range
     public void A_bad_entry_stops_the_host_naming_the_key_and_not_the_value(string key, string value)
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Load(new() { [key + ":0"] = value }));

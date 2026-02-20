@@ -48,8 +48,9 @@ public sealed class SlidingWindowLimiter(TimeProvider clock)
     }
 
     /// <summary>
-    /// Milliseconds since the limiter was made, on the timestamp clock. <c>GetElapsedTime</c> divides before it multiplies, so a
-    /// timestamp of nanoseconds that has run for months cannot overflow the way <c>timestamp * 1000</c> would.
+    /// Milliseconds since the limiter was made, on the timestamp clock. <c>GetElapsedTime</c> subtracts the two timestamps first
+    /// and scales the difference by a floating-point ratio, so a timestamp of nanoseconds that has run for months cannot overflow
+    /// the way <c>timestamp * 1000</c> would.
     /// </summary>
     private long ElapsedMilliseconds() => (long)clock.GetElapsedTime(_started).TotalMilliseconds;
 

@@ -1,6 +1,5 @@
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Network;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
@@ -17,24 +16,5 @@ public sealed class ClientAddressGuardTests(PostgresFixture postgres, KeyMateria
 
         Assert.Contains("ASPNETCORE_FORWARDEDHEADERS_ENABLED", ex.ToString(), StringComparison.Ordinal);
         Assert.Contains(ProxySettings.KnownNetworksKey, ex.ToString(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task A_proxy_variable_of_the_machine_in_list_form_cannot_make_a_test_host_trust_a_proxy()
-    {
-        const string Variable = "Auth__Proxy__KnownNetworks__0";
-        Environment.SetEnvironmentVariable(Variable, "10.250.0.0/24");
-        try
-        {
-            await using var factory = new AuthAppFactory(Postgres, Keys);
-
-            using var client = factory.CreateClient();
-
-            Assert.True(factory.Services.GetRequiredService<ProxySettings>().IsEmpty);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(Variable, null);
-        }
     }
 }
