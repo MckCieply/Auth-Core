@@ -1,8 +1,13 @@
+using System.Net;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Api;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Auth.IntegrationTests;
@@ -67,7 +72,7 @@ public sealed class ErrorHandlingMiddlewareTests
     [Theory]
     [InlineData(StatusCodes.Status413PayloadTooLarge)]
     [InlineData(StatusCodes.Status400BadRequest)]
-    public async Task A_request_the_server_rejected_is_answered_with_its_own_status_the_headers_and_invalid_request(int status)   // criterion 4
+    public async Task A_request_the_server_rejected_is_answered_with_its_own_status_no_store_and_invalid_request(int status)
     {
         var run = await RunAsync(_ => throw new BadHttpRequestException("rejected-by-the-server", status));
 
@@ -79,6 +84,30 @@ public sealed class ErrorHandlingMiddlewareTests
         Assert.Equal("no-cache", run.Http.Response.Headers.Pragma.ToString());
         Assert.Contains(run.Logs.Entries, e => e.Level == LogLevel.Information && e.Message.Contains("rejected-by-the-server", StringComparison.Ordinal));
         Assert.DoesNotContain(run.Logs.Entries, e => e.Level >= LogLevel.Warning);   // the client's fault, not an error of ours
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Status413PayloadTooLarge)]
+    [InlineData(StatusCodes.Status400BadRequest)]
+    public async Task A_request_the_server_rejected_has_the_security_headers_in_the_pipeline_of_the_service(int status)   // criterion 4
+    {
+        // The two middleware in the order Program.cs gives them, with a terminal that fails the way a body read does.
+        using var host = await new HostBuilder()
+            .ConfigureWebHost(web => web
+                .UseTestServer()
+                .Configure(app =>
+                {
+                    app.UseErrorHandling();
+                    app.UseSecurityHeaders();
+                    app.Run(_ => throw new BadHttpRequestException("rejected-by-the-server", status));
+                }))
+            .StartAsync(TestContext.Current.CancellationToken);
+
+        using var response = await host.GetTestClient().PostAsync("/auth/login", new StringContent("{}"), TestContext.Current.CancellationToken);
+
+        Assert.Equal((HttpStatusCode)status, response.StatusCode);
+        Assert.Equal("""{"error":"invalid_request"}""", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        SecurityHeadersApi.AssertSecurityHeaders(response);
     }
 
     [Fact]

@@ -28,13 +28,14 @@ public static class SecurityHeaders
         var development = app.ApplicationServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment();
         return app.Use((context, next) =>
         {
-            context.Response.OnStarting(() => Apply(context, development));
+            context.Response.OnStarting(static state => Apply(((HttpContext Context, bool Development))state), (context, development));
             return next(context);
         });
     }
 
-    private static Task Apply(HttpContext context, bool development)
+    private static Task Apply((HttpContext Context, bool Development) state)
     {
+        var (context, development) = state;
         var headers = context.Response.Headers;
         var path = context.Request.Path;
         headers["X-Content-Type-Options"] = "nosniff";
