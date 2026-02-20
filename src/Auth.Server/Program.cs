@@ -14,6 +14,7 @@ using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -25,6 +26,8 @@ if (args is ["admin", .. var adminArguments])
 }
 
 var builder = WebApplication.CreateBuilder(args);
+// No Server header (spec 0008). Only a live stack shows it: the test server never sends one.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 // Fail fast on missing or broken key material, before anything else is built.
 var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
@@ -40,6 +43,8 @@ builder.Services.AddSingleton<SlidingWindowLimiter>();
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+// Nothing of Auth-Core uses Data Protection, and the production container's file system is read-only: keys stay in memory.
+builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
 builder.Services.AddAuthOpenApi();
 builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
@@ -77,12 +82,13 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
-// The client address first (the rate limiter and the audit log are about it), then the limiter: both before authentication,
-// because login is answered inside it. The no-store rule runs before authentication too, so that the 401 of a missing or
-// invalid token is marked never to be stored.
+// The outermost handler and the headers come first: whatever the pipeline answers, a 404, a 429 or an exception included, has
+// them. Then the client address (the rate limiter and the audit log are about it) and the limiter: all before authentication,
+// because login is answered inside it.
+app.UseErrorHandling();
+app.UseSecurityHeaders();
 app.UseClientAddress(proxies);
 app.UseMiddleware<RateLimitMiddleware>();
-app.UseNoStoreForTenancyPaths();
 app.UseAuthentication();
 app.UseAuthorization();
 

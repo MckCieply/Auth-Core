@@ -39,7 +39,11 @@ public static class OpenApiSetup
         app.MapOpenApi(DocumentPath);
         if (app.Environment.IsDevelopment())
         {
-            app.MapScalarApiReference(ReferencePath, options => options.WithOpenApiRoutePattern(DocumentPath));
+            // The bundle is served from the same origin. The one inline script carries a nonce (SecurityHeaders puts it into the
+            // policy); the default fonts, the telemetry and the agent would reach other hosts, which the policy forbids.
+            app.MapScalarApiReference(
+                ReferencePath,
+                options => options.WithOpenApiRoutePattern(DocumentPath).WithNonce().DisableDefaultFonts().DisableTelemetry().DisableAgent());
         }
 
         return app;

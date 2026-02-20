@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Auth.Server.Api;
 using Auth.Server.Login;
 using Microsoft.AspNetCore;
 using OpenIddict.Abstractions;
@@ -39,9 +40,17 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
 
         if (!string.IsNullOrEmpty(context.Response.Error))
         {
+            // A refresh that failed for a reason that is not the client's (OpenIddict says server_error) is a 503, and the person
+            // stays signed in: the cookie is neither cleared nor rotated (spec 0008 → POST /auth/refresh during an outage).
+            if (isRefresh && string.Equals(context.Response.Error, Errors.ServerError, StringComparison.Ordinal))
+            {
+                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                http.Response.Headers.RetryAfter = ErrorHandlingMiddleware.RefreshRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = ErrorHandlingMiddleware.TemporarilyUnavailable }, context);
+            }
             // invalid_request is the wrong-method case: a malformed request, answered like login's 400. Every other
             // error on this path is a refresh failure and gets the one uniform answer (spec 0002, criterion 7).
-            if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
+            else if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
             {
                 http.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = Errors.InvalidGrant }, context);
