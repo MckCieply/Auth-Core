@@ -20,12 +20,14 @@ public static class TenancyErrors
     public const string RoleNameTaken = "role_name_taken";
     public const string TooManyAttempts = "too_many_attempts";
     public const string TooManyRequests = "too_many_requests";
+    public const string UnsupportedMediaType = "unsupported_media_type";
 
     public static int StatusOf(string error) => error switch
     {
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission => StatusCodes.Status400BadRequest,
         Forbidden or PermissionsChanged or PermissionNotHeld => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
+        UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken
             => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,

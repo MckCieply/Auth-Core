@@ -15,7 +15,7 @@ namespace Auth.Server.Seeding;
 /// default roles of the active manifest). The optional second one (<see cref="UnverifiedEmailKey"/>,
 /// <see cref="UnverifiedPasswordKey"/>) has not confirmed its email: until self-service sign-up exists it is the only
 /// way to have an account that needs verification (spec 0004, Decision 2), and it is a member with a role that does not
-/// manage members (the first default role, in the order of the manifest, that does not; else a new empty role
+/// manage members (the first role of the company, by name, that holds neither <c>members:manage</c> nor <c>*</c>; else a new empty role
 /// <c>member</c>). Each user is created only when both of its settings are present. Seeding is idempotent and never
 /// resets the password of an existing user or moves a member to another company.
 /// </summary>
@@ -56,22 +56,28 @@ public static partial class DevUserSeeder
         var manifest = scope.ServiceProvider.GetRequiredService<ManifestHolder>().Current;
         var roles = await db.CompanyRoles.Where(r => r.CompanyId == companyId).ToListAsync(ct);
 
-        // The company's copy of the first default role, in the order of the manifest, that manages members or does not.
-        CompanyRole? FirstDefaultRole(bool manages) => manifest.DefaultRoles
-            .Where(d => manifest.Catalog.Expand(d.Permissions).Contains(PermissionCatalog.MembersManage) == manages)
+        // The company's copy of the first default role, in the order of the manifest, that manages members.
+        CompanyRole? FirstManagingDefaultRole() => manifest.DefaultRoles
+            .Where(d => manifest.Catalog.Expand(d.Permissions).Contains(PermissionCatalog.MembersManage))
             .Select(d => roles.FirstOrDefault(r => r.NormalizedName == NameInput.Normalize(d.Name)))
             .FirstOrDefault(r => r is not null);
 
         if (first is not null)
         {
-            var admin = roles.FirstOrDefault(r => r.NormalizedName == NameInput.Normalize("admin")) ?? FirstDefaultRole(manages: true)
+            var admin = roles.FirstOrDefault(r => r.NormalizedName == NameInput.Normalize("admin")) ?? FirstManagingDefaultRole()
                 ?? throw new InvalidOperationException("The development company has no role that manages members.");
             await EnsureMemberAsync(db, clock, first, companyId, admin, ct);
         }
 
         if (second is not null)
         {
-            var plain = FirstDefaultRole(manages: false) ?? roles.FirstOrDefault(r => r.NormalizedName == NameInput.Normalize("member"));
+            // Read from the database, not from the manifest (a role of the manifest may not be the company's any more): the first
+            // role of the company, by name, that holds neither members:manage nor *. The order the roles were stored in cannot be
+            // read back, so the name decides.
+            var plain = roles
+                .OrderBy(r => r.Name, StringComparer.Ordinal)
+                .FirstOrDefault(r => !r.Permissions.Contains(PermissionCatalog.All, StringComparer.Ordinal)
+                    && !r.Permissions.Contains(PermissionCatalog.MembersManage, StringComparer.Ordinal));
             if (plain is null)
             {
                 // Every default role manages members: the second user still must not.

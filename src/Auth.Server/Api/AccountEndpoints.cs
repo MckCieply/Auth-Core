@@ -25,8 +25,9 @@ public static class AccountEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // The health check has no OpenAPI metadata of its own: the description adds it (see OpenApiSetup).
-        app.MapHealthChecks(HealthPath);
+        // The health check has no OpenAPI metadata of its own: the description adds it (see OpenApiSetup). GET and HEAD only: any
+        // other method is the framework's 405 with `Allow: GET, HEAD` (spec 0008).
+        app.MapHealthChecks(HealthPath).WithMetadata(new HttpMethodMetadata(["GET", "HEAD"]));
 
         app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync)
             .WithTags("Sessions")

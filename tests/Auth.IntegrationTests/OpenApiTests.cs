@@ -106,7 +106,8 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.NotEmpty(routes);
         foreach (var route in routes)
         {
-            var methods = route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["GET"];
+            // HEAD answers wherever GET does (the health check): the description says it once, under GET.
+            var methods = (route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["GET"]).Where(m => m != "HEAD");
             foreach (var method in methods)
             {
                 Assert.True(operations.ContainsKey($"{method} {PathOf(route)}"), $"{method} {PathOf(route)} is not described.");
