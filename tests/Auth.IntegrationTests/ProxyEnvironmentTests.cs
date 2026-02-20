@@ -39,6 +39,16 @@ public sealed class ProxyEnvironmentTests
     }
 
     [Fact]
+    public void A_name_written_with_colons_is_pinned_too()   // Windows allows a colon in a variable name
+    {
+        var pinned = Pinned(("Auth:Proxy:KnownNetworks:0", "10.250.0.0/24"), ("auth:proxy:KnownProxies", "10.0.0.7"));
+
+        Assert.Equal(2, pinned.Count);
+        Assert.Equal("", pinned["Auth:Proxy:KnownNetworks:0"]);
+        Assert.Equal("", pinned["Auth:Proxy:KnownProxies"]);
+    }
+
+    [Fact]
     public void Other_variables_are_left_alone()
     {
         var pinned = Pinned(("Auth__RateLimit__Enabled", "false"), ("Auth__Proxy", "x"), ("PATH", "/bin"), ("Auth_Proxy__X", "y"));

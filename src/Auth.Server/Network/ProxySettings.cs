@@ -32,7 +32,7 @@ public sealed class ProxySettings
     /// <summary>CIDR ranges whose addresses are proxies.</summary>
     public IReadOnlyList<IPNetwork> Networks { get; }
 
-    /// <summary>Single proxy addresses; an IPv4-mapped IPv6 address is held as the IPv4 address.</summary>
+    /// <summary>Single proxy addresses, never in the IPv4-mapped form.</summary>
     public IReadOnlyList<IPAddress> Proxies { get; }
 
     public bool IsEmpty => Networks.Count == 0 && Proxies.Count == 0;
@@ -41,7 +41,11 @@ public sealed class ProxySettings
     /// Reads both lists. Each key may hold one value with entries separated by commas, or a list (<c>Key:0</c>, <c>Key:1</c>);
     /// blank entries are ignored. A bad entry stops the host, naming the key and never echoing the value.
     /// </summary>
-    /// <exception cref="InvalidOperationException">An entry is not a CIDR range written as its network (bits set beyond the prefix are refused), or not an address.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// An entry is not written plainly (a short, octal, hexadecimal or scoped form), is a CIDR range that is not written as its own
+    /// network (bits set beyond the prefix), has a prefix length of 0, or lies inside or contains the IPv4-mapped range
+    /// (<c>::ffff:0:0/96</c>), or is not an address; or the framework's <c>ForwardedHeaders_Enabled</c> switch is <c>true</c>.
+    /// </exception>
     public static ProxySettings Load(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -59,7 +63,7 @@ public sealed class ProxySettings
         {
             if (!IPNetwork.TryParse(entry, out var network) || network.PrefixLength == 0 || OverlapsIPv4Mapped(network) || !IsWrittenAsItsNetwork(entry, network))
             {
-                throw new InvalidOperationException($"Configuration value '{KnownNetworksKey}' must be a list of CIDR ranges, each a plain address, a slash and a prefix length of at least 1. An IPv4 range is written as IPv4, never in the IPv4-mapped IPv6 form.");
+                throw new InvalidOperationException($"Configuration value '{KnownNetworksKey}' must be a list of CIDR ranges, each a plain address, a slash and a prefix length of at least 1, and no range inside or containing the IPv4-mapped addresses. An IPv4 range is written as IPv4.");
             }
 
             networks.Add(network);
@@ -126,7 +130,7 @@ public sealed class ProxySettings
     /// An address as an operator writes one: IPv4 as four decimal numbers exactly as the address prints (the parser alone also reads
     /// <c>10.0.7</c> as 10.0.0.7, <c>10</c> as 0.0.0.10, <c>0x0a000007</c> as 10.0.0.7 and <c>010.0.0.7</c> as 8.0.0.7), IPv6
     /// without a scope id (the parser drops <c>%eth0</c> silently). An IPv4 address in its IPv6-mapped form is refused: an IPv4 proxy
-    /// is written as IPv4 (a request's address is turned into IPv4 before it is compared, see <see cref="ClientAddress"/>).
+    /// is written as IPv4 (the forwarded-headers middleware of the framework also compares a mapped remote address as its IPv4 form).
     /// </summary>
     private static bool TryParsePlainAddress(string text, [NotNullWhen(true)] out IPAddress? address)
     {

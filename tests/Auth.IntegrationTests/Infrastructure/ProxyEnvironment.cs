@@ -7,9 +7,12 @@ namespace Auth.IntegrationTests.Infrastructure;
 /// </summary>
 internal static class ProxyEnvironment
 {
-    private const string Prefix = "Auth__Proxy__";
+    private const string Prefix = "Auth:Proxy:";
 
-    /// <summary>Every variable that starts with <c>Auth__Proxy__</c> (any case), as its configuration key with a blank value.</summary>
+    /// <summary>
+    /// Every variable that starts with <c>Auth__Proxy__</c> or <c>Auth:Proxy:</c> (Windows allows a colon in a name), any case, as
+    /// its configuration key with a blank value.
+    /// </summary>
     public static Dictionary<string, string?> PinnedBlank(IEnumerable<KeyValuePair<string, string>> environment)
     {
         ArgumentNullException.ThrowIfNull(environment);
@@ -17,9 +20,10 @@ internal static class ProxyEnvironment
         var pinned = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, _) in environment)
         {
-            if (name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+            var key = name.Replace("__", ":", StringComparison.Ordinal);
+            if (key.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
             {
-                pinned[name.Replace("__", ":", StringComparison.Ordinal)] = "";
+                pinned[key] = "";
             }
         }
 

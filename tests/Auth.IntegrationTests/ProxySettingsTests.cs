@@ -82,6 +82,8 @@ public sealed class ProxySettingsTests
     [InlineData(ProxySettings.KnownNetworksKey, "::ffff:0.0.0.0/96")]       // every IPv4 client of a dual-stack listener
     [InlineData(ProxySettings.KnownNetworksKey, "::ffff:10.250.0.0/120")]
     [InlineData(ProxySettings.KnownNetworksKey, "::/64")]                   // a range that holds the whole mapped range
+    [InlineData(ProxySettings.KnownNetworksKey, "::/80")]                   // the longest range that still holds all of it
+    [InlineData(ProxySettings.KnownNetworksKey, "::ff00:0:0/88")]           // a range inside it, at the edge of the fixed bits
     public void A_bad_entry_stops_the_host_naming_the_key_and_not_the_value(string key, string value)
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Load(new() { [key + ":0"] = value }));
@@ -121,5 +123,15 @@ public sealed class ProxySettingsTests
 
         Assert.Equal(["2001:db8::/32"], settings.Networks.Select(n => n.ToString()));
         Assert.Equal([IPAddress.IPv6Loopback], settings.Proxies);
+    }
+
+    [Theory]
+    [InlineData("::1/128")]   // beside the mapped range, not in it
+    [InlineData("::/81")]     // the first range that stops short of the bits that make an address mapped
+    public void A_range_next_to_the_mapped_range_is_accepted(string network)
+    {
+        var settings = Load(new() { [ProxySettings.KnownNetworksKey] = network });
+
+        Assert.Equal([network], settings.Networks.Select(n => n.ToString()));
     }
 }
