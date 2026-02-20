@@ -14,7 +14,9 @@ namespace Auth.IntegrationTests;
 
 /// <summary>
 /// The handler driven directly, on a bare <see cref="DefaultHttpContext"/>: the cases the in-memory test server cannot make
-/// (Kestrel's own rejections of a request body, a client that has gone, a response that has started).
+/// (Kestrel's own rejections of a request body, a client that has gone, a response that has started). One theory runs the
+/// handler and the security headers in a minimal test-server pipeline, in the order Program.cs gives them, with a final step
+/// that throws as a body read does.
 /// </summary>
 public sealed class ErrorHandlingMiddlewareTests
 {
