@@ -25,8 +25,10 @@ public sealed record ResponseHeaderMetadata(int Status, string Name, JsonSchemaT
 public static class EndpointMetadata
 {
     /// <summary>
-    /// Documents the JSON body the endpoint reads. It is not <c>Accepts</c> on purpose: that would make the routing
-    /// answer <c>415</c> to another content type, and the contract is <c>400 invalid_request</c>, said by the handler.
+    /// Documents the JSON body the endpoint reads. It is not <c>Accepts</c> on purpose: that would make the routing answer
+    /// its own bare <c>415</c> to another content type, and the contract is <c>400 invalid_request</c>, said by the handler.
+    /// The <c>415</c> of the contract is another one: <see cref="JsonCharsetGuard"/> answers <c>415 unsupported_media_type</c>
+    /// to a JSON body declared with a charset other than UTF-8.
     /// </summary>
     public static RouteHandlerBuilder ReadsJson<T>(this RouteHandlerBuilder builder)
     {

@@ -15,8 +15,8 @@ namespace Auth.Server.Seeding;
 /// default roles of the active manifest). The optional second one (<see cref="UnverifiedEmailKey"/>,
 /// <see cref="UnverifiedPasswordKey"/>) has not confirmed its email: until self-service sign-up exists it is the only
 /// way to have an account that needs verification (spec 0004, Decision 2), and it is a member with a role that does not
-/// manage members (the first role of the company, by name, that holds neither <c>members:manage</c> nor <c>*</c>; else a new empty role
-/// <c>member</c>). Each user is created only when both of its settings are present. Seeding is idempotent and never
+/// manage members (the first role of the company, by name, that holds neither <c>members:manage</c> nor <c>*</c>; else a
+/// new empty role <c>member</c>). Each user is created only when both of its settings are present. Seeding is idempotent and never
 /// resets the password of an existing user or moves a member to another company.
 /// </summary>
 public static partial class DevUserSeeder

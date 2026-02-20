@@ -119,6 +119,17 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Fact]
+    public async Task The_name_order_is_ordinal_so_upper_case_comes_first()
+    {
+        await using var factory = WithSecondUser(Factory())
+            .WithManifest("permissions: [a:b]\ndefault_roles:\n  owner: [\"*\"]\n  alpha: [a:b]\n  Zeta: [a:b]\n");
+        _ = factory.Services;
+
+        // Ordinal: 'Z' (U+005A) sorts before 'a' (U+0061), unlike a culture-aware order, which would give alpha.
+        Assert.Equal(("Development", "Zeta"), await MembershipOfAsync(factory, UnverifiedEmail));
+    }
+
+    [Fact]
     public async Task A_role_that_holds_members_manage_or_star_is_never_the_second_users()
     {
         await using var factory = WithSecondUser(Factory())

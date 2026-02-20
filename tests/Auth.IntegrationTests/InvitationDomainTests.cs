@@ -34,7 +34,7 @@ public sealed class InvitationDomainTests(PostgresFixture postgres, KeyMaterialF
     [InlineData("x@example.c0m")]
     [InlineData("x@example.c")]
     [InlineData("x@example.xn--")]
-    [InlineData("x@example.xn--@")]
+    [InlineData("x@example.xn--é")]   // the typed xn-- branch refuses a character outside ASCII after the prefix
     [InlineData("x@example.1")]
     public void A_domain_whose_last_label_is_not_letters_or_xn_and_more_is_refused(string email)   // criterion 7
     {

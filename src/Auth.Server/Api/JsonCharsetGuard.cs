@@ -31,11 +31,17 @@ public static class JsonCharsetGuard
             && !path.Equals(LogoutEndpoint.LogoutPath + "/", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Every <c>charset</c> parameter is looked at, not only the one the parser reports (the first): a body declared UTF-16 in any
+    /// of them is refused.
+    /// </summary>
     internal static bool IsRefused(string? contentType) =>
         MediaTypeHeaderValue.TryParse(contentType, out var parsed)
-        && JsonObjectBody.IsJson(contentType)
-        && parsed.Charset.HasValue
-        && !HeaderUtilities.RemoveQuotes(parsed.Charset).Equals("utf-8", StringComparison.OrdinalIgnoreCase);   // charset="utf-8" keeps its quotes in the parsed value
+        && string.Equals(parsed.MediaType.Value, JsonObjectBody.JsonMediaType, StringComparison.OrdinalIgnoreCase)
+        && parsed.Parameters.Any(parameter =>
+            string.Equals(parameter.Name.Value, "charset", StringComparison.OrdinalIgnoreCase)
+            // charset="utf-8" keeps its quotes in the parsed value
+            && !HeaderUtilities.RemoveQuotes(parameter.Value).Equals("utf-8", StringComparison.OrdinalIgnoreCase));
 
     public static IApplicationBuilder UseJsonCharsetGuard(this IApplicationBuilder app)
     {

@@ -75,8 +75,9 @@ public static class EmailInput
     /// <list type="bullet">
     /// <item>one that <see cref="MayStandForAnotherAddress">may stand for another address</see>;</item>
     /// <item>one whose domain is a literal (<c>joe@[10.0.0.5]</c>), has no dot (<c>joe@localhost</c>, <c>joe@intranet</c>)
-    /// or ends in a part of digits only (<c>joe@10.0.0.5</c>). Here a member, not an account, chooses where a mail goes,
-    /// and a manager must not make the instance's mail relay deliver to an internal host.</item>
+    /// or ends in a label that is neither <c>xn--</c> plus more nor two or more letters (<c>joe@10.0.0.5</c>,
+    /// <c>joe@127.0x1</c>, <c>joe@host.123</c>). Here a member, not an account, chooses where a mail goes, and a manager must
+    /// not make the instance's mail relay deliver to an internal host.</item>
     /// </list>
     /// The domain rule must hold for the domain the relay is given, not only for the one typed. The transport hands the
     /// relay MimeKit's IDN-encoded form of the address or, to a relay that takes UTF-8 addresses, the address as typed,
