@@ -48,6 +48,18 @@ public sealed class ProxyEnvironmentTests
         Assert.Equal("", pinned["Auth:Proxy:KnownProxies"]);
     }
 
+    [Theory]
+    [InlineData("ASPNETCORE_")]
+    [InlineData("DOTNET_")]
+    [InlineData("aspnetcore_")]
+    public void A_variable_the_host_reads_with_a_prefix_is_pinned_under_the_name_configuration_sees(string prefix)
+    {
+        var pinned = Pinned((prefix + "Auth__Proxy__KnownNetworks__0", "10.250.0.0/24"));
+
+        Assert.Equal("", Assert.Single(pinned).Value);
+        Assert.Equal("Auth:Proxy:KnownNetworks:0", Assert.Single(pinned).Key);
+    }
+
     [Fact]
     public void Other_variables_are_left_alone()
     {

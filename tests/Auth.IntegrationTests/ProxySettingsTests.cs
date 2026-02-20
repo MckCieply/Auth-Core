@@ -82,8 +82,8 @@ public sealed class ProxySettingsTests
     [InlineData(ProxySettings.KnownNetworksKey, "::ffff:0.0.0.0/96")]       // every IPv4 client of a dual-stack listener
     [InlineData(ProxySettings.KnownNetworksKey, "::ffff:10.250.0.0/120")]
     [InlineData(ProxySettings.KnownNetworksKey, "::/64")]                   // a range that holds the whole mapped range
-    [InlineData(ProxySettings.KnownNetworksKey, "::/80")]                   // the longest range that still holds all of it
-    [InlineData(ProxySettings.KnownNetworksKey, "::ff00:0:0/88")]           // a range inside it, at the edge of the fixed bits
+    [InlineData(ProxySettings.KnownNetworksKey, "::/80")]                   // the longest range starting at :: that still holds all of it
+    [InlineData(ProxySettings.KnownNetworksKey, "::ff00:0:0/88")]           // holds it without starting at ::, so only the bit comparison refuses it
     public void A_bad_entry_stops_the_host_naming_the_key_and_not_the_value(string key, string value)
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Load(new() { [key + ":0"] = value }));
