@@ -90,8 +90,9 @@ public sealed class JsonCharsetTests(PostgresFixture postgres, KeyMaterialFixtur
     [InlineData("application/json; charset=utf-8; charset=utf-16", true)]   // twice: the parser reports only one of them, so the guard looks at every one, and a body declared utf-16 anywhere is refused
     [InlineData("application/json; charset=utf-16; charset=utf-8", true)]
     [InlineData("application/json; charset=utf-8; charset=UTF-8", false)]
+    [InlineData("application/json; charset", true)]   // a parameter with no value: an empty one is not utf-8, as with charset=""
     [InlineData("application/json", false)]
-    [InlineData("text/plain; charset=utf-16", false)]                // not JSON: the handler's own 400
+    [InlineData("text/plain; charset=utf-16", false)]               // not JSON: the handler's own 400
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("not a content type", false)]
