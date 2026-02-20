@@ -60,9 +60,9 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
     [Fact]
     public async Task The_429_says_how_long_to_wait_on_the_clock()   // criterion 1
     {
-        // The clock of SessionTestBase starts at the real time, in the middle of a ten-second segment: start on a segment boundary
-        // so that the arithmetic below does not depend on when the test runs.
-        Clock.Advance(TimeSpan.FromMilliseconds(10_000 - (Clock.GetUtcNow().ToUnixTimeMilliseconds() % 10_000)));
+        // The limiter counts from the moment it was made, on the timestamp of the injected clock, and the fake clock stands still
+        // until a test moves it: the host was built before this method, so the first request is exactly on a segment boundary
+        // and the arithmetic below does not depend on when the test runs.
         for (var i = 1; i <= 3; i++)
         {
             using var answered = await UnknownLogin(i);

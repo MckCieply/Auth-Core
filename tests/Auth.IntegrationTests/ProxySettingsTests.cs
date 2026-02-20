@@ -77,11 +77,53 @@ public sealed class ProxySettingsTests
     [InlineData(ProxySettings.KnownProxiesKey, "10.250.0.0/24")]     // a network where an address belongs
     [InlineData(ProxySettings.KnownProxiesKey, "proxy.internal")]    // a name, not an address
     [InlineData(ProxySettings.KnownProxiesKey, "300.1.1.1")]
+    [InlineData(ProxySettings.KnownProxiesKey, "10.0.7")]            // the framework would read it as 10.0.0.7
+    [InlineData(ProxySettings.KnownProxiesKey, "10")]                // ... as 0.0.0.10
+    [InlineData(ProxySettings.KnownProxiesKey, "0x0a000007")]        // ... as 10.0.0.7
+    [InlineData(ProxySettings.KnownProxiesKey, "010.0.0.7")]         // ... as 8.0.0.7 (octal)
+    [InlineData(ProxySettings.KnownProxiesKey, "fe80::1%eth0")]      // a scope id would be dropped silently
+    [InlineData(ProxySettings.KnownNetworksKey, "010.250.0.0/24")]   // octal: 8.250.0.0/24
+    [InlineData(ProxySettings.KnownNetworksKey, "10.250/16")]        // 10.250.0.0/16 written short
+    [InlineData(ProxySettings.KnownNetworksKey, "0.0.0.0/0")]        // every address: trusting everyone
+    [InlineData(ProxySettings.KnownNetworksKey, "::/0")]
     public void A_bad_entry_stops_the_host_naming_the_key_and_not_the_value(string key, string value)
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Load(new() { [key + ":0"] = value }));
 
         Assert.Contains($"'{key}'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(value, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("TRUE")]
+    [InlineData(" True ")]
+    public void The_framework_switch_that_trusts_every_sender_stops_the_host_and_points_to_the_settings(string value)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => Load(new() { ["ForwardedHeaders_Enabled"] = value }));
+
+        Assert.Contains("ASPNETCORE_FORWARDEDHEADERS_ENABLED", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(ProxySettings.KnownNetworksKey, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(ProxySettings.KnownProxiesKey, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void The_framework_switch_being_off_or_blank_is_no_reason_to_stop(string value) =>
+        Assert.True(Load(new() { ["ForwardedHeaders_Enabled"] = value }).IsEmpty);
+
+    [Fact]
+    public void Plain_ipv6_ranges_and_addresses_in_their_usual_spelling_are_accepted()
+    {
+        var settings = Load(new()
+        {
+            [ProxySettings.KnownNetworksKey] = "2001:db8::/32",
+            [ProxySettings.KnownProxiesKey] = "::1",
+        });
+
+        Assert.Equal(["2001:db8::/32"], settings.Networks.Select(n => n.ToString()));
+        Assert.Equal([IPAddress.IPv6Loopback], settings.Proxies);
     }
 }

@@ -71,6 +71,13 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[RateLimitSettings.EnabledKey] = "false";
         _settings[ProxySettings.KnownNetworksKey] = "";
         _settings[ProxySettings.KnownProxiesKey] = "";
+        // The list form of a variable of the machine (Auth__Proxy__KnownNetworks__0) adds children that the two keys above do not
+        // cover: every such variable is pinned to blank as well.
+        foreach (var name in Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                     .Where(name => name.StartsWith("Auth__Proxy__", StringComparison.OrdinalIgnoreCase)))
+        {
+            _settings[name.Replace("__", ":", StringComparison.Ordinal)] = "";
+        }
         // The manifest: a file of this host's own, so that a test changes it without touching another's.
         _manifestDirectory = Directory.CreateDirectory(
             Path.Combine(Path.GetTempPath(), "auth-core-manifest-" + Guid.NewGuid().ToString("N"))).FullName;

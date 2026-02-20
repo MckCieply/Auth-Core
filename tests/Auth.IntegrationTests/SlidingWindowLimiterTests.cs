@@ -150,6 +150,73 @@ public sealed class SlidingWindowLimiterTests
         Assert.False(Try(3, "busy").Allowed);
     }
 
+    /// <summary>A clock whose wall time can be set to anything, while its timestamp only ever rises: what a real machine does.</summary>
+    private sealed class SteppedClock : TimeProvider
+    {
+        private long _milliseconds;
+
+        public DateTimeOffset Wall { get; set; } = Start;
+
+        public override DateTimeOffset GetUtcNow() => Wall;
+
+        public override long GetTimestamp() => _milliseconds;
+
+        public override long TimestampFrequency => 1_000;
+
+        public void Pass(TimeSpan span)
+        {
+            _milliseconds += (long)span.TotalMilliseconds;
+            Wall += span;
+        }
+    }
+
+    [Fact]
+    public void A_wall_clock_set_back_does_not_keep_a_partition_blocked()   // an NTP step, a manual change
+    {
+        var clock = new SteppedClock();
+        var limiter = new SlidingWindowLimiter(clock);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(limiter.TryAcquire(RatePolicy.Login, "a", 3).Allowed);
+        }
+
+        Assert.False(limiter.TryAcquire(RatePolicy.Login, "a", 3).Allowed);
+
+        clock.Wall -= TimeSpan.FromHours(1);    // the step back
+        clock.Pass(TimeSpan.FromSeconds(61));   // a minute of real time goes by; the wall clock is still an hour behind where it was
+
+        Assert.True(limiter.TryAcquire(RatePolicy.Login, "a", 3).Allowed);
+    }
+
+    [Fact]
+    public void A_wall_clock_set_back_does_not_stop_idle_partitions_from_being_forgotten()
+    {
+        var clock = new SteppedClock();
+        var limiter = new SlidingWindowLimiter(clock);
+        Assert.True(limiter.TryAcquire(RatePolicy.Login, "gone", 3).Allowed);
+
+        clock.Wall -= TimeSpan.FromDays(1);
+        clock.Pass(TimeSpan.FromMinutes(5));
+        Assert.True(limiter.TryAcquire(RatePolicy.Login, "newcomer", 3).Allowed);
+
+        Assert.Equal(1, limiter.PartitionCount);
+    }
+
+    [Fact]
+    public void A_wall_clock_set_forward_does_not_let_a_partition_through_early()
+    {
+        var clock = new SteppedClock();
+        var limiter = new SlidingWindowLimiter(clock);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(limiter.TryAcquire(RatePolicy.Login, "a", 3).Allowed);
+        }
+
+        clock.Wall += TimeSpan.FromHours(1);
+
+        Assert.False(limiter.TryAcquire(RatePolicy.Login, "a", 3).Allowed);
+    }
+
     [Fact]
     public void Requests_that_arrive_together_cannot_pass_the_limit()
     {

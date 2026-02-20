@@ -9,6 +9,8 @@ public readonly record struct RateDecision(bool Allowed, int RetryAfterSeconds);
 /// seconds, counted on the injected clock. A request is let through when the six segments add up to less than the limit. A
 /// refused request counts nothing. When one is refused, the answer says how many seconds pass before the window holds fewer
 /// requests than the limit, at least 1. The counters live in memory (one instance per product, ADR 0001): a restart clears them.
+/// Time is the clock's monotonic timestamp, counted from the creation of the limiter, not its wall clock: a step of the wall clock
+/// (NTP, a manual change) must not leave a partition blocked, or let one through early.
 /// Partitions that have been idle for a whole window are removed once a minute, so memory follows the last minute's traffic.
 /// </summary>
 public sealed class SlidingWindowLimiter(TimeProvider clock)
@@ -18,7 +20,8 @@ public sealed class SlidingWindowLimiter(TimeProvider clock)
     private const long SweepIntervalMilliseconds = 60_000;
 
     private readonly ConcurrentDictionary<(RatePolicy Policy, string Partition), Window> _windows = new();
-    private long _lastSweep = clock.GetUtcNow().ToUnixTimeMilliseconds();
+    private readonly long _started = clock.GetTimestamp();
+    private long _lastSweep;
 
     /// <summary>How many partitions are being counted (for the tests).</summary>
     public int PartitionCount => _windows.Count;
@@ -27,7 +30,7 @@ public sealed class SlidingWindowLimiter(TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(partition);
 
-        var now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+        var now = ElapsedMilliseconds();
         SweepIfDue(now);
         while (true)
         {
@@ -43,6 +46,12 @@ public sealed class SlidingWindowLimiter(TimeProvider clock)
             }
         }
     }
+
+    /// <summary>
+    /// Milliseconds since the limiter was made, on the timestamp clock. <c>GetElapsedTime</c> divides before it multiplies, so a
+    /// timestamp of nanoseconds that has run for months cannot overflow the way <c>timestamp * 1000</c> would.
+    /// </summary>
+    private long ElapsedMilliseconds() => (long)clock.GetElapsedTime(_started).TotalMilliseconds;
 
     private void SweepIfDue(long now)
     {
