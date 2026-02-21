@@ -39,7 +39,7 @@ public sealed partial class AuditLog(
     /// Writes the row now, from a scope and a context of its own: the request's context may be tracking a change that is half made,
     /// and this save must neither write it nor be undone by it. It never throws, except an <see cref="OperationCanceledException"/>
     /// for the caller's own cancelled token: any other failure is logged at <c>Warning</c> and swallowed, and nothing retries the row.
-    /// EF Core logs its own <c>Error</c> lines (the failed command, the failed save) for such a failure as well: they are expected, and the Warning of this class is the one to look for.
+    /// EF Core logs its own <c>Error</c> lines (for example the connection, the failed command and the failed save) for such a failure as well: they are expected, and the Warning of this class is the one to look for.
     /// </summary>
     public async Task WriteAloneAsync(AuditEntry entry, Actor? actor = null, CancellationToken cancellationToken = default)
     {
