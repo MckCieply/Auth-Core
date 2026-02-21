@@ -1,3 +1,5 @@
+using Auth.Server.Audit;
+
 namespace Auth.Server.Tenancy;
 
 public static class TenancyServices
@@ -13,6 +15,9 @@ public static class TenancyServices
         services.AddSingleton(ManifestSettings.Load(configuration, contentRoot));
         services.AddSingleton<ManifestHolder>();
         services.AddSingleton<ManifestActivator>();
+        // The audit writer needs the request's client address; the operator CLI has no request, and the accessor then says so.
+        services.AddHttpContextAccessor();
+        services.AddScoped<AuditLog>();
         services.AddScoped<CompanyService>();
         services.AddScoped<MembershipReader>();
         services.AddScoped<CompanyGuard>();

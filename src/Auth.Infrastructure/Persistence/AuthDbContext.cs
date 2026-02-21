@@ -26,6 +26,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
 
     public DbSet<ActiveManifest> ActiveManifests => Set<ActiveManifest>();
 
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -117,6 +119,30 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         {
             manifest.HasKey(m => m.Id);
             manifest.Property(m => m.Id).ValueGeneratedNever();
+        });
+
+        // Spec 0008 → Audit log. The names are the contract's (snake_case): the backup runbook queries them. No foreign keys on purpose.
+        builder.Entity<AuditEvent>(audit =>
+        {
+            audit.ToTable("audit_events");
+            audit.HasKey(a => a.Id);
+            audit.Property(a => a.Id).HasColumnName("id").ValueGeneratedNever();
+            audit.Property(a => a.OccurredAt).HasColumnName("occurred_at");
+            audit.Property(a => a.Kind).HasColumnName("kind").HasMaxLength(40);
+            audit.Property(a => a.ActorUserId).HasColumnName("actor_user_id");
+            audit.Property(a => a.SubjectUserId).HasColumnName("subject_user_id");
+            audit.Property(a => a.SubjectEmail).HasColumnName("subject_email").HasMaxLength(256);
+            audit.Property(a => a.OrgId).HasColumnName("org_id");
+            audit.Property(a => a.OrgName).HasColumnName("org_name").HasMaxLength(100);
+            audit.Property(a => a.TargetId).HasColumnName("target_id");
+            audit.Property(a => a.ClientIp).HasColumnName("client_ip").HasMaxLength(64);
+            audit.Property(a => a.Details).HasColumnName("details").HasColumnType("jsonb");
+            // Pruning selects by age; the runbook's queries select by account, company and address.
+            audit.HasIndex(a => a.OccurredAt);
+            audit.HasIndex(a => a.SubjectUserId);
+            audit.HasIndex(a => a.ActorUserId);
+            audit.HasIndex(a => a.OrgId);
+            audit.HasIndex(a => a.ClientIp);
         });
     }
 }

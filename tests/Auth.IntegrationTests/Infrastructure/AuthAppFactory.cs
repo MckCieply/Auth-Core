@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Identity;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Network;
 using Auth.Server.RateLimiting;
@@ -71,6 +72,8 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[RateLimitSettings.EnabledKey] = "false";
         _settings[ProxySettings.KnownNetworksKey] = "";
         _settings[ProxySettings.KnownProxiesKey] = "";
+        // A variable of the machine cannot change how long a test host keeps its audit rows.
+        _settings[AuditSettings.RetentionDaysKey] = "";
         // The list form of a variable of the machine (Auth__Proxy__KnownNetworks__0) adds children that the two keys above do not
         // cover: every such variable is pinned to blank as well.
         foreach (var (key, value) in ProxyEnvironment.PinnedBlankFromProcess())
