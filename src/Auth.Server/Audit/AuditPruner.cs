@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Email;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Server.Audit;
@@ -11,7 +12,16 @@ public sealed partial class AuditPruner(IServiceScopeFactory scopes, TimeProvide
 {
     public async Task<int> PruneOnceAsync(CancellationToken cancellationToken)
     {
-        var threshold = clock.GetUtcNow() - TimeSpan.FromDays(settings.RetentionDays);
+        var now = StorableTime.Now(clock);
+
+        // A retention beyond the dates that exist (the setting has no upper bound) keeps every row; it must not overflow.
+        if (settings.RetentionDays >= (now - DateTimeOffset.MinValue).TotalDays)
+        {
+            LogPruned(logger, 0);
+            return 0;
+        }
+
+        var threshold = now - TimeSpan.FromDays(settings.RetentionDays);
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();

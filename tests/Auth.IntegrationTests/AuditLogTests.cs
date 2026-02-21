@@ -185,7 +185,10 @@ public sealed class AuditLogTests : TenancyTestBase
         }
 
         Assert.Empty(await RowsAsync());
-        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Warning && e.Category.EndsWith("AuditLog", StringComparison.Ordinal));
+        Assert.Single(Logs.Entries, e => e.Level == LogLevel.Warning && e.Category.EndsWith("AuditLog", StringComparison.Ordinal));
+        // EF Core logs its own Error lines for the failed command and the failed save; they are expected, and the Warning above is the line to look for.
+        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Error && e.Category == "Microsoft.EntityFrameworkCore.Database.Command");
+        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Error && e.Category == "Microsoft.EntityFrameworkCore.Update");
     }
 
     [Fact]
@@ -215,6 +218,82 @@ public sealed class AuditLogTests : TenancyTestBase
 
         Assert.Equal(1, await db.SaveChangesAsync(TestContext.Current.CancellationToken));   // the caller's own save still works
         Assert.Equal([AuditKinds.OrgRenamed], (await RowsAsync()).Select(r => r.Kind));
+    }
+
+    [Fact]
+    public async Task Details_that_cannot_be_serialised_are_logged_and_never_thrown()
+    {
+        var loop = new Dictionary<string, object?>();
+        loop["self"] = loop;   // deeper than any JSON writer goes
+        using (var scope = Factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AuditLog>().WriteAloneAsync(
+                new AuditEntry { Kind = AuditKinds.LoginFailed, Details = loop },
+                cancellationToken: TestContext.Current.CancellationToken);
+        }
+
+        Assert.Empty(await RowsAsync());
+        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Warning && e.Category.EndsWith("AuditLog", StringComparison.Ordinal));
+    }
+
+    private sealed class CancellingScopes(Func<OperationCanceledException> make) : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => throw make();
+    }
+
+    private AuditLog LogWithScopes(IServiceScope scope, IServiceScopeFactory scopes) =>
+        new(
+            scope.ServiceProvider.GetRequiredService<AuthDbContext>(),
+            scopes,
+            scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>(),
+            Clock,
+            scope.ServiceProvider.GetRequiredService<ILogger<AuditLog>>());
+
+    [Fact]
+    public async Task A_cancellation_that_did_not_come_from_the_callers_token_is_swallowed()
+    {
+        using var scope = Factory.Services.CreateScope();
+        var audit = LogWithScopes(scope, new CancellingScopes(() => new OperationCanceledException("a timeout inside the store")));
+
+        await audit.WriteAloneAsync(Entry(), cancellationToken: TestContext.Current.CancellationToken);   // does not throw
+
+        Assert.Empty(await RowsAsync());
+        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Warning && e.Category.EndsWith("AuditLog", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_callers_own_cancelled_token_is_the_one_exception_that_is_thrown()
+    {
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        using var scope = Factory.Services.CreateScope();
+        var audit = scope.ServiceProvider.GetRequiredService<AuditLog>();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => audit.WriteAloneAsync(Entry(), cancellationToken: cancelled.Token));
+
+        Assert.Empty(await RowsAsync());
+    }
+
+    [Fact]
+    public async Task The_id_and_the_time_of_a_row_come_from_the_injected_clock()
+    {
+        var moment = new DateTimeOffset(2030, 1, 2, 3, 4, 5, 678, TimeSpan.Zero);
+        Clock.SetUtcNow(moment);
+        using (var scope = Factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AuditLog>().WriteAloneAsync(Entry(), cancellationToken: TestContext.Current.CancellationToken);
+        }
+
+        var row = Assert.Single(await RowsAsync());
+        Assert.Equal(moment, row.OccurredAt.ToUniversalTime());
+        var bytes = row.Id.ToByteArray(bigEndian: true);   // a version 7 id begins with the Unix time in milliseconds
+        long milliseconds = 0;
+        for (var i = 0; i < 6; i++)
+        {
+            milliseconds = (milliseconds << 8) | bytes[i];
+        }
+
+        Assert.Equal(moment.ToUnixTimeMilliseconds(), milliseconds);
     }
 
     [Fact]

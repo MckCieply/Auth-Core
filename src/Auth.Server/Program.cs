@@ -35,10 +35,11 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
-// Fail fast on a bad proxy list or a bad rate limit, naming the key (spec 0008).
+// Fail fast on a bad proxy list, a bad rate limit or a bad audit retention, naming the key (spec 0008).
 var proxies = ProxySettings.Load(builder.Configuration);
 builder.Services.AddSingleton(proxies);
 builder.Services.AddSingleton(RateLimitSettings.Load(builder.Configuration));
+builder.Services.AddSingleton(AuditSettings.Load(builder.Configuration));
 builder.Services.AddSingleton<SlidingWindowLimiter>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
@@ -54,7 +55,6 @@ builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LockoutPruner>();
-builder.Services.AddSingleton(AuditSettings.Load(builder.Configuration));
 builder.Services.AddSingleton<AuditPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();

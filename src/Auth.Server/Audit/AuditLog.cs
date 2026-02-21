@@ -21,7 +21,11 @@ public sealed partial class AuditLog(
     public const int MaxEmailLength = 256;
     public const int MaxOrgNameLength = 100;
 
-    /// <summary>Adds the row to the context; the caller's own <c>SaveChangesAsync</c> writes it.</summary>
+    /// <summary>
+    /// Adds the row to the context; the caller's own <c>SaveChangesAsync</c> writes it. Call it after every check that can refuse
+    /// the change and before the <c>SaveChangesAsync</c> that commits it. A row staged after that save, or on a path that saves
+    /// nothing, is not written, or is written by whatever saves next on this context.
+    /// </summary>
     public AuditEvent Stage(AuditEntry entry, Actor? actor = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -33,21 +37,23 @@ public sealed partial class AuditLog(
 
     /// <summary>
     /// Writes the row now, from a scope and a context of its own: the request's context may be tracking a change that is half made,
-    /// and this save must neither write it nor be undone by it. A failure is logged and swallowed, and nothing retries the row.
+    /// and this save must neither write it nor be undone by it. It never throws, except an <see cref="OperationCanceledException"/>
+    /// for the caller's own cancelled token: any other failure is logged at <c>Warning</c> and swallowed, and nothing retries the row.
+    /// EF Core logs its own <c>Error</c> lines (the failed command, the failed save) for such a failure as well: they are expected, and the Warning of this class is the one to look for.
     /// </summary>
     public async Task WriteAloneAsync(AuditEntry entry, Actor? actor = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        var row = Build(entry, actor);
         try
         {
+            var row = Build(entry, actor);
             await using var scope = scopes.CreateAsyncScope();
             var own = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
             own.AuditEvents.Add(row);
             await own.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             LogNotWritten(logger, entry.Kind, exception);
         }
@@ -61,10 +67,11 @@ public sealed partial class AuditLog(
             details["via"] = "cli";
         }
 
+        var now = StorableTime.Now(clock);
         return new AuditEvent
         {
-            Id = Guid.CreateVersion7(),
-            OccurredAt = StorableTime.Now(clock),
+            Id = Guid.CreateVersion7(now),
+            OccurredAt = now,
             Kind = entry.Kind,
             ActorUserId = entry.ActorUserId ?? actor?.UserId,
             SubjectUserId = entry.SubjectUserId,

@@ -42,6 +42,26 @@ public sealed class AuditTableTests(PostgresFixture postgres, KeyMaterialFixture
     }
 
     [Fact]
+    public async Task The_text_columns_have_the_lengths_the_writer_cuts_to()
+    {
+        var lengths = await StringsAsync(
+            $"""
+            SELECT column_name || ':' || data_type || ':' || character_maximum_length || ':' || is_nullable AS "Value"
+            FROM information_schema.columns
+            WHERE table_name = 'audit_events' AND character_maximum_length IS NOT NULL ORDER BY ordinal_position
+            """);
+
+        Assert.Equal(
+            [
+                "kind:character varying:40:NO",
+                "subject_email:character varying:256:YES",
+                "org_name:character varying:100:YES",
+                "client_ip:character varying:64:YES",
+            ],
+            lengths);
+    }
+
+    [Fact]
     public async Task The_table_has_no_foreign_key_so_that_a_row_outlives_what_it_names()
     {
         var keys = await StringsAsync(
