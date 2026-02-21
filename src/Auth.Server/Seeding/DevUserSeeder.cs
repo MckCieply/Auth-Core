@@ -127,7 +127,7 @@ public static partial class DevUserSeeder
             return existing.Id;
         }
 
-        var created = await companies.CreateAsync(name, ct);
+        var created = await companies.CreateAsync(name, ct, via: "seed");
         if (!created.Succeeded)
         {
             throw new InvalidOperationException($"Could not seed the development company: {created.Error}.");

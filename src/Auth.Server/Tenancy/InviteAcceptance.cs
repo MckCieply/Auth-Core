@@ -1,6 +1,7 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
@@ -20,7 +21,7 @@ public sealed record InvitePreview(string OrgName, string Email, string Role);
 /// </summary>
 public sealed class InviteAcceptance(
     AuthDbContext db, UserManager<ApplicationUser> users, IOpenIddictTokenManager tokens,
-    IOpenIddictAuthorizationManager authorizations, TimeProvider clock)
+    IOpenIddictAuthorizationManager authorizations, TimeProvider clock, AuditLog audit)
 {
     /// <summary>
     /// The company, address and role of a usable invitation; the token stays usable. Unknown, used, expired, cancelled and
@@ -147,6 +148,20 @@ public sealed class InviteAcceptance(
         await AccountSessions.EndAllAsync(db, tokens, authorizations, account, cancellationToken);
 
         db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now });
+        // The person who holds the link is anonymous: no actor. Who joined, where, and as what; never the link or the password.
+        audit.Stage(new AuditEntry
+        {
+            Kind = AuditKinds.InviteAccepted,
+            SubjectUserId = account.Id,
+            SubjectEmail = account.Email,
+            OrgId = invite.CompanyId,
+            OrgName = await audit.CompanyNameAsync(invite.CompanyId, cancellationToken),
+            TargetId = invite.Id,
+            Details = new Dictionary<string, object?>
+            {
+                ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
+            },
+        });
         await db.SaveChangesAsync(cancellationToken);
 
         // Not the request's token: a client that goes away now must not leave the outcome open.

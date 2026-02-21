@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 
@@ -10,7 +11,8 @@ namespace Auth.Server.Tenancy;
 /// that begins by locking the company, so that the last-manager check and the change cannot be interleaved with another.
 /// </summary>
 public sealed class MemberService(
-    AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations)
+    AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations,
+    AuditLog audit)
 {
     /// <summary>The company's members, sorted by address, ordinally.</summary>
     public async Task<IReadOnlyList<MemberItem>> ListAsync(Guid companyId, CancellationToken cancellationToken)
@@ -71,7 +73,20 @@ public sealed class MemberService(
             return Outcome.Fail(TenancyErrors.LastManager);
         }
 
+        var previousRole = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == membership.RoleId).Select(r => r.Name).SingleAsync(cancellationToken);
         membership.RoleId = roleId;
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.MemberRoleChanged,
+                SubjectUserId = userId,
+                SubjectEmail = await EmailOfAsync(userId, cancellationToken),
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = roleId,
+                Details = new Dictionary<string, object?> { ["from"] = previousRole, ["to"] = role.Name },
+            },
+            current);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
@@ -121,7 +136,25 @@ public sealed class MemberService(
             }
         }
 
+        var removedRole = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == membership.RoleId).Select(r => r.Name).SingleAsync(cancellationToken);
+        var details = new Dictionary<string, object?> { ["role"] = removedRole };
+        if (force)
+        {
+            details["forced"] = true;
+        }
+
         db.Memberships.Remove(membership);
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.MemberRemoved,
+                SubjectUserId = userId,
+                SubjectEmail = await EmailOfAsync(userId, cancellationToken),
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                Details = details,
+            },
+            current);
         await db.SaveChangesAsync(cancellationToken);
 
         // Every session ends: the refresh tokens, and the authorizations they hang on (spec 0002, Decision 11).
@@ -132,6 +165,9 @@ public sealed class MemberService(
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
     }
+
+    private Task<string?> EmailOfAsync(Guid userId, CancellationToken cancellationToken) =>
+        db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.Email).FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>
     /// Safety rule 1, the other way round: whether the actor may remove this member or change their role. Not when the

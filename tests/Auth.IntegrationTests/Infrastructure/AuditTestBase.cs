@@ -13,10 +13,21 @@ public abstract class AuditTestBase : TenancyTestBase
 {
     protected const string WrongPassword = "Wrong-Password-1";
 
+    /// <summary>The address <see cref="SendFromCallerAsync"/> sends from, which a row of the request's change carries.</summary>
+    protected const string CallerAddress = "203.0.113.5";
+
     protected AuditTestBase(PostgresFixture postgres, KeyMaterialFixture keys)
         : base(postgres, keys)
     {
         Factory.WithRemoteAddressHeader().WithoutHostedService<AuditPruningService>();
+    }
+
+    /// <summary>A company API call with a bearer token that names <see cref="CallerAddress"/> as its client address.</summary>
+    protected async Task<HttpResponseMessage> SendFromCallerAsync(HttpMethod method, string path, string token, object? body = null)
+    {
+        using var request = TenancyApi.Request(method, path, token, body);
+        request.Headers.Add(AuthAppFactory.RemoteAddressHeader, CallerAddress);
+        return await Client.SendAsync(request);
     }
 
     /// <summary>The rows of the audit log, of one kind or all, oldest first.</summary>

@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.EntityFrameworkCore;
@@ -9,13 +10,14 @@ namespace Auth.Server.Tenancy;
 /// Creates companies (spec 0005 → Concepts): only the operator does, through the CLI, and the development seeder. And renames
 /// one, for a member who may manage it.
 /// </summary>
-public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock)
+public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
 {
     /// <summary>
     /// Creates a company with its own copy of the active default roles. After that its roles are its own: a later
     /// change to the manifest does not touch them.
     /// </summary>
-    public async Task<Outcome<Guid>> CreateAsync(string name, CancellationToken cancellationToken)
+    /// <param name="via">Who made it, for the audit log: <c>cli</c> for the operator, <c>seed</c> for the development seeder.</param>
+    public async Task<Outcome<Guid>> CreateAsync(string name, CancellationToken cancellationToken, string via = "cli")
     {
         ArgumentNullException.ThrowIfNull(name);
 
@@ -37,6 +39,14 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             });
         }
 
+        // The row is written by the same save as the company and its roles.
+        audit.Stage(new AuditEntry
+        {
+            Kind = AuditKinds.OrgCreated,
+            OrgId = company.Id,
+            OrgName = name,
+            Details = new Dictionary<string, object?> { ["via"] = via },
+        });
         await db.SaveChangesAsync(cancellationToken);
         return Outcome.Ok(company.Id);
     }
@@ -64,8 +74,19 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             return entered.Without;
         }
 
+        var previous = await audit.CompanyNameAsync(companyId, cancellationToken);
         await db.Companies.Where(c => c.Id == companyId)
             .ExecuteUpdateAsync(set => set.SetProperty(c => c.Name, name), cancellationToken);
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.OrgRenamed,
+                OrgId = companyId,
+                OrgName = name,
+                Details = new Dictionary<string, object?> { ["from"] = previous, ["to"] = name },
+            },
+            entered.Value);
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
     }

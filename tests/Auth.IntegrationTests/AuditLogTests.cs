@@ -23,11 +23,13 @@ public sealed class AuditLogTests : TenancyTestBase
     /// <summary>PostgreSQL stores <c>jsonb</c> in its own normal form, with a space after each colon.</summary>
     private static string? Compact(string? json) => json?.Replace(" ", "", StringComparison.Ordinal);
 
+    /// <summary>The rows these tests wrote: not the <c>org.created</c> of the development company, which every host's seed writes.</summary>
     private async Task<List<AuditEvent>> RowsAsync()
     {
         using var scope = Factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.AsNoTracking()
+        var rows = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.AsNoTracking()
             .OrderBy(a => a.OccurredAt).ToListAsync(TestContext.Current.CancellationToken);
+        return [.. rows.Where(a => a.Kind != AuditKinds.OrgCreated || Compact(a.Details) != """{"via":"seed"}""")];
     }
 
     [Fact]
@@ -307,7 +309,7 @@ public sealed class AuditLogTests : TenancyTestBase
         }
 
         var reasons = await InDbAsync(db => db.Database
-            .SqlQuery<string>($"""SELECT details->>'reason' AS "Value" FROM audit_events""")
+            .SqlQuery<string>($"""SELECT details->>'reason' AS "Value" FROM audit_events WHERE kind = 'login.failed'""")
             .ToListAsync(TestContext.Current.CancellationToken));
         Assert.Equal(["wrong_password"], reasons);
     }

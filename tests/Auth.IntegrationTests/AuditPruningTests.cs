@@ -35,6 +35,7 @@ public sealed class AuditPruningTests : SessionTestBase
     {
         using var scope = Factory.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.AsNoTracking()
+            .Where(a => a.Kind == AuditKinds.LoginFailed)
             .OrderBy(a => a.SubjectEmail).Select(a => a.SubjectEmail).ToListAsync(TestContext.Current.CancellationToken);
     }
 
@@ -100,6 +101,7 @@ public sealed class AuditPruningTests : SessionTestBase
         using (var scope = factory.Services.CreateScope())
         {
             var remaining = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.AsNoTracking()
+                .Where(a => a.Kind == AuditKinds.LoginFailed)
                 .Select(a => a.SubjectEmail).ToListAsync(TestContext.Current.CancellationToken);
             Assert.Equal(["six"], remaining);
         }
@@ -123,7 +125,7 @@ public sealed class AuditPruningTests : SessionTestBase
 
         Assert.Equal(0, removed);
         using var check = factory.Services.CreateScope();
-        Assert.Equal(1, await check.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, await check.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.CountAsync(a => a.Kind == AuditKinds.LoginFailed, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -146,7 +148,7 @@ public sealed class AuditPruningTests : SessionTestBase
         while (left > 0 && DateTime.UtcNow < deadline)
         {
             using var scope = after.Services.CreateScope();
-            left = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.CountAsync(TestContext.Current.CancellationToken);
+            left = await scope.ServiceProvider.GetRequiredService<AuthDbContext>().AuditEvents.CountAsync(a => a.Kind == AuditKinds.LoginFailed, TestContext.Current.CancellationToken);
             if (left > 0)
             {
                 await Task.Delay(100, TestContext.Current.CancellationToken);

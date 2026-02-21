@@ -35,6 +35,10 @@ public sealed partial class AuditLog(
         return row;
     }
 
+    /// <summary>The company's name now: the <c>org_name</c> of a change made under the company's lock.</summary>
+    public Task<string?> CompanyNameAsync(Guid companyId, CancellationToken cancellationToken) =>
+        db.Companies.AsNoTracking().Where(c => c.Id == companyId).Select(c => (string?)c.Name).FirstOrDefaultAsync(cancellationToken);
+
     /// <summary>
     /// Writes the row now, from a scope and a context of its own: the request's context may be tracking a change that is half made,
     /// and this save must neither write it nor be undone by it. It never throws, except an <see cref="OperationCanceledException"/>
