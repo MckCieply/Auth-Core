@@ -1,6 +1,8 @@
 using System.Net;
+using System.Text.Json;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
 
@@ -42,6 +44,7 @@ public sealed class AuditRoleFlowsTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal("Auditor", AuditApi.Text(row, "name"));
         Assert.Equal("""["reports:read","templates:manage"]""", AuditApi.Raw(row, "permissions"));
         Assert.Null(row.SubjectUserId);
+        Assert.Null(row.SubjectEmail);
         Assert.Equal(CallerAddress, row.ClientIp);
         Assert.Equal(["name", "permissions"], AuditApi.DetailNames(row));
     }
@@ -51,6 +54,8 @@ public sealed class AuditRoleFlowsTests(PostgresFixture postgres, KeyMaterialFix
     {
         var (company, admin, token) = await CompanyWithAdminAsync();
         var user = await RoleIdAsync(company, "user");
+        var before = await InDbAsync(db => db.CompanyRoles.Where(r => r.Id == user).Select(r => r.Permissions).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.NotEmpty(before);
 
         using (var taken = await TenancyApi.Send(Client, HttpMethod.Put, $"/auth/org/roles/{user}", token, new { name = "admin", permissions = ReportsRead }))
         {
@@ -73,8 +78,10 @@ public sealed class AuditRoleFlowsTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(user, row.TargetId);
         Assert.Equal("Staff", AuditApi.Text(row, "name"));
         Assert.Equal("user", AuditApi.Text(row, "previous_name"));
-        Assert.Contains("templates:manage", row.Details!, StringComparison.Ordinal);
-        Assert.Contains("reports:approve", row.Details!, StringComparison.Ordinal);   // what the role held before
+        Assert.Equal("""["templates:manage"]""", AuditApi.Raw(row, "permissions"));
+        Assert.Equal(JsonSerializer.Serialize(before), AuditApi.Raw(row, "previous_permissions"));   // what the role held before
+        Assert.Null(row.SubjectUserId);
+        Assert.Null(row.SubjectEmail);
         Assert.Equal(company, row.OrgId);
         Assert.Equal("Acme", row.OrgName);
         Assert.Equal(CallerAddress, row.ClientIp);
@@ -107,5 +114,8 @@ public sealed class AuditRoleFlowsTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(company, row.OrgId);
         Assert.Equal("Acme", row.OrgName);
         Assert.Equal(CallerAddress, row.ClientIp);
+        Assert.Null(row.SubjectUserId);
+        Assert.Null(row.SubjectEmail);
+        Assert.Equal(["name", "permissions"], AuditApi.DetailNames(row));
     }
 }

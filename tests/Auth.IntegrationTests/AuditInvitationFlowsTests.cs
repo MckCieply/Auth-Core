@@ -98,6 +98,7 @@ public sealed class AuditInvitationFlowsTests(PostgresFixture postgres, KeyMater
         Assert.Equal(company, row.OrgId);
         Assert.Equal("Acme", row.OrgName);
         Assert.Equal(CallerAddress, row.ClientIp);
+        Assert.Equal(["role"], AuditApi.DetailNames(row));
         Assert.Single(await AuditAsync(AuditKinds.InviteSent));
     }
 
@@ -130,6 +131,7 @@ public sealed class AuditInvitationFlowsTests(PostgresFixture postgres, KeyMater
         Assert.Null(row.SubjectUserId);
         Assert.Equal("user", AuditApi.Text(row, "role"));
         Assert.Equal(CallerAddress, row.ClientIp);
+        Assert.Equal(["role"], AuditApi.DetailNames(row));
     }
 
     [Fact]

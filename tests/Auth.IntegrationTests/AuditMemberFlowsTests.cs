@@ -73,6 +73,25 @@ public sealed class AuditMemberFlowsTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
+    public async Task A_member_who_holds_less_than_a_role_can_neither_invite_to_it_nor_give_it_and_nothing_is_recorded()   // rule 1
+    {
+        var (company, _, _) = await CompanyWithAdminAsync();
+        await AddRoleAsync(company, "Lead", "members:manage");
+        await AddMemberAsync(company, "lead@acme.test", "Lead");
+        var worker = await AddMemberAsync(company, Worker, "user");
+        var lead = (await SessionApi.LoginAsync(Client, "lead@acme.test", UserPassword)).AccessToken;
+        var adminRole = await RoleIdAsync(company, "admin");
+
+        using var invite = await TenancyApi.Send(Client, HttpMethod.Post, "/auth/org/invites", lead, new { email = "new@acme.test", role_id = adminRole });
+        using var change = await TenancyApi.Send(Client, HttpMethod.Put, $"/auth/org/members/{worker}/role", lead, new { role_id = adminRole });
+
+        await TenancyApi.AssertErrorAsync(invite, HttpStatusCode.Forbidden, "permission_not_held");
+        await TenancyApi.AssertErrorAsync(change, HttpStatusCode.Forbidden, "permission_not_held");
+        Assert.Empty(await AuditAsync(AuditKinds.InviteSent));
+        Assert.Empty(await AuditAsync(AuditKinds.MemberRoleChanged));
+    }
+
+    [Fact]
     public async Task The_operator_removing_the_last_manager_by_force_is_recorded_as_forced_and_by_the_cli()   // criterion 8
     {
         var (company, admin, _) = await CompanyWithAdminAsync();
@@ -88,11 +107,13 @@ public sealed class AuditMemberFlowsTests(PostgresFixture postgres, KeyMaterialF
         Assert.Null(row.ActorUserId);
         Assert.Equal(admin, row.SubjectUserId);
         Assert.Equal("cli", AuditApi.Text(row, "via"));
-        Assert.Equal("true", AuditApi.Text(row, "forced")?.ToLowerInvariant());
+        Assert.Equal("true", AuditApi.Raw(row, "forced"));   // the JSON boolean
         Assert.Equal("boss@acme.test", row.SubjectEmail);
         Assert.Equal(company, row.OrgId);
         Assert.Equal("Acme", row.OrgName);
         Assert.Equal("admin", AuditApi.Text(row, "role"));
         Assert.Null(row.ClientIp);
+        Assert.Null(row.TargetId);
+        Assert.Equal(["forced", "role", "via"], AuditApi.DetailNames(row));
     }
 }

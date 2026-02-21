@@ -71,8 +71,7 @@ public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHo
 
         var role = new CompanyRole { CompanyId = companyId, Name = name, NormalizedName = normalizedName, Permissions = held };
         db.CompanyRoles.Add(role);
-        await db.SaveChangesAsync(cancellationToken);
-        // The role has its id now. The row is saved before the commit, so the role and its row are both there or neither.
+        // The row is written by the same save as the role.
         audit.Stage(
             new AuditEntry
             {

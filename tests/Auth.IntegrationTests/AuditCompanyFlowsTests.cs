@@ -19,6 +19,8 @@ public sealed class AuditCompanyFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Null(row.ActorUserId);
         Assert.Null(row.SubjectUserId);
         Assert.Null(row.ClientIp);   // the CLI has no request
+        Assert.Null(row.SubjectEmail);
+        Assert.Null(row.TargetId);
         Assert.Equal("cli", AuditApi.Text(row, "via"));
         Assert.Equal(["via"], AuditApi.DetailNames(row));
     }
@@ -33,6 +35,10 @@ public sealed class AuditCompanyFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal("seed", AuditApi.Text(row, "via"));
         Assert.Null(row.ActorUserId);
         Assert.Null(row.ClientIp);   // the seeder runs outside a request
+        Assert.Null(row.SubjectUserId);
+        Assert.Null(row.SubjectEmail);
+        Assert.Null(row.TargetId);
+        Assert.Equal(["via"], AuditApi.DetailNames(row));
     }
 
     [Fact]

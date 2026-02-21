@@ -1,6 +1,7 @@
 using System.Net;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Auth.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -27,5 +28,41 @@ public sealed class AuditAtomicityTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal("Acme", await InDbAsync(db => db.Companies.Where(c => c.Id == company).Select(c => c.Name).SingleAsync(TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == worker, TestContext.Current.CancellationToken)));
         Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.Name == "Auditor", TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task When_the_row_cannot_be_written_the_invitation_is_not_made()
+    {
+        var (company, _, token) = await CompanyWithAdminAsync();
+        var user = await RoleIdAsync(company, "user");
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync("DROP TABLE audit_events", TestContext.Current.CancellationToken));
+
+        using var invite = await TenancyApi.Send(Client, HttpMethod.Post, "/auth/org/invites", token, new { email = "new@acme.test", role_id = user });
+
+        Assert.Equal(HttpStatusCode.InternalServerError, invite.StatusCode);
+        Assert.Equal(0, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(m => m.Kind == MailKind.Invitation, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task When_the_row_cannot_be_written_the_acceptance_is_not_made()
+    {
+        const string email = "new@acme.test";
+        var (company, _, token) = await CompanyWithAdminAsync();
+        using (var sent = await TenancyApi.Send(Client, HttpMethod.Post, "/auth/org/invites", token, new { email, role_id = await RoleIdAsync(company, "user") }))
+        {
+            Assert.Equal(HttpStatusCode.Accepted, sent.StatusCode);
+        }
+
+        await DispatchAsync();
+        var link = TokenIn(Mail.Sent[^1]);
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync("DROP TABLE audit_events", TestContext.Current.CancellationToken));
+
+        using var accepted = await TenancyApi.Accept(Client, link, "Brand-New-Passw0rd");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, accepted.StatusCode);
+        Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(i => i.Email == email, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Email == email, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == company, TestContext.Current.CancellationToken)));
     }
 }
