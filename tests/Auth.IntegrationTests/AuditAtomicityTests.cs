@@ -1,7 +1,7 @@
 using System.Net;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
-using Auth.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
