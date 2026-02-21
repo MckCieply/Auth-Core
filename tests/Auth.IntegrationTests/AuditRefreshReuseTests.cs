@@ -101,6 +101,9 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
 
     private async Task<(bool Rejected, int Rows)> ReplayAfterAsync(TimeSpan delay)
     {
+        // The clock starts at the real time, with sub-microsecond ticks, and PostgreSQL stores the redemption date to the microsecond:
+        // from a whole second on, "exactly the leeway" is exact.
+        Clock.SetUtcNow(new DateTimeOffset((Clock.GetUtcNow().UtcTicks / TimeSpan.TicksPerSecond + 1) * TimeSpan.TicksPerSecond, TimeSpan.Zero));
         var login = await SessionApi.LoginAsync(Client, Factory);
         await SessionApi.RefreshOk(Client, login.RefreshToken);
 

@@ -1,6 +1,5 @@
 using Auth.Server.Audit;
 using Auth.Server.Tenancy;
-using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;

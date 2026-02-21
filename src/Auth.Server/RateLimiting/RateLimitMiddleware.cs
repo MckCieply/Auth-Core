@@ -7,8 +7,8 @@ namespace Auth.Server.RateLimiting;
 /// Counts every request under <c>/auth/</c> against the policy of its method and path, per client address, and answers
 /// <c>429</c> over the limit without any other work: nothing downstream runs, so no password is evaluated and no lockout streak
 /// changes. After the forwarded-headers middleware (the address is the real one) and before authentication (login is OpenIddict's,
-/// inside it). A refusal is written to the audit log, at most once per partition (address, or the /64 of an IPv6 one) and policy per minute, before the answer is sent;
-/// the write never fails the request.
+/// inside it). A refusal is written to the audit log, at most once per partition (an address, or the /64 of an IPv6 one) and
+/// policy per minute, before the answer is sent; the write never fails the request.
 /// </summary>
 public sealed class RateLimitMiddleware(RequestDelegate next, SlidingWindowLimiter limiter, RateLimitSettings settings, RateLimitAudit audit)
 {
