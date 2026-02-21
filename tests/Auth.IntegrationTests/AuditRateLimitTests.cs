@@ -74,6 +74,29 @@ public sealed class AuditRateLimitTests : AuditTestBase
     }
 
     [Fact]
+    public async Task Addresses_of_one_ipv6_64_are_one_event_and_the_row_names_the_first_address()   // the dedupe follows the limiter's partition
+    {
+        await ExhaustAsync("2001:db8:1:2::1", 1);
+
+        using (var first = await UnknownLogin(4, "2001:db8:1:2::1"))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, first.StatusCode);
+        }
+
+        foreach (var (number, remote) in new[] { (5, "2001:db8:1:2::2"), (6, "2001:db8:1:2::3"), (7, "2001:db8:1:2:ffff::4") })
+        {
+            using var refused = await UnknownLogin(number, remote);
+            Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);   // the same /64, so the same counter
+        }
+
+        var row = await SingleAsync(AuditKinds.RateLimitHit);   // four refusals from four addresses of one /64: one row
+        Assert.Equal("2001:db8:1:2::1", row.ClientIp);   // the whole address of the first refusal, not the /64
+
+        using var elsewhere = await UnknownLogin(8, "2001:db8:1:3::1");   // another /64 has its own counter
+        Assert.Equal(HttpStatusCode.Unauthorized, elsewhere.StatusCode);
+    }
+
+    [Fact]
     public async Task A_refused_request_writes_no_login_row_for_it()   // nothing downstream ran
     {
         await ExhaustAsync("203.0.113.9", 1);

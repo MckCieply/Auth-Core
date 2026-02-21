@@ -31,17 +31,18 @@ public static class LogoutEndpoint
         {
             // The revocation and the row of the logout are one transaction (spec 0008: a change and its row are written together, or
             // neither is). OpenIddict's stores use the request's AuthDbContext, so their saves join it. If the row cannot be written the
-            // logout is a 500 and the session is still there.
-            await using var transaction = await db.Database.BeginTransactionAsync(http.RequestAborted);
-            var subject = await RevokeFamilyAsync(reference, tokens, authorizations, http.RequestAborted);
+            // logout is a 500 and the session is still there. Not the request's token: a client that goes away now must not leave the
+            // outcome open (a half-done logout would keep the session alive).
+            await using var transaction = await db.Database.BeginTransactionAsync(CancellationToken.None);
+            var subject = await RevokeFamilyAsync(reference, tokens, authorizations, CancellationToken.None);
             if (Guid.TryParse(subject, out var userId))
             {
                 // The account the cookie's session belonged to, from the token store; a logout with no valid cookie writes nothing.
                 audit.Stage(new AuditEntry { Kind = AuditKinds.Logout, ActorUserId = userId, SubjectUserId = userId });
-                await db.SaveChangesAsync(http.RequestAborted);
+                await db.SaveChangesAsync(CancellationToken.None);
             }
 
-            await transaction.CommitAsync(http.RequestAborted);
+            await transaction.CommitAsync(CancellationToken.None);
         }
 
         RefreshCookie.Clear(http.Response);

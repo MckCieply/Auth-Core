@@ -1,11 +1,15 @@
 using System.Net;
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Auth.Server.Seeding;
+using Auth.Server.Sessions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.Abstractions;
 
 namespace Auth.IntegrationTests;
 
@@ -19,6 +23,17 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         RateLimitApi.SendAsync(
             Client, HttpMethod.Post, "/auth/login", remote, null, System.Text.Json.JsonSerializer.Serialize(new { email, password }));
 
+    private Task<HttpResponseMessage> PostFromAsync(string path, object body, string remote = Remote) =>
+        RateLimitApi.SendAsync(Client, HttpMethod.Post, path, remote, null, System.Text.Json.JsonSerializer.Serialize(body));
+
+    /// <summary>A logout from <paramref name="remote"/> carrying the refresh cookie.</summary>
+    private async Task<HttpResponseMessage> LogoutFromAsync(string refreshToken, string remote = Remote)
+    {
+        using var request = RateLimitApi.Request(HttpMethod.Post, SessionApi.LogoutPath, remote, null, null);
+        request.Headers.TryAddWithoutValidation("Cookie", $"{SessionApi.CookieName}={refreshToken}");
+        return await Client.SendAsync(request, TestContext.Current.CancellationToken);
+    }
+
     // ---- login
 
     [Fact]
@@ -26,6 +41,9 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
     {
         using var response = await LoginFromAsync(Factory.SeedEmail, Factory.SeedPassword);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var accessToken = body.RootElement.GetProperty("access_token").GetString()!;
+        var refreshToken = SessionApi.RefreshCookieOf(response).Value.Value!;
 
         var row = await SingleAsync(AuditKinds.LoginSucceeded);
         var seed = await Factory.SeedUserIdAsync();
@@ -37,7 +55,7 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(Remote, row.ClientIp);
         Assert.Null(row.TargetId);
         Assert.Empty(await AuditAsync(AuditKinds.LoginFailed));
-        await AssertNoSecretsAsync(Factory.SeedPassword);
+        await AssertNoSecretsAsync(Factory.SeedPassword, accessToken, refreshToken);   // neither token the login handed out is in any row
     }
 
     [Fact]
@@ -117,6 +135,32 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);   // the session was not revoked: the cookie still refreshes
     }
 
+    [Fact]
+    public async Task A_client_that_goes_away_once_the_cookie_is_read_still_ends_the_session_and_leaves_its_row()   // the outcome is never left open
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+        using var gone = new CancellationTokenSource();
+        await gone.CancelAsync();
+        var context = new DefaultHttpContext { RequestAborted = gone.Token };   // the connection dropped before the endpoint ran
+        context.Request.Headers.Cookie = $"{SessionApi.CookieName}={session.RefreshToken}";
+
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var services = scope.ServiceProvider;
+            context.RequestServices = services;
+            _ = await LogoutEndpoint.HandleAsync(
+                context,
+                services.GetRequiredService<IOpenIddictTokenManager>(),
+                services.GetRequiredService<IOpenIddictAuthorizationManager>(),
+                services.GetRequiredService<AuthDbContext>(),
+                services.GetRequiredService<AuditLog>());
+        }
+
+        using var refresh = await SessionApi.Refresh(Client, session.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(refresh);   // the session is gone
+        Assert.Single(await AuditAsync(AuditKinds.Logout));
+    }
+
     private Task<int> TokenCountAsync() =>
         InDbAsync(db => db.Database.SqlQueryRaw<int>("""SELECT count(*)::int AS "Value" FROM "OpenIddictTokens" """).SingleAsync(TestContext.Current.CancellationToken));
 
@@ -187,12 +231,14 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);   // no cookie: no row
         Assert.Empty(await AuditAsync(AuditKinds.Logout));
 
-        using var real = await SessionApi.Logout(Client, session.RefreshToken);
+        using var real = await LogoutFromAsync(session.RefreshToken);
         Assert.Equal(HttpStatusCode.NoContent, real.StatusCode);
         var row = await SingleAsync(AuditKinds.Logout);
         var seed = await Factory.SeedUserIdAsync();
         Assert.Equal(seed, row.ActorUserId);
         Assert.Equal(seed, row.SubjectUserId);
+        Assert.Equal(Remote, row.ClientIp);
+        await AssertNoSecretsAsync(session.RefreshToken, session.AccessToken);
 
         using var again = await SessionApi.Logout(Client, session.RefreshToken);   // already revoked
         using var junk = await SessionApi.Logout(Client, "a-cookie-nobody-issued");
@@ -209,7 +255,7 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         for (var i = 0; i < 5; i++)
         {
             Clock.Advance(PastTheGap);   // one accepted request per minute (spec 0004)
-            using var response = await AccountApi.Forgot(Client, "Typed@Example.test");
+            using var response = await PostFromAsync(AccountApi.ForgotPath, new { email = "Typed@Example.test" });
             await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
         }
 
@@ -224,6 +270,7 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
             Assert.Equal("Typed@Example.test", row.SubjectEmail);   // as typed
             Assert.Null(row.SubjectUserId);   // no account: the request does not look one up
             Assert.Null(row.ActorUserId);
+            Assert.Equal(Remote, row.ClientIp);   // the request's address, though the row is written from the store's own scope
         });
     }
 
@@ -260,10 +307,11 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
 
         Assert.Empty(await AuditAsync(AuditKinds.PasswordReset));   // nothing changed, so no row
 
-        using var done = await AccountApi.Reset(Client, token, NewPassword);
+        using var done = await PostFromAsync(AccountApi.ResetPath, new { token, new_password = NewPassword });
         await AccountApi.AssertEmptyAsync(done, HttpStatusCode.NoContent);
 
         var row = await SingleAsync(AuditKinds.PasswordReset);
+        Assert.Equal(Remote, row.ClientIp);
         Assert.Equal(await Factory.SeedUserIdAsync(), row.SubjectUserId);
         Assert.Equal(Factory.SeedEmail, row.SubjectEmail);
         Assert.Null(row.ActorUserId);   // the person who holds the link is anonymous
@@ -295,6 +343,7 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         var row = await SingleAsync(AuditKinds.EmailVerified);
         Assert.Equal(user.Id, row.SubjectUserId);
         Assert.Equal("new@example.com", row.SubjectEmail);
+        Assert.Equal("unknown", row.ClientIp);   // the helper sends no address
         await AssertNoSecretsAsync(token);
     }
 }

@@ -2,6 +2,9 @@ using System.Net;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Auth.Server.Seeding;
+using Auth.Server.Sessions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Auth.IntegrationTests;
 
@@ -23,6 +26,7 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(seed, row.SubjectUserId);
         Assert.Equal(await DevCompanyIdAsync(), row.OrgId);
         Assert.Equal(DevUserSeeder.DefaultOrgName, row.OrgName);
+        Assert.Equal("unknown", row.ClientIp);   // the helper sends no address
 
         using var again = await SessionApi.Refresh(Client, login.RefreshToken);   // the family is revoked now: nothing more to detect
         await SessionApi.AssertInvalidGrantAsync(again);
@@ -64,6 +68,72 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
         }
 
         Assert.Empty(await AuditAsync(AuditKinds.RefreshReuseDetected));
+    }
+
+    [Fact]
+    public async Task A_replay_exactly_at_the_leeway_is_rejected_and_recorded()   // the boundary is OpenIddict's, and ours is the same
+    {
+        var (rejected, rows) = await ReplayAfterAsync(SessionPolicy.ReuseLeeway);
+
+        Assert.True(rejected);
+        Assert.Equal(1, rows);
+    }
+
+    [Fact]
+    public async Task A_replay_a_millisecond_inside_the_leeway_is_let_through_and_not_recorded()
+    {
+        var (rejected, rows) = await ReplayAfterAsync(SessionPolicy.ReuseLeeway - TimeSpan.FromMilliseconds(1));
+
+        Assert.False(rejected);
+        Assert.Equal(0, rows);
+    }
+
+    [Fact]
+    public async Task A_row_exists_exactly_when_the_replay_is_answered_invalid_grant()
+    {
+        foreach (var delay in new[] { TimeSpan.FromMilliseconds(14_999), TimeSpan.FromSeconds(15), TimeSpan.FromMilliseconds(15_001) })
+        {
+            var (rejected, rows) = await ReplayAfterAsync(delay);
+            Assert.Equal(rejected ? 1 : 0, rows);
+            await InDbAsync(db => db.AuditEvents.ExecuteDeleteAsync(TestContext.Current.CancellationToken));
+        }
+    }
+
+    private async Task<(bool Rejected, int Rows)> ReplayAfterAsync(TimeSpan delay)
+    {
+        var login = await SessionApi.LoginAsync(Client, Factory);
+        await SessionApi.RefreshOk(Client, login.RefreshToken);
+
+        Clock.Advance(delay);
+        using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
+        var rejected = replay.StatusCode == HttpStatusCode.Unauthorized;
+        if (rejected)
+        {
+            await SessionApi.AssertInvalidGrantAsync(replay);
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        }
+
+        return (rejected, (await AuditAsync(AuditKinds.RefreshReuseDetected)).Count);
+    }
+
+    [Fact]
+    public async Task A_failing_lookup_of_the_company_does_not_change_the_answer_or_stop_the_revocation()
+    {
+        var login = await SessionApi.LoginAsync(Client, Factory);
+        var next = await SessionApi.RefreshOk(Client, login.RefreshToken);
+        Clock.Advance(TimeSpan.FromSeconds(20));
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync("""ALTER TABLE "Memberships" RENAME TO "Memberships_away" """, TestContext.Current.CancellationToken));
+
+        using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
+        using var afterReplay = await SessionApi.Refresh(Client, next.RefreshToken);
+
+        await SessionApi.AssertInvalidGrantAsync(replay);        // not a 500: OpenIddict still decides the reuse
+        await SessionApi.AssertInvalidGrantAsync(afterReplay);   // and still revoked the family
+        Assert.Empty(await AuditAsync(AuditKinds.RefreshReuseDetected));   // nothing was written for it
+        Assert.Contains(Logs.Entries, e => e.Level == LogLevel.Warning && e.Category.EndsWith("RefreshReuseAuditHandler", StringComparison.Ordinal));
     }
 
     [Fact]
