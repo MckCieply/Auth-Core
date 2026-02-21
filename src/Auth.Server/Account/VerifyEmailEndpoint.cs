@@ -1,5 +1,6 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
@@ -18,12 +19,13 @@ public static class VerifyEmailEndpoint
     private static readonly string[] Fields = ["token"];
 
     public static async Task<IResult> HandleAsync(
-        HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, TimeProvider clock)
+        HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, TimeProvider clock, AuditLog audit)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(users);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(audit);
 
         var cancellationToken = http.RequestAborted;
         var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Fields, cancellationToken);
@@ -48,6 +50,9 @@ public static class VerifyEmailEndpoint
             throw new InvalidOperationException(
                 "Could not confirm the email: " + string.Join(", ", result.Errors.Select(e => e.Code)));
         }
+
+        audit.Stage(new AuditEntry { Kind = AuditKinds.EmailVerified, SubjectUserId = user.Id, SubjectEmail = user.Email });
+        await db.SaveChangesAsync(CancellationToken.None);
 
         // Not the request's token: a client that goes away now must not leave the outcome open.
         await transaction.CommitAsync(CancellationToken.None);

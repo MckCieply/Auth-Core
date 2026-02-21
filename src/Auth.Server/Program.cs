@@ -41,6 +41,7 @@ builder.Services.AddSingleton(proxies);
 builder.Services.AddSingleton(RateLimitSettings.Load(builder.Configuration));
 builder.Services.AddSingleton(AuditSettings.Load(builder.Configuration));
 builder.Services.AddSingleton<SlidingWindowLimiter>();
+builder.Services.AddSingleton<RateLimitAudit>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);

@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Lockout;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,7 +13,12 @@ namespace Auth.Server.Email;
 /// </summary>
 public sealed class MailRequestStore(IServiceScopeFactory scopes, TimeProvider clock)
 {
-    public async Task<MailLimitDecision> SubmitAsync(MailKind kind, string normalizedEmail, CancellationToken cancellationToken)
+    /// <param name="typedEmail">
+    /// The address as it was typed. A password reset request is recorded in the audit log with it, in the same transaction as the
+    /// queued request, and with no account: the request does not look the account up (spec 0004).
+    /// </param>
+    public async Task<MailLimitDecision> SubmitAsync(
+        MailKind kind, string normalizedEmail, CancellationToken cancellationToken, string? typedEmail = null)
     {
         ArgumentNullException.ThrowIfNull(normalizedEmail);
 
@@ -28,6 +34,12 @@ public sealed class MailRequestStore(IServiceScopeFactory scopes, TimeProvider c
         if (decision.Allowed)
         {
             db.MailRequests.Add(new MailRequest { Kind = kind, NormalizedEmail = normalizedEmail, RequestedAt = now, NextAttemptAt = now });
+            if (kind == MailKind.PasswordReset && typedEmail is not null)
+            {
+                scope.ServiceProvider.GetRequiredService<AuditLog>().Stage(
+                    new AuditEntry { Kind = AuditKinds.PasswordResetRequested, SubjectEmail = typedEmail });
+            }
+
             await db.SaveChangesAsync(cancellationToken);
         }
 

@@ -1,5 +1,6 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
@@ -23,7 +24,7 @@ public static class ResetPasswordEndpoint
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users,
-        IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations, TimeProvider clock)
+        IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations, TimeProvider clock, AuditLog audit)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(db);
@@ -31,6 +32,7 @@ public static class ResetPasswordEndpoint
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(authorizations);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(audit);
 
         var cancellationToken = http.RequestAborted;
         var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Fields, cancellationToken);
@@ -68,6 +70,10 @@ public static class ResetPasswordEndpoint
 
         // Every session ends, every other link goes, the streak is cleared (spec 0004 → Effects of a reset).
         await AccountSessions.EndAllAsync(db, tokens, authorizations, user, cancellationToken);
+
+        // The row is written by the save inside this transaction: the reset and its row, both or neither. Who, never the link or the password.
+        audit.Stage(new AuditEntry { Kind = AuditKinds.PasswordReset, SubjectUserId = user.Id, SubjectEmail = user.Email });
+        await db.SaveChangesAsync(CancellationToken.None);
 
         // Not the request's token: a client that goes away now must not leave the outcome open.
         await transaction.CommitAsync(CancellationToken.None);

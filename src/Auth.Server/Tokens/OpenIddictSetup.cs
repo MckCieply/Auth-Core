@@ -95,7 +95,9 @@ public static class OpenIddictSetup
                 // authorization that comes with it must not leak into the access token's claim set.
                 options.AddEventHandler(RefreshTokenIssuanceHandler.Descriptor)
                     .AddEventHandler(AccessTokenClaimFilter.Descriptor)
-                    .AddEventHandler(SessionResponseHandler.Descriptor);
+                    .AddEventHandler(SessionResponseHandler.Descriptor)
+                    // Spec 0008: records a refresh token that is presented again after its leeway, just before OpenIddict revokes the family.
+                    .AddEventHandler(RefreshReuseAuditHandler.Descriptor);
 
                 options.AddSigningCertificate(keys.Signing)
                     .AddEncryptionCertificate(keys.Encryption);

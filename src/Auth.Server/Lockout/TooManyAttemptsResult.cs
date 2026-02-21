@@ -11,11 +11,14 @@ public sealed class TooManyAttemptsResult(TimeSpan retryAfter) : IResult
 {
     public const string Error = "too_many_attempts";
 
+    /// <summary>The seconds the answer says to wait: the cooldown rounded up, at least 1.</summary>
+    public static long SecondsOf(TimeSpan retryAfter) => Math.Max(1, (long)Math.Ceiling(retryAfter.TotalSeconds));
+
     public Task ExecuteAsync(HttpContext httpContext)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        var seconds = Math.Max(1, (long)Math.Ceiling(retryAfter.TotalSeconds));
+        var seconds = SecondsOf(retryAfter);
         httpContext.Response.Headers[HeaderNames.CacheControl] = "no-store";
         httpContext.Response.Headers[HeaderNames.Pragma] = "no-cache";
         httpContext.Response.Headers[HeaderNames.RetryAfter] = seconds.ToString(CultureInfo.InvariantCulture);
