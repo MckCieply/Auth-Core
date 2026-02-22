@@ -19,6 +19,7 @@ public static class TenancyServices
         services.AddHttpContextAccessor();
         services.AddScoped<AuditLog>();
         services.AddScoped<CompanyService>();
+        services.AddScoped<CompanyDeletionService>();
         services.AddScoped<MembershipReader>();
         services.AddScoped<CompanyGuard>();
         services.AddScoped<InvitationService>();

@@ -43,8 +43,9 @@ default_roles:
 ```
 
 - `permissions` are the strings your code passes to `require_permission`. Name them `resource:action`.
-- `members:manage`, `roles:manage` and `org:manage` are built in: they guard Auth-Core's company API, so you do not list
-  them, but a role may hold them. `"*"` stands for every permission of the catalog.
+- `members:manage`, `roles:manage`, `org:manage` and `org:delete` are built in: they guard Auth-Core's company API, so you do
+  not list them, but a role may hold them. `"*"` stands for every permission of the catalog (so the admin holds `org:delete`,
+  which lets them delete the whole company).
 - At least one default role must hold `members:manage` or `"*"`, so that the first admin of a company can manage it.
 - Auth-Core reads the file at startup (`Auth__Manifest__Path`; the overlay of step 6 mounts it). A broken file never stops
   the service: the last valid manifest stays active and `/auth/health` says `Degraded`.

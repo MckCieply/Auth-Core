@@ -41,10 +41,10 @@ public sealed class ManifestParserTests
         var manifest = ManifestParser.Parse(Valid).Manifest!;
 
         Assert.Equal(
-            ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             manifest.Catalog.Permissions);
         Assert.Equal("*", manifest.Catalog.Listed[0]);
-        Assert.Equal(7, manifest.Catalog.Listed.Count);
+        Assert.Equal(8, manifest.Catalog.Listed.Count);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class ManifestParserTests
               owner: [members:manage]
             """).Manifest!;
 
-        Assert.Equal(["docs:read", "members:manage", "org:manage", "roles:manage"], manifest.Catalog.Permissions);
+        Assert.Equal(["docs:read", "members:manage", "org:delete", "org:manage", "roles:manage"], manifest.Catalog.Permissions);
     }
 
     [Fact]

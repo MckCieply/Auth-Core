@@ -11,12 +11,14 @@ public sealed record ListOrgsCommand : AdminCommand;
 
 public sealed record RemoveMemberCommand(string Org, string Email, bool Force) : AdminCommand;
 
+public sealed record DeleteOrgCommand(string Org, string Confirm) : AdminCommand;
+
 /// <summary>The outcome of reading the arguments: a command, or the code of what is wrong with them.</summary>
 public readonly record struct AdminParseResult(AdminCommand? Command, string? Error);
 
 /// <summary>
-/// Reads the arguments of the four operator commands by hand (spec 0005 → Operator CLI): <c>--name value</c> or
-/// <c>--name=value</c> in any order, and the flag <c>--force</c> on <c>remove-member</c>. Four commands do not need a
+/// Reads the arguments of the five operator commands by hand (spec 0005 → Operator CLI, spec 0008): <c>--name value</c> or
+/// <c>--name=value</c> in any order, and the flag <c>--force</c> on <c>remove-member</c>. Five commands do not need a
 /// command-line library, and a library is one more dependency in an image that has to stay small.
 /// </summary>
 public static class AdminArguments
@@ -28,6 +30,7 @@ public static class AdminArguments
           invite        --org <id> --email <email> --role <name>
           list-orgs
           remove-member --org <id> --email <email> [--force]
+          delete-org    --org <id> --confirm <name>
         """;
 
     private static readonly Dictionary<string, (string[] Options, string[] Flags)> Commands = new(StringComparer.Ordinal)
@@ -36,6 +39,7 @@ public static class AdminArguments
         ["invite"] = (["org", "email", "role"], []),
         ["list-orgs"] = ([], []),
         ["remove-member"] = (["org", "email"], ["force"]),
+        ["delete-org"] = (["org", "confirm"], []),
     };
 
     /// <param name="args">What follows <c>admin</c> on the command line.</param>
@@ -110,6 +114,7 @@ public static class AdminArguments
                 "create-org" => new CreateOrgCommand(values["name"]),
                 "invite" => new InviteCommand(values["org"], values["email"], values["role"]),
                 "list-orgs" => new ListOrgsCommand(),
+                "delete-org" => new DeleteOrgCommand(values["org"], values["confirm"]),
                 _ => new RemoveMemberCommand(values["org"], values["email"], flags.Contains("force")),
             },
             null);

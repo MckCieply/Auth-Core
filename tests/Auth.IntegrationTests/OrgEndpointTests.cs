@@ -30,7 +30,7 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
         Assert.Equal("Development", me.GetProperty("org_name").GetString());
         Assert.Equal(["admin"], me.GetProperty("roles").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(
-            ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             me.GetProperty("permissions").EnumerateArray().Select(e => e.GetString()));
     }
 

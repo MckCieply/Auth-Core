@@ -19,7 +19,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
     private const string NoMembership = """{"error":"no_membership"}""";
 
     private static readonly string[] EveryPermission =
-        ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"];
+        ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"];
 
     private Task<SessionApi.Session> SeedLoginAsync() => SessionApi.LoginAsync(Client, Factory);
 
@@ -258,6 +258,6 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.DoesNotContain("templates:manage", permissions);
         Assert.DoesNotContain("reports:approve", permissions);
         Assert.Contains("orders:read", permissions);
-        Assert.Equal(["members:manage", "orders:read", "org:manage", "reports:read", "roles:manage"], permissions);
+        Assert.Equal(["members:manage", "orders:read", "org:delete", "org:manage", "reports:read", "roles:manage"], permissions);
     }
 }

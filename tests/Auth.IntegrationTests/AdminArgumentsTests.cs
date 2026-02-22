@@ -64,7 +64,7 @@ public sealed class AdminArgumentsTests
     public void No_command_and_an_unknown_command_are_errors()
     {
         Assert.Equal("missing_command", Error());
-        Assert.Equal("unknown_command", Error("delete-org"));
+        Assert.Equal("unknown_command", Error("drop-org"));
         Assert.Equal("unknown_command", Error("--name", "Acme"));
         Assert.Equal("unknown_command", Error("Create-Org", "--name", "Acme"));
     }

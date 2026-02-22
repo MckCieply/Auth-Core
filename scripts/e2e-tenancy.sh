@@ -252,7 +252,7 @@ login seed E2E_SEED_EMAIL E2E_SEED_PASSWORD
 PAYLOAD="$(jwt_payload "$tmp/seed.auth")"
 BODY="$PAYLOAD"
 expect_eq "step 2: roles" "$(val 'd["roles"]')" "['admin']"
-expect_eq "step 2: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 2: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 call GET /auth/me "" "$tmp/seed.auth"
 expect_status "step 2: GET /auth/me" 200
 expect_no_store "step 2: GET /auth/me"
@@ -312,13 +312,13 @@ login admin E2E_ADMIN_EMAIL E2E_PASSWORD
 BODY="$(jwt_payload "$tmp/admin.auth")"
 expect_eq "step 5: org_id" "$(val 'd["org_id"]')" "$A"
 expect_eq "step 5: roles" "$(val 'd["roles"]')" "['admin']"
-expect_eq "step 5: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 5: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 pass "step 5: ADMIN's token carries org_id of company A, roles [admin] and the expanded, sorted permissions without a star"
 
 # --- Step 6: ADMIN invites WORKER through the API ---------------------------------------------------------------------
 call GET /auth/org/roles "" "$tmp/admin.auth"
 expect_status "step 6: GET /auth/org/roles" 200
-expect_eq "step 6: catalog" "$(val 'd["catalog"]')" "['*', 'documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 6: catalog" "$(val 'd["catalog"]')" "['*', 'documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 USER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "user"][0]')"
 ADMIN_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "admin"][0]')"
 export E2E_USER_ROLE="$USER_ROLE" E2E_ADMIN_ROLE="$ADMIN_ROLE"

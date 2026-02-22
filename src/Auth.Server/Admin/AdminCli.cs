@@ -120,6 +120,16 @@ public static class AdminCli
                 await output.WriteLineAsync("Member removed; every session of the account has ended.");
                 return Done;
 
+            case DeleteOrgCommand delete:
+                var deleted = await operatorCommands.DeleteOrgAsync(delete.Org, delete.Confirm, cancellationToken);
+                if (!deleted.Succeeded)
+                {
+                    return await RefusedAsync(deleted, error);
+                }
+
+                await output.WriteLineAsync("Company deleted; every session of its members has ended.");
+                return Done;
+
             default:
                 throw new InvalidOperationException("A command that the parser makes is not handled.");
         }
