@@ -1,6 +1,7 @@
 using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Admin;
 using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,6 +29,30 @@ public sealed class AuditAtomicityTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal("Acme", await InDbAsync(db => db.Companies.Where(c => c.Id == company).Select(c => c.Name).SingleAsync(TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == worker, TestContext.Current.CancellationToken)));
         Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.Name == "Auditor", TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task When_the_row_cannot_be_written_the_company_is_not_deleted()   // every change reaches the database before the save: only the transaction undoes them
+    {
+        var (company, _, token) = await CompanyWithAdminAsync();
+        await AddMemberAsync(company, "worker@acme.test", "user");
+        var worker = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);
+        using (var sent = await TenancyApi.Send(Client, HttpMethod.Post, "/auth/org/invites", token, new { email = "new@acme.test", role_id = await RoleIdAsync(company, "user") }))
+        {
+            Assert.Equal(HttpStatusCode.Accepted, sent.StatusCode);
+        }
+
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync("DROP TABLE audit_events", TestContext.Current.CancellationToken));
+
+        var run = await OperatorCli.RunAsync(Factory, "delete-org", "--org", company.ToString(), "--confirm", "Acme");
+
+        Assert.Equal(AdminCli.Failed, run.Exit);
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(2, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(i => i.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.MailRequests.CountAsync(m => m.Kind == MailKind.Invitation, TestContext.Current.CancellationToken)));
+        _ = await SessionApi.RefreshOk(Client, worker.RefreshToken);   // the revocations were rolled back with the rest
     }
 
     [Fact]

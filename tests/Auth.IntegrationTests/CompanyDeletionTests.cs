@@ -3,6 +3,8 @@ using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using OpenIddict.Abstractions;
 
 namespace Auth.IntegrationTests;
 
@@ -16,9 +18,10 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
     [Fact]
     public async Task The_company_its_roles_members_invitations_and_their_queued_mails_are_deleted_and_nothing_else()   // criterion 10, 11
     {
-        var (acme, _, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var (acme, acmeAdmin, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
         var (globex, globexAdmin, globexToken) = await CompanyWithAdminAsync("Globex", "boss@globex.test");
+        _ = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);   // the admins logged in to get their tokens
         using (var one = await InviteAsync(adminToken, "new@acme.test", await RoleIdAsync(acme, "user")))
         {
             Assert.Equal(HttpStatusCode.Accepted, one.StatusCode);
@@ -47,6 +50,33 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         Assert.Equal(1, await CountAsync(db => db.Invites.CountAsync(i => i.CompanyId == globex, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Email == "boss@acme.test", TestContext.Current.CancellationToken)));
+
+        // Read from the store, so the revocation is proved apart from the membership check, which would refuse these sessions anyway.
+        await AssertSessionsAsync(acmeAdmin, revoked: true);
+        await AssertSessionsAsync(worker, revoked: true);
+        await AssertSessionsAsync(globexAdmin, revoked: false);
+    }
+
+    private async Task AssertSessionsAsync(Guid user, bool revoked)
+    {
+        var subject = user.ToString();
+        using var scope = Factory.Services.CreateScope();
+        var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
+        var authorizations = scope.ServiceProvider.GetRequiredService<IOpenIddictAuthorizationManager>();
+
+        var foundTokens = await tokens.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.NotEmpty(foundTokens);
+        foreach (var item in foundTokens)
+        {
+            Assert.Equal(revoked, await tokens.GetStatusAsync(item, TestContext.Current.CancellationToken) == OpenIddictConstants.Statuses.Revoked);
+        }
+
+        var foundGrants = await authorizations.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.NotEmpty(foundGrants);
+        foreach (var item in foundGrants)
+        {
+            Assert.Equal(revoked, await authorizations.GetStatusAsync(item, TestContext.Current.CancellationToken) == OpenIddictConstants.Statuses.Revoked);
+        }
     }
 
     [Fact]
@@ -115,7 +145,7 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
     [Fact]
     public async Task The_deletion_is_recorded_with_the_company_the_counts_and_the_operator_mark()   // criterion 8
     {
-        var (acme, admin, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var (acme, _, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         await AddMemberAsync(acme, "worker@acme.test", "user");
         using (var invite = await InviteAsync(adminToken, "new@acme.test", await RoleIdAsync(acme, "user")))
         {
@@ -132,6 +162,10 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         Assert.Equal("cli", AuditApi.Text(row, "via"));
         Assert.Equal("2", AuditApi.Text(row, "members"));
         Assert.Equal("1", AuditApi.Text(row, "invitations"));
-        Assert.NotEqual(Guid.Empty, admin);
+        Assert.Equal("2", AuditApi.Text(row, "roles"));   // the two default roles, admin and user
+        Assert.Equal(["invitations", "members", "roles", "via"], AuditApi.DetailNames(row));
+        Assert.Null(row.ClientIp);
+        Assert.Null(row.SubjectUserId);
+        Assert.Null(row.TargetId);
     }
 }
