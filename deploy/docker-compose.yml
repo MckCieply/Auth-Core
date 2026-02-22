@@ -10,7 +10,8 @@ name: auth-core
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # The tag says which release, the digest says which bytes (the same image as the notes sample's database job).
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_DB: auth
       POSTGRES_USER: auth
@@ -26,7 +27,8 @@ services:
 
   mailpit:
     # A mail catcher: the auth service sends to it over SMTP, the e2e script reads the mails from its HTTP API.
-    image: axllent/mailpit:v1.31.3
+    # Its API is unauthenticated: development only, on loopback (spec 0008).
+    image: axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
     ports:
       # Loopback only: the web UI and the API (http://localhost:8025). SMTP (1025) stays inside the compose network.
       - "127.0.0.1:8025:8025"
@@ -59,6 +61,16 @@ services:
       Auth__Keys__SigningKeyPath: /run/secrets/auth/signing.key
       Auth__Keys__EncryptionCertificatePath: /run/secrets/auth/encryption.crt
       Auth__Keys__EncryptionKeyPath: /run/secrets/auth/encryption.key
+      # The per-IP limits of spec 0008 (30 logins, 60 refreshes, 10 mail requests, 20 invitation requests and 300 other requests per
+      # minute and address) and how long the audit log keeps a row (90 days). A blank value is the default. Some of the older e2e
+      # scripts exceed the limits on purpose: run them with AUTH_RATE_LIMIT_ENABLED=false (see the header of each script).
+      Auth__RateLimit__Enabled: ${AUTH_RATE_LIMIT_ENABLED:-true}
+      Auth__RateLimit__Login__PermitPerMinute: ${AUTH_RATE_LIMIT_LOGIN:-}
+      Auth__RateLimit__Refresh__PermitPerMinute: ${AUTH_RATE_LIMIT_REFRESH:-}
+      Auth__RateLimit__Email__PermitPerMinute: ${AUTH_RATE_LIMIT_EMAIL:-}
+      Auth__RateLimit__Invite__PermitPerMinute: ${AUTH_RATE_LIMIT_INVITE:-}
+      Auth__RateLimit__General__PermitPerMinute: ${AUTH_RATE_LIMIT_GENERAL:-}
+      Auth__Audit__RetentionDays: ${AUTH_AUDIT_RETENTION_DAYS:-}
     volumes:
       - ../.secrets:/run/secrets/auth:ro
       - ./auth.yaml:/etc/auth-core/auth.yaml:ro
