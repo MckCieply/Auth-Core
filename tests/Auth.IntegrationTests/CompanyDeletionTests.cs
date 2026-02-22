@@ -21,7 +21,7 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         var (acme, acmeAdmin, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
         var (globex, globexAdmin, globexToken) = await CompanyWithAdminAsync("Globex", "boss@globex.test");
-        _ = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);   // the admins logged in to get their tokens
+        _ = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);   // the worker's session; the admins have theirs from CompanyWithAdminAsync
         using (var one = await InviteAsync(adminToken, "new@acme.test", await RoleIdAsync(acme, "user")))
         {
             Assert.Equal(HttpStatusCode.Accepted, one.StatusCode);
