@@ -48,7 +48,8 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      # Loopback only: the reverse proxy on this host reaches it here, from the gateway address of the "auth" network below.
+      # Loopback only: the reverse proxy on this host reaches it here, from the gateway (first address) of whichever of the two
+      # networks below Docker uses for it.
       - "127.0.0.1:${AUTH_PORT:-8080}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -74,14 +75,17 @@ services:
       Auth__Email__Smtp__Host: ${AUTH_SMTP_HOST:?set AUTH_SMTP_HOST in .env}
       Auth__Email__Smtp__Port: ${AUTH_SMTP_PORT:-587}
       Auth__Email__Smtp__Security: ${AUTH_SMTP_SECURITY:-starttls}
-      Auth__Email__Smtp__Username: ${AUTH_SMTP_USERNAME:-}
-      Auth__Email__Smtp__Password: ${AUTH_SMTP_PASSWORD:-}
-      # Who may tell the service the client address (spec 0008): the proxy on this host reaches the published port from the gateway of
-      # the "auth" network (10.250.0.1 for the default subnet below); a proxy in a container joins the "proxy" network, whose
-      # subnet is trusted instead. Both are written plainly (IPv4 as four decimal numbers, a network as its base address and a
-      # prefix length); the service refuses to start with anything else. With neither set, no forwarded header is read and every
-      # client looks like the proxy, so all of them share one set of rate limits.
-      Auth__Proxy__KnownProxies__0: ${AUTH_PROXY_KNOWN_PROXIES:-10.250.0.1}
+      # No default for the credentials either: the variable must be in .env, blank for a relay without authentication.
+      Auth__Email__Smtp__Username: ${AUTH_SMTP_USERNAME?set AUTH_SMTP_USERNAME in .env (blank for a relay without authentication)}
+      Auth__Email__Smtp__Password: ${AUTH_SMTP_PASSWORD?set AUTH_SMTP_PASSWORD in .env (blank for a relay without authentication)}
+      # Who may tell the service the client address (spec 0008): a proxy on this host reaches the published port from the gateway
+      # (first address) of whichever of the two networks Docker uses for it; both are trusted (10.250.0.1 and 10.250.1.1 for the
+      # default subnets below; change them with AUTH_SUBNET and AUTH_PROXY_SUBNET). A proxy in a container joins the "proxy" network,
+      # whose subnet can be trusted instead. All are written plainly (IPv4 as four decimal numbers, a network as its base address and
+      # a prefix length); the service refuses to start with anything else. Write AUTH_PROXY_KNOWN_PROXIES= (empty) to trust no host
+      # proxy; leaving the variable out keeps the default. With nothing trusted no forwarded header is read and every client looks
+      # like the proxy, so all of them share one set of rate limits.
+      Auth__Proxy__KnownProxies__0: ${AUTH_PROXY_KNOWN_PROXIES-10.250.0.1,10.250.1.1}
       Auth__Proxy__KnownNetworks__0: ${AUTH_PROXY_KNOWN_NETWORKS:-}
       # Per-IP limits and the retention of the audit log; a blank value is the default of the contract.
       Auth__RateLimit__Enabled: ${AUTH_RATE_LIMIT_ENABLED:-true}
@@ -92,10 +96,22 @@ services:
       Auth__RateLimit__General__PermitPerMinute: ${AUTH_RATE_LIMIT_GENERAL:-}
       Auth__Audit__RetentionDays: ${AUTH_AUDIT_RETENTION_DAYS:-}
     volumes:
-      # The key files, readable by the container's user (uid 1654); see docs/operations/key-rotation.md for how to make them.
-      - ${AUTH_KEYS_DIR:?set AUTH_KEYS_DIR in .env (the directory with signing.crt, signing.key, encryption.crt, encryption.key)}:/run/secrets/auth:ro
+      # The key files, readable by the container's user (uid 1654); see docs/operations/key-rotation.md for how to make them. The long
+      # syntax with create_host_path: false, because the short one silently creates a missing host path (an empty directory), which would
+      # leave the service on the built-in manifest or without keys; here a missing path stops the start.
+      - type: bind
+        source: ${AUTH_KEYS_DIR:?set AUTH_KEYS_DIR in .env (the directory with signing.crt, signing.key, encryption.crt, encryption.key)}
+        target: /run/secrets/auth
+        read_only: true
+        bind:
+          create_host_path: false
       # The product's manifest (permissions and default roles).
-      - ${AUTH_MANIFEST:?set AUTH_MANIFEST in .env (the path of the product's auth.yaml)}:/etc/auth-core/auth.yaml:ro
+      - type: bind
+        source: ${AUTH_MANIFEST:?set AUTH_MANIFEST in .env (the path of the product's auth.yaml)}
+        target: /etc/auth-core/auth.yaml
+        read_only: true
+        bind:
+          create_host_path: false
     # No health check: the image has no shell and no curl, and /auth/health does not reach the database anyway.
     networks:
       - auth
@@ -106,7 +122,7 @@ volumes:
 
 networks:
   # A fixed subnet, so that the proxy can be named in Auth__Proxy__KnownProxies above: a proxy on the host reaches the published port from
-  # this network's gateway, which is the first address of the subnet.
+  # the gateway (first address) of whichever of the two networks Docker uses for it; both gateways are trusted.
   auth:
     ipam:
       config:
