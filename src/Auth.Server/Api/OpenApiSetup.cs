@@ -9,8 +9,8 @@ using Scalar.AspNetCore;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// The OpenAPI description of the service (spec 0005 → OpenAPI): every endpoint of specs 0001–0005 with its request, its
-/// responses and the error codes each response carries, at <c>GET /auth/openapi/v1.json</c> in every environment. An
+/// The OpenAPI description of the service (spec 0005 → OpenAPI): every endpoint of specs 0001–0008 with its request, its
+/// responses and the error codes each response carries (and the 429 and 415 that the pipeline adds to every endpoint that can say them), at <c>GET /auth/openapi/v1.json</c> in every environment. An
 /// interactive reference of it is served in Development only. The endpoints describe themselves where they are mapped
 /// (<see cref="EndpointMetadata"/>); this adds what the framework cannot see: the JSON bodies and the cookie the handlers
 /// read, the headers they set, the error codes, the bearer scheme, and the two endpoints that are not minimal-API routes.

@@ -11,7 +11,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0005, as "METHOD path".
+    // Every endpoint of specs 0001–0008, as "METHOD path".
     private static readonly string[] Endpoints =
     [
         "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",

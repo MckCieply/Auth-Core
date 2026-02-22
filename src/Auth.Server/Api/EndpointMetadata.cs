@@ -102,7 +102,7 @@ public static class EndpointMetadata
             .ProducesError(StatusCodes.Status503ServiceUnavailable, ErrorHandlingMiddleware.TemporarilyUnavailable)
             .WithMetadata(new ResponseHeaderMetadata(
                 StatusCodes.Status503ServiceUnavailable, "Retry-After", JsonSchemaType.Integer,
-                "The seconds to wait before refreshing again: 5. The cookie is neither cleared nor rotated."));
+                $"The seconds to wait before refreshing again: {ErrorHandlingMiddleware.RefreshRetryAfterSeconds}. The cookie is neither cleared nor rotated."));
     }
 
     /// <summary>

@@ -43,9 +43,8 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
     public async Task What_a_member_sees_afterwards_is_what_a_removed_member_sees()   // criterion 10
     {
         var (company, _, token) = await CompanyWithAdminAsync();
-        var worker = await AddMemberAsync(company, "worker@acme.test", "user");
+        await AddMemberAsync(company, "worker@acme.test", "user");
         var session = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);
-        Assert.NotEqual(Guid.Empty, worker);
 
         using (var response = await DeleteAsync(token))
         {
@@ -137,11 +136,13 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
     [Fact]
     public async Task A_password_with_a_nul_character_is_a_malformed_body()
     {
-        var (_, _, token) = await CompanyWithAdminAsync();
+        var (company, _, token) = await CompanyWithAdminAsync();
 
         using var response = await DeleteAsync(token, new { name = "Acme", password = "Another-Passw0rd" + (char)0 });
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_request");
+        Assert.Equal(0, await StreaksAsync());
+        Assert.Equal(1, await CompaniesAsync(company));
     }
 
     [Fact]
@@ -161,7 +162,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         using var utf16Response = await Client.SendAsync(utf16);
 
         await TenancyApi.AssertErrorAsync(plainResponse, HttpStatusCode.BadRequest, "invalid_request");
-        Assert.Equal(HttpStatusCode.UnsupportedMediaType, utf16Response.StatusCode);
+        await TenancyApi.AssertErrorAsync(utf16Response, HttpStatusCode.UnsupportedMediaType, "unsupported_media_type");
     }
 
     [Fact]
@@ -217,7 +218,8 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(1, await CompaniesAsync(company));
         var refusals = await AuditAsync(AuditKinds.OrgDeleteRefused);
         Assert.Equal(10, refusals.Count(r => AuditApi.Text(r, "reason") == "wrong_password"));
-        Assert.Equal("locked", AuditApi.Text(Assert.Single(refusals, r => AuditApi.Text(r, "reason") == "locked"), "reason"));
+        Assert.Single(refusals, r => AuditApi.Text(r, "reason") == "locked");
+        Assert.Equal(11, refusals.Count);   // ten wrong passwords and the locked one, nothing else
     }
 
     [Fact]
@@ -249,6 +251,8 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         var row = await SingleAsync(AuditKinds.OrgDeleteRefused);
         Assert.Equal("locked", AuditApi.Text(row, "reason"));
         Assert.Equal(admin, row.ActorUserId);
+        Assert.Equal(company, row.OrgId);
+        Assert.Equal("Acme", row.OrgName);
     }
 
     [Fact]
@@ -276,6 +280,8 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_request");
         Assert.Equal(0, await StreaksAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.OrgDeleteRefused));   // a wrong name is not recorded
+        Assert.Empty(await AuditAsync(AuditKinds.OrgDeleted));
     }
 
     [Fact]
@@ -291,6 +297,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "permission_not_held");
         Assert.Equal(1, await CompaniesAsync(company));
         Assert.Empty(await AuditAsync(AuditKinds.OrgDeleted));
+        Assert.Empty(await AuditAsync(AuditKinds.OrgDeleteRefused));   // a rule 1 refusal is not recorded either
     }
 
     [Fact]
