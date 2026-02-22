@@ -24,6 +24,9 @@ public sealed record ResponseHeaderMetadata(int Status, string Name, JsonSchemaT
 
 public static class EndpointMetadata
 {
+    /// <summary>The text of every <c>Retry-After</c> header of the description.</summary>
+    public const string RetryAfterDescription = "The seconds to wait before the next attempt: the same number as `retry_after_seconds` in the body.";
+
     /// <summary>
     /// Documents the JSON body the endpoint reads. It is not <c>Accepts</c> on purpose: that would make the routing answer
     /// its own bare <c>415</c> to another content type, and the contract is <c>400 invalid_request</c>, said by the handler.
@@ -84,7 +87,22 @@ public static class EndpointMetadata
             .WithMetadata(new ErrorCodesMetadata(StatusCodes.Status429TooManyRequests, [TenancyErrors.TooManyAttempts]))
             .WithMetadata(new ResponseHeaderMetadata(
                 StatusCodes.Status429TooManyRequests, "Retry-After", JsonSchemaType.Integer,
-                "The seconds to wait before the next attempt: the same number as `retry_after_seconds` in the body."));
+                RetryAfterDescription));
+    }
+
+    /// <summary>
+    /// The <c>503 temporarily_unavailable</c> of a refresh while the database cannot be reached, and its <c>Retry-After</c>
+    /// (spec 0008): the cookie is neither cleared nor rotated, and the same cookie works once the database is back.
+    /// </summary>
+    public static RouteHandlerBuilder ProducesTemporarilyUnavailable(this RouteHandlerBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder
+            .ProducesError(StatusCodes.Status503ServiceUnavailable, ErrorHandlingMiddleware.TemporarilyUnavailable)
+            .WithMetadata(new ResponseHeaderMetadata(
+                StatusCodes.Status503ServiceUnavailable, "Retry-After", JsonSchemaType.Integer,
+                "The seconds to wait before refreshing again: 5. The cookie is neither cleared nor rotated."));
     }
 
     /// <summary>

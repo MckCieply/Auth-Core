@@ -45,7 +45,8 @@ public static class AccountEndpoints
                 + "`401 invalid_grant`.")
             .Produces<RefreshResponse>()
             .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up.")
-            .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant");
+            .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant")
+            .ProducesTemporarilyUnavailable();
         app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync)
             .WithTags("Sessions")
             .ReadsRefreshCookie("The refresh token whose session ends. Missing or unknown: the answer is the same `204`.")
