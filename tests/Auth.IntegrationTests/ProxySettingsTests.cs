@@ -61,6 +61,19 @@ public sealed class ProxySettingsTests
         Assert.Equal(2, settings.Proxies.Count);
     }
 
+    [Fact]
+    public void A_comma_list_in_the_first_list_item_is_read_as_several_entries()   // the production compose puts both gateways in Auth__Proxy__KnownProxies__0
+    {
+        var settings = Load(new()
+        {
+            [ProxySettings.KnownNetworksKey + ":0"] = "10.250.0.0/24, 10.250.1.0/24",
+            [ProxySettings.KnownProxiesKey + ":0"] = "10.250.0.1,10.250.1.1",
+        });
+
+        Assert.Equal(["10.250.0.0/24", "10.250.1.0/24"], settings.Networks.Select(n => n.ToString()));
+        Assert.Equal(["10.250.0.1", "10.250.1.1"], settings.Proxies.Select(p => p.ToString()));
+    }
+
     [Theory]
     [InlineData(ProxySettings.KnownNetworksKey, "10.250.0.0")]       // no prefix length
     [InlineData(ProxySettings.KnownNetworksKey, "10.250.0.5/24")]    // bits set beyond the prefix: .NET 10 parses it and masks it to 10.250.0.0/24, we refuse it
