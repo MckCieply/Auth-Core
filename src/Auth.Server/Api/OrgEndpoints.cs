@@ -8,8 +8,9 @@ using Microsoft.AspNetCore.Identity;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// <c>GET /auth/me</c>, <c>GET /auth/org</c>, <c>PATCH /auth/org</c> (spec 0005 → Company API) and <c>DELETE /auth/org</c> (spec 0008): who the caller is,
-/// which company, its name, and its deletion. Every answer is read from the database, never from the token.
+/// <c>GET /auth/me</c>, <c>GET /auth/org</c>, <c>PATCH /auth/org</c> (spec 0005 → Company API) and <c>DELETE /auth/org</c>
+/// (spec 0008): who the caller is, which company, its name, and its deletion. Every answer is read from the database, never
+/// from the token.
 /// </summary>
 public static class OrgEndpoints
 {
