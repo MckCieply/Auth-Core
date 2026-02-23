@@ -33,18 +33,21 @@ Needs the .NET 10 SDK, Docker with Compose, `openssl`, and Python 3 with
 ```bash
 cp .env.example .env            # set local values; git-ignored
 scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (git-ignored)
-docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own for this sequence, never "auth-core" (your development stack)
+AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
 scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
+docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
+scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 
-The per-IP rate limits (30 logins a minute, and so on) are on by default. The lockout and mail checks above exceed them on purpose, so start
-that stack (with `COMPOSE_PROJECT_NAME` set to a name of your own) with `AUTH_RATE_LIMIT_ENABLED=false docker compose ... up -d --build`; `scripts/e2e-hardening.sh` (limits, headers, the outage,
-company deletion, the audit log, about six minutes) runs last, on the stack recreated with the defaults (`docker compose ... up -d`).
+The per-IP rate limits (30 logins a minute, and so on) are on by default. The lockout and mail checks exceed them on purpose, so the
+older scripts run on a stack started with the limiter off; `scripts/e2e-hardening.sh` runs last, on the same stack recreated with the
+defaults.
 
 The stack includes a mail catcher; its inbox is at `http://localhost:8025`.
 

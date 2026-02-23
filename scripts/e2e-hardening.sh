@@ -4,7 +4,7 @@
 # What it checks, in order (SEED = the development seed user; ADMIN = the first admin of a company made for the run):
 #   1. the security headers on 200, HEAD, 404, 405, the key set and the OpenAPI document (the last two without Cache-Control) and no
 #      Server header on the live server; HEAD /auth/health has an empty body; POST /auth/health is 405 with Allow: GET, HEAD; a body
-#      declared charset=utf-16 is 415 on login and on DELETE /auth/org, charset=utf-8 is read; a body declared far over the size limit
+#      declared charset=utf-16 is 415 on login, forgot, preview and DELETE /auth/org, charset=utf-8 is read; a body declared far over the size limit
 #      is refused with invalid_request and the headers (Kestrel's 413, or the endpoint's own 400: TestServer enforces neither); the
 #      interactive reference has its own policy with a nonce - criteria 4, 5, 6.
 #   2. after a minute without requests: 30 logins of new unknown addresses (each with another forged X-Forwarded-For) are 401, the 31st
@@ -20,7 +20,7 @@
 #      permissions_changed, the refresh 401 invalid_grant, the login 403 no_membership, the pending link invalid_token, the company's
 #      rows and the queued mail are gone, and the accounts stay - criteria 10, 8. (That the queued mail is never sent is not checked here: the
 #      dispatcher may send a queued request in the second before the deletion; CompanyDeletionTests pins it.)
-#   6. the audit log holds a row of each kind the run produced, and none of the passwords or links the run used - criterion 8.
+#   6. the audit log holds a row of each kind the run produced, and none of the passwords, links or session tokens the run used - criterion 8.
 #
 # Full sequence, from the repo root. The older scripts run first on a stack whose limiter is off (the lockout script makes about 58
 # logins a minute and the mail script exactly 10 requests for a mail); this one runs last on the same stack recreated WITH the defaults:
@@ -38,8 +38,7 @@
 # `docker compose run --rm -T --no-deps auth admin ...`; the audit log is read with `docker compose exec postgres psql`. Needs: curl,
 # python3 (standard library only), docker compose. Env: BASE_URL (default http://localhost:8080), MAILPIT_URL (default
 # http://localhost:8025), COMPOSE_PROJECT_NAME (default auth-core-hardening: the project of the running stack, which this script stops
-# PostgreSQL in, so "auth-core" is refused), E2E_NO_SETTLE=1 (skips the minute of
-# waiting before step 2 and the one after step 3: only when nothing else has sent requests to the stack for a minute).
+# PostgreSQL in, so "auth-core" is refused). Nothing else may send requests to the stack while it runs: the limits are per address.
 # Takes about six minutes: two minutes of waiting for the limiter's windows to empty, and up to two for the mail of the new admin.
 # Re-runnable on the same stack. Exits non-zero on the first failure; prints "PASS <step>"
 # per step; never prints a password, a token, a cookie or a mail body. Request bodies are built into files in a mktemp -d
@@ -66,6 +65,8 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() { echo "FAIL $*" >&2; exit 1; }
 pass() { echo "PASS $*"; }
@@ -122,7 +123,7 @@ call() {
   if [[ -n "${3:-}" ]]; then args+=(-H "Content-Type: ${5:-application/json}" --data-binary "@$3"); fi
   if [[ -n "${4:-}" ]]; then args+=(-H "@$4"); fi
   if [[ -n "${EXTRA_HEADER:-}" ]]; then args+=(-H "$EXTRA_HEADER"); fi
-  HTTP_CODE="$(curl "${args[@]}")"
+  HTTP_CODE="$(curl "${args[@]}")" || fail "$1 $2: no answer (curl failed)"
   BODY="$(cat "$tmp/body")"
 }
 
@@ -132,34 +133,41 @@ call_head() {
   BODY=""
 }
 
-# head_body_bytes <path>: sends a raw HEAD request and prints how many bytes follow the header block (Kestrel sends none, whatever the
-# in-memory test server of the .NET tests does); -1 when the answer has no header block.
+# head_body_bytes <path>: sends a raw HEAD request and prints "<status> <bytes after the header block>" (Kestrel sends none, whatever the
+# in-memory test server of the .NET tests does); "0 -1" when the answer has no header block. The whole URL goes to python: a bare
+# /auth/... argument would be rewritten into a Windows path by Git Bash when python is a Windows interpreter.
 head_body_bytes() {
-  python3 - "$BASE_URL" "$1" <<'PY' | tr -d '\r'
+  python3 - "$BASE_URL$1" <<'PY' | tr -d '\r'
 import socket, sys, urllib.parse
 u = urllib.parse.urlparse(sys.argv[1])
+target = u.path + ("?" + u.query if u.query else "")
 s = socket.create_connection((u.hostname, u.port or 80), timeout=10)
-s.sendall(("HEAD %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" % (sys.argv[2], u.netloc)).encode("ascii"))
+s.sendall(("HEAD %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" % (target, u.netloc)).encode("ascii"))
 data = b""
-while True:
-    chunk = s.recv(65536)
-    if not chunk:
-        break
-    data += chunk
+try:
+    while True:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        data += chunk
+except OSError:
+    pass
 head, sep, rest = data.partition(b"\r\n\r\n")
-print(len(rest) if sep else -1)
+status = head.split(b" ")[1].decode("ascii") if sep else "0"
+print(status, len(rest) if sep else -1)
 PY
 }
 
-# oversize_post <path>: a raw POST that DECLARES a body of 100 MB (far over Kestrel's 30 MB limit and the endpoints' own 8 KB) and sends
+# oversize_post <path>: (the whole URL goes to python, as in head_body_bytes) a raw POST that DECLARES a body of 100 MB (far over Kestrel's 30 MB limit and the endpoints' own 8 KB) and sends
 # two bytes of it, so that this script never has to send 100 MB. Sets HTTP_CODE and BODY; the response headers go to $tmp/hdr.
 oversize_post() {
-  HTTP_CODE="$(python3 - "$BASE_URL" "$1" "$tmp/hdr" "$tmp/body" <<'PY' | tr -d '\r'
+  HTTP_CODE="$(python3 - "$BASE_URL$1" "$tmp/hdr" "$tmp/body" <<'PY' | tr -d '\r'
 import re, socket, sys, urllib.parse
 u = urllib.parse.urlparse(sys.argv[1])
+target = u.path + ("?" + u.query if u.query else "")
 s = socket.create_connection((u.hostname, u.port or 80), timeout=10)
 s.sendall(("POST %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: 104857600\r\n\r\n{}"
-           % (sys.argv[2], u.netloc)).encode("ascii"))
+           % (target, u.netloc)).encode("ascii"))
 data = b""
 try:
     while True:
@@ -172,7 +180,7 @@ try:
             length = re.search(rb"(?im)^content-length:\s*(\d+)", head)
             if length and len(rest) >= int(length.group(1)):
                 break
-except socket.timeout:
+except OSError:
     pass
 head, sep, rest = data.partition(b"\r\n\r\n")
 if not sep:
@@ -189,8 +197,8 @@ if re.search(rb"(?im)^transfer-encoding:\s*chunked", head):
         pos = end + 2 + size + 2
     rest = out
 lines = head.split(b"\r\n")
-open(sys.argv[3], "wb").write(b"\r\n".join(lines[1:]) + b"\r\n")
-open(sys.argv[4], "wb").write(rest)
+open(sys.argv[2], "wb").write(b"\r\n".join(lines[1:]) + b"\r\n")
+open(sys.argv[3], "wb").write(rest)
 print(lines[0].split(b" ")[1].decode("ascii"))
 PY
 )" || fail "the raw oversized request to $1 got no answer"
@@ -260,12 +268,16 @@ login() {
   keep_session "$1"
 }
 
+SESSION_SECRETS=()   # every access token and refresh cookie value of the run: step 6 looks for them in the audit log (never printed)
+
 keep_session() { # keep_session <name>: the access token of $BODY and the cookie of the last response
-  printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/$1.auth"
-  local pair
+  local token pair
+  token="$(val 'd["access_token"]')"
+  printf 'Authorization: Bearer %s\n' "$token" > "$tmp/$1.auth"
   pair="$({ grep -i '^set-cookie:[[:space:]]*auth_rt=[^;]' "$tmp/hdr" || true; } | head -n1 | tr -d '\r' | cut -d: -f2- | sed 's/^ *//' | cut -d';' -f1)"
   [[ -n "$pair" ]] || fail "the response set no auth_rt cookie for $1"
   printf 'Cookie: %s\n' "$pair" > "$tmp/$1.cookie"
+  SESSION_SECRETS+=("$token" "${pair#auth_rt=}")
 }
 
 # psql_value <sql>: the value the query returns. The SQL is this script's own text: a value that came from the service under test is
@@ -283,9 +295,10 @@ secret_in_audit() {
 
 # flood <method> <path> <times> [body]: one curl, the same request <times> times; the status of each is a line of $tmp/flood.codes
 flood() {
-  local args=(-sS --max-time 180 -o /dev/null -w '%{http_code}\n' -X "$1") urls=() i
+  local args=(-sS --max-time 180 -w '%{http_code}\n' -X "$1") urls=() i
   if [[ -n "${4:-}" ]]; then args+=(-H 'Content-Type: application/json' --data-binary "$4"); fi
-  for ((i = 0; i < $3; i++)); do urls+=("$BASE_URL$2"); done
+  # every URL has its own -o: curl pairs one -o with one URL, and the bodies of the others would go to the standard output
+  for ((i = 0; i < $3; i++)); do urls+=(-o /dev/null "$BASE_URL$2"); done
   curl "${args[@]}" "${urls[@]}" | tr -d '\r' > "$tmp/flood.codes" || fail "the burst of $3 requests to $2 failed"
 }
 
@@ -352,7 +365,7 @@ uuid_or_fail() { [[ "$2" =~ $UUID_PATTERN ]] || fail "$1 is not a UUID"; }
 
 wait_healthy || fail "$BASE_URL/auth/health did not return 200 within 90s (is the stack up? see the header)"
 wait_mailpit || fail "$MAILPIT_URL/readyz did not return 200 within 60s (is the mailpit service up?)"
-START_TS="$(psql_value "SELECT now()")"
+START_TS="$(psql_value "SELECT now()" || true)"
 [[ -n "$START_TS" ]] || fail "the audit log cannot be read: is the compose project of the running stack the one this script uses? (set COMPOSE_PROJECT_NAME)"
 
 # --- Step 1: the headers, the methods, the charset ----------------------------------------------------------------------------
@@ -362,7 +375,7 @@ expect_security_headers "step 1: GET /auth/health"
 call_head /auth/health
 expect_eq "step 1: HEAD /auth/health" "$HTTP_CODE" "200"
 expect_security_headers "step 1: HEAD /auth/health"
-expect_eq "step 1: the bytes after the headers of HEAD /auth/health" "$(head_body_bytes /auth/health)" "0"
+expect_eq "step 1: the status and the bytes after the headers of a raw HEAD /auth/health" "$(head_body_bytes /auth/health)" "200 0"
 call POST /auth/health
 expect_status "step 1: POST /auth/health" 405
 expect_eq "step 1: the Allow of POST /auth/health" "$(header allow)" "GET, HEAD"
@@ -387,8 +400,14 @@ call DELETE /auth/org "$tmp/charset.json" "" "application/json; charset=utf-16"
 expect_error "step 1: DELETE /auth/org with a body declared utf-16 (before the token is looked at)" 415 unsupported_media_type
 call POST /auth/login "$tmp/charset.json" "" "application/json; charset=utf-8"
 expect_error "step 1: a login body declared utf-8 is read" 401 invalid_credentials
+expect_security_headers "step 1: the 401 of a login"
 call POST /auth/login "$tmp/charset.json"
 expect_error "step 1: a login body with no charset is read" 401 invalid_credentials
+# The email flows and the invitations read JSON too: the same 415, checked before they do anything (no mail, no counter of the mail limits).
+call POST /auth/password/forgot "$tmp/charset.json" "" "application/json; charset=utf-16"
+expect_error "step 1: a forgot-password body declared utf-16" 415 unsupported_media_type
+call POST /auth/invites/preview "$tmp/charset.json" "" "application/json; charset=utf-16"
+expect_error "step 1: an invitation preview body declared utf-16" 415 unsupported_media_type
 # A body declared far over the limit. Kestrel answers 413 when the body is read past its limit; the login endpoint checks the
 # declared size against its own 8 KB first and answers 400. Both are the endpoint's invalid_request, with the headers and no cookie.
 oversize_post /auth/login
@@ -406,13 +425,14 @@ grep -Eq "^default-src 'none'; script-src 'self' 'nonce-[A-Za-z0-9+/=_-]+'; styl
 NONCE="$(sed -E "s/.*'nonce-([^']+)'.*/\1/" <<< "$POLICY")"
 grep -q -F -- "$NONCE" "$tmp/body" || fail "step 1: the nonce of the policy is not in the page"
 [[ "$(header x-frame-options)" == "DENY" && "$(header x-content-type-options)" == "nosniff" ]] || fail "step 1: the interactive reference lacks a header"
-pass "step 1: the headers are on 200, HEAD, 404, 405, 415, the oversized body and the two documents (no Server header); HEAD has no body; POST /auth/health is 405 Allow: GET, HEAD; utf-16 is 415, utf-8 is read; the reference has its own policy"
+[[ "$(header referrer-policy)" == "no-referrer" && "$(header cross-origin-resource-policy)" == "same-origin" ]] || fail "step 1: the interactive reference lacks Referrer-Policy or Cross-Origin-Resource-Policy"
+[[ "$(header cache-control)" == *no-store* && -z "$(header server)" ]] || fail "step 1: the interactive reference is cacheable or sends a Server header"
+pass "step 1: the headers are on 200, HEAD, 404, 405, 415, the oversized body and the two documents (no Server header); HEAD has no body; POST /auth/health is 405 Allow: GET, HEAD; utf-16 is 415 on login, forgot, preview and DELETE /auth/org, utf-8 is read; the reference has its own policy"
 
 # --- Step 2: the login limit -----------------------------------------------------------------------------------------------
-if [[ "${E2E_NO_SETTLE:-0}" != "1" ]]; then
-  echo "waiting a minute so that the limiter's window is empty..."
-  sleep 61
-fi
+# Step 1 made requests of the login and general policies: wait until the limiter's windows are empty.
+echo "waiting a minute so that the limiter's windows are empty..."
+sleep 61
 for i in $(seq 1 30); do
   json_body "$tmp/flood.json" "{'email': 'nobody-$run-$i@example.invalid', 'password': '$WRONG_PASSWORD'}"
   EXTRA_HEADER="X-Forwarded-For: 198.51.100.$i" call POST /auth/login "$tmp/flood.json"
@@ -450,6 +470,8 @@ done
 json_body "$tmp/mail.json.req" "{'email': 'mail-$run-11@example.invalid'}"
 call POST /auth/password/forgot "$tmp/mail.json.req"
 expect_too_many_requests "step 3: the 11th request for a mail"
+expect_eq "step 3: the refused mail request wrote no password.reset_requested row" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'password.reset_requested' AND subject_email = 'mail-$run-11@example.invalid'")" "0"
 flood POST /auth/invites/preview 25 '{"token":"not-a-token"}'
 N="$(first_429 400 "step 3: invitation requests")"
 (( N >= 16 && N <= 21 )) || fail "step 3: the first refused invitation request was request $N, expected about the 21st"
@@ -460,10 +482,9 @@ expect_eq "step 3: a rate_limit.hit row for each of the five policies" \
   "$(psql_value "SELECT count(DISTINCT details->>'policy') FROM audit_events WHERE kind = 'rate_limit.hit' AND occurred_at >= '$START_TS'")" "5"
 pass "step 3: refresh, mail, invitation and general requests are refused at their own numbers; one rate_limit.hit row for each of the five policies"
 
-if [[ "${E2E_NO_SETTLE:-0}" != "1" ]]; then
-  echo "waiting a minute so that the limiter's windows empty..."
-  sleep 61
-fi
+# Step 3 filled the windows of every policy: wait until they are empty.
+echo "waiting a minute so that the limiter's windows empty..."
+sleep 61
 
 # --- Step 4: a refresh during an outage ------------------------------------------------------------------------------------
 login seed E2E_SEED_EMAIL E2E_SEED_PASSWORD
@@ -540,9 +561,13 @@ expect_error "step 5: DELETE /auth/org with a wrong name" 400 invalid_request
 # Queued now, so that the deletion follows within a second: the server mails a queued request at its next poll, within a minute.
 cli invite --org "$ORG" --email "$QUEUED_EMAIL" --role user   # queued; the server would mail it at its next poll
 [[ "$CLI_EXIT" == "0" ]] || fail "step 5: the operator's invitation failed"
+QUEUED_BEFORE="$(psql_value "SELECT count(*) FROM \"MailRequests\" WHERE \"NormalizedEmail\" = '${QUEUED_EMAIL^^}'")"
 json_body "$tmp/delete.json" "{'name': os.environ['E2E_ORG_NAME'], 'password': os.environ['E2E_PASSWORD']}"
 call DELETE /auth/org "$tmp/delete.json" "$tmp/admin.auth"
 expect_status "step 5: DELETE /auth/org with the name and the password" 204 ""
+if [[ "$QUEUED_BEFORE" != "1" ]]; then
+  echo "NOTE step 5: the dispatcher sent the queued mail before the deletion; CompanyDeletionTests pins it"
+fi
 expect_security_headers "step 5: the 204"
 call GET /auth/me "" "$tmp/admin.auth"
 expect_error "step 5: the old access token" 403 permissions_changed
@@ -571,10 +596,10 @@ KINDS="$(psql_value "SELECT string_agg(DISTINCT kind, ',' ORDER BY kind) FROM au
 for kind in login.succeeded login.failed logout refresh.reuse_detected password.reset_requested invite.sent invite.accepted org.created org.deleted org.delete_refused rate_limit.hit; do
   [[ ",$KINDS," == *",$kind,"* ]] || fail "step 6: this run left no audit row of the kind $kind (kinds: $KINDS)"
 done
-for secret in "$SEED_PASSWORD" "$E2E_PASSWORD" "$WRONG_PASSWORD" "$ADMIN_LINK" "$PENDING_LINK"; do
+for secret in "$SEED_PASSWORD" "$E2E_PASSWORD" "$WRONG_PASSWORD" "$ADMIN_LINK" "$PENDING_LINK" "${SESSION_SECRETS[@]}"; do
   [[ -n "$secret" ]] || fail "step 6: a secret to look for is empty"
-  expect_eq "step 6: rows of the audit log that hold a password or a link of this run" "$(secret_in_audit "$secret")" "0"
+  expect_eq "step 6: rows of the audit log that hold a password, a link or a session token of this run" "$(secret_in_audit "$secret")" "0"
 done
-pass "step 6: the audit log has a row of each kind this run produced, and none of its passwords or links"
+pass "step 6: the audit log has a row of each kind this run produced, and none of its passwords, links or session tokens"
 
 echo "ALL PASS"

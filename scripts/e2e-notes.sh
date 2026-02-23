@@ -30,7 +30,7 @@
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
 #   scripts/e2e-notes.sh                  # this script: brings the stack up (builds the images), then drives it
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
-# The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it), not as "auth-core"
+# The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it; "auth-core" is refused), not as "auth-core"
 # that deploy/docker-compose.yml names: its containers and volumes stay apart from a development stack of the same
 # clone, and the down -v above removes only them. (Host ports 8088, 8080 and 8025 are still shared: stop the other stack.)
 # The earlier e2e scripts run on the stack WITHOUT the overlay (deploy/docker-compose.yml alone), as before.
@@ -51,6 +51,7 @@ BASE_URL="${BASE_URL:-http://localhost:8088}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 # deploy/docker-compose.yml names the project "auth-core", which every other stack of the clone uses; run apart from them
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-notes}"
+[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"

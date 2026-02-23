@@ -21,6 +21,16 @@ public sealed class TransientFailureTests
             new AggregateException(new ArgumentException("a"), new InvalidOperationException("b", new TimeoutException()))));
     }
 
+    [Theory]
+    [InlineData(PostgresErrorCodes.CannotConnectNow)]   // 57P03: the server is starting up, as right after it was started again
+    [InlineData(PostgresErrorCodes.AdminShutdown)]   // 57P01: the server is shutting down, as when it is stopped under a connection
+    public void A_postgres_server_that_is_starting_up_or_shutting_down_is_the_outage_of_a_dependency(string sqlState)
+    {
+        Assert.True(ErrorHandlingMiddleware.IsTransientFailure(new PostgresException("starting up", "FATAL", "FATAL", sqlState)));
+        Assert.True(ErrorHandlingMiddleware.IsTransientFailure(
+            new InvalidOperationException("outer", new PostgresException("starting up", "FATAL", "FATAL", sqlState))));
+    }
+
     [Fact]
     public void Anything_else_is_not_the_outage_of_a_dependency()
     {
