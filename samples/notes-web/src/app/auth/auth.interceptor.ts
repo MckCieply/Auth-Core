@@ -133,7 +133,8 @@ function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | nu
         }
       } else if (result === 'unavailable') {
         auth.showNotice('unreachable');
-      } // 'limited': the bar says "Try again in N s." already (the 429 of this refresh); it is not replaced
+      }
+      // 'limited' sets nothing: the bar already says "Try again in N s." for the 429 of this very refresh.
       return false;
     });
     return from(renewed);

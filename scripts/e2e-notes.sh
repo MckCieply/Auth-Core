@@ -425,9 +425,9 @@ RECORDED="$("${compose[@]}" exec -T postgres psql -U auth -d auth -tA \
   -c "SELECT client_ip FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$SPOOFED_EMAIL'" | tr -d '\r')"
 [[ "$RECORDED" =~ ^[0-9a-f.:]+$ ]] || fail "step 7: the failed login through the proxy is not in the audit log as one address"
 # The proxy's own address, read from the running container (not from the default of the overlay: .env may have changed it).
-PROXY_CONTAINER="$("${compose[@]}" ps -q caddy)"
+PROXY_CONTAINER="$("${compose[@]}" ps -q caddy)" || fail "step 7: could not ask compose for the proxy (caddy) container"
 [[ -n "$PROXY_CONTAINER" ]] || fail "step 7: the proxy (caddy) is not running"
-PROXY_ADDRESS="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "$PROXY_CONTAINER" | tr -d '\r' | { grep -E '^[0-9.]+$' || true; } | head -n1)"
+PROXY_ADDRESS="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "$PROXY_CONTAINER" | tr -d '\r' | { grep -E '^[0-9.]+$' || true; } | head -n1)" || fail "step 7: docker inspect of the proxy container failed"
 [[ -n "$PROXY_ADDRESS" ]] || fail "step 7: could not read the address of the proxy container"
 [[ "$RECORDED" != "203.0.113.99" ]] || fail "step 7: the recorded address is the one the client wrote into X-Forwarded-For"
 [[ "$RECORDED" != "$PROXY_ADDRESS" ]] || fail "step 7: the recorded address is the proxy's: the proxy is not trusted"

@@ -149,8 +149,8 @@ export class AuthService {
   /** Run once before the first route is resolved (app.config.ts): is there a session to resume? */
   async start(): Promise<void> {
     const result = await this.refresh();
+    // 'limited' sets nothing: the bar already says "Try again in N s." for the 429 of this very refresh.
     if (result === 'unavailable') {
-      // ('limited' is left alone: the bar already says "Try again in N s." for the 429 of this very refresh.)
       this.noticeState.set('unreachable');
     } else if (result === 'ok' && !(await this.loadMe(REFRESH_TIMEOUT_MS)) && this.noticeState() === null) {
       // The same ten seconds as the refresh: the app must not sit blank behind the initializer. Not when the interceptor has
