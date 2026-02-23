@@ -97,7 +97,7 @@ runs in a container, see "A proxy in a container" under step 6.
 The two networks of the compose file have fixed subnets so that the trusted proxy can be named. They lie outside the ranges Docker takes its own networks from
 (`172.17.0.0/16` to `172.31.0.0/16` and `192.168.0.0/16`): a fixed subnet taken from those can overlap a network Docker has already made, and Compose then stops
 with "Pool overlaps". If `10.250.0.0/24` or `10.250.1.0/24` clashes with a network of yours (a VPN, an office network), change `AUTH_SUBNET`, `AUTH_PROXY_SUBNET` and
-the addresses that name them (`AUTH_PROXY_KNOWN_PROXIES`, `AUTH_PROXY_KNOWN_NETWORKS`) together.
+the addresses that name them (`AUTH_PROXY_KNOWN_PROXIES`, and the fixed address of a proxy in a container) together.
 
 ## 5. Start it
 
@@ -224,7 +224,7 @@ curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
 $C exec -T postgres psql -U auth -d auth -c "SELECT occurred_at, client_ip FROM audit_events WHERE kind = 'login.failed' ORDER BY occurred_at DESC LIMIT 1"
 ```
 
-If it shows a gateway, the proxy's address is not in `AUTH_PROXY_KNOWN_PROXIES` (or the proxy runs in a container and `AUTH_PROXY_KNOWN_NETWORKS` is not set): see "When
+If it shows a gateway, the proxy's address is not in `AUTH_PROXY_KNOWN_PROXIES` (or the proxy runs in a container and its fixed address is not in `AUTH_PROXY_KNOWN_PROXIES`, or it has no fixed address): see "When
 something is wrong". Then sign in through your frontend and call one product endpoint with the token.
 
 ## Running it
@@ -262,7 +262,7 @@ something is wrong". Then sign in through your frontend and call one product end
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
 | "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |
-| Everybody gets `429 too_many_requests` | The proxy is not trusted: every client looks like the proxy and shares its limits. Check `AUTH_PROXY_KNOWN_PROXIES` (and `AUTH_PROXY_KNOWN_NETWORKS` for a proxy in a container), and that the proxy sets `X-Forwarded-For` |
+| Everybody gets `429 too_many_requests` | The proxy is not trusted: every client looks like the proxy and shares its limits. Check `AUTH_PROXY_KNOWN_PROXIES` (the fixed address of a proxy in a container: see "A proxy in a container"), and that the proxy sets `X-Forwarded-For` |
 | Refresh is `503 temporarily_unavailable` | The database cannot be reached; the cookie is kept. Look at `$C ps` and the logs of `postgres` |
 | Mails do not arrive | `$C logs auth` shows each failed attempt (the dispatcher retries); check the relay's host, port, security, credentials and the sender's domain. The service verifies the relay's certificate against its chain **and for revocation**: the container needs outbound HTTP to the address of the certificate authority's revocation list (or OCSP responder), which is in the relay's certificate; a relay certificate that names no revocation list or OCSP responder is refused (the status is unknown); the read-only container cannot cache the list, so it fetches it at each connection |
 | Signed-in people are asked to sign in again | The keys changed, or the database was restored from before their session |
