@@ -28,6 +28,10 @@
 # HTTP_URL, HTTPS_URL, MAILPIT_URL. Exits non-zero on the first failure; prints "PASS <project>" per project; never prints a
 # password, a token, a cookie or a mail body. samples/notes-web/test-results/ (a screenshot of each failed test shows the page:
 # emails, notes) is removed when the script ends, whatever the outcome; E2E_KEEP_RESULTS=1 keeps it for a look.
+#
+# The stack is started with the per-IP rate limiter OFF (AUTH_RATE_LIMIT_ENABLED=false, spec 0008): the seeding and every test of both
+# browsers reach Auth-Core from one address through the trusted Caddy proxy, so they share one limiter partition, and a run can make
+# more than 30 logins or 10 mail requests a minute. The limits are checked by scripts/e2e-hardening.sh, not here.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,6 +50,8 @@ if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PRO
   echo "FAIL a stack named $COMPOSE_PROJECT_NAME is running: this script would remove it (down -v); pick another name, e.g. COMPOSE_PROJECT_NAME=auth-core-web-mine $0" >&2
   exit 1
 fi
+# The limiter is off for this stack (see the header): the compose file reads the variable from the environment, which wins over .env.
+export AUTH_RATE_LIMIT_ENABLED=false
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"

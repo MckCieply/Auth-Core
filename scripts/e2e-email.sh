@@ -23,8 +23,10 @@
 # this one last):
 #   cp .env.example .env                  # then set real local values (git-ignored)
 #   scripts/dev-keys.sh                   # dev signing/encryption keys into .secrets/ (git-ignored)
+#   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, never "auth-core" (the development stack): a bare down -v would wipe it
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
-#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#                                         # the per-IP limiter is off for the older checks (spec 0008): the lockout script makes about 58 logins a minute and the mail script exactly 10 mail requests; scripts/e2e-hardening.sh runs last on the stack recreated with the defaults
 #   scripts/e2e-login.sh                  # spec 0001 regression
 #   scripts/e2e-refresh.sh                # spec 0002 regression
 #   scripts/e2e-lockout.sh                # spec 0003 regression

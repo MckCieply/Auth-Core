@@ -42,6 +42,10 @@ scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
 ```
 
+The per-IP rate limits (30 logins a minute, and so on) are on by default. The lockout and mail checks above exceed them on purpose, so start
+that stack (with `COMPOSE_PROJECT_NAME` set to a name of your own) with `AUTH_RATE_LIMIT_ENABLED=false docker compose ... up -d --build`; `scripts/e2e-hardening.sh` (limits, headers, the outage,
+company deletion, the audit log, about six minutes) runs last, on the stack recreated with the defaults (`docker compose ... up -d`).
+
 The stack includes a mail catcher; its inbox is at `http://localhost:8025`.
 
 The operator's commands are subcommands of the service's own binary, so they run from its image. With the
