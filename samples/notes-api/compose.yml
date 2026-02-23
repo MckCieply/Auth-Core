@@ -91,6 +91,10 @@ services:
     ports:
       # Loopback only, like every other port of this stack.
       - "127.0.0.1:8088:8088"
+    networks:
+      default:
+        # A fixed address, so that Auth-Core can be told which proxy to believe about the client address (see `auth` below).
+        ipv4_address: ${NOTES_PROXY_IP:-10.250.2.10}
     volumes:
       - ../samples/notes-api/Caddyfile:/etc/caddy/Caddyfile:ro
 
@@ -99,6 +103,17 @@ services:
       # Tokens name the origin the browser uses, and are for the notes service.
       Auth__Tokens__Issuer: http://localhost:8088/auth
       Auth__Tokens__Audience: notes-api
+      # The proxy in front of Auth-Core in this stack, and nothing else, is believed about the client address (spec 0008): a network of
+      # the one address Caddy has. A request that reaches Auth-Core's own port from the host is taken as it comes.
+      Auth__Proxy__KnownNetworks__0: ${NOTES_PROXY_IP:-10.250.2.10}/32
     volumes:
       # The same container path as in the base file: this mount replaces the development manifest.
       - ../samples/notes-api/auth.yaml:/etc/auth-core/auth.yaml:ro
+
+networks:
+  default:
+    ipam:
+      config:
+        # A fixed subnet for the project's network, so that the proxy's address above is in it. Change both (NOTES_SUBNET and
+        # NOTES_PROXY_IP in .env) if another network of yours already uses this range.
+        - subnet: ${NOTES_SUBNET:-10.250.2.0/24}

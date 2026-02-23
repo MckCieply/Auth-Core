@@ -115,6 +115,9 @@ export class LoginPage {
       case 'too_many_attempts':
         this.message.set(this.t.tooManyAttempts(failure.retryAfterSeconds));
         break;
+      case 'too_many_requests':
+        // The notice bar above the screen says when to try again: the interceptor put it there.
+        break;
       default:
         this.message.set(this.common.somethingWrong);
     }

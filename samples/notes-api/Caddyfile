@@ -6,9 +6,18 @@
 
 http://:8088 {
 	handle /auth/* {
-		reverse_proxy auth:8080
+		# Auth-Core limits and records requests per client address (spec 0008). This proxy says which address that is: the one it saw,
+		# and nothing the client wrote (header_up sets the header, so a forged X-Forwarded-For is replaced).
+		reverse_proxy auth:8080 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 	handle /api/* {
+		header {
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+		}
 		reverse_proxy notes-api:8000
 	}
 	handle {

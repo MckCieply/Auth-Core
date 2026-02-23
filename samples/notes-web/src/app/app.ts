@@ -40,7 +40,10 @@ export class App {
   protected readonly dismissLabel = texts.notices.dismiss;
   protected readonly notice = computed(() => {
     const kind = this.auth.notice();
-    return kind === null ? null : texts.notices[kind];
+    if (kind === null) {
+      return null;
+    }
+    return kind === 'wait' ? texts.notices.tryAgainIn(this.auth.noticeSeconds()) : texts.notices[kind];
   });
 
   protected dismiss(): void {

@@ -28,7 +28,11 @@
 	# app's own calls (and the services) spell them in lower case.
 	@auth path_regexp ^/auth(/|$)
 	handle @auth {
-		reverse_proxy auth:8080
+		reverse_proxy auth:8080 {
+			# Auth-Core limits and records requests per client address (spec 0008): the one this proxy saw, never one the client wrote.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 	@api path_regexp ^/api(/|$)
 	handle @api {
@@ -42,6 +46,9 @@
 			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{http.request.uuid}'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 			Referrer-Policy no-referrer
 			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Cross-Origin-Opener-Policy same-origin
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
 		}
 		# Every answer that is index.html is revalidated, an unknown path included. Only a .js, .css or .ico file that exists may
 		# be cached (the .js and .css files are hashed by the build, so a new build has new names; favicon.ico is not hashed and
@@ -101,6 +108,8 @@ http://:8088 {
 
 https://localhost:8443, https://127.0.0.1:8443 {
 	tls internal
+	# TLS ends here, so this proxy sends HSTS (Auth-Core does not). Over HTTPS only.
+	header Strict-Transport-Security "max-age=31536000"
 	import routes
 }
 

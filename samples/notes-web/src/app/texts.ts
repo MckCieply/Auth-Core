@@ -33,6 +33,8 @@ export const texts = {
     tryLater: 'Try again shortly.',
     forbidden: "You don't have access to this.",
     dismiss: 'Dismiss',
+    // A request limit (429 too_many_requests): the number is what the server said.
+    tryAgainIn: (seconds: number): string => `Try again in ${seconds} s.`,
   },
 
   login: {
