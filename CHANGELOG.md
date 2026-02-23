@@ -20,7 +20,7 @@ The first release: the service, its image, a Python package for backends, an Ang
   hold; a company keeps a manager), the manifest of a product's permissions and default roles, and the operator CLI
   (`create-org`, `invite`, `list-orgs`, `remove-member`, `delete-org`).
 - **Company deletion** by `DELETE /auth/org` (the permission `org:delete`, the company's name and the caller's password) and by `delete-org`.
-- **Audit log.** The table `audit_events`: 22 kinds written in the transaction of the change, kept 90 days, read with SQL.
+- **Audit log.** The table `audit_events`: 22 kinds, each written in the transaction of the change it records (events that change nothing are written on their own and never fail the request), kept 90 days, read with SQL.
 - **Security headers** on every response, and no `Server` header; a `Content-Security-Policy` of its own for the interactive reference.
 - **OpenAPI** description at `/auth/openapi/v1.json`, with the interactive reference in Development.
 - **Production.** The image `ghcr.io/mckcieply/auth-core:0.1.0` (public, with OCI labels, base images pinned by digest), `deploy/docker-compose.prod.yml`
@@ -33,7 +33,7 @@ The first release: the service, its image, a Python package for backends, an Ang
 
 - A refresh while the database is down answers `503 temporarily_unavailable` (it was `500`), and the cookie is kept.
 - An unhandled error answers `500 {"error":"internal_error"}` with the headers (Kestrel's own `500` dropped them).
-- `GET /auth/health` answers `GET` and `HEAD` only (any other method is `405` with `Allow: GET, HEAD`).
+- `/auth/health` answers `GET` and `HEAD` only (any other method is `405` with `Allow: GET, HEAD`).
 - A JSON body declared with a charset other than UTF-8 is `415 unsupported_media_type`.
 - An invitation to an address whose domain ends in digits or in a hexadecimal form (`127.0x1`, `host.123`) is refused.
 - The second development seed user takes the first role of the company, by name, that holds neither `members:manage` nor `*`.

@@ -1,8 +1,9 @@
 # Deploying Auth-Core on a server
 
 From nothing to a first sign-in on a small Linux server (a VPS), from the published image. It is written for a server that runs Docker and a
-reverse proxy; the proxy gives you HTTPS. Everything here is tried on a throwaway stack by `scripts/e2e-prod.sh` (the production compose
-file, an SMTP relay that requires STARTTLS, a proxy with HTTPS), including the backup and the restore.
+reverse proxy; the proxy gives you HTTPS. Most of it is tried on a throwaway stack by `scripts/e2e-prod.sh` (the production compose
+file, an SMTP relay that requires STARTTLS, a proxy in a container with HTTPS, the backup and the restore); the Caddyfile for a proxy on the host and the address
+it arrives from are checked on your own server, in step 8.
 
 Every compose command below names the project, `auth-core-prod`, the same as the `name:` of the file. The name finds the stack and its volume
 (`auth-core-prod_postgres-data`), so use it every time and never the name of another stack on the same host. The commands are run from the
@@ -39,7 +40,8 @@ chmod 600 .env
 ## 2. The keys
 
 Make the two RSA keys as [`docs/operations/key-rotation.md`](../operations/key-rotation.md) says ("Generating production keys"), into `/etc/auth-core/keys`, owned by
-uid `1654` (the container's user) and not readable by anyone else. Put a copy somewhere safe, apart from the server. The certificates have an end date:
+uid `1654` (the container's user), the private keys readable by it only. After the `chown` and `chmod` of that runbook, move the directory into place:
+`sudo mkdir -p /etc/auth-core && sudo mv keys-new /etc/auth-core/keys`. Put a copy somewhere safe, apart from the server. The certificates have an end date:
 write it in your calendar and rotate before it.
 
 ## 3. The manifest
@@ -114,7 +116,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/j
 ```
 
 `000` or `500` means the service or the database does not answer yet: ask again every few seconds ([`backup.md`](../operations/backup.md), step 5 of the restore, has the
-same check). When it says `401` the service is ready; the first company is next. If the service does not start, `$C logs auth` names the setting that is wrong or
+same check). A `429` (`too_many_requests`) means more than 30 logins a minute came from this host: wait the seconds in `Retry-After`, then ask again. When it says
+`401` the service is ready; the first company is next. If the service does not start, `$C logs auth` names the setting that is wrong or
 missing (it never prints a value): a key file that cannot be read, a mail relay without TLS, an `http` frontend URL, a missing issuer, a proxy entry written in a
 form that is not accepted.
 
@@ -161,14 +164,17 @@ name it in Caddy's `trusted_proxies` so that Caddy hands on the real client's ad
 
 A proxy that runs on this host (as above) needs nothing more. A proxy that runs in a container joins a network that the compose file of Auth-Core creates:
 the network named by `AUTH_PROXY_NETWORK` (default `auth-core-proxy`), with the subnet `AUTH_PROXY_SUBNET` (default `10.250.1.0/24`). Declare it as an
-**external** network in the proxy's own compose file, and use the service name `auth` as the address of Auth-Core:
+**external** network in the proxy's own compose file, give the proxy a **fixed address** in that subnet, and use the service name `auth` as the address of
+Auth-Core:
 
 ```yaml
 # the proxy's own compose file
 services:
   caddy:
     image: caddy:2            # pin it by digest, as the compose file of Auth-Core does
-    networks: [auth-core-proxy]
+    networks:
+      auth-core-proxy:
+        ipv4_address: 10.250.1.10     # inside AUTH_PROXY_SUBNET, and not its gateway (10.250.1.1)
     # ... ports 80 and 443, the Caddyfile, a volume for /data
 networks:
   auth-core-proxy:
@@ -176,10 +182,18 @@ networks:
     name: auth-core-proxy     # the value of AUTH_PROXY_NETWORK
 ```
 
-In the Caddyfile use `reverse_proxy auth:8080` (the rest is as above). In `.env` of Auth-Core set `AUTH_PROXY_KNOWN_NETWORKS=10.250.1.0/24` (the same as
-`AUTH_PROXY_SUBNET`), and write `AUTH_PROXY_KNOWN_PROXIES=` with nothing after it when no proxy runs on the host: a gateway you do not need is an address you do not
-have to trust. Start Auth-Core first: the network exists once its compose file has been brought up, and the proxy's compose file refuses an external network that
-does not exist.
+In the Caddyfile use `reverse_proxy auth:8080` (the rest is as above). In `.env` of Auth-Core trust that one address and nothing else:
+
+```
+AUTH_PROXY_KNOWN_PROXIES=10.250.1.10
+AUTH_PROXY_KNOWN_NETWORKS=
+```
+
+An explicit value replaces the default, so the two gateways are no longer trusted (a proxy on the host would not be believed any more: this stack has one kind of proxy).
+This is the pattern of the sample overlays, whose proxy has a fixed address too. **Do not trust the whole subnet** (`AUTH_PROXY_KNOWN_NETWORKS=10.250.1.0/24`): a
+trusted subnet includes its gateway, which is the address a process on the host reaches the published port from, and such a process could then choose the address that
+is recorded for its own requests (the residual risk of the threat model). Start Auth-Core first: the network exists once its compose file has been brought up, and
+the proxy's compose file refuses an external network that does not exist.
 
 ## 7. The first company and its admin
 
@@ -196,7 +210,7 @@ service runs. The admin follows the link to your frontend's invitation screen, c
 ## 8. Check it
 
 ```bash
-curl -si https://app.example.com/auth/health | head -n 14          # 200, the security headers, Strict-Transport-Security from the proxy, no Server header
+curl -s -D - -o /dev/null https://app.example.com/auth/health    # 200, the security headers, Strict-Transport-Security from the proxy, no Server header
 curl -s  https://app.example.com/auth/.well-known/jwks.json         # the public keys
 curl -s  https://app.example.com/auth/openapi/v1.json | head -c 200  # the API description (the interactive reference is not served in Production)
 ```
@@ -244,12 +258,12 @@ something is wrong". Then sign in through your frontend and call one product end
 | What you see | Why, and what to do |
 | --- | --- |
 | The `auth` container exits at start | `$C logs auth`: it names the setting (a key file, the relay's security, a frontend URL, the issuer or audience, a proxy entry, the database) |
-| It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove that variable from `.env` and from the environment of the compose command; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
+| It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove it from the `environment:` of the `auth` service (in `deploy/docker-compose.prod.yml` or an override file you added) or from a `run -e`; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
 | "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |
 | Everybody gets `429 too_many_requests` | The proxy is not trusted: every client looks like the proxy and shares its limits. Check `AUTH_PROXY_KNOWN_PROXIES` (and `AUTH_PROXY_KNOWN_NETWORKS` for a proxy in a container), and that the proxy sets `X-Forwarded-For` |
 | Refresh is `503 temporarily_unavailable` | The database cannot be reached; the cookie is kept. Look at `$C ps` and the logs of `postgres` |
-| Mails do not arrive | `$C logs auth` shows each failed attempt (the dispatcher retries); check the relay's host, port, security, credentials and the sender's domain. The service verifies the relay's certificate against its chain **and for revocation**: the container needs outbound HTTP to the address of the certificate authority's revocation list (or OCSP responder), which is in the relay's certificate |
+| Mails do not arrive | `$C logs auth` shows each failed attempt (the dispatcher retries); check the relay's host, port, security, credentials and the sender's domain. The service verifies the relay's certificate against its chain **and for revocation**: the container needs outbound HTTP to the address of the certificate authority's revocation list (or OCSP responder), which is in the relay's certificate; a relay certificate that names no revocation list or OCSP responder is refused (the status is unknown); the read-only container cannot cache the list, so it fetches it at each connection |
 | Signed-in people are asked to sign in again | The keys changed, or the database was restored from before their session |
 | The recorded client address is always the same | The proxy is not trusted, or does not send `X-Forwarded-For`; see "Who may tell Auth-Core the client address" |

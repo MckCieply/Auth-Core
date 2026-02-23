@@ -61,10 +61,24 @@ auth delete-org --org <id> --confirm "Acme"                       # deletes the 
 The commands work on the database with the service's configuration and never migrate it. A product's permissions and default roles come from its manifest
 (`Auth:Manifest:Path`; `deploy/auth.yaml` in development): a broken file never stops the service, and `/auth/health` then says `Degraded`.
 
-The samples are overlays of the same stack: the notes service and a proxy (`scripts/e2e-notes.sh`, on `http://localhost:8088`, its own compose project
-`auth-core-notes`), and the Angular app on top of them (`scripts/e2e-web.sh`, on `https://localhost:8443`, `auth-core-web`). Tests: `dotnet build -warnaserror && dotnet test`
-(integration tests with Testcontainers: Docker must be running); the Python package and the sample have tests that need no Docker (`cd clients/python && python -m pytest -q`);
-the Angular app has its own (`cd samples/notes-web && npx ng test --watch=false`).
+The samples are overlays of the same stack: the notes service and a proxy (`scripts/e2e-notes.sh`, needs `NOTES_DB_PASSWORD` in `.env`, on `http://localhost:8088`, its own
+compose project `auth-core-notes`), and the Angular app on top of them (`scripts/e2e-web.sh`, on `https://localhost:8443`, `auth-core-web`).
+
+Tests (integration, PostgreSQL by Testcontainers: Docker must be running):
+
+```bash
+dotnet build -warnaserror && dotnet test
+```
+
+The Python package and the sample have tests that need no Docker (Python 3.12):
+
+```bash
+python -m venv .venv && . .venv/bin/activate        # on Windows in Git Bash: . .venv/Scripts/activate
+pip install -e "clients/python[test]" -r samples/notes-api/requirements.txt
+(cd clients/python && python -m pytest -q) && (cd samples/notes-api && python -m pytest -q)
+```
+
+The Angular app has its own: `cd samples/notes-web && npx ng test --watch=false`.
 
 ## Run it for real
 

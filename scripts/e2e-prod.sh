@@ -13,7 +13,7 @@
 #      is answered (the database is reached and migrated: /auth/health does not say so).
 #   3. the first company from the CLI (create-org prints the id), an invitation for its admin: the mail arrives over STARTTLS (Mailpit
 #      refuses plain SMTP; the relay's certificate is checked for revocation against the list the test authority publishes, which the
-#      container fetches over HTTP and caches on its read-only root file system) and names the https frontend URL; no seed user exists.
+#      container fetches over HTTP (it cannot cache it: the root file system is read-only)) and names the https frontend URL; no seed user exists.
 #   4. through the proxy: the admin accepts, logs in (the refresh cookie is HttpOnly, Secure, SameSite=Strict, Path=/auth), refreshes;
 #      HSTS is sent; a failed login through the proxy is recorded with the address the proxy saw, not the one the client wrote and not
 #      the proxy's own.

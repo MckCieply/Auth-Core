@@ -41,7 +41,8 @@ def test_the_readme_is_in_the_metadata_and_names_the_install_line():
 def test_the_guide_and_the_sample_name_the_new_tag():
     line = "@python-v0.1.1#subdirectory=clients/python"
     assert line in (REPOSITORY / "docs/integration/python-fastapi.md").read_text(encoding="utf-8")
-    assert "python-v0.1.1" in (REPOSITORY / "samples/notes-api/requirements.txt").read_text(encoding="utf-8")
+    for name in ("requirements.txt", "requirements-image.txt"):
+        assert "python-v0.1.1" in (REPOSITORY / "samples/notes-api" / name).read_text(encoding="utf-8")
 
 
 def test_a_wheel_carries_the_licence_the_readme_and_the_version(tmp_path, monkeypatch):
