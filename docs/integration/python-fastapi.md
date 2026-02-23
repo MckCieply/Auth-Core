@@ -17,7 +17,7 @@ The package is `auth-core-fastapi` (import name `auth_core_fastapi`). It is inst
 its only dependencies are FastAPI and `PyJWT[crypto]`. In your `requirements.txt` or `pyproject.toml`:
 
 ```
-auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.0#subdirectory=clients/python
+auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.1#subdirectory=clients/python
 ```
 
 Pin the tag: the package is versioned with the token contract. A git tag can be moved, so for production pin the install

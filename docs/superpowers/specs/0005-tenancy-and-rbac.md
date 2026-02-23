@@ -480,7 +480,7 @@ manifest is the exception above, because it comes from the product.
   email, spec 0004) becomes a member with a role that does not manage members; it
   stays, because no other path creates an account with an unconfirmed email, and the
   verification flow still needs one to be tested. Its role is the first default
-  role, in the order of the manifest, that does not manage members; when every default
+  role, in the order of the manifest (amended by spec 0008: the first stored role by name in ordinal order), that does not manage members; when every default
   role manages members, it is a role called `member`, made empty if the company has none. A seed user of a
   database made before this slice joins at the next start; an existing member is never
   moved.

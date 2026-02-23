@@ -730,7 +730,7 @@ def test_the_keys_are_fetched_over_http(server):  # criterion 5
     assert server.requests == 1
 
 
-@pytest.mark.parametrize("status", [404, 500, 503])
+@pytest.mark.parametrize("status", [404, 429, 500, 503])
 def test_an_error_status_is_a_failed_fetch(server, status):  # criterion 5
     server.status = status
 
