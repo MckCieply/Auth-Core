@@ -33,6 +33,7 @@ Needs the .NET 10 SDK, Docker with Compose, `openssl`, and Python 3 with
 ```bash
 cp .env.example .env            # set local values; git-ignored
 scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (git-ignored)
+# On Windows (Git Bash) run it as: MSYS2_ARG_CONV_EXCL='/CN=' scripts/dev-keys.sh
 export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own for this sequence, never "auth-core" (your development stack)
 AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
@@ -43,6 +44,7 @@ scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
+unset COMPOSE_PROJECT_NAME        # the project is gone: do not leave the name in your shell
 ```
 
 The per-IP rate limits (30 logins a minute, and so on) are on by default. The lockout and mail checks exceed them on purpose, so the
