@@ -106,10 +106,37 @@ describe('a 429 too_many_requests', () => {
   it('a refresh answered 429 keeps the session and says when to try again', async () => {
     const refreshed = auth.refresh();
     ctrl.expectOne('/auth/refresh').flush(tooMany(30), status(429));
-    expect(await refreshed).toBe('unavailable');
+    expect(await refreshed).toBe('limited');
     expect(auth.token()).toBe('tok');
     expect(auth.notice()).toBe('wait');
     expect(auth.noticeSeconds()).toBe(30);
+  });
+
+  it('the start of the app: a refresh answered 429 shows "wait", one answered 503 shows "unreachable"', async () => {
+    const limited = auth.start();
+    ctrl.expectOne('/auth/refresh').flush(tooMany(20), status(429));
+    await limited;
+    expect(auth.notice()).toBe('wait');
+    expect(auth.noticeSeconds()).toBe(20);
+
+    auth.clearNotice();
+    const down = auth.start();
+    ctrl.expectOne('/auth/refresh').flush(outage, status(503));
+    await down;
+    expect(auth.notice()).toBe('unreachable');
+    expect(auth.token()).toBe('tok');
+  });
+
+  it('an old "wait" notice does not hide a later outage: a refresh answered 503 says "unreachable"', async () => {
+    auth.showNotice('wait', 5);
+    const done = lastValueFrom(http.get('/api/notes')).catch((error: unknown) => error);
+    ctrl.expectOne('/api/notes').flush(null, status(401));
+    await settle();
+    ctrl.expectOne('/auth/refresh').flush(outage, status(503));
+    await settle();
+    expect(await done).toBeInstanceOf(HttpErrorResponse);
+    expect(auth.notice()).toBe('unreachable');
+    expect(auth.token()).toBe('tok');
   });
 
   it('a refresh answered 503 temporarily_unavailable keeps the session', async () => {
@@ -153,8 +180,12 @@ describe('the answers of the service that failureOf and retryAfterOf read', () =
     expect(failureOf(answer(429, tooMany('x')))).toEqual({ kind: 'too_many_requests', retryAfterSeconds: 60 });
   });
 
-  it('a 429 too_many_attempts is still the lockout', () => {
+  it('a 429 too_many_attempts is still the lockout, its wait read the same way', () => {
     expect(failureOf(answer(429, { error: 'too_many_attempts', retry_after_seconds: 90 }))).toEqual({
+      kind: 'too_many_attempts',
+      retryAfterSeconds: 90,
+    });
+    expect(failureOf(answer(429, { error: 'too_many_attempts', retry_after_seconds: 89.2 }))).toEqual({
       kind: 'too_many_attempts',
       retryAfterSeconds: 90,
     });
@@ -162,6 +193,8 @@ describe('the answers of the service that failureOf and retryAfterOf read', () =
 
   it('retryAfterOf is the number of the body, a minute when there is none', () => {
     expect(retryAfterOf(answer(429, tooMany(5)))).toBe(5);
+    expect(retryAfterOf(answer(429, tooMany(2.5)))).toBe(3);
+    expect(retryAfterOf(answer(429, tooMany(Infinity)))).toBe(60);
     expect(retryAfterOf(answer(429, null))).toBe(60);
     expect(retryAfterOf(answer(429, 'text'))).toBe(60);
   });

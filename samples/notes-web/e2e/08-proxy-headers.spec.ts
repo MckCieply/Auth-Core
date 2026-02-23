@@ -28,6 +28,8 @@ test("Auth-Core's own headers reach the browser through the proxy, with HSTS add
   expect(headers['content-security-policy']).toBe(AUTH_CORE_POLICY);
   expect(headers['x-content-type-options']).toBe('nosniff');
   expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['cross-origin-resource-policy']).toBe('same-origin');
+  expect(headers['referrer-policy']).toBe('no-referrer');
   expect(headers['cache-control']).toBe('no-store');
   expect(headers['strict-transport-security']).toBe('max-age=31536000');
 });

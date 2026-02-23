@@ -28,11 +28,10 @@
 	# app's own calls (and the services) spell them in lower case.
 	@auth path_regexp ^/auth(/|$)
 	handle @auth {
-		reverse_proxy auth:8080 {
-			# Auth-Core limits and records requests per client address (spec 0008): the one this proxy saw, never one the client wrote.
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-		}
+		# Auth-Core limits and records requests per client address (spec 0008). Caddy sets X-Forwarded-For to the address it saw and
+		# X-Forwarded-Proto to the scheme, and drops what a client wrote into them, because this file names no trusted_proxies
+		# (Caddy 2.5+); step 7 of scripts/e2e-notes.sh proves it.
+		reverse_proxy auth:8080
 	}
 	@api path_regexp ^/api(/|$)
 	handle @api {

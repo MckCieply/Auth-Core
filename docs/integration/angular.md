@@ -210,5 +210,5 @@ answers `429 {"error":"too_many_requests","retry_after_seconds":n}` with `Retry-
 shows "Try again in N s." for such an answer from any endpoint of your origin and **does not sign the person out**: only a `401 invalid_grant`
 from the refresh ends the session. During a database outage a refresh answers `503 temporarily_unavailable` with `Retry-After: 5` instead of
 `401`; the cookie is neither cleared nor rotated, so the same cookie works once the database is back, and the sample keeps the session too.
-Keep both rules in your own interceptor: a `429` or a `503` is never a reason to sign out. The behind-one-address limits apply to people behind a
-shared NAT together; the lockout of a person's own address (`429 too_many_attempts`) is a different answer and the sign-in screen words it itself.
+Keep both rules in your own interceptor: a `429` or a `503` is never a reason to sign out. People behind one shared address (a NAT) share these
+limits. The lockout of one account after repeated wrong passwords (`429 too_many_attempts`, spec 0003) is a different answer, which the sign-in screen words itself.

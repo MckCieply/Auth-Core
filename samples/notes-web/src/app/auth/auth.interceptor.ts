@@ -131,11 +131,9 @@ function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | nu
         if (auth.token() === null) {
           goToLogin(router); // not when a new sign-in happened while the refresh was away: that session is fine
         }
-      } else {
-        if (auth.notice() !== 'wait') {
-          auth.showNotice('unreachable'); // not over the "try again in N s." that a 429 of this refresh has put there
-        }
-      }
+      } else if (result === 'unavailable') {
+        auth.showNotice('unreachable');
+      } // 'limited': the bar says "Try again in N s." already (the 429 of this refresh); it is not replaced
       return false;
     });
     return from(renewed);

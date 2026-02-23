@@ -418,13 +418,19 @@ expect_status "step 7: GET /auth/health" 200
   || fail "step 7: /auth/health has not the policy of Auth-Core"
 SPOOFED_EMAIL="nobody-$run@example.invalid"
 json_body "$tmp/spoof.json" "{'email': '$SPOOFED_EMAIL', 'password': 'Wrong-Password-1'}"
-curl -sS --max-time 20 -o /dev/null -X POST "$BASE_URL/auth/login" -H 'Content-Type: application/json' \
-  -H 'X-Forwarded-For: 203.0.113.99' --data-binary "@$tmp/spoof.json" || fail "step 7: the login through the proxy did not answer"
+SPOOF_CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/auth/login" -H 'Content-Type: application/json' \
+  -H 'X-Forwarded-For: 203.0.113.99' --data-binary "@$tmp/spoof.json")" || fail "step 7: the login through the proxy did not answer"
+[[ "$SPOOF_CODE" == "401" ]] || fail "step 7: the login of an unknown address through the proxy answered HTTP $SPOOF_CODE, expected 401"
 RECORDED="$("${compose[@]}" exec -T postgres psql -U auth -d auth -tA \
   -c "SELECT client_ip FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$SPOOFED_EMAIL'" | tr -d '\r')"
-[[ -n "$RECORDED" ]] || fail "step 7: the failed login through the proxy is not in the audit log"
+[[ "$RECORDED" =~ ^[0-9a-f.:]+$ ]] || fail "step 7: the failed login through the proxy is not in the audit log as one address"
+# The proxy's own address, read from the running container (not from the default of the overlay: .env may have changed it).
+PROXY_CONTAINER="$("${compose[@]}" ps -q caddy)"
+[[ -n "$PROXY_CONTAINER" ]] || fail "step 7: the proxy (caddy) is not running"
+PROXY_ADDRESS="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "$PROXY_CONTAINER" | tr -d '\r' | { grep -E '^[0-9.]+$' || true; } | head -n1)"
+[[ -n "$PROXY_ADDRESS" ]] || fail "step 7: could not read the address of the proxy container"
 [[ "$RECORDED" != "203.0.113.99" ]] || fail "step 7: the recorded address is the one the client wrote into X-Forwarded-For"
-[[ "$RECORDED" != "${NOTES_PROXY_IP:-10.250.2.10}" ]] || fail "step 7: the recorded address is the proxy's: the proxy is not trusted"
+[[ "$RECORDED" != "$PROXY_ADDRESS" ]] || fail "step 7: the recorded address is the proxy's: the proxy is not trusted"
 pass "step 7: the proxy's headers reach the browser, and Auth-Core records the address the proxy saw, not the proxy's and not a forged one"
 
 echo "ALL PASS"

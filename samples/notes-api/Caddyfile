@@ -6,12 +6,10 @@
 
 http://:8088 {
 	handle /auth/* {
-		# Auth-Core limits and records requests per client address (spec 0008). This proxy says which address that is: the one it saw,
-		# and nothing the client wrote (header_up sets the header, so a forged X-Forwarded-For is replaced).
-		reverse_proxy auth:8080 {
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-		}
+		# Auth-Core limits and records requests per client address (spec 0008). Caddy sets X-Forwarded-For to the address it saw and
+		# X-Forwarded-Proto to the scheme, and drops what a client wrote into them, because this file names no trusted_proxies
+		# (Caddy 2.5+); step 7 of scripts/e2e-notes.sh proves it.
+		reverse_proxy auth:8080
 	}
 	handle /api/* {
 		header {
