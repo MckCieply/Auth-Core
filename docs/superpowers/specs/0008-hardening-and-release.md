@@ -277,6 +277,13 @@ and `405`:
     proxy on the host needs nothing of it).
   - `postgres`: pinned by digest, no published port, a named volume, the health check
     over TCP.
+  - **Two database roles** (Decision 14): the image's superuser (`POSTGRES_USER`) is
+    used only by the operator (backup, restore, password changes); Auth-Core connects
+    as its own role, which owns the database `auth` and its objects and has none of
+    `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `REPLICATION` or `BYPASSRLS`. The role and its
+    password (a secret of its own in `.env`, no default) are created when the volume is
+    first initialised; migrations run as that role. The backup runbook dumps and
+    restores so that the restored objects belong to that role again.
   - A network with a fixed subnet (`${AUTH_SUBNET}`, with a default), so that the
     trusted proxy can be named: a proxy on the host reaches the published port from
     that network's gateway.
@@ -380,7 +387,8 @@ and `405`:
 11. `delete-org` deletes with the exact name and refuses otherwise.
 12. `deploy/docker-compose.prod.yml` starts from an empty volume with an image built
     locally under the GHCR name, migrates, serves login and refresh through a proxy,
-    and refuses to start without its secrets.
+    and refuses to start without its secrets; Auth-Core's database role is not a
+    superuser and owns the tables, and a restored database is owned by it again.
 13. The backup runbook, followed literally, restores a dropped database; a refresh
     cookie issued before the backup still refreshes.
 14. The Angular sample shows "Try again in N s." on `429 too_many_requests` and keeps
@@ -427,6 +435,23 @@ and `405`:
     exactly how long to wait; the framework's sliding window cannot, and its fixed
     window lets twice the limit through around the turn of a minute.
 
+### Amendment (owner, 2026-02-23)
+
+Taken while building the slice, after the threat model was written.
+
+14. **Auth-Core does not connect as the database superuser** in production. A flaw that
+    let SQL through would otherwise reach everything PostgreSQL can do, programs run by
+    `COPY … TO PROGRAM` in the database container included. The production compose
+    file creates a role of its own for Auth-Core (Production compose above); the
+    development compose is unchanged.
+15. **Four more risks are accepted** for v0.1.0 (also in the threat model): trusting the
+    pair `0.0.0.0/1` and `128.0.0.0/1` trusts every IPv4 address, and is not refused;
+    which gateway a proxy on the host arrives from depends on the Docker engine (the
+    production test prints it); a process on the server host can choose the client
+    address Auth-Core records, since it reaches the published port from a trusted
+    gateway; certificates that lapse stop Auth-Core from signing, so the key rotation
+    runbook records their end date and replaces them before it.
+
 ## Deferred / follow-ups
 
 - Rotation without signing everyone out (previous keys kept for verification and
@@ -451,6 +476,7 @@ and `405`:
   pasted into the wrong field; it is kept for the retention period.
 - Anyone can create `login.failed` and `password.reset_requested` rows; only the per-IP
   limits and the retention bound the table.
+- The four risks of Decision 15.
 
 ## Verification notes (for the local verifiers)
 
