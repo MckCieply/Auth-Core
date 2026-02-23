@@ -237,7 +237,7 @@ done
 wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 2: $DIRECT_URL/auth/health did not return 200 within 120s (docker compose -p $COMPOSE_PROJECT_NAME logs auth)"
 wait_ok 60 -k "$PROXY_URL/auth/health" || fail "step 2: $PROXY_URL/auth/health (through the proxy) did not return 200 within 60s"
 wait_ok 60 "$MAILPIT_URL/readyz" || fail "step 2: the mail catcher did not answer within 60s"
-auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')"
+auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')" || fail "step 2: docker compose ps failed"
 [[ -n "$auth_id" ]] || fail "step 2: no auth container"
 # The inspect is captured first and the caller fails: a fail inside $(...) would print its FAIL line and then the caller's.
 read_only="$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$auth_id" | tr -d '\r')" || fail "step 2: docker inspect of the auth container failed"
@@ -345,7 +345,7 @@ json_body "$tmp/spoof.json" "{'email': '$SPOOF_EMAIL', 'password': 'Wrong-Passwo
 EXTRA_HEADER="X-Forwarded-For: 203.0.113.77" call POST /auth/login "$tmp/spoof.json"
 expect_status "step 4: a failed login through the proxy" 401
 RECORDED="$(recorded_ip "$SPOOF_EMAIL" || true)"
-caddy_id="$("${compose[@]}" ps -q caddy | tr -d '\r')"
+caddy_id="$("${compose[@]}" ps -q caddy | tr -d '\r')" || fail "step 4: docker compose ps failed"
 [[ -n "$caddy_id" ]] || fail "step 4: no caddy container"
 CADDY_IP="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' "$caddy_id" | tr -d '\r')" || fail "step 4: docker inspect of the caddy container failed"
 [[ -n "$RECORDED" ]] || fail "step 4: the failed login left no audit row with an address"
@@ -389,7 +389,7 @@ json_body "$tmp/gateway.json" "{'email': '$GW_EMAIL', 'password': 'Wrong-Passwor
 direct /auth/login "$tmp/gateway.json"
 expect_status "step 6: a failed login straight to the published port" 401
 GW_IP="$(recorded_ip "$GW_EMAIL" || true)"
-auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')"
+auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')" || fail "step 6: docker compose ps failed"
 [[ -n "$auth_id" ]] || fail "step 6: no auth container"
 GW_NETWORKS="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} (container {{$v.IPAddress}}, gateway {{$v.Gateway}}) {{end}}' "$auth_id" | tr -d '\r')" || fail "step 6: docker inspect of the auth container failed"
 GW_DOCKER="$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\r' || echo unknown)"
