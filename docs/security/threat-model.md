@@ -3,7 +3,8 @@
 Auth-Core is a self-hosted authentication service: one instance per product, behind one reverse proxy on the product's origin
 ([ADR 0001](../adr/0001-instance-per-project.md), [ADR 0004](../adr/0004-same-origin-cookie-refresh.md)). This is its threat model, made
 with STRIDE for each element of the deployment. For every element it lists the threat, what stops it and where that is built, and the risk
-that is accepted. The last section collects the accepted risks in one place, with the decision that accepted each. It describes version
+that is accepted. The last section collects the risks that a spec accepted, with the decision that accepted each; the tables also name
+risks of the trusted base (the host, the database, the relay) that no decision covers, and the last section lists those apart. It describes version
 0.1.0 ([spec 0008](../superpowers/specs/0008-hardening-and-release.md)).
 
 ## What is protected, and from whom
@@ -63,6 +64,8 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | D | Floods | Per-IP limits (30 logins, 60 refreshes, 10 mail requests, 20 invitation requests and 300 other requests a minute) answered `429` before any work is done (`RateLimitMiddlewareTests`); the limiter counts on the monotonic clock of the injected `TimeProvider`, so a step of the wall clock neither blocks nor frees a client (`SlidingWindowLimiterTests`); an IPv6 client is counted by its `/64`, so one subscriber cannot spread over its addresses | Many people behind one address share its limits; 30 logins a minute is the ceiling for an office behind one NAT. A distributed guesser below the limits on many addresses is stopped only by the per-identifier lockout; an attacker who holds several `/64` networks has a set of limits for each. The counters live in memory (one instance per product): a restart clears them, so whoever can make the service restart gets a fresh allowance |
 | E | The proxy is bypassed: Auth-Core's port reached directly | The published port is on `127.0.0.1` only (`docker-compose.prod.yml`) | A process on the host reaches the port from a gateway address, which is trusted by default, so it can write any client address into `X-Forwarded-For`; a request that gets that far is taken as it comes |
 
+Not applicable: R (the proxy is not where actions are recorded: Auth-Core's audit log records them with the client address the proxy forwards, and the sample's Caddy writes no access log).
+
 ## Auth-Core
 
 | | Threat | Mitigation | Residual |
@@ -93,6 +96,7 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | I | Addresses in the mail queue | A request is queued with the normalised address and nothing else; the row is removed within seconds when no account has the address, and at delivery or when the request is an hour old otherwise ([spec 0004](../superpowers/specs/0004-email-flows.md), Decision 12) | Whoever reads the database sees the addresses of the requests that are pending |
 | I | A backup read by the wrong person | The runbook keeps the dump apart from the key files, and says to encrypt it off the host ([`backup.md`](../operations/backup.md)) | A dump holds every account's password hash |
 | D | The disk fills, the server is lost | Pruning of expired rows, the audit log by its retention; a nightly dump and a restore that is tried ([`backup.md`](../operations/backup.md), `scripts/e2e-prod.sh` step 5) | Whatever happened after the last backup is lost, a deleted company included |
+| E | Code in Auth-Core runs arbitrary SQL | EF Core parameterises every query; the few raw statements (`FromSql`, `ExecuteSqlAsync`, `SqlQuery`, all with interpolated values, which EF sends as parameters) never concatenate input into the text | Auth-Core connects as the PostgreSQL superuser (the image's `POSTGRES_USER`): a flaw that ran SQL could do anything in PostgreSQL, `COPY ... TO PROGRAM` in the postgres container included |
 
 ## SMTP relay
 
@@ -103,6 +107,8 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | I | Names and mail content | Company and role names are encoded and limited to 100 characters | A hostile admin can word a company or role name as they like; every mail names the company |
 | D | The relay is down | Mail goes through a queue with retries; the request is answered `202` at once (`MailDispatcherTests`) | A mail may arrive late. Delivery is at-least-once: a retry after a failure that came after the relay took the mail sends a second mail, with a new link ([spec 0004](../superpowers/specs/0004-email-flows.md), Decision 13) |
 
+Not applicable: R (the relay's own delivery log belongs to its operator; Auth-Core audits the invitation, `invite.sent`, and never a mail body or a link), E (Auth-Core only connects out to the relay and takes nothing from it but an accepted or a refused send).
+
 ## Key files
 
 | | Threat | Mitigation | Residual |
@@ -110,7 +116,9 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | I | The signing or encryption key is read | Read-only mount, a directory of its own, a mode that only the container's user can read ([`key-rotation.md`](../operations/key-rotation.md)); RSA of at least 2048 bits is enforced at start (`KeyMaterialTests`) | Anyone who reads the signing key can make tokens until the key is rotated |
 | T | A key replaced by an attacker | Write access to the host is root | |
 | D | A key lost or rotated | The service refuses to start without its keys; keys are backed up apart from the dump | A key change signs everyone out (Decision 7 of spec 0008): no previous keys are kept for verification or decryption |
-| D | A certificate lapses | The runbook generates certificates valid for ten years and says to note the date: OpenIddict refuses a certificate outside its validity | After the date the service cannot use the keys until they are replaced, which signs everyone out |
+| D | A certificate lapses | The runbook generates certificates valid for ten years and says to note the date: OpenIddict refuses to work when no certificate is within its dates, most likely as a `500` on the first login with its message in the log | After the date the service cannot issue or read tokens until new certificates (or new keys) are in place |
+
+Not applicable: S (a file cannot be impersonated; a replaced file is the T row), R (a key file records nothing; sign-ins are in the audit log), E (a file has no authority of its own; what a reader of the signing key can do is the I row).
 
 ## Product backend
 
@@ -122,6 +130,8 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | D | Auth-Core unreachable | The package keeps the keys it holds for 24 hours and answers `503 auth_unavailable` when it has none | A key that Auth-Core has removed or rotated still works at a product backend until its next successful fetch, and for at most 24 hours while Auth-Core is down ([spec 0006](../superpowers/specs/0006-python-consumer-package.md), Decision 10) |
 | E | A demoted member's token | Short life | 15 minutes at the product's endpoints at the extreme |
 
+Not applicable: R (what a product's backend does is the product's to record; Auth-Core records its own flows, and the token names `sub` and `org_id` for the product's log).
+
 ## Operator CLI
 
 | | Threat | Mitigation | Residual |
@@ -131,11 +141,12 @@ to PostgreSQL and to the relay (private network; TLS to the relay), the host's f
 | I | Secrets in its output | It prints no connection string or exception text, only `error: <code>` or `error: failed (<exception type>)` and the service's own warnings | |
 | E | The CLI used to bypass the API's rules | It is the operator's own tool; the same services and rules apply except rule 1 | |
 
+Not applicable: R (every command is recorded with "via": "cli"), D (the CLI is run by the operator, one command at a time; nobody else can reach it, and a failing command costs one run).
+
 ## Residual risks
 
 Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 40 are the risks accepted by
-specs 0002 to 0008; items 41 to 43 were found while building the production compose file and the proxy rules, and are recorded here as
-built (spec 0008's own list does not name them).
+specs 0002 to 0008. The risks that no spec has accepted are listed apart, after them.
 
 1. **A key change signs everyone out.** No previous keys are kept for verification or decryption; rotation is a runbook (spec 0008, Decision 7).
 2. **A distributed guesser below the per-IP limits** on many addresses is stopped only by the per-identifier lockout, which an attacker can use to keep a chosen account locked, at one request per cooldown (spec 0003, Decision 8 and Deferred / follow-ups; spec 0008, Residual risks).
@@ -171,15 +182,27 @@ built (spec 0008's own list does not name them).
 32. **Cancelling an invitation** whose mail is being sent waits for the send (at most 20 seconds) while it holds the company's lock, and the other changes of that company wait with it (spec 0005, As built, residual risks found in verification).
 33. **Package limit:** an asynchronous exception (a gevent or eventlet timeout) delivered between marking a fetch as running and the `try` that ends it can leave the key cache marked as fetching; while the cache is warm, a request that lacks its key is then answered `503` at once (spec 0006, As built, known limits).
 34. **The refresh cookie is `Secure`,** so on a plain-HTTP origin other than `localhost` browsers drop it; HTTPS comes with the real deployment (spec 0006, As built, known limits).
-35. **Angular, its CLI and its build stay at 21.1.4 with their known advisories:** six high advisories against the runtime packages (cross-site scripting through i18n bindings, sanitisation bypasses, denial of service in pipes and server-side rendering, leaks of the transfer cache), none reachable by what the sample uses, and advisories in the development tooling that never reach the build; the content-security-policy is the second line. A product that copies the sample moves to a fixed release (spec 0007, Decision 13 and As built, known limits).
+35. **Angular, its CLI and its build stay at 21.1.4 with their known advisories:** six high advisories against the runtime packages (cross-site scripting through i18n bindings, sanitisation bypasses, denial of service in pipes and server-side rendering, leaks of the transfer cache), none reachable by what the sample uses except the date pipe, used with a fixed format and a validated date, and advisories in the development tooling that never reach the build; the content-security-policy is the second line. A product that copies the sample moves to a fixed release (spec 0007, Decision 13 and As built, known limits).
 36. **An access log records the mail link's `?token=` query** unless it is turned off or scrubbed for `/reset`, `/verify` and `/invite`; a token that is still valid in a log is a way into someone's account (spec 0007, As built, the guide's step 4; `docs/integration/angular.md`).
 37. **Kestrel's answers before the pipeline** (a malformed request line, headers too large) cannot carry the security headers (spec 0008, Unhandled errors).
 38. **The per-IP counters are in memory:** a restart clears them (one instance per product, ADR 0001; spec 0008, Per-IP rate limiting).
 39. **The audit log is not tamper-evident** and is bounded by the retention; it is read by SQL (spec 0008, Decision 5 and Deferred / follow-ups).
 40. **A mail link in a mailbox** is a credential for its lifetime; whoever reads the mailbox can use it: a reset link lives 1 hour and a verification link 24 hours (spec 0004, Decision 11), an invitation link 7 days (spec 0005, Decision 11).
+
+### Pending the owner's decision
+
+Found while building the production compose file, the proxy rules and these documents, and recorded here as built. Spec 0008's own list does
+not name them, and no decision has accepted them yet.
+
 41. **An operator who trusts `0.0.0.0/1` and `128.0.0.0/1`** trusts every IPv4 address, and every client can then choose its own address; this misconfiguration is not refused (spec 0008, Client address and trusted proxies; `ProxySettings` refuses the other mistakes).
 42. **Which gateway a proxy on the host arrives from depends on the Docker engine,** so the default of `AUTH_PROXY_KNOWN_PROXIES` (both gateways) fits a Linux VPS and is checked there by `scripts/e2e-prod.sh` step 6; Docker Desktop is not a Linux VPS and may deliver the connection from another address (spec 0008, Production compose).
 43. **A process on the host can choose its client address:** it reaches the published port from a trusted gateway, so its `X-Forwarded-For` is believed (spec 0008, Production compose; the host is part of the trusted base).
+44. **A certificate lapses** (the generated ones after ten years): OpenIddict refuses to work when no certificate is within its dates, most
+    likely as a `500` on the first login, and the service cannot issue or read tokens until new certificates (or new keys) are in place, which
+    signs everyone out (spec 0008, Decision 7; `docs/operations/key-rotation.md`). Whether new certificates for the same keys would be enough has not been tried.
+45. **Auth-Core connects to PostgreSQL as its superuser** (the image's `POSTGRES_USER`): a flaw in Auth-Core that ran SQL could do anything in
+    PostgreSQL, `COPY ... TO PROGRAM` in the postgres container included. EF Core parameterises every query, and the few raw statements pass their values as parameters
+    (`FromSql` and `ExecuteSqlAsync` with interpolated values; no `FromSqlRaw`) (spec 0008, Production compose).
 
 ### Accepted earlier and closed by spec 0008
 

@@ -18,7 +18,7 @@
 #      HSTS is sent; a failed login through the proxy is recorded with the address the proxy saw, not the one the client wrote and not
 #      the proxy's own.
 #   5. the backup runbook (docs/operations/backup.md), command for command: a dump, the database dropped, recreated and restored, the
-#      service started again; the refresh cookie issued BEFORE the backup still refreshes and the company is still there.
+#      service started again and waited for with the runbook's login (not /auth/health); the refresh cookie issued BEFORE the backup still refreshes and the company is still there.
 #   6. which gateway a proxy on the host arrives from: one failed login straight to the published port, with no X-Forwarded-For, is
 #      recorded with the gateway of one of the two networks (10.250.0.1 or 10.250.1.1), the two addresses the compose file trusts. The
 #      networks of the container and the Docker version are printed. This is a check of the Docker of THIS machine: Docker Desktop (Windows,
@@ -367,7 +367,17 @@ timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'DROP D
 timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'CREATE DATABASE auth OWNER auth' > /dev/null || fail "step 5: could not create the database"
 timeout 300 "${compose[@]}" exec -T postgres pg_restore -U auth -d auth --no-owner --exit-on-error < "$backup/auth.dump" || fail "step 5: pg_restore failed"
 timeout 120 "${compose[@]}" start auth > /dev/null 2>&1 || fail "step 5: could not start the service again"
-wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 5: the service did not answer within 120s of its start"
+# The runbook's own readiness check (docs/operations/backup.md, step 5 of the restore): a login of an address nobody has, a fresh one each time,
+# until it is a 401. /auth/health does not reach the database; a login does (000 or 500 until the service and the database answer).
+ready=0
+deadline=$((SECONDS + 120))
+while (( SECONDS < deadline )); do
+  json_body "$tmp/ready5.json" "{'email': 'nobody-$(date +%s)@example.invalid', 'password': 'not-a-password'}"
+  direct /auth/login "$tmp/ready5.json" || true
+  if [[ "$HTTP_CODE" == "401" ]]; then ready=1; break; fi
+  sleep 3
+done
+[[ "$ready" == "1" ]] || { "${compose[@]}" logs --no-color --tail 30 auth >&2 || true; fail "step 5: a login was not answered with 401 within 120s of the start of the service (HTTP $HTTP_CODE)"; }
 ok=0
 deadline=$((SECONDS + 60))
 while (( SECONDS < deadline )); do

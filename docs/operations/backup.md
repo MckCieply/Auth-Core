@@ -53,10 +53,14 @@ in a directory of their own, apart from the dump, then encrypt it and copy it aw
 ```bash
 umask 077
 mkdir -p secrets-backup
-cp -a /etc/auth-core/keys secrets-backup/keys      # the directory named by AUTH_KEYS_DIR
+sudo cp -a /etc/auth-core/keys secrets-backup/keys      # the directory named by AUTH_KEYS_DIR
 cp /etc/auth-core/auth.yaml secrets-backup/auth.yaml   # the file named by AUTH_MANIFEST
 cp .env secrets-backup/env
+sudo tar -C secrets-backup -cf - . | age -r <recipient> > secrets-$(date +%F).tar.age
 ```
+
+The key files are owned by uid `1654` and readable by it only (mode 0400), so copying and archiving them takes `sudo`. The `age` line
+encrypts the archive to your recipient key (replace `<recipient>`); remove the plain `secrets-backup` directory afterwards.
 
 ## Restore, step by step
 
@@ -95,22 +99,26 @@ use when it was made.
 
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
-     -d '{"email":"nobody@example.invalid","password":"not-a-password"}' http://127.0.0.1:8080/auth/login
+     -d "{\"email\":\"nobody-$(date +%s)@example.invalid\",\"password\":\"not-a-password\"}" http://127.0.0.1:8080/auth/login
    ```
 
-   (Use your `AUTH_PORT` when it is not 8080. The failed attempt is one `login.failed` row.) Then check the data:
+   `000` or `500` means the service or the database does not answer yet: ask again every few seconds. `401` means ready. A `429` means the
+   address was locked by earlier attempts: the command makes a new address each time, so run it again. (Use your `AUTH_PORT` when it is not
+   8080. Each failed attempt is one `login.failed` row.) Then check the data:
 
    ```bash
    $C run --rm -T --no-deps auth admin list-orgs      # the companies: id, name, members
    ```
 
-   Then sign in as someone and refresh. **Every session still valid at the time of the backup is valid now** (the refresh tokens are in
-   the dump, the keys are the same); sessions started after the backup are gone, and so is everything else that happened after it.
+   Then sign in as someone and refresh. Refresh tokens rotate, so a session whose cookie has not been used since the dump keeps working
+   (its token is in the dump and the keys are the same); anyone who refreshed after the dump (in practice everyone active since then) is
+   signed out and signs in again, as is every session started after it. Everything else that happened after the dump is gone.
 
 If the **keys are lost** too: put new keys in place ([`key-rotation.md`](key-rotation.md)). Everyone signs in again; accounts, companies and
 roles are intact.
 
-If you restored into a **new server**: install Docker, put `deploy/`, `.env`, the keys and the manifest in place, run `$C up -d postgres`,
+If you restored into a **new server**: install Docker, put `deploy/`, `.env`, the keys and the manifest in place (restore the keys with `sudo cp -a`, or run the `chown` and `chmod` of
+[`key-rotation.md`](key-rotation.md) again), run `$C up -d postgres`,
 wait until `$C exec -T postgres pg_isready -h 127.0.0.1 -U auth -d auth` says it accepts connections (over TCP: on a fresh volume the image first
 runs a temporary server that listens on its socket only), then do steps 2 and 3, and step 5. Skip step 1: there is no `auth` container yet to
 stop. In step 4 use `$C up -d auth` instead of `$C start auth`: it creates the container, which `start` cannot.
@@ -130,14 +138,17 @@ and run a query by giving it on the standard input, `auth_psql <<'SQL'` followed
 
 The columns: `occurred_at`, `kind`, `actor_user_id` (the account that acted; empty for the operator CLI, an anonymous request or a failed
 login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account), `org_id`, `org_name` (its name at that
-moment), `target_id` (the role or invitation), `client_ip` (the whole address; `unknown` when there was none), `details` (a small JSON
+moment), `target_id` (the role or invitation), `client_ip` (the whole address; empty for the operator CLI, `unknown` for a request that had none), `details` (a small JSON
 object). A row outlives the account, company, role or invitation it names. It never holds a password, a token, a link, a cookie or a mail
 body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted every hour; a row exactly that old is still there.
 
 What `details` holds, where it is set: `"via": "cli"` for the operator CLI, and `"via": "seed"` on the `org.created` row of the
-development seeder (Development only); `"forced": true` on a `member.removed` row when the operator passed `--force`; `reason` on
-`login.failed` and `org.delete_refused`; `retry_after_seconds` on `login.locked`; `policy` and `limit` on `rate_limit.hit`; the counts of members,
-invitations and roles on `org.deleted`.
+development seeder (Development only); `"forced": true` on a `member.removed` row when the operator passed `--force` (that row also has
+the `role` the member had); `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
+`org.renamed`; `role` on `invite.sent`, `invite.resent`, `invite.accepted` and `invite.cancelled`; `name` and `permissions` on
+`role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed` and
+`org.delete_refused`; `retry_after_seconds` on `login.locked`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
+and `roles` on `org.deleted`.
 
 Two things to know when a row seems to be missing:
 
