@@ -10,7 +10,8 @@
 #
 # The directory in E2E_PROD_PKI_DIR is made by the script: ca.crt (the test authority's certificate, for the auth container), relay/ (the
 # certificate and key of the relay, for Mailpit) and crl/ (the list, for the pki service). The authority's key stays in the directory itself and
-# is mounted nowhere.
+# is mounted nowhere. Every mount is a read-only bind with create_host_path: false: a missing path stops the start instead of becoming an
+# empty directory.
 services:
   mailpit:
     image: axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
@@ -21,7 +22,12 @@ services:
       MP_SMTP_REQUIRE_STARTTLS: "true"
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
     volumes:
-      - ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/relay:/pki:ro
+      - type: bind
+        source: ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/relay
+        target: /pki
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       # The API the script reads the mails from. Loopback only.
       - "127.0.0.1:8025:8025"
@@ -47,7 +53,12 @@ services:
       - /data:mode=1777
       - /config:mode=1777
     volumes:
-      - ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/crl:/crl:ro
+      - type: bind
+        source: ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/crl
+        target: /crl
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       auth:
         aliases:
@@ -72,7 +83,12 @@ services:
     ports:
       - "127.0.0.1:8443:8443"
     volumes:
-      - ${E2E_PROD_CADDYFILE:?set by scripts/e2e-prod.sh}:/etc/caddy/Caddyfile:ro
+      - type: bind
+        source: ${E2E_PROD_CADDYFILE:?set by scripts/e2e-prod.sh}
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - proxy
 
@@ -86,4 +102,9 @@ services:
       # The test authority that signed Mailpit's certificate. It replaces the system's authorities for this container.
       SSL_CERT_FILE: /pki/ca.crt
     volumes:
-      - ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/ca.crt:/pki/ca.crt:ro
+      - type: bind
+        source: ${E2E_PROD_PKI_DIR:?set by scripts/e2e-prod.sh}/ca.crt
+        target: /pki/ca.crt
+        read_only: true
+        bind:
+          create_host_path: false

@@ -7,8 +7,9 @@
 #   1. docker compose refuses to render the production file without its secrets, and the service refuses to start with a key file that
 #      is not there and with a mail relay without TLS.
 #   2. the image carries the OCI labels (source, version, licenses MIT, revision); the container runs with a read-only root file system,
-#      no capability and no privilege gain, and serves /auth/health; no Server header; the headers of the table; no interactive reference;
-#      a login is answered (the database is reached and migrated: /auth/health does not say so).
+#      no capability and no privilege gain, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY, the
+#      Content-Security-Policy, Referrer-Policy no-referrer, Cross-Origin-Resource-Policy same-origin, Cache-Control no-store, Pragma no-cache)
+#      and no Server header; no interactive reference; a login is answered (the database is reached and migrated: /auth/health does not say so).
 #   3. the first company from the CLI (create-org prints the id), an invitation for its admin: the mail arrives over STARTTLS (Mailpit
 #      refuses plain SMTP; the relay's certificate is checked for revocation against the list the test authority publishes, which the
 #      container fetches over HTTP and caches on its read-only root file system) and names the https frontend URL; no seed user exists.
@@ -29,19 +30,22 @@
 # Env: COMPOSE_PROJECT_NAME (default auth-core-prodtest; it must be auth-core-prodtest or auth-core-prodtest-<suffix>, because the script
 # runs `down -v` on its project: "auth-core", the development stack, and any other project are refused, and so is a project that already
 # has containers or volumes), AUTH_PORT, E2E_PROD_SKIP_BUILD=1 (reuse an image already built under the name), E2E_KEEP_STACK=1 (leave the
-# stack up), PROXY_URL, DIRECT_URL, MAILPIT_URL. The AUTH_* variables of the compose file that are set in your shell are unset: the stack
+# stack up, and keep the directory with the files it mounts). The addresses of the proxy (https://localhost:8443) and of the mail catcher
+# (http://localhost:8025) are fixed, because the overlay and the Caddyfile fix their ports. The AUTH_* variables of the compose file that are set in your shell are unset: the stack
 # gets the environment file this script makes and nothing else.
 # Takes about five minutes (the first build longer; the invitation mail waits for the server's next poll, within a minute). Exits non-zero
 # on the first failure; prints "PASS <step>" per step; never prints a password, a token, a cookie or a mail body. Keys, the test
-# authority and the environment file are made in a mktemp -d directory (removed on exit); request bodies and cookies go through files.
+# authority and the environment file are made in a mktemp -d directory (removed on exit, unless E2E_KEEP_STACK=1 keeps the stack: its
+# containers mount files from there); request bodies and cookies go through files.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-prodtest}"
 AUTH_PORT="${AUTH_PORT:-8080}"
-PROXY_URL="${PROXY_URL:-https://localhost:8443}"
-DIRECT_URL="${DIRECT_URL:-http://127.0.0.1:$AUTH_PORT}"
-MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
+# Fixed: the overlay publishes Caddy on 8443 and Mailpit on 8025, and the Caddyfile's site is https://localhost:8443.
+PROXY_URL="https://localhost:8443"
+MAILPIT_URL="http://localhost:8025"
+DIRECT_URL="http://127.0.0.1:$AUTH_PORT"
 VERSION="0.0.0-prodtest"
 IMAGE="ghcr.io/mckcieply/auth-core:$VERSION"
 
@@ -72,7 +76,12 @@ compose=(docker compose -p "$COMPOSE_PROJECT_NAME" -f "$(host_path "$root/deploy
 
 STACK_STARTED=0
 cleanup() {
-  if [[ "$STACK_STARTED" == "1" && "${E2E_KEEP_STACK:-0}" != "1" ]]; then "${compose[@]}" down -v > /dev/null 2>&1 || true; fi
+  if [[ "$STACK_STARTED" == "1" && "${E2E_KEEP_STACK:-0}" == "1" ]]; then
+    # The containers mount files from $tmp (the keys, the test authority's certificate, the relay's certificate and key, the list): it stays with the stack.
+    echo "stack kept: files in $tmp; remove with: docker compose -p $COMPOSE_PROJECT_NAME down -v; rm -rf $tmp" >&2
+    return
+  fi
+  if [[ "$STACK_STARTED" == "1" ]]; then "${compose[@]}" down -v > /dev/null 2>&1 || true; fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -171,11 +180,12 @@ wait_ok() { # wait_ok <seconds> <curl args...>: waits until the URL answers 200
   return 1
 }
 
-psql_value() { printf '%s\n' "$1" | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'; }
+# Every docker call that talks to a container is bounded by timeout (coreutils; it works with a pipe and with a redirected standard input).
+psql_value() { printf '%s\n' "$1" | timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'; }
 
 recorded_ip() { # recorded_ip <email>: the client_ip of the newest failed login of that address; waits up to 15 s for the row
-  local i out
-  for i in $(seq 1 15); do
+  local out deadline=$((SECONDS + 15))
+  while (( SECONDS < deadline )); do
     out="$(psql_value "SELECT client_ip FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$1' ORDER BY occurred_at DESC LIMIT 1" || true)"
     if [[ -n "$out" ]]; then printf '%s' "$out"; return 0; fi
     sleep 1
@@ -185,7 +195,7 @@ recorded_ip() { # recorded_ip <email>: the client_ip of the newest failed login 
 
 cli() { # cli <args...>: the operator's command in a one-off container of the production service; sets CLI_OUT and CLI_EXIT
   CLI_EXIT=0
-  CLI_OUT="$("${compose[@]}" run --rm -T --no-deps auth admin "$@" 2> "$tmp/cli.err")" || CLI_EXIT=$?
+  CLI_OUT="$(timeout 120 "${compose[@]}" run --rm -T --no-deps auth admin "$@" 2> "$tmp/cli.err")" || CLI_EXIT=$?
   CLI_OUT="${CLI_OUT//$'\r'/}"
 }
 
@@ -217,7 +227,7 @@ grep -q "Auth:Email:Smtp:Security" "$tmp/nomail.out" || fail "step 1: the refusa
 pass "step 1: docker compose refuses the file without its secrets; the service refuses a missing key file and a relay without TLS, naming the setting"
 
 # --- Step 2: the image, the container, the headers ------------------------------------------------------------------------------------
-labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}')"
+labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}')" || fail "step 2: docker image inspect of $IMAGE failed"
 for expected in '"org.opencontainers.image.source":"https://github.com/MckCieply/Auth-Core"' "\"org.opencontainers.image.version\":\"$VERSION\"" \
                 '"org.opencontainers.image.licenses":"MIT"' '"org.opencontainers.image.revision":"'; do
   [[ "$labels" == *"$expected"* ]] || fail "step 2: the image has no label $expected"
@@ -227,13 +237,22 @@ wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 2: $DIRECT_URL/auth/health d
 wait_ok 60 -k "$PROXY_URL/auth/health" || fail "step 2: $PROXY_URL/auth/health (through the proxy) did not return 200 within 60s"
 wait_ok 60 "$MAILPIT_URL/readyz" || fail "step 2: the mail catcher did not answer within 60s"
 auth_id="$("${compose[@]}" ps -q auth)"
-expect_eq "step 2: the root file system is read-only" "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$auth_id")" "true"
-[[ "$(docker inspect -f '{{.HostConfig.CapDrop}}' "$auth_id")" == *ALL* ]] || fail "step 2: the container does not drop every capability"
-[[ "$(docker inspect -f '{{.HostConfig.SecurityOpt}}' "$auth_id")" == *no-new-privileges* ]] || fail "step 2: the container may gain privileges"
+[[ -n "$auth_id" ]] || fail "step 2: no auth container"
+auth_inspect() { docker inspect -f "$1" "$auth_id" || fail "step 2: docker inspect of the auth container failed"; }
+expect_eq "step 2: the root file system is read-only" "$(auth_inspect '{{.HostConfig.ReadonlyRootfs}}')" "true"
+[[ "$(auth_inspect '{{.HostConfig.CapDrop}}')" == *ALL* ]] || fail "step 2: the container does not drop every capability"
+[[ "$(auth_inspect '{{.HostConfig.SecurityOpt}}')" == *no-new-privileges* ]] || fail "step 2: the container may gain privileges"
 direct /auth/health
 expect_status "step 2: /auth/health" 200 "Healthy"
+# The table of the spec (Security headers on every response), on a 200 of the live server.
 [[ -z "$(header server)" ]] || fail "step 2: the live server sends a Server header"
-[[ "$(header x-content-type-options)" == "nosniff" && "$(header x-frame-options)" == "DENY" ]] || fail "step 2: the security headers are missing on the live server"
+expect_eq "step 2: X-Content-Type-Options" "$(header x-content-type-options)" "nosniff"
+expect_eq "step 2: X-Frame-Options" "$(header x-frame-options)" "DENY"
+expect_eq "step 2: Content-Security-Policy" "$(header content-security-policy)" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+expect_eq "step 2: Referrer-Policy" "$(header referrer-policy)" "no-referrer"
+expect_eq "step 2: Cross-Origin-Resource-Policy" "$(header cross-origin-resource-policy)" "same-origin"
+expect_eq "step 2: Cache-Control" "$(header cache-control)" "no-store"
+expect_eq "step 2: Pragma" "$(header pragma)" "no-cache"
 direct /auth/scalar/
 expect_status "step 2: no interactive reference in Production" 404
 direct /auth/openapi/v1.json
@@ -243,13 +262,14 @@ expect_status "step 2: the OpenAPI description is served in Production" 200
 # system: a login that is answered shows it works there.
 json_body "$tmp/ready.json" "{'email': 'ready-$run@example.invalid', 'password': 'Wrong-Password-1'}"
 ready=0
-for _ in $(seq 1 40); do
+deadline=$((SECONDS + 120))
+while (( SECONDS < deadline )); do
   direct /auth/login "$tmp/ready.json" || true
   if [[ "$HTTP_CODE" == "401" ]]; then ready=1; break; fi
   sleep 3
 done
 [[ "$ready" == "1" ]] || { "${compose[@]}" logs --no-color --tail 30 auth >&2 || true; fail "step 2: a login was not answered with 401 within 120s (HTTP $HTTP_CODE): the database is not reached or not migrated"; }
-pass "step 2: the image has its labels; the container is read-only with no capability and no privilege gain, serves /auth/health and answers a login; no Server header; no interactive reference"
+pass "step 2: the image has its labels; the container is read-only with no capability and no privilege gain, serves /auth/health and answers a login; the headers of the table, no Server header; no interactive reference"
 
 # --- Step 3: the first company from the CLI, the mail over STARTTLS ----------------------------------------------------------------------
 ADMIN_EMAIL="boss-$run@prodtest.example"
@@ -261,9 +281,10 @@ ORG="$CLI_OUT"
 cli invite --org "$ORG" --email "$ADMIN_EMAIL" --role admin
 [[ "$CLI_EXIT" == "0" ]] || { cat "$tmp/cli.err" >&2; fail "step 3: the invitation failed"; }
 mail_ok=0
-for _ in $(seq 1 150); do
-  curl -sS --max-time 10 -G "$MAILPIT_URL/api/v1/search" --data-urlencode "query=to:$ADMIN_EMAIL" -o "$tmp/search.json"
-  if [[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages_count"])' < "$tmp/search.json" | tr -d '\r')" == "1" ]]; then mail_ok=1; break; fi
+deadline=$((SECONDS + 150))
+while (( SECONDS < deadline )); do
+  curl -sS --max-time 10 -G "$MAILPIT_URL/api/v1/search" --data-urlencode "query=to:$ADMIN_EMAIL" -o "$tmp/search.json" || true
+  if [[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages_count"])' < "$tmp/search.json" 2> /dev/null | tr -d '\r' || true)" == "1" ]]; then mail_ok=1; break; fi
   sleep 1
 done
 if [[ "$mail_ok" != "1" ]]; then
@@ -274,13 +295,15 @@ if [[ "$mail_ok" != "1" ]]; then
   { "${compose[@]}" logs --no-color --tail 20 pki 2>&1 || true; } >&2
   fail "step 3: no invitation mail arrived within 150s: the relay requires STARTTLS and the service must trust its test authority and accept its certificate, whose revocation it checks against the list at http://pki.test/ca.crl; if the log above shows the list was not fetched or not cached, the CRL fetch fails on the read-only root file system (the fix is a writable HOME for the cache, HOME: /tmp in the auth service of deploy/docker-compose.prod.yml, and a line in docs/deployment/vps.md that the relay's certificate must be checkable from the container)"
 fi
-# The list was really asked for: the access log of the small server that publishes it shows the request of the service.
-crl_requests="$({ "${compose[@]}" logs --no-color pki 2>&1 || true; } | grep -c '/ca\.crl' || true)"
+# The list was really asked for: the access log of the small server that publishes it (Caddy's JSON log, "uri":"/ca.crl") shows the
+# request of the service. A mail without that request means the revocation of the relay's certificate was not checked.
+crl_requests="$({ "${compose[@]}" logs --no-color pki 2>&1 || true; } | grep -c '"uri":"/ca\.crl"' || true)"
 if [[ "${crl_requests:-0}" == "0" ]]; then
-  echo "NOTE step 3: the access log of pki shows no request for /ca.crl although the mail arrived: the revocation check may not have been exercised (or the log has another format)" >&2
+  { "${compose[@]}" logs --no-color --tail 20 pki 2>&1 || true; } >&2
+  fail "step 3: the mail arrived but pki saw no request for /ca.crl: the relay's revocation was not checked"
 fi
-mail_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages"][0]["ID"])' < "$tmp/search.json" | tr -d '\r')"
-curl -sS --max-time 10 "$MAILPIT_URL/api/v1/message/$mail_id" -o "$tmp/mail.json"
+mail_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages"][0]["ID"])' < "$tmp/search.json" | tr -d '\r')" || fail "step 3: the search result holds no mail"
+curl -sS --max-time 10 "$MAILPIT_URL/api/v1/message/$mail_id" -o "$tmp/mail.json" || fail "step 3: the mail could not be read from the catcher"
 python3 -c '
 import json, os, re, sys
 mail = json.load(sys.stdin.buffer)
@@ -317,7 +340,9 @@ json_body "$tmp/spoof.json" "{'email': '$SPOOF_EMAIL', 'password': 'Wrong-Passwo
 EXTRA_HEADER="X-Forwarded-For: 203.0.113.77" call POST /auth/login "$tmp/spoof.json"
 expect_status "step 4: a failed login through the proxy" 401
 RECORDED="$(recorded_ip "$SPOOF_EMAIL" || true)"
-CADDY_IP="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' "$("${compose[@]}" ps -q caddy)")"
+caddy_id="$("${compose[@]}" ps -q caddy)"
+[[ -n "$caddy_id" ]] || fail "step 4: no caddy container"
+CADDY_IP="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' "$caddy_id")" || fail "step 4: docker inspect of the caddy container failed"
 [[ -n "$RECORDED" ]] || fail "step 4: the failed login left no audit row with an address"
 [[ "$RECORDED" != "203.0.113.77" ]] || fail "step 4: the recorded address is the one the client wrote"
 [[ "$RECORDED" != "$CADDY_IP" ]] || fail "step 4: the recorded address is the proxy's own ($CADDY_IP): X-Forwarded-For was not honoured from the trusted proxy network"
@@ -326,25 +351,26 @@ pass "step 4: accept, login and refresh through the proxy; the cookie is HttpOnl
 # --- Step 5: the backup runbook, command for command ----------------------------------------------------------------------------
 # docs/operations/backup.md: the database is dumped with pg_dump in the custom format, no owner; the key files, the manifest and the
 # environment file are copied. Then the disaster: the service stops, the database is dropped. The restore: recreate, pg_restore, start.
-"${compose[@]}" exec -T postgres pg_dump -U auth -d auth --format=custom --no-owner > "$backup/auth.dump" \
+timeout 300 "${compose[@]}" exec -T postgres pg_dump -U auth -d auth --format=custom --no-owner > "$backup/auth.dump" \
   || fail "step 5: pg_dump failed"
 [[ -s "$backup/auth.dump" ]] || fail "step 5: the dump is empty"
 cp -a "$keys" "$backup/keys"
 cp "$root/deploy/auth.yaml" "$backup/auth.yaml"
 cp "$tmp/prod.env" "$backup/prod.env"
-"${compose[@]}" stop auth > /dev/null 2>&1 || fail "step 5: could not stop the service"
-"${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'DROP DATABASE IF EXISTS auth WITH (FORCE)' > /dev/null || fail "step 5: could not drop the database"
-"${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'CREATE DATABASE auth OWNER auth' > /dev/null || fail "step 5: could not create the database"
-"${compose[@]}" exec -T postgres pg_restore -U auth -d auth --no-owner --exit-on-error < "$backup/auth.dump" || fail "step 5: pg_restore failed"
-"${compose[@]}" start auth > /dev/null 2>&1 || fail "step 5: could not start the service again"
+timeout 120 "${compose[@]}" stop auth > /dev/null 2>&1 || fail "step 5: could not stop the service"
+timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'DROP DATABASE IF EXISTS auth WITH (FORCE)' > /dev/null || fail "step 5: could not drop the database"
+timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'CREATE DATABASE auth OWNER auth' > /dev/null || fail "step 5: could not create the database"
+timeout 300 "${compose[@]}" exec -T postgres pg_restore -U auth -d auth --no-owner --exit-on-error < "$backup/auth.dump" || fail "step 5: pg_restore failed"
+timeout 120 "${compose[@]}" start auth > /dev/null 2>&1 || fail "step 5: could not start the service again"
 wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 5: the service did not answer within 120s of its start"
 ok=0
-for _ in $(seq 1 30); do
+deadline=$((SECONDS + 60))
+while (( SECONDS < deadline )); do
   call POST /auth/refresh "" "$tmp/session.cookie" || true
   if [[ "$HTTP_CODE" == "200" ]]; then ok=1; break; fi
   sleep 2
 done
-[[ "$ok" == "1" ]] || fail "step 5: the refresh cookie issued before the backup does not refresh after the restore (HTTP $HTTP_CODE)"
+[[ "$ok" == "1" ]] || fail "step 5: the refresh cookie issued before the backup does not refresh within 60s of the restore (HTTP $HTTP_CODE)"
 cli list-orgs
 [[ "$CLI_EXIT" == "0" && "$CLI_OUT" == *"$ORG"* ]] || fail "step 5: the company is not in the restored database"
 pass "step 5: the runbook's dump, drop, restore and start brought the database back: the cookie issued before the backup still refreshes and the company is there"
@@ -359,7 +385,8 @@ direct /auth/login "$tmp/gateway.json"
 expect_status "step 6: a failed login straight to the published port" 401
 GW_IP="$(recorded_ip "$GW_EMAIL" || true)"
 auth_id="$("${compose[@]}" ps -q auth)"
-GW_NETWORKS="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} (container {{$v.IPAddress}}, gateway {{$v.Gateway}}) {{end}}' "$auth_id")"
+[[ -n "$auth_id" ]] || fail "step 6: no auth container"
+GW_NETWORKS="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} (container {{$v.IPAddress}}, gateway {{$v.Gateway}}) {{end}}' "$auth_id")" || fail "step 6: docker inspect of the auth container failed"
 GW_DOCKER="$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)"
 echo "step 6: the connection to ${DIRECT_URL} was recorded from '${GW_IP:-none}'; networks of the auth container: $GW_NETWORKS; Docker server $GW_DOCKER"
 if [[ "$GW_IP" != "10.250.0.1" && "$GW_IP" != "10.250.1.1" ]]; then
