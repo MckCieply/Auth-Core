@@ -4,7 +4,7 @@ Auth-Core is a self-hosted authentication service: one instance per product, beh
 ([ADR 0001](../adr/0001-instance-per-project.md), [ADR 0004](../adr/0004-same-origin-cookie-refresh.md)). This is its threat model, made
 with STRIDE for each element of the deployment. For every element it lists the threat, what stops it and where that is built, and the risk
 that is accepted. The last section collects the risks that a spec accepted, with the decision that accepted each; the tables also name
-risks of the trusted base (the host, the database, the relay) that no decision covers, and the last section lists those apart. It describes version
+risks of the trusted base (the host, the database, the relay) that no decision covers; they stay in the tables. It describes version
 0.1.0 ([spec 0008](../superpowers/specs/0008-hardening-and-release.md)).
 
 ## What is protected, and from whom
@@ -198,11 +198,10 @@ not name them, and no decision has accepted them yet.
 42. **Which gateway a proxy on the host arrives from depends on the Docker engine,** so the default of `AUTH_PROXY_KNOWN_PROXIES` (both gateways) fits a Linux VPS and is checked there by `scripts/e2e-prod.sh` step 6; Docker Desktop is not a Linux VPS and may deliver the connection from another address (spec 0008, Production compose).
 43. **A process on the host can choose its client address:** it reaches the published port from a trusted gateway, so its `X-Forwarded-For` is believed (spec 0008, Production compose; the host is part of the trusted base).
 44. **A certificate lapses** (the generated ones after ten years): OpenIddict refuses to work when no certificate is within its dates, most
-    likely as a `500` on the first login, and the service cannot issue or read tokens until new certificates (or new keys) are in place, which
-    signs everyone out (spec 0008, Decision 7; `docs/operations/key-rotation.md`). Whether new certificates for the same keys would be enough has not been tried.
+    likely as a `500` on the first login, and the service cannot issue or read tokens until new certificates (or new keys) are in place; new keys sign everyone out (whether new certificates for the same keys would is untried) (spec 0008, Decision 7; `docs/operations/key-rotation.md`).
 45. **Auth-Core connects to PostgreSQL as its superuser** (the image's `POSTGRES_USER`): a flaw in Auth-Core that ran SQL could do anything in
     PostgreSQL, `COPY ... TO PROGRAM` in the postgres container included. EF Core parameterises every query, and the few raw statements pass their values as parameters
-    (`FromSql` and `ExecuteSqlAsync` with interpolated values; no `FromSqlRaw`) (spec 0008, Production compose).
+    (`FromSql`, `ExecuteSqlAsync` and `SqlQuery` with interpolated values; no `FromSqlRaw`) (spec 0008, Production compose).
 
 ### Accepted earlier and closed by spec 0008
 

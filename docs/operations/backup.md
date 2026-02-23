@@ -57,10 +57,11 @@ sudo cp -a /etc/auth-core/keys secrets-backup/keys      # the directory named by
 cp /etc/auth-core/auth.yaml secrets-backup/auth.yaml   # the file named by AUTH_MANIFEST
 cp .env secrets-backup/env
 sudo tar -C secrets-backup -cf - . | age -r <recipient> > secrets-$(date +%F).tar.age
+sudo rm -rf secrets-backup
 ```
 
 The key files are owned by uid `1654` and readable by it only (mode 0400), so copying and archiving them takes `sudo`. The `age` line
-encrypts the archive to your recipient key (replace `<recipient>`); remove the plain `secrets-backup` directory afterwards.
+encrypts the archive to your recipient key (replace `<recipient>`); then remove the plain directory (last line).
 
 ## Restore, step by step
 
@@ -102,8 +103,8 @@ use when it was made.
      -d "{\"email\":\"nobody-$(date +%s)@example.invalid\",\"password\":\"not-a-password\"}" http://127.0.0.1:8080/auth/login
    ```
 
-   `000` or `500` means the service or the database does not answer yet: ask again every few seconds. `401` means ready. A `429` means the
-   address was locked by earlier attempts: the command makes a new address each time, so run it again. (Use your `AUTH_PORT` when it is not
+   `000` or `500` means the service or the database does not answer yet: ask again every few seconds. `401` means ready. A `429`
+   (`too_many_requests`) means more than 30 logins a minute came from this host: wait the seconds in `Retry-After`, then ask again. (Use your `AUTH_PORT` when it is not
    8080. Each failed attempt is one `login.failed` row.) Then check the data:
 
    ```bash
@@ -143,8 +144,7 @@ object). A row outlives the account, company, role or invitation it names. It ne
 body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted every hour; a row exactly that old is still there.
 
 What `details` holds, where it is set: `"via": "cli"` for the operator CLI, and `"via": "seed"` on the `org.created` row of the
-development seeder (Development only); `"forced": true` on a `member.removed` row when the operator passed `--force` (that row also has
-the `role` the member had); `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
+development seeder (Development only); `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
 `org.renamed`; `role` on `invite.sent`, `invite.resent`, `invite.accepted` and `invite.cancelled`; `name` and `permissions` on
 `role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed` and
 `org.delete_refused`; `retry_after_seconds` on `login.locked`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
