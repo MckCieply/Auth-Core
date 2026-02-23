@@ -7,9 +7,10 @@
 #   1. docker compose refuses to render the production file without its secrets, and the service refuses to start with a key file that
 #      is not there and with a mail relay without TLS.
 #   2. the image carries the OCI labels (source, version, licenses MIT, revision); the container runs with a read-only root file system,
-#      no capability and no privilege gain, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY, the
-#      Content-Security-Policy, Referrer-Policy no-referrer, Cross-Origin-Resource-Policy same-origin, Cache-Control no-store, Pragma no-cache)
-#      and no Server header; no interactive reference; a login is answered (the database is reached and migrated: /auth/health does not say so).
+#      no capability and no privilege gain, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY,
+#      the Content-Security-Policy, Referrer-Policy no-referrer, Cross-Origin-Resource-Policy same-origin, Cache-Control no-store,
+#      Pragma no-cache), no Server header and no Strict-Transport-Security (HSTS is the proxy's); no interactive reference; a login
+#      is answered (the database is reached and migrated: /auth/health does not say so).
 #   3. the first company from the CLI (create-org prints the id), an invitation for its admin: the mail arrives over STARTTLS (Mailpit
 #      refuses plain SMTP; the relay's certificate is checked for revocation against the list the test authority publishes, which the
 #      container fetches over HTTP and caches on its read-only root file system) and names the https frontend URL; no seed user exists.
@@ -227,7 +228,7 @@ grep -q "Auth:Email:Smtp:Security" "$tmp/nomail.out" || fail "step 1: the refusa
 pass "step 1: docker compose refuses the file without its secrets; the service refuses a missing key file and a relay without TLS, naming the setting"
 
 # --- Step 2: the image, the container, the headers ------------------------------------------------------------------------------------
-labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}')" || fail "step 2: docker image inspect of $IMAGE failed"
+labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}' | tr -d '\r')" || fail "step 2: docker image inspect of $IMAGE failed"
 for expected in '"org.opencontainers.image.source":"https://github.com/MckCieply/Auth-Core"' "\"org.opencontainers.image.version\":\"$VERSION\"" \
                 '"org.opencontainers.image.licenses":"MIT"' '"org.opencontainers.image.revision":"'; do
   [[ "$labels" == *"$expected"* ]] || fail "step 2: the image has no label $expected"
@@ -236,16 +237,20 @@ done
 wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 2: $DIRECT_URL/auth/health did not return 200 within 120s (docker compose -p $COMPOSE_PROJECT_NAME logs auth)"
 wait_ok 60 -k "$PROXY_URL/auth/health" || fail "step 2: $PROXY_URL/auth/health (through the proxy) did not return 200 within 60s"
 wait_ok 60 "$MAILPIT_URL/readyz" || fail "step 2: the mail catcher did not answer within 60s"
-auth_id="$("${compose[@]}" ps -q auth)"
+auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')"
 [[ -n "$auth_id" ]] || fail "step 2: no auth container"
-auth_inspect() { docker inspect -f "$1" "$auth_id" || fail "step 2: docker inspect of the auth container failed"; }
-expect_eq "step 2: the root file system is read-only" "$(auth_inspect '{{.HostConfig.ReadonlyRootfs}}')" "true"
-[[ "$(auth_inspect '{{.HostConfig.CapDrop}}')" == *ALL* ]] || fail "step 2: the container does not drop every capability"
-[[ "$(auth_inspect '{{.HostConfig.SecurityOpt}}')" == *no-new-privileges* ]] || fail "step 2: the container may gain privileges"
+# The inspect is captured first and the caller fails: a fail inside $(...) would print its FAIL line and then the caller's.
+read_only="$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$auth_id" | tr -d '\r')" || fail "step 2: docker inspect of the auth container failed"
+cap_drop="$(docker inspect -f '{{.HostConfig.CapDrop}}' "$auth_id" | tr -d '\r')" || fail "step 2: docker inspect of the auth container failed"
+security_opt="$(docker inspect -f '{{.HostConfig.SecurityOpt}}' "$auth_id" | tr -d '\r')" || fail "step 2: docker inspect of the auth container failed"
+expect_eq "step 2: the root file system is read-only" "$read_only" "true"
+[[ "$cap_drop" == *ALL* ]] || fail "step 2: the container does not drop every capability"
+[[ "$security_opt" == *no-new-privileges* ]] || fail "step 2: the container may gain privileges"
 direct /auth/health
 expect_status "step 2: /auth/health" 200 "Healthy"
 # The table of the spec (Security headers on every response), on a 200 of the live server.
 [[ -z "$(header server)" ]] || fail "step 2: the live server sends a Server header"
+[[ -z "$(header strict-transport-security)" ]] || fail "step 2: Auth-Core sends HSTS"
 expect_eq "step 2: X-Content-Type-Options" "$(header x-content-type-options)" "nosniff"
 expect_eq "step 2: X-Frame-Options" "$(header x-frame-options)" "DENY"
 expect_eq "step 2: Content-Security-Policy" "$(header content-security-policy)" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -340,9 +345,9 @@ json_body "$tmp/spoof.json" "{'email': '$SPOOF_EMAIL', 'password': 'Wrong-Passwo
 EXTRA_HEADER="X-Forwarded-For: 203.0.113.77" call POST /auth/login "$tmp/spoof.json"
 expect_status "step 4: a failed login through the proxy" 401
 RECORDED="$(recorded_ip "$SPOOF_EMAIL" || true)"
-caddy_id="$("${compose[@]}" ps -q caddy)"
+caddy_id="$("${compose[@]}" ps -q caddy | tr -d '\r')"
 [[ -n "$caddy_id" ]] || fail "step 4: no caddy container"
-CADDY_IP="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' "$caddy_id")" || fail "step 4: docker inspect of the caddy container failed"
+CADDY_IP="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}}{{end}}' "$caddy_id" | tr -d '\r')" || fail "step 4: docker inspect of the caddy container failed"
 [[ -n "$RECORDED" ]] || fail "step 4: the failed login left no audit row with an address"
 [[ "$RECORDED" != "203.0.113.77" ]] || fail "step 4: the recorded address is the one the client wrote"
 [[ "$RECORDED" != "$CADDY_IP" ]] || fail "step 4: the recorded address is the proxy's own ($CADDY_IP): X-Forwarded-For was not honoured from the trusted proxy network"
@@ -384,10 +389,10 @@ json_body "$tmp/gateway.json" "{'email': '$GW_EMAIL', 'password': 'Wrong-Passwor
 direct /auth/login "$tmp/gateway.json"
 expect_status "step 6: a failed login straight to the published port" 401
 GW_IP="$(recorded_ip "$GW_EMAIL" || true)"
-auth_id="$("${compose[@]}" ps -q auth)"
+auth_id="$("${compose[@]}" ps -q auth | tr -d '\r')"
 [[ -n "$auth_id" ]] || fail "step 6: no auth container"
-GW_NETWORKS="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} (container {{$v.IPAddress}}, gateway {{$v.Gateway}}) {{end}}' "$auth_id")" || fail "step 6: docker inspect of the auth container failed"
-GW_DOCKER="$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)"
+GW_NETWORKS="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} (container {{$v.IPAddress}}, gateway {{$v.Gateway}}) {{end}}' "$auth_id" | tr -d '\r')" || fail "step 6: docker inspect of the auth container failed"
+GW_DOCKER="$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\r' || echo unknown)"
 echo "step 6: the connection to ${DIRECT_URL} was recorded from '${GW_IP:-none}'; networks of the auth container: $GW_NETWORKS; Docker server $GW_DOCKER"
 if [[ "$GW_IP" != "10.250.0.1" && "$GW_IP" != "10.250.1.1" ]]; then
   fail "step 6: a host proxy arrives from '${GW_IP:-no address}', which is neither 10.250.0.1 nor 10.250.1.1 (the two addresses AUTH_PROXY_KNOWN_PROXIES trusts by default): on this Docker (server $GW_DOCKER; Docker Desktop is not a Linux VPS) a proxy on the host would not be trusted, so every client would share one set of limits. Networks: $GW_NETWORKS"
