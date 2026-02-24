@@ -4,7 +4,8 @@
 # authority, which the auth container trusts through SSL_CERT_FILE (the chiseled image has no tools to install one), a small static server
 # for that authority's certificate revocation list (MailKit checks revocation by default and no setting of the service turns that off),
 # and a reverse proxy on https://localhost:8443 (Caddy, `tls internal`: a browser warns, the script accepts it). The proxy is on the "proxy" network of the
-# production file, whose subnet the script tells Auth-Core to trust for the client address.
+# production file with a fixed address (E2E_PROD_PROXY_IP), the one address the script tells Auth-Core to trust for the client address, as
+# docs/deployment/vps.md recommends for a proxy in a container (never the whole subnet: it includes the gateway).
 #
 #   docker compose -p auth-core-prodtest -f deploy/docker-compose.prod.yml -f scripts/prod-test.compose.yml --env-file <env made by the script> up -d
 #
@@ -90,7 +91,9 @@ services:
         bind:
           create_host_path: false
     networks:
-      - proxy
+      proxy:
+        # A fixed address (not the gateway, the first address): the one address Auth-Core trusts for the client address.
+        ipv4_address: ${E2E_PROD_PROXY_IP:?set by scripts/e2e-prod.sh}
 
   auth:
     depends_on:

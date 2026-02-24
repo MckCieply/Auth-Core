@@ -12,6 +12,15 @@ run from the directory that holds `deploy/` and `.env`. Every command names the 
 `COMPOSE_PROJECT_NAME=auth-core-prod` in the comments of the compose file): the name finds the stack and its volume
 `auth-core-prod_postgres-data`, so use it every time, and never the name of another stack on the same host.
 
+## Two database roles
+
+PostgreSQL here has two roles. The **superuser** `auth` (`POSTGRES_USER`) is the operator's: every command below that talks to PostgreSQL runs as it,
+inside the `postgres` container, where the local socket needs no password. **Auth-Core's own role** (`AUTH_DB_APP_USER`, `auth_app` unless you
+changed it, with the password `AUTH_DB_APP_PASSWORD`) is not a superuser, owns the database `auth` and everything in it, and is the only way
+Auth-Core connects. The image creates it when the volume is first made ([`deploy/postgres-init/10-auth-app-role.sh`](../../deploy/postgres-init/10-auth-app-role.sh)).
+A dump holds no roles and (as made here) no owners, so a restore has to give the restored objects back to Auth-Core's role: step 3 of the restore
+does, and an object that stays with the superuser stops the next migration of Auth-Core.
+
 ## What to back up
 
 | What | Where it lives | Why |
@@ -44,8 +53,7 @@ find backups -name 'auth-*.dump' -mtime +14 -delete
 17 3 * * *  /usr/local/bin/auth-core-backup
 ```
 
-The custom format is compressed and restores with `pg_restore`; `--no-owner` lets it restore into the role `auth` whatever the dump was
-made as. A failed dump leaves a short or empty file: the script stops at the failed command (`set -e`), but look at the size of the newest
+The custom format is compressed and restores with `pg_restore`; `--no-owner` leaves the owners out of the dump, so who owns the restored objects is decided when you restore (step 3 below). A failed dump leaves a short or empty file: the script stops at the failed command (`set -e`), but look at the size of the newest
 dump now and then. Copy `backups/` and (once, and after every key rotation) the key files, the manifest and `.env` off the host. Gather them
 in a directory of their own, apart from the dump, then encrypt it and copy it away (the paths are those of `AUTH_KEYS_DIR`,
 `AUTH_MANIFEST` and your `.env`):
@@ -74,17 +82,21 @@ use when it was made.
    $C stop auth
    ```
 
-2. **Recreate the database** (the connection is to the `postgres` database, so the target can be dropped):
+2. **Recreate the database**, owned by Auth-Core's role (the connection is to the `postgres` database, so the target can be dropped). A new
+   database starts with every role allowed to connect, so the second command takes that away again:
 
    ```bash
    $C exec -T postgres psql -U auth -d postgres -c 'DROP DATABASE IF EXISTS auth WITH (FORCE)'
-   $C exec -T postgres psql -U auth -d postgres -c 'CREATE DATABASE auth OWNER auth'
+   $C exec -T postgres sh -c 'psql -U auth -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE auth OWNER $AUTH_DB_APP_USER" -c "REVOKE CONNECT ON DATABASE auth FROM PUBLIC"'
    ```
 
-3. **Restore the dump**:
+   (`sh -c '...'` runs the command in the container, where `$AUTH_DB_APP_USER` is the name the volume was made with.)
+
+3. **Restore the dump** as the superuser, **as Auth-Core's role** (`--role`): the restored tables, sequences and indexes then belong to it.
+   Without `--role` the restore succeeds and every object belongs to the superuser, and Auth-Core fails at its next migration:
 
    ```bash
-   $C exec -T postgres pg_restore -U auth -d auth --no-owner --exit-on-error < backups/auth-DATE.dump
+   $C exec -T postgres sh -c 'pg_restore -U auth -d auth --no-owner --role="$AUTH_DB_APP_USER" --exit-on-error' < backups/auth-DATE.dump
    ```
 
 4. **Start the service.** It migrates at start; a restored database is already at its migration, so nothing is applied unless you restored
@@ -111,6 +123,13 @@ use when it was made.
    $C run --rm -T --no-deps auth admin list-orgs      # the companies: id, name, members
    ```
 
+   The restored objects must all belong to Auth-Core's role: this prints one line, with its name and the number of objects (the superuser `auth`
+   in that line means step 3 was run without `--role`):
+
+   ```bash
+   $C exec -T postgres psql -U auth -d auth -tA -c "SELECT pg_get_userbyid(relowner), count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace GROUP BY 1"
+   ```
+
    Then sign in as someone and refresh. Refresh tokens rotate, so a session whose cookie has not been used since the dump keeps working
    (its token is in the dump and the keys are the same); anyone who refreshed after the dump (in practice everyone active since then) is
    signed out and signs in again, as is every session started after it. Everything else that happened after the dump is gone.
@@ -118,11 +137,15 @@ use when it was made.
 If the **keys are lost** too: put new keys in place ([`key-rotation.md`](key-rotation.md)). Everyone signs in again; accounts, companies and
 roles are intact.
 
-If you restored into a **new server**: install Docker, put `deploy/`, `.env`, the keys and the manifest in place (restore the keys with `sudo cp -a`, or run the `chown` and `chmod` of
-[`key-rotation.md`](key-rotation.md) again), run `$C up -d postgres`,
-wait until `$C exec -T postgres pg_isready -h 127.0.0.1 -U auth -d auth` says it accepts connections (over TCP: on a fresh volume the image first
+If you restored into a **new server**: install Docker, put `deploy/` (with its `postgres-init/` directory), `.env`, the keys and the manifest in place
+(restore the keys with `sudo cp -a`, or run the `chown` and `chmod` of [`key-rotation.md`](key-rotation.md) again), and run `$C up -d postgres`. On the
+empty volume the image runs `deploy/postgres-init/10-auth-app-role.sh`, which makes Auth-Core's role and the empty database it owns from
+`AUTH_DB_APP_USER` and `AUTH_DB_APP_PASSWORD` in `.env` (the name and the password may differ from the old server's: the dump holds no role).
+Wait until `$C exec -T postgres pg_isready -h 127.0.0.1 -U auth -d auth` says it accepts connections (over TCP: on a fresh volume the image first
 runs a temporary server that listens on its socket only), then do steps 2 and 3, and step 5. Skip step 1: there is no `auth` container yet to
-stop. In step 4 use `$C up -d auth` instead of `$C start auth`: it creates the container, which `start` cannot.
+stop. In step 4 use `$C up -d auth` instead of `$C start auth`: it creates the container, which `start` cannot. If the first start of `postgres`
+stopped in the script (its log says `AUTH_DB_APP_USER must be ...`), the volume already counts as made and a second start skips the script: on a
+server whose database is still empty, remove the volume (`$C down -v`), correct `.env` and start again.
 
 A company deleted by mistake (`DELETE /auth/org`, or `delete-org`) has no undo but this restore, which brings back the whole database as
 it was at the dump. The audit log shows when it happened (`org.deleted`, below), so you know which dump to take.

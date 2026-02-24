@@ -105,15 +105,20 @@ Do the planned steps at once, and also:
   Its key cache is in memory (`clients/python/src/auth_core_fastapi/_jwks.py`), so the restarted backend fetches only the new key, and tokens
   signed with the old key are refused from then on. Changing the audience does not help: the old key can sign any audience.
 - If the **encryption key** leaked, the refresh tokens in the database can be read; the rotation makes them unreadable, so every session ends.
-- If the **database or `.env`** leaked as well: change `POSTGRES_PASSWORD` (inside PostgreSQL, then in `.env`), change the relay's password
-  (`AUTH_SMTP_PASSWORD`) at the relay and in `.env`, and consider every password hash exposed: ask people to reset their passwords (the audit
-  log shows who signed in meanwhile). The command asks for the new password itself, so it is in no argument and no shell history:
+- If the **database or `.env`** leaked as well: change the passwords of **both** database roles, the operator's superuser `auth` (`POSTGRES_PASSWORD`)
+  and Auth-Core's own role (`AUTH_DB_APP_USER`, `AUTH_DB_APP_PASSWORD`), inside PostgreSQL and then in `.env`; change the relay's password
+  (`AUTH_SMTP_PASSWORD`) at the relay and in `.env`; and consider every password hash exposed: ask people to reset their passwords (the audit
+  log shows who signed in meanwhile). Each command asks for the new password itself, twice, so it is in no argument and no shell history
+  (an empty answer removes the password: type one):
 
   ```bash
   $C exec postgres psql -U auth -d postgres -c '\password auth'
+  $C exec postgres sh -c 'psql -U auth -d postgres -c "\password $AUTH_DB_APP_USER"'
   ```
 
-  (Letters and digits only, because the value is part of a connection string. Then put it in `.env` and recreate both services.)
+  (Letters and digits only, at least 16, because the value is part of a connection string. Put both in `.env` at once, then `$C up -d`: compose
+  recreates the services whose environment changed. `postgres` reads the two passwords only when the volume is first made, so recreating it
+  changes nothing in the database; `auth` gets the new connection string. Until it does, its new connections fail.)
 - Look at the audit log for the period ([`backup.md`](backup.md), "Reading the audit log"): `login.succeeded` from addresses you do not know, `refresh.reuse_detected`,
   `member.role_changed`, `invite.sent`.
 - Write down what happened and when; the old keys are evidence.

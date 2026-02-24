@@ -21,8 +21,20 @@ services:
       POSTGRES_DB: auth
       POSTGRES_USER: auth
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The role Auth-Core connects as (spec 0008, Decision 14): made by postgres-init/10-auth-app-role.sh when the volume is first
+      # initialised, from these two values. The image's superuser above is for the operator only (backup, restore, password changes).
+      AUTH_DB_APP_USER: ${AUTH_DB_APP_USER:-auth_app}
+      AUTH_DB_APP_PASSWORD: ${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Run once, on an empty volume, by the image's entrypoint. The long syntax with create_host_path: false, so that a missing file
+      # stops the start instead of becoming an empty directory (and a database without the role).
+      - type: bind
+        source: ./postgres-init/10-auth-app-role.sh
+        target: /docker-entrypoint-initdb.d/10-auth-app-role.sh
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       # Over TCP (-h): on a fresh volume the image runs a temporary init server that listens on its socket only and would pass a socket check.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U auth -d auth"]
@@ -55,7 +67,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       # The service creates and migrates its database at start. No seed users and no interactive reference in Production.
       Auth__Database__MigrateOnStartup: "true"
-      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=auth;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=${AUTH_DB_APP_USER:-auth_app};Password=${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
       # What the tokens say about themselves: the origin the browser uses plus /auth, and the audience of the product's backend.
       Auth__Tokens__Issuer: ${AUTH_ISSUER:?set AUTH_ISSUER in .env (for example https://app.example.com/auth)}
       Auth__Tokens__Audience: ${AUTH_AUDIENCE:?set AUTH_AUDIENCE in .env (the audience your backend checks)}
@@ -80,8 +92,10 @@ services:
       Auth__Email__Smtp__Password: ${AUTH_SMTP_PASSWORD?set AUTH_SMTP_PASSWORD in .env (blank for a relay without authentication)}
       # Who may tell the service the client address (spec 0008): a proxy on this host reaches the published port from the gateway
       # (first address) of whichever of the two networks Docker uses for it; both are trusted (10.250.0.1 and 10.250.1.1 for the
-      # default subnets below; change them with AUTH_SUBNET and AUTH_PROXY_SUBNET). A proxy in a container joins the "proxy" network,
-      # whose subnet can be trusted instead. All are written plainly (IPv4 as four decimal numbers, a network as its base address and
+      # default subnets below; change them with AUTH_SUBNET and AUTH_PROXY_SUBNET). A proxy in a container joins the "proxy" network with
+      # a fixed address of its own, and that one address is trusted instead (AUTH_PROXY_KNOWN_PROXIES=<address>: an explicit value replaces
+      # the default; docs/deployment/vps.md, "A proxy in a container"), never the whole subnet, whose gateway is where a process on this host
+      # arrives from. All are written plainly (IPv4 as four decimal numbers, a network as its base address and
       # a prefix length); the service refuses to start with anything else. Write AUTH_PROXY_KNOWN_PROXIES= (empty) to trust no host
       # proxy; leaving the variable out keeps the default. With nothing trusted no forwarded header is read and every client looks
       # like the proxy, so all of them share one set of rate limits.
@@ -128,7 +142,7 @@ networks:
       config:
         - subnet: ${AUTH_SUBNET:-10.250.0.0/24}
   # For a reverse proxy that runs in a container of its own: it joins this network (declared there as external) and reaches the
-  # service as auth:8080. Set AUTH_PROXY_KNOWN_NETWORKS to AUTH_PROXY_SUBNET then. Nothing joins it otherwise.
+  # service as auth:8080. Give it a fixed address in AUTH_PROXY_SUBNET and trust that address in AUTH_PROXY_KNOWN_PROXIES, not the subnet. Nothing joins it otherwise.
   proxy:
     name: ${AUTH_PROXY_NETWORK:-auth-core-proxy}
     ipam:

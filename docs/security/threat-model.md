@@ -90,13 +90,13 @@ Not applicable: R (the proxy is not where actions are recorded: Auth-Core's audi
 
 | | Threat | Mitigation | Residual |
 | --- | --- | --- | --- |
-| S | Another container or host connects as `auth` | No published port; a private network; a long random password from `.env` | The password is in the container's environment |
+| S | Another container or host connects as `auth` or as Auth-Core's role | No published port; a private network; a long random password for each role from `.env`; Auth-Core's role may connect to its own database only (`CONNECT` is revoked from PUBLIC on it and on the maintenance databases, `deploy/postgres-init/10-auth-app-role.sh`) | The passwords are in the containers' environment. Inside the `postgres` container the local socket and the loopback addresses trust every role (which is why the operator's commands need no password): a process in that container is part of the trusted base |
 | T | A stolen or tampered database | Passwords are hashed (ASP.NET Identity); link tokens and refresh tokens are stored as hashes or protected payloads | Anyone with write access to the database can make themselves a member of any company; PostgreSQL is part of the trusted base |
 | R | Rows removed to hide actions | Deleting an audit row needs database access | The audit log is not tamper-evident |
 | I | Addresses in the mail queue | A request is queued with the normalised address and nothing else; the row is removed within seconds when no account has the address, and at delivery or when the request is an hour old otherwise ([spec 0004](../superpowers/specs/0004-email-flows.md), Decision 12) | Whoever reads the database sees the addresses of the requests that are pending |
 | I | A backup read by the wrong person | The runbook keeps the dump apart from the key files, and says to encrypt it off the host ([`backup.md`](../operations/backup.md)) | A dump holds every account's password hash |
 | D | The disk fills, the server is lost | Pruning of expired rows, the audit log by its retention; a nightly dump and a restore that is tried ([`backup.md`](../operations/backup.md), `scripts/e2e-prod.sh` step 5) | Whatever happened after the last backup is lost, a deleted company included |
-| E | Code in Auth-Core runs arbitrary SQL | EF Core parameterises every query; the few raw statements (`FromSql`, `ExecuteSqlAsync`, `SqlQuery`, all with interpolated values, which EF sends as parameters) never concatenate input into the text | Auth-Core connects as the PostgreSQL superuser (the image's `POSTGRES_USER`): a flaw that ran SQL could do anything in PostgreSQL, `COPY ... TO PROGRAM` in the postgres container included |
+| E | Code in Auth-Core runs arbitrary SQL | EF Core parameterises every query; the few raw statements (`FromSql`, `ExecuteSqlAsync`, `SqlQuery`, all with interpolated values, which EF sends as parameters) never concatenate input into the text; **Auth-Core connects as a role of its own that is not a superuser** (none of `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS`; spec 0008, Decision 14; `scripts/e2e-prod.sh`, `check_app_role`, shows the attributes and that the role cannot connect to the maintenance database, run `COPY ... TO PROGRAM` or make a role, after the first start and after a restore) | A flaw that ran SQL reaches everything that role owns, which is all of Auth-Core's data (accounts, password hashes, sessions, companies, the audit log), but not the rest of PostgreSQL and not the host: it cannot run a program in the postgres container |
 
 ## SMTP relay
 
@@ -145,8 +145,7 @@ Not applicable: R (every command is recorded with "via": "cli"), D (the CLI is r
 
 ## Residual risks
 
-Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 40 are the risks accepted by
-specs 0002 to 0008. The risks that no spec has accepted are listed apart, after them.
+Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 45 are the risks accepted by specs 0002 to 0008 (41 to 44 by Decision 15; 45 is what Decision 14 leaves).
 
 1. **A key change signs everyone out.** No previous keys are kept for verification or decryption; rotation is a runbook (spec 0008, Decision 7).
 2. **A distributed guesser below the per-IP limits** on many addresses is stopped only by the per-identifier lockout, which an attacker can use to keep a chosen account locked, at one request per cooldown (spec 0003, Decision 8 and Deferred / follow-ups; spec 0008, Residual risks).
@@ -189,25 +188,19 @@ specs 0002 to 0008. The risks that no spec has accepted are listed apart, after 
 39. **The audit log is not tamper-evident** and is bounded by the retention; it is read by SQL (spec 0008, Decision 5 and Deferred / follow-ups).
 40. **A mail link in a mailbox** is a credential for its lifetime; whoever reads the mailbox can use it: a reset link lives 1 hour and a verification link 24 hours (spec 0004, Decision 11), an invitation link 7 days (spec 0005, Decision 11).
 
-### Pending the owner's decision
-
-Found while building the production compose file, the proxy rules and these documents, and recorded here as built. Spec 0008's own list does
-not name them, and no decision has accepted them yet.
-
-41. **An operator who trusts `0.0.0.0/1` and `128.0.0.0/1`** trusts every IPv4 address, and every client can then choose its own address; this misconfiguration is not refused (spec 0008, Client address and trusted proxies; `ProxySettings` refuses the other mistakes).
-42. **Which gateway a proxy on the host arrives from depends on the Docker engine,** so the default of `AUTH_PROXY_KNOWN_PROXIES` (both gateways) fits a Linux VPS and is checked there by `scripts/e2e-prod.sh` step 6; Docker Desktop is not a Linux VPS and may deliver the connection from another address (spec 0008, Production compose).
-43. **A process on the host can choose its client address:** it reaches the published port from a trusted gateway, so its `X-Forwarded-For` is believed (spec 0008, Production compose; the host is part of the trusted base).
+41. **An operator who trusts `0.0.0.0/1` and `128.0.0.0/1`** trusts every IPv4 address, and every client can then choose its own address; this misconfiguration is not refused (spec 0008, Client address and trusted proxies; `ProxySettings` refuses the other mistakes); accepted by Decision 15 (spec 0008).
+42. **Which gateway a proxy on the host arrives from depends on the Docker engine,** so the default of `AUTH_PROXY_KNOWN_PROXIES` (both gateways) fits a Linux VPS and is checked there by `scripts/e2e-prod.sh` step 6; Docker Desktop is not a Linux VPS and may deliver the connection from another address (spec 0008, Production compose); accepted by Decision 15 (spec 0008).
+43. **A process on the host can choose its client address:** it reaches the published port from a trusted gateway, so its `X-Forwarded-For` is believed (spec 0008, Production compose; the host is part of the trusted base); accepted by Decision 15 (spec 0008).
 44. **A certificate lapses** (the generated ones after ten years): OpenIddict refuses to work when no certificate is within its dates, most
-    likely as a `500` on the first login, and the service cannot issue or read tokens until new certificates (or new keys) are in place; new keys sign everyone out (whether new certificates for the same keys would is untried) (spec 0008, Decision 7; `docs/operations/key-rotation.md`).
-45. **Auth-Core connects to PostgreSQL as its superuser** (the image's `POSTGRES_USER`): a flaw in Auth-Core that ran SQL could do anything in
-    PostgreSQL, `COPY ... TO PROGRAM` in the postgres container included. EF Core parameterises every query, and the few raw statements pass their values as parameters
-    (`FromSql`, `ExecuteSqlAsync` and `SqlQuery` with interpolated values; no `FromSqlRaw`) (spec 0008, Production compose).
+    likely as a `500` on the first login, and the service cannot issue or read tokens until new certificates (or new keys) are in place; new keys sign everyone out (whether new certificates for the same keys would is untried) (spec 0008, Decision 7; `docs/operations/key-rotation.md`). Accepted by Decision 15 (spec 0008).
+45. **Auth-Core's database role owns all of Auth-Core's data.** A flaw that ran SQL reaches the accounts, the password hashes, the sessions, the companies and the audit log, but not the rest of PostgreSQL and not the host (spec 0008, Decision 14).
 
 ### Accepted earlier and closed by spec 0008
 
-These items of specs 0003 to 0005 no longer stand as they were written; they are named so that none is lost.
+These items of specs 0003 to 0005, and one found while building spec 0008, no longer stand as they were written; they are named so that none is lost.
 
 - Per-IP rate limiting and the trusted-proxy rule, deferred by spec 0003 (Decision 6), are built (spec 0008); what is left of them is items 2, 3, 38 and 41 to 43 above.
 - `/auth/health` answering `POST`, and a JSON body declared `charset=utf-16` being read (spec 0005, As built): fixed by spec 0008, Decision 3 (`HealthMethodsTests`, `JsonCharsetTests`).
 - A domain written as a hexadecimal IPv4 form (`127.0x1`) passing the invitation rule (spec 0005, As built): fixed by spec 0008, Decision 3 (`InvitationDomainTests`).
 - Company deletion, a known gap of spec 0005: built by spec 0008, Decision 8; its own residual risk is item 4.
+- Auth-Core connecting to PostgreSQL as its superuser, found while the production compose file was built: closed by spec 0008, Decision 14 (`deploy/postgres-init/10-auth-app-role.sh`, `scripts/e2e-prod.sh`); what is left of it is item 45.

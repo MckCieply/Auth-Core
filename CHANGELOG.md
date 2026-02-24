@@ -24,7 +24,7 @@ The first release: the service, its image, a Python package for backends, an Ang
 - **Security headers** on every response, and no `Server` header; a `Content-Security-Policy` of its own for the interactive reference.
 - **OpenAPI** description at `/auth/openapi/v1.json`, with the interactive reference in Development.
 - **Production.** The image `ghcr.io/mckcieply/auth-core:0.1.0` (public, with OCI labels, base images pinned by digest), `deploy/docker-compose.prod.yml`
-  (read-only, no capabilities, two fixed subnets outside Docker's default pools, a named network for a proxy in a container), `deploy/.env.prod.example`,
+  (read-only, no capabilities, two fixed subnets outside Docker's default pools, a named network for a proxy in a container; Auth-Core connects to PostgreSQL as a role of its own that is not a superuser), `deploy/.env.prod.example`,
   and `docs/deployment/vps.md`.
 - **Documents.** The threat model (STRIDE), the backup and the key rotation runbooks, the integration guides for Python and Angular.
 - **Samples.** `samples/notes-api` (FastAPI and PostgreSQL behind Caddy) and `samples/notes-web` (Angular 21): the first backend and frontend of the service.

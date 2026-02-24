@@ -24,13 +24,15 @@ C="docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml --env-file
 
 ## 1. Get the files
 
-You need two files and nothing else from the repository: the compose file and the example of its environment. At a tag:
+You need three files and nothing else from the repository: the compose file, the script that makes Auth-Core's database role, and the example of its environment. At a tag:
 
 ```bash
 sudo mkdir -p /srv/auth-core && cd /srv/auth-core
 sudo chown "$USER" /srv/auth-core
-mkdir -p deploy
+mkdir -p deploy/postgres-init
 curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/docker-compose.prod.yml -o deploy/docker-compose.prod.yml
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
+chmod 644 deploy/postgres-init/10-auth-app-role.sh
 curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/.env.prod.example -o .env
 chmod 600 .env
 ```
@@ -59,7 +61,8 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 
 | Variable | What |
 | --- | --- |
-| `POSTGRES_PASSWORD` | a long random value, letters and digits only |
+| `POSTGRES_PASSWORD` | a long random value, letters and digits only: the password of the superuser, which only you use (backups, restores) |
+| `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16: the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it) |
 | `AUTH_CORE_VERSION` | `0.1.0` |
 | `AUTH_ISSUER` | `https://app.example.com/auth`: the origin your users see plus `/auth`. Your backend's package must be given the same value |
 | `AUTH_AUDIENCE` | the audience your backend checks, for example `my-product-api` |
@@ -67,6 +70,11 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 | `AUTH_APP_NAME`, `AUTH_APP_LOCALE` | the product's name in the mails, and `pl` or `en` |
 | `AUTH_FRONTEND_RESET_URL`, `AUTH_FRONTEND_VERIFY_URL`, `AUTH_FRONTEND_INVITE_URL` | the three screens of **your frontend** that the mails link to, https |
 | `AUTH_EMAIL_FROM`, `AUTH_SMTP_HOST`, `AUTH_SMTP_PORT`, `AUTH_SMTP_SECURITY`, `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | the relay |
+
+**Two database roles.** Auth-Core connects to PostgreSQL as a role of its own that is not a superuser and owns only its database; the superuser stays for you. Both are
+created when the volume is first made, from `.env`. They are **not** created later: if the first start stops with a message that starts `AUTH_DB_APP_USER must be`
+(it names the rule, never the password), the volume already counts as made and a second start skips the step, so remove the volume, which holds nothing yet
+(`docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml --env-file .env down -v`), correct `.env` and start again. Start from an empty volume: a volume made by anything else has no such role.
 
 The two SMTP credentials must both be **present** in `.env`: compose refuses to start when either line is missing. Leave both blank for a relay without
 authentication.
@@ -107,7 +115,7 @@ $C logs -f auth                                      # until you see it listenin
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/auth/health      # 200 (use your AUTH_PORT when it is not 8080)
 ```
 
-The service creates and migrates its database on its own at start. **`/auth/health` does not reach the database**, so a `200` there does not prove it is up. A login
+The service migrates its database on its own at start (PostgreSQL creates it, owned by Auth-Core's role, at the first start). **`/auth/health` does not reach the database**, so a `200` there does not prove it is up. A login
 does: it writes the attempt, so it is `500` until the database answers and `401` after. Ask with an address nobody has, until it says `401`:
 
 ```bash
@@ -259,8 +267,9 @@ something is wrong". Then sign in through your frontend and call one product end
 | --- | --- |
 | The `auth` container exits at start | `$C logs auth`: it names the setting (a key file, the relay's security, a frontend URL, the issuer or audience, a proxy entry, the database) |
 | It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove it from the `environment:` of the `auth` service (in `deploy/docker-compose.prod.yml` or an override file you added) or from a `run -e`; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
+| `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
-| "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it) |
+| "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it), or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |
 | Everybody gets `429 too_many_requests` | The proxy is not trusted: every client looks like the proxy and shares its limits. Check `AUTH_PROXY_KNOWN_PROXIES` (the fixed address of a proxy in a container: see "A proxy in a container"), and that the proxy sets `X-Forwarded-For` |
 | Refresh is `503 temporarily_unavailable` | The database cannot be reached; the cookie is kept. Look at `$C ps` and the logs of `postgres` |
