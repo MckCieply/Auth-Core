@@ -41,6 +41,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+      # Failures in the first 30 s (the first-time init of a fresh volume) do not count towards the retries or mark the container unhealthy.
+      start_period: 30s
     networks:
       - auth
 

@@ -24,6 +24,8 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+      # Failures in the first 30 s (the first-time init of a fresh volume) do not count towards the retries or mark the container unhealthy.
+      start_period: 30s
 
   mailpit:
     # A mail catcher: the auth service sends to it over SMTP, the e2e script reads the mails from its HTTP API.

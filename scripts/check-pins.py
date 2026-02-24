@@ -52,7 +52,9 @@ def is_compose(path):
     name = posixpath.basename(path)
     if not name.endswith((".yml", ".yaml")):
         return False
-    return path.startswith("deploy/") or path.startswith("scripts/") or (path.startswith("samples/") and name in ("compose.yml", "compose.yaml"))
+    if path.startswith("deploy/") or path.startswith("scripts/"):
+        return True
+    return path.startswith("samples/") and "compose" in name
 
 
 def is_dockerfile(path):
@@ -222,6 +224,11 @@ def self_test():
         "docs/a.md": "Run `postgres:16` somewhere.\n",
         "docs/superpowers/plans/old.md": "image: postgres:9\n",
     }
+    for odd in ("samples/x/docker-compose.yml", "samples/x/compose.prod.yaml", "scripts/y/stack-compose.yml"):
+        bad = {**files, odd: "services:\n  web:\n    image: nginx:latest\n"}
+        found = check_repository(set(bad), bad.__getitem__)
+        if not any(odd in problem for problem in found):
+            failures.append(f"self-test {odd}: expected an unpinned image to be reported, got {found}")
     found = check_repository(set(files), files.__getitem__)
     if len(found) != 1 or "docs/a.md" not in found[0]:
         failures.append(f"self-test whole repository: expected one problem in docs/a.md (and none from docs/superpowers/), got {found}")

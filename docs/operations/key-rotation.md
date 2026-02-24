@@ -110,17 +110,21 @@ openssl x509 -enddate -noout -in <AUTH_KEYS_DIR>/encryption.crt
 6. **Watch the backends.** For up to five minutes a backend may still believe the old key for tokens issued before the change, and answers `401` for the
    new ones until it has fetched the new key set; with the package it is at most ten seconds (it fetches at once on an unknown `kid`, not more
    than once every 10 seconds). Every person who was signed in is asked to sign in again.
-7. **Keep the old keys for a day**, in case you must roll back (step 8), then delete them. The key files are owned by uid `1654` and the directory is `0555`
-   (the `chmod` block of "Generating production keys"), so a plain `rm` is refused: use `sudo`. For the old directory `/etc/auth-core/keys-old`:
+7. **Keep the old keys for a day**, in case you must roll back (step 8), then delete them. "The old keys" are what step 3 told you to keep: the old directory (the one
+   `AUTH_KEYS_DIR` named before you changed it, `/etc/auth-core/keys` in [`vps.md`](../deployment/vps.md)) if you moved the new one beside it, or the backup of
+   step 1 if you copied over it. Delete only the one that exists. The key files are owned by uid `1654` and the directory is `0555`
+   (the `chmod` block of "Generating production keys"), so a plain `rm` is refused: use `sudo`. For the old directory, with its path in `OLD`:
 
    ```bash
-   sudo shred -u /etc/auth-core/keys-old/signing.key /etc/auth-core/keys-old/encryption.key
-   sudo rm -rf /etc/auth-core/keys-old
+   OLD=/etc/auth-core/keys    # the old directory, or the directory of the step-1 backup of the keys
+   sudo shred -u "$OLD"/signing.key "$OLD"/encryption.key
+   sudo rm -rf "$OLD"
    ```
 
    (`shred` overwrites the file before it removes it; on a journaling or copy-on-write file system or on an SSD that is best effort, so keep the disk encrypted.
    Without `sudo`, the operator who owns the directory would have to `chmod u+w` it first: deleting a file needs write permission on its directory, and `0555` has none.
-   Delete the copy of step 1 on the machine you keep it on, in the same way, when the day has passed.)
+   If you copied over the live directory, `OLD` must be the backup, never `AUTH_KEYS_DIR` itself. Delete any other copy of the step-1 backup on the machine you keep it on, in the same way,
+   when the day has passed.)
 8. **Rolling back** is the same as rotating: put the old files back, recreate the service. Sessions that were started with the new keys are signed out again.
 
 ## Emergency rotation: a key may have leaked
