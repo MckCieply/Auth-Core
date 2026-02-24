@@ -80,7 +80,7 @@ curl -s https://app.example.com/auth/.well-known/jwks.json | grep -o '"kid" *: *
 3. **Put the new keys in place, with `sudo`** (the key files are owned by uid `1654` and readable by it only). Generate them as in
    "Generating production keys" (that gives `keys-new`, with the owner and modes the container needs, from the directory you ran it in), then either
    copy its four files over the ones in `AUTH_KEYS_DIR` (`sudo cp -p keys-new/* <AUTH_KEYS_DIR>/`, the path from `.env`; `-p` keeps the owner and modes), or move it
-   beside the old directory (`sudo mv keys-new /etc/auth-core/keys-2`) and change `AUTH_KEYS_DIR` in `.env` to it. Keep the old directory.
+   beside the old directory (`sudo mv keys-new /etc/auth-core/keys-2`) and change `AUTH_KEYS_DIR` in `.env` to it. Keep the old keys: the old directory, or, if you copied over it, the backup of step 1.
 4. **Recreate the service** so that it reads them (the compose file mounts the directory read-only, and a running container does not notice a
    change; `--force-recreate` also picks up a new `AUTH_KEYS_DIR`):
 
