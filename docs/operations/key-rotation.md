@@ -116,10 +116,18 @@ openssl x509 -enddate -noout -in <AUTH_KEYS_DIR>/encryption.crt
    (the `chmod` block of "Generating production keys"), so a plain `rm` is refused: use `sudo`. For the old directory, with its path in `OLD`:
 
    ```bash
-   OLD=/etc/auth-core/keys    # the old directory, or the directory of the step-1 backup of the keys
-   sudo shred -u "$OLD"/signing.key "$OLD"/encryption.key
-   sudo rm -rf "$OLD"
+   (
+     OLD='<the old key directory of step 3, or the step-1 backup: never AUTH_KEYS_DIR>'
+     [ -d "$OLD" ] || { echo "refusing: $OLD is not a directory; put the real path in OLD"; exit 1; }
+     [ "${OLD%/}" != "$(grep '^AUTH_KEYS_DIR=' .env | cut -d= -f2-)" ] || { echo "refusing: that is the live key directory"; exit 1; }
+     sudo shred -u "$OLD"/signing.key "$OLD"/encryption.key
+     sudo rm -rf "$OLD"
+   )
    ```
+
+   (Run it from the directory that holds `.env`, `/srv/auth-core` in [`vps.md`](../deployment/vps.md). The block runs in a subshell, so a refusal does not close your own shell. The first line of the block is a
+   placeholder that cannot run as it stands: replace it with the real path, for example `/etc/auth-core/keys` after a move beside it, where `AUTH_KEYS_DIR` now names the new directory.
+   The second and third lines stop the block if `OLD` is not a directory or is the directory the service reads now, for example after you copied over it and named that same path.)
 
    (`shred` overwrites the file before it removes it; on a journaling or copy-on-write file system or on an SSD that is best effort, so keep the disk encrypted.
    Without `sudo`, the operator who owns the directory would have to `chmod u+w` it first: deleting a file needs write permission on its directory, and `0555` has none.
