@@ -60,4 +60,64 @@ public sealed class RateLimitAuditTests
 
         Assert.Equal(1, recorded);
     }
+
+    [Fact]
+    public void A_wall_clock_set_back_does_not_suppress_rows_past_a_minute()   // an NTP step, a manual change
+    {
+        var clock = new SteppedClock();
+        var audit = new RateLimitAudit(clock);
+        Assert.True(audit.ShouldRecord("203.0.113.9", RatePolicy.Login));
+
+        clock.Wall -= TimeSpan.FromHours(1);    // the step back
+        clock.Pass(TimeSpan.FromSeconds(61));   // a minute of real time goes by; the wall clock is still an hour behind where it was
+
+        Assert.True(audit.ShouldRecord("203.0.113.9", RatePolicy.Login));
+    }
+
+    [Fact]
+    public void A_wall_clock_set_back_does_not_stop_the_sweep()
+    {
+        var clock = new SteppedClock();
+        var audit = new RateLimitAudit(clock);
+        Assert.True(audit.ShouldRecord("203.0.113.9", RatePolicy.Login));
+        Assert.True(audit.ShouldRecord("203.0.113.10", RatePolicy.Login));
+
+        clock.Wall -= TimeSpan.FromDays(1);
+        clock.Pass(TimeSpan.FromMinutes(5));
+        Assert.True(audit.ShouldRecord("203.0.113.11", RatePolicy.Login));
+
+        Assert.Equal(1, audit.Count);
+    }
+
+    [Fact]
+    public void A_wall_clock_set_forward_does_not_record_early()
+    {
+        var clock = new SteppedClock();
+        var audit = new RateLimitAudit(clock);
+        Assert.True(audit.ShouldRecord("203.0.113.9", RatePolicy.Login));
+
+        clock.Wall += TimeSpan.FromHours(1);
+
+        Assert.False(audit.ShouldRecord("203.0.113.9", RatePolicy.Login));
+    }
+
+    /// <summary>A clock whose wall time can be set to anything, while its timestamp only ever rises: what a real machine does.</summary>
+    private sealed class SteppedClock : TimeProvider
+    {
+        private long _milliseconds;
+
+        public DateTimeOffset Wall { get; set; } = DateTimeOffset.FromUnixTimeSeconds(1_767_225_600);
+
+        public override DateTimeOffset GetUtcNow() => Wall;
+
+        public override long GetTimestamp() => _milliseconds;
+
+        public override long TimestampFrequency => 1_000;
+
+        public void Pass(TimeSpan span)
+        {
+            _milliseconds += (long)span.TotalMilliseconds;
+            Wall += span;
+        }
+    }
 }

@@ -83,7 +83,7 @@ The Angular app has its own: `cd samples/notes-web && npx ng test --watch=false`
 ## Run it for real
 
 The image is public and the compose file is `deploy/docker-compose.prod.yml`: PostgreSQL pinned by digest, the service read-only with no capabilities, the
-port on `127.0.0.1` only. A server with Docker, a domain and an SMTP relay is enough; the guide goes from nothing to a first sign-in,
+port on `127.0.0.1` only. An x86-64 (amd64) server with Docker, a domain and an SMTP relay is enough (the image is built for `linux/amd64` only); the guide goes from nothing to a first sign-in,
 with a `Caddyfile` for HTTPS, upgrading and troubleshooting:
 
 - [`docs/deployment/vps.md`](docs/deployment/vps.md): the deployment guide.

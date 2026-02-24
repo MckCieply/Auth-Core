@@ -41,7 +41,7 @@ The key is a PEM RSA private key (`openssl req` writes it as PKCS#8), and the ce
 )
 ```
 
-(The block runs in a subshell, so a failure, or the `cd`, does not touch your own shell.)
+(The block runs in a subshell, so a failure, or the `cd`, does not touch your own shell: you are still in the directory you started from, and the next block runs from there, with the paths of the new directory spelled out.)
 
 (On Git Bash for Windows prefix the two `openssl req` lines with `MSYS2_ARG_CONV_EXCL='/CN='`.) The certificates are containers for the
 public keys: their names are not checked, **but their dates are**: OpenIddict refuses to work when no certificate is within its dates. If the
@@ -51,10 +51,10 @@ calendar, and rotate before it. (Whether new certificates for the same keys woul
 container runs as the user with uid `1654`, so the files must be readable by it and by nobody else:
 
 ```bash
-sudo chown 1654:1654 signing.key signing.crt encryption.key encryption.crt
-sudo chmod 0400 signing.key encryption.key
-sudo chmod 0444 signing.crt encryption.crt
-sudo chmod 0555 .
+sudo chown 1654:1654 keys-new/signing.key keys-new/signing.crt keys-new/encryption.key keys-new/encryption.crt
+sudo chmod 0400 keys-new/signing.key keys-new/encryption.key
+sudo chmod 0444 keys-new/signing.crt keys-new/encryption.crt
+sudo chmod 0555 keys-new
 ```
 
 Never use the development keys of `scripts/dev-keys.sh` (they are world-readable on purpose). Keep a copy of every set of keys somewhere safe, apart from
@@ -77,8 +77,10 @@ curl -s https://app.example.com/auth/.well-known/jwks.json | grep -o '"kid" *: *
 1. **Back up first**: the database ([`backup.md`](backup.md)), and the current key directory. Record the `kid` the key set shows now (see
    "Checking the key set").
 2. **Announce it.** People are signed out within the access token's life, 10 minutes, or at their next refresh.
-3. **Put the new keys in place, with `sudo`** (the key files are owned by uid `1654` and readable by it only). Either replace the four
-   files in `AUTH_KEYS_DIR`, or generate them in a new directory and change `AUTH_KEYS_DIR` in `.env` to it. Keep the old directory.
+3. **Put the new keys in place, with `sudo`** (the key files are owned by uid `1654` and readable by it only). Generate them as in
+   "Generating production keys" (that gives `keys-new`, with the owner and modes the container needs, from the directory you ran it in), then either
+   copy its four files over the ones in `AUTH_KEYS_DIR` (`sudo cp -p keys-new/* <AUTH_KEYS_DIR>/`, the path from `.env`; `-p` keeps the owner and modes), or move it
+   beside the old directory (`sudo mv keys-new /etc/auth-core/keys-2`) and change `AUTH_KEYS_DIR` in `.env` to it. Keep the old directory.
 4. **Recreate the service** so that it reads them (the compose file mounts the directory read-only, and a running container does not notice a
    change; `--force-recreate` also picks up a new `AUTH_KEYS_DIR`):
 

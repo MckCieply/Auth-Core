@@ -184,6 +184,10 @@ Two things to know when a row seems to be missing:
   written`, and the row is not retried. `rate_limit.hit` is written at most once per address (an IPv6 address by its `/64`) and policy per
   minute.
 
+A `refresh.reuse_detected` row is not always theft. A refresh interrupted by an outage (the old token marked redeemed, the new one not stored) that
+the browser retries after the 15-second leeway ends the session the same way, and is recorded as `refresh.reuse_detected`; after an outage such
+rows are not evidence of theft. Look at the times: a cluster of rows from the minutes of an outage, for people who were then signed in, is that.
+
 **Everything about an account** (the address as you know it; the first line finds the account's id):
 
 ```sql

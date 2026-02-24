@@ -21,6 +21,15 @@ test('HSTS is sent over HTTPS, and not over plain HTTP', async ({ page }) => {
   expect(plain.headers()['strict-transport-security']).toBeUndefined();
 });
 
+test('the notes service gets nosniff and X-Frame-Options from the proxy, over HTTPS and over plain HTTP', async ({ page }) => {
+  for (const base of ['', apiUrl()]) {
+    const answer = await page.request.get(`${base}/api/health`);
+    expect(answer.status(), base).toBe(200);
+    expect(answer.headers()['x-content-type-options'], base).toBe('nosniff');
+    expect(answer.headers()['x-frame-options'], base).toBe('DENY');
+  }
+});
+
 test("Auth-Core's own headers reach the browser through the proxy, with HSTS added over HTTPS", async ({ page }) => {
   const answer = await page.request.get('/auth/health');
   expect(answer.status()).toBe(200);

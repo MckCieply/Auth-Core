@@ -35,9 +35,14 @@
 	}
 	@api path_regexp ^/api(/|$)
 	handle @api {
+		# The notes service sends no security headers of its own: these two, as in samples/notes-api/Caddyfile.
+		header {
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+		}
 		reverse_proxy notes-api:8000
 	}
-	# The app. The headers are here and not on /auth and /api, which set their own.
+	# The app. The headers of the app are here and not on /auth and /api: /auth sets its own, /api gets only the two above.
 	handle {
 		root * /srv
 		encode gzip

@@ -15,7 +15,7 @@ C="docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml --env-file
 
 ## What you need
 
-- A Linux server with Docker and the Compose plugin (`docker compose version`), and `openssl`.
+- A Linux server with Docker and the Compose plugin (`docker compose version`), and `openssl`. The server must be x86-64 (amd64): the image is built for `linux/amd64` only, so an ARM server (a Raspberry Pi, an Ampere or Graviton instance) cannot run it.
 - A domain name for the product, say `app.example.com`, pointing at the server. Auth-Core lives at `/auth` of **that** origin, next to your product's
   backend at `/api` and its frontend ([ADR 0004](../adr/0004-same-origin-cookie-refresh.md)).
 - An SMTP relay that offers TLS (STARTTLS on 587 or TLS on 465) and a sender address on a domain you control (SPF, DKIM and DMARC are the relay's and
@@ -42,7 +42,8 @@ chmod 600 .env
 ## 2. The keys
 
 Make the two RSA keys as [`docs/operations/key-rotation.md`](../operations/key-rotation.md) says ("Generating production keys"), into `/etc/auth-core/keys`, owned by
-uid `1654` (the container's user), the private keys readable by it only. After the `chown` and `chmod` of that runbook, move the directory into place:
+uid `1654` (the container's user), the private keys readable by it only. Run both blocks of that runbook from `/srv/auth-core` (the first makes `keys-new` there, the
+second sets its owner and modes with `keys-new/...` paths), then move the directory into place from the same place:
 `sudo mkdir -p /etc/auth-core && sudo mv keys-new /etc/auth-core/keys`. Put a copy somewhere safe, apart from the server. The certificates have an end date:
 write it in your calendar and rotate before it.
 
