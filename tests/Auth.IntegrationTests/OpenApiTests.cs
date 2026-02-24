@@ -147,7 +147,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Theory]
-    // Every operation can also say 429 (the per-IP limit), and every one that reads a JSON body 415 (spec 0008).
+    // Every operation can also say 429 (the per-IP limit), and every POST, PUT, PATCH and DELETE but refresh and logout 415 (spec 0008: the charset guard).
     [InlineData("POST /auth/login", "200,400,401,403,415,429")]
     [InlineData("POST /auth/refresh", "200,401,429,503")]
     [InlineData("POST /auth/logout", "204,429")]
@@ -163,15 +163,15 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("DELETE /auth/org", "204,400,401,403,415,429")]
     [InlineData("GET /auth/org/members", "200,401,403,429")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "204,400,401,403,404,409,415,429")]
-    [InlineData("DELETE /auth/org/members/{user_id}", "204,400,401,403,404,409,429")]
+    [InlineData("DELETE /auth/org/members/{user_id}", "204,400,401,403,404,409,415,429")]
     [InlineData("GET /auth/org/invites", "200,401,403,429")]
     [InlineData("POST /auth/org/invites", "202,400,401,403,404,409,415,429")]
-    [InlineData("POST /auth/org/invites/{id}/resend", "202,400,401,403,404,429")]
-    [InlineData("DELETE /auth/org/invites/{id}", "204,400,401,403,404,429")]
+    [InlineData("POST /auth/org/invites/{id}/resend", "202,400,401,403,404,415,429")]
+    [InlineData("DELETE /auth/org/invites/{id}", "204,400,401,403,404,415,429")]
     [InlineData("GET /auth/org/roles", "200,401,403,429")]
     [InlineData("POST /auth/org/roles", "201,400,401,403,409,415,429")]
     [InlineData("PUT /auth/org/roles/{id}", "204,400,401,403,404,409,415,429")]
-    [InlineData("DELETE /auth/org/roles/{id}", "204,400,401,403,404,409,429")]
+    [InlineData("DELETE /auth/org/roles/{id}", "204,400,401,403,404,409,415,429")]
     public async Task Each_endpoint_describes_the_statuses_of_the_contract(string endpoint, string statuses)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);

@@ -188,6 +188,8 @@ A `refresh.reuse_detected` row is not always theft. A refresh interrupted by an 
 the browser retries after the 15-second leeway ends the session the same way, and is recorded as `refresh.reuse_detected`; after an outage such
 rows are not evidence of theft. Look at the times: a cluster of rows from the minutes of an outage, for people who were then signed in, is that.
 
+(Every `sql` block on this page is run, as written, on a restored database by `scripts/e2e-prod.sh`, step 5; change a query here and the script says so.)
+
 **Everything about an account** (the address as you know it; the first line finds the account's id):
 
 ```sql

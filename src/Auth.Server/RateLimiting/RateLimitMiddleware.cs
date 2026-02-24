@@ -24,8 +24,9 @@ public sealed class RateLimitMiddleware(RequestDelegate next, SlidingWindowLimit
             if (!decision.Allowed)
             {
                 // Deduped on the limiter's partition (an IPv6 /64 is one source), so that no address inside it can multiply the rows;
-                // the row still records the full address.
-                if (audit.ShouldRecord(partition, policy))
+                // above the limiter's cap that is the shared overflow partition, so that a flood from many addresses is one row per policy
+                // and minute. The row still records the full address.
+                if (audit.ShouldRecord(decision.Overflow ? SlidingWindowLimiter.OverflowPartition : partition, policy))
                 {
                     await context.RequestServices.GetRequiredService<AuditLog>().WriteAloneAsync(
                         new AuditEntry

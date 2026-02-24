@@ -181,13 +181,15 @@ public static class OpenApiSetup
         }
 
         // The codes of each error status, from every place that declared the status, and two answers that come from the pipeline and
-        // not from a handler (spec 0008): every endpoint can say 429 too_many_requests, and every one that reads a JSON body can
-        // say 415 unsupported_media_type. A status that no handler declared gets its response made here.
+        // not from a handler (spec 0008): every endpoint can say 429 too_many_requests, and every one the charset guard covers can say
+        // 415 unsupported_media_type (POST, PUT, PATCH and DELETE under /auth/ other than refresh and logout, whether or not the route
+        // reads a body: the guard looks at the header, before the route is chosen). A status that no handler declared gets its response
+        // made here.
         var codesByStatus = metadata.OfType<ErrorCodesMetadata>()
             .GroupBy(e => e.Status)
             .ToDictionary(g => g.Key, g => g.SelectMany(e => e.Codes).ToHashSet(StringComparer.Ordinal));
         AddCode(codesByStatus, StatusCodes.Status429TooManyRequests, TenancyErrors.TooManyRequests);
-        if (metadata.OfType<JsonRequestMetadata>().Any())
+        if (context.Description.HttpMethod is { } method && JsonCharsetGuard.Applies(method, "/" + context.Description.RelativePath?.TrimStart('/')))
         {
             AddCode(codesByStatus, StatusCodes.Status415UnsupportedMediaType, TenancyErrors.UnsupportedMediaType);
         }

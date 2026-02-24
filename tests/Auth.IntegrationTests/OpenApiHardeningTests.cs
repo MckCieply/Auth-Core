@@ -72,19 +72,30 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
-    public async Task Exactly_the_operations_that_read_a_json_body_say_415_unsupported_media_type()   // spec 0008 → OpenAPI
+    public async Task Exactly_the_operations_the_charset_guard_covers_say_415_unsupported_media_type()   // spec 0008 → Fixes and OpenAPI
     {
         var (_, operations) = await DescriptionAsync();
 
+        var covered = 0;
         foreach (var (endpoint, operation) in operations)
         {
-            var reads = operation["requestBody"] is not null;
-            Assert.Equal(reads, operation["responses"]!["415"] is not null);
-            if (reads)
+            // The scope of the guard: POST, PUT, PATCH and DELETE under /auth/ other than refresh and logout, whether or not the route reads a body.
+            var parts = endpoint.Split(' ', 2);
+            var guarded = parts[0] is "POST" or "PUT" or "PATCH" or "DELETE" && parts[1] is not ("/auth/refresh" or "/auth/logout");
+            Assert.Equal(guarded, operation["responses"]!["415"] is not null);
+            if (guarded)
             {
+                covered++;
                 Assert.Contains("unsupported_media_type", Description(operation, "415"));
             }
+
+            if (operation["requestBody"] is not null)
+            {
+                Assert.True(guarded, endpoint + " reads a JSON body, so the guard covers it");
+            }
         }
+
+        Assert.Equal(17, covered);
     }
 
     [Fact]

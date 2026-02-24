@@ -22,7 +22,8 @@
 #   5. the backup runbook (docs/operations/backup.md), command for command: a dump, the database dropped, recreated and restored, the
 #      service started again and waited for with the runbook's login (not /auth/health); the restored objects belong to Auth-Core's role
 #      again (pg_restore --role), the role still has every property of step 2, a login and the refresh cookie issued BEFORE the backup work,
-#      and the company is still there.
+#      and the company is still there; every SQL query of "Reading the audit log" in the runbook runs on the restored database, taken out of
+#      the document itself (the account, the company and the failed logins from the recorded address must return rows).
 #   6. which gateway a proxy on the host arrives from: one failed login straight to the published port, with no X-Forwarded-For, is
 #      recorded with the gateway of one of the two networks (10.250.0.1 or 10.250.1.1), the two addresses the compose file trusts BY DEFAULT
 #      (a host proxy needs them). The networks of the container and the Docker version are printed. This is a check of the Docker of THIS
@@ -390,8 +391,11 @@ json_body "$tmp/login.json" "{'email': '$ADMIN_EMAIL', 'password': os.environ['E
 call POST /auth/login "$tmp/login.json"
 expect_status "step 4: login through the proxy" 200
 cookie_line="$({ grep -i '^set-cookie:[[:space:]]*auth_rt=' "$tmp/hdr" || true; } | head -n1 | tr -d '\r' | cut -d: -f2- | sed 's/^ *//')"
+# ASP.NET Core writes the attribute names in lower case (httponly, samesite=strict): compare whole attributes, case-insensitively.
+cookie_attributes="$(printf '%s;' "$cookie_line" | tr 'A-Z' 'a-z' | tr -d ' ')"  # lower case, no spaces, a ; after each attribute
 for attribute in 'HttpOnly' 'Secure' 'SameSite=Strict' 'Path=/auth'; do
-  [[ "$cookie_line" == *"$attribute"* ]] || fail "step 4: the refresh cookie lacks $attribute"
+  wanted="$(printf '%s' "$attribute" | tr 'A-Z' 'a-z')"
+  [[ "$cookie_attributes" == *";$wanted;"* ]] || fail "step 4: the refresh cookie lacks $attribute"
 done
 [[ -n "$(header strict-transport-security)" ]] || fail "step 4: the proxy sends no HSTS over HTTPS"
 printf 'Cookie: %s\n' "$(printf '%s' "$cookie_line" | cut -d';' -f1)" > "$tmp/before.cookie"
@@ -459,6 +463,37 @@ owners="$(timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d auth -tA 
   || fail "step 5: the owners of the restored objects could not be read"
 [[ "$owners" =~ ^${APP_ROLE}\|[0-9]+$ ]] || fail "step 5: the restored objects do not all belong to $APP_ROLE (owner and count: $owners)"
 check_app_role "step 5"
+# The queries of "Reading the audit log" in the runbook, run on the restored database as the runbook writes them: the script takes every
+# ```sql block from the document itself (so the text and the check cannot drift apart) and puts only this run's values where the runbook has
+# its examples: the admin's address, the company's id, and the address that step 4 recorded. Each must run without an error; the ones that
+# ask about what this script did (the account, the company, the failed logins from the recorded address) must return rows.
+audit_count="$(python3 - "$(host_path "$root/docs/operations/backup.md")" "$(host_path "$tmp")" "$ADMIN_EMAIL" "$ORG" "$RECORDED" <<'PY'
+import re, sys
+doc, out, email, org, ip = sys.argv[1:6]
+text = open(doc, encoding="utf-8").read()
+section = text[text.index("\n## Reading the audit log"):]
+statements = [s for block in re.findall(r"```sql\n(.*?)```", section, re.S) for s in re.split(r"\n\s*\n", block.strip())]
+for number, statement in enumerate(statements):
+    statement = (statement.replace("boss@acme.example", email)
+                 .replace("00000000-0000-0000-0000-000000000000", org)
+                 .replace("203.0.113.9", ip))
+    with open("%s/audit-query-%d.sql" % (out, number), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(statement + "\n")
+print(len(statements))
+PY
+)" || fail "step 5: the audit queries could not be taken out of docs/operations/backup.md"
+audit_count="${audit_count//$'\r'/}"
+# 7: the account; the company's id by name; the company's changes; the failed logins from an address; from a network; who deleted a company; who hits the limits.
+expect_eq "step 5: the number of statements in the runbook's audit queries (a changed runbook needs a changed check)" "$audit_count" "7"
+audit_min_rows=(1 1 1 1 0 0 0)
+for ((n = 0; n < audit_count; n++)); do
+  audit_out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d auth -tA -v ON_ERROR_STOP=1 < "$tmp/audit-query-$n.sql" | tr -d '\r')" \
+    || fail "step 5: statement $((n + 1)) of the runbook's audit queries failed on the restored database"
+  audit_rows="$(printf '%s' "$audit_out" | grep -c . || true)"
+  (( audit_rows >= audit_min_rows[n] )) || fail "step 5: statement $((n + 1)) of the runbook's audit queries returned $audit_rows rows, expected at least ${audit_min_rows[n]}"
+done
+audit_out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d auth -tA -v ON_ERROR_STOP=1 < "$tmp/audit-query-1.sql" | tr -d '\r')"
+[[ "$audit_out" == *"$ORG"* ]] || fail "step 5: the runbook's query for a company's id by name does not find the company $ORG"
 # The role works after the restore: a login (a write of the lockout row and of the token entries) and a refresh as the role the service connects as.
 call POST /auth/login "$tmp/login.json"
 expect_status "step 5: a login after the restore" 200

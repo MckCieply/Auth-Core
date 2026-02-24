@@ -46,8 +46,16 @@ The key is a PEM RSA private key (`openssl req` writes it as PKCS#8), and the ce
 (On Git Bash for Windows prefix the two `openssl req` lines with `MSYS2_ARG_CONV_EXCL='/CN='`.) The certificates are containers for the
 public keys: their names are not checked, **but their dates are**: OpenIddict refuses to work when no certificate is within its dates. If the
 service starts but a login answers `500` and its log says "at least one of the registered certificates must be valid", the certificates
-have lapsed (or are not yet valid). The certificates above are valid for ten years (`-days 3650`): write the date they lapse in your
-calendar, and rotate before it. (Whether new certificates for the same keys would be enough has not been tried: rotate the keys.) The
+have lapsed (or are not yet valid). The certificates above are valid for ten years (`-days 3650`). Print the date they lapse, **write it in your
+calendar and in your notes about this server**, and rotate a month before it:
+
+```bash
+openssl x509 -enddate -noout -in keys-new/signing.crt        # notAfter=...
+openssl x509 -enddate -noout -in keys-new/encryption.crt     # notAfter=...
+```
+
+(The two dates are the same when both certificates were made in one block. Check them again after every rotation: a rotation with the block above starts a new ten years.)
+(Whether new certificates for the same keys would be enough has not been tried: rotate the keys.) The
 container runs as the user with uid `1654`, so the files must be readable by it and by nobody else:
 
 ```bash
@@ -72,10 +80,17 @@ curl -s https://app.example.com/auth/.well-known/jwks.json | grep -o '"kid" *: *
 
 (Use your `AUTH_PORT` and your own origin.) Both lines must show the same `kid`.
 
+The same directory holds the certificates' end dates; this is the check to repeat once a year, and the date to compare with the one in your calendar:
+
+```bash
+openssl x509 -enddate -noout -in <AUTH_KEYS_DIR>/signing.crt          # the path from .env
+openssl x509 -enddate -noout -in <AUTH_KEYS_DIR>/encryption.crt
+```
+
 ## Planned rotation
 
 1. **Back up first**: the database ([`backup.md`](backup.md)), and the current key directory. Record the `kid` the key set shows now (see
-   "Checking the key set").
+   "Checking the key set") and the end dates of the current certificates, which that section also prints.
 2. **Announce it.** People are signed out within the access token's life, 10 minutes, or at their next refresh.
 3. **Put the new keys in place, with `sudo`** (the key files are owned by uid `1654` and readable by it only). Generate them as in
    "Generating production keys" (that gives `keys-new`, with the owner and modes the container needs, from the directory you ran it in), then either
@@ -95,7 +110,17 @@ curl -s https://app.example.com/auth/.well-known/jwks.json | grep -o '"kid" *: *
 6. **Watch the backends.** For up to five minutes a backend may still believe the old key for tokens issued before the change, and answers `401` for the
    new ones until it has fetched the new key set; with the package it is at most ten seconds (it fetches at once on an unknown `kid`, not more
    than once every 10 seconds). Every person who was signed in is asked to sign in again.
-7. **Keep the old keys for a day**, in case you must roll back (step 8), then delete them securely.
+7. **Keep the old keys for a day**, in case you must roll back (step 8), then delete them. The key files are owned by uid `1654` and the directory is `0555`
+   (the `chmod` block of "Generating production keys"), so a plain `rm` is refused: use `sudo`. For the old directory `/etc/auth-core/keys-old`:
+
+   ```bash
+   sudo shred -u /etc/auth-core/keys-old/signing.key /etc/auth-core/keys-old/encryption.key
+   sudo rm -rf /etc/auth-core/keys-old
+   ```
+
+   (`shred` overwrites the file before it removes it; on a journaling or copy-on-write file system or on an SSD that is best effort, so keep the disk encrypted.
+   Without `sudo`, the operator who owns the directory would have to `chmod u+w` it first: deleting a file needs write permission on its directory, and `0555` has none.
+   Delete the copy of step 1 on the machine you keep it on, in the same way, when the day has passed.)
 8. **Rolling back** is the same as rotating: put the old files back, recreate the service. Sessions that were started with the new keys are signed out again.
 
 ## Emergency rotation: a key may have leaked

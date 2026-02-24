@@ -20,6 +20,8 @@ C="docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml --env-file
   backend at `/api` and its frontend ([ADR 0004](../adr/0004-same-origin-cookie-refresh.md)).
 - An SMTP relay that offers TLS (STARTTLS on 587 or TLS on 465) and a sender address on a domain you control (SPF, DKIM and DMARC are the relay's and
   the domain's business). Auth-Core refuses to start with a relay that does not use TLS.
+- A reverse proxy that ends TLS on ports 80 and 443; this guide uses Caddy 2.5 or newer. Install it as Caddy's own documentation says for your distribution (the
+  official package, [caddyserver.com/docs/install](https://caddyserver.com/docs/install)), or run the pinned container image of "A proxy in a container" in step 6.
 - A manifest for your product: its permissions and the default roles of a new company ([`docs/integration/python-fastapi.md`](../integration/python-fastapi.md), step 2).
 
 ## 1. Get the files
@@ -49,7 +51,8 @@ write it in your calendar and rotate before it.
 
 ## 3. The manifest
 
-Copy your product's `auth.yaml` to `/etc/auth-core/auth.yaml`. At least one default role must hold `members:manage` or `"*"`, so that the first admin of a
+Copy your product's `auth.yaml` to `/etc/auth-core/auth.yaml` and make it readable by the container's user (uid `1654`), for example `sudo chmod 0644 /etc/auth-core/auth.yaml`:
+a file that cannot be read does not stop the service, see "`Degraded`" in step 5. At least one default role must hold `members:manage` or `"*"`, so that the first admin of a
 company can manage it. (`deploy/auth.yaml` in the repository is a development example.) The built-in permissions are `members:manage`, `roles:manage`,
 `org:manage` and `org:delete`; a role with `"*"` holds all of them, **including the right to delete the company**.
 
@@ -62,8 +65,8 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 
 | Variable | What |
 | --- | --- |
-| `POSTGRES_PASSWORD` | a long random value, letters and digits only: the password of the superuser, which only you use (backups, restores) |
-| `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16: the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it) |
+| `POSTGRES_PASSWORD` | a long random value, letters and digits only (`openssl rand -hex 32`): the password of the superuser, which only you use (backups, restores). Empty in the example: compose refuses to start until you fill it |
+| `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16 (`openssl rand -hex 32` again): the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it). Empty in the example too |
 | `AUTH_CORE_VERSION` | `0.1.0` |
 | `AUTH_ISSUER` | `https://app.example.com/auth`: the origin your users see plus `/auth`. Your backend's package must be given the same value |
 | `AUTH_AUDIENCE` | the audience your backend checks, for example `my-product-api` |
@@ -113,8 +116,12 @@ the addresses that name them (`AUTH_PROXY_KNOWN_PROXIES`, and the fixed address 
 ```bash
 $C up -d
 $C logs -f auth                                      # until you see it listening; Ctrl-C leaves the logs
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/auth/health      # 200 (use your AUTH_PORT when it is not 8080)
+curl -s -w ' %{http_code}\n' http://127.0.0.1:8080/auth/health      # Healthy 200 (use your AUTH_PORT when it is not 8080)
 ```
+
+**`Healthy 200` is the answer you want; `Degraded 200` is not.** `Degraded` still has the status 200, and means the service could not use your manifest file (it does not exist,
+it cannot be read by uid `1654`, it is too large or it is not valid) and runs on the built-in roles or the last valid manifest it stored. Read why in the log, and fix the file
+before you create the first company: `$C logs auth | grep "was not used"` prints a line that names the path and the reason. Restart the service (`$C restart auth`) after the fix.
 
 The service migrates its database on its own at start (PostgreSQL creates it, owned by Auth-Core's role, at the first start). **`/auth/health` does not reach the database**, so a `200` there does not prove it is up. A login
 does: it writes the attempt, so it is `500` until the database answers and `401` after. Ask with an address nobody has, until it says `401`:
@@ -164,6 +171,8 @@ app.example.com {
 }
 ```
 
+Put the file where your installation reads its Caddyfile (the package's service reads `/etc/caddy/Caddyfile`) and reload Caddy as [its documentation](https://caddyserver.com/docs/running) says.
+
 Auth-Core sends no `Strict-Transport-Security` itself: the proxy does. A frontend needs its own `Content-Security-Policy` (the Angular sample's `Caddyfile` is an example;
 the sample's headers and its client address rules are in the comments of its two `Caddyfile`s).
 The mails' links open `AUTH_FRONTEND_*_URL`: they must be routes of your frontend. If another proxy or a CDN sits in front of Caddy, Caddy sees that proxy's address:
@@ -180,7 +189,7 @@ Auth-Core:
 # the proxy's own compose file
 services:
   caddy:
-    image: caddy:2            # pin it by digest, as the compose file of Auth-Core does
+    image: caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772   # the image of the samples; change both parts together
     networks:
       auth-core-proxy:
         ipv4_address: 10.250.1.10     # inside AUTH_PROXY_SUBNET, and not its gateway (10.250.1.1)
@@ -269,11 +278,12 @@ something is wrong". Then sign in through your frontend and call one product end
 | The `auth` container exits at start | `$C logs auth`: it names the setting (a key file, the relay's security, a frontend URL, the issuer or audience, a proxy entry, the database) |
 | It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove it from the `environment:` of the `auth` service (in `deploy/docker-compose.prod.yml` or an override file you added) or from a `run -e`; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
 | `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
+| `/auth/health` says `Degraded` (still status 200), or a new company has the built-in roles instead of your product's | The manifest file was not used: `$C logs auth \| grep "was not used"` names the path and the reason (missing, not readable by uid `1654`, too large, not valid). Fix the file (`sudo chmod 0644 /etc/auth-core/auth.yaml` for the permission), then `$C restart auth` |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
 | "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it), or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |
 | Everybody gets `429 too_many_requests` | The proxy is not trusted: every client looks like the proxy and shares its limits. Check `AUTH_PROXY_KNOWN_PROXIES` (the fixed address of a proxy in a container: see "A proxy in a container"), and that the proxy sets `X-Forwarded-For` |
 | Refresh is `503 temporarily_unavailable` | The database cannot be reached; the cookie is kept. Look at `$C ps` and the logs of `postgres` |
-| Mails do not arrive | `$C logs auth` shows each failed attempt (the dispatcher retries); check the relay's host, port, security, credentials and the sender's domain. The service verifies the relay's certificate against its chain **and for revocation**: the container needs outbound HTTP to the address of the certificate authority's revocation list (or OCSP responder), which is in the relay's certificate; a relay certificate that names no revocation list or OCSP responder is refused (the status is unknown); the read-only container cannot cache the list, so it fetches it at each connection |
+| Mails do not arrive | `$C logs auth` shows each failed attempt (the dispatcher retries); check the relay's host, port, security, credentials and the sender's domain. The service verifies the relay's certificate against its chain **and for revocation**: the container needs outbound HTTP to the address of the certificate authority's revocation list (or OCSP responder), which is in the relay's certificate; a relay certificate that names no revocation list or OCSP responder may be refused (MailKit checks revocation, and such a certificate gives an unknown status; this has not been tried against a real relay); the read-only container cannot cache the list, so it fetches it at each connection |
 | Signed-in people are asked to sign in again | The keys changed, or the database was restored from before their session |
 | The recorded client address is always the same | The proxy is not trusted, or does not send `X-Forwarded-For`; see "Who may tell Auth-Core the client address" |

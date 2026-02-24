@@ -18,13 +18,19 @@ public static class JsonCharsetGuard
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!(HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method)
-            || HttpMethods.IsPatch(request.Method) || HttpMethods.IsDelete(request.Method)))
+        return Applies(request.Method, request.Path);
+    }
+
+    /// <summary>The scope of the guard; the OpenAPI description declares <c>415</c> on exactly these operations.</summary>
+    internal static bool Applies(string method, PathString path)
+    {
+        ArgumentNullException.ThrowIfNull(method);
+
+        if (!(HttpMethods.IsPost(method) || HttpMethods.IsPut(method) || HttpMethods.IsPatch(method) || HttpMethods.IsDelete(method)))
         {
             return false;
         }
 
-        var path = request.Path;
         return path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase)
             && !RefreshRequestHandler.IsRefreshPath(path)
             && !path.Equals(LogoutEndpoint.LogoutPath, StringComparison.OrdinalIgnoreCase)

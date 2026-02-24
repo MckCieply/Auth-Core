@@ -48,7 +48,9 @@ services:
     environment:
       # Development enables the dev seed user and migrate-on-startup (see appsettings.Development.json).
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=auth;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # "GSS Encryption Mode=Disable": the image has no Kerberos library, and without it Npgsql probes for one and prints
+      # "Cannot load library libgssapi_krb5.so.2" at every start and from every admin command. Nothing here uses GSS.
+      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=auth;GSS Encryption Mode=Disable;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       Auth__DevSeed__Email: ${AUTH_DEV_SEED_EMAIL:?set AUTH_DEV_SEED_EMAIL in .env}
       Auth__DevSeed__Password: ${AUTH_DEV_SEED_PASSWORD:?set AUTH_DEV_SEED_PASSWORD in .env}
       # Optional second seed user with an unconfirmed email (spec 0004); scripts/e2e-email.sh needs it.

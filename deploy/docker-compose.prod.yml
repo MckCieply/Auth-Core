@@ -67,7 +67,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       # The service creates and migrates its database at start. No seed users and no interactive reference in Production.
       Auth__Database__MigrateOnStartup: "true"
-      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=${AUTH_DB_APP_USER:-auth_app};Password=${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
+      # "GSS Encryption Mode=Disable": the image has no Kerberos library, and without it Npgsql probes for one and prints
+      # "Cannot load library libgssapi_krb5.so.2" at every start and from every admin command. Nothing here uses GSS.
+      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=${AUTH_DB_APP_USER:-auth_app};GSS Encryption Mode=Disable;Password=${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
       # What the tokens say about themselves: the origin the browser uses plus /auth, and the audience of the product's backend.
       Auth__Tokens__Issuer: ${AUTH_ISSUER:?set AUTH_ISSUER in .env (for example https://app.example.com/auth)}
       Auth__Tokens__Audience: ${AUTH_AUDIENCE:?set AUTH_AUDIENCE in .env (the audience your backend checks)}

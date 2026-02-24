@@ -12318,3 +12318,45 @@ The spec was amended while this plan was reviewed (the second seed user's role i
 
 - **`login.succeeded` and `logout` are part of the change they record.** The session is issued, and the session is revoked, in a transaction that also holds the audit row, so that the contract's "a change and its row are written together, or neither" holds. The cost is that a database that cannot write `audit_events` also cannot log anyone in or out (`500 internal_error`, no session, no cookie); a failed login, a refused request and a rate-limit hit are still written on their own and never fail a request. The sign-in holds its response body in memory until the commit (probed).
 - **A login to an account that has no password yet** (an invited account that has not accepted) is recorded as `unknown_address`, with no subject: the answer is the same `401` as for an unknown address, and so is its row. The "As built" section records it.
+
+---
+
+## As built
+
+Written after verification round 1 (the three verifiers' reports and the fix wave that followed). Where this section and the text above disagree, this section is what was built.
+
+**1. The Caddyfiles use no `header_up`.** The plan's text at about lines 8544, 8565-8568, 8629-8630, 9899-9900 and 11153-11156 (the sample and guide Caddyfiles, and the sentences that say `header_up` "replaces" a forged `X-Forwarded-For`), and the threat-model row near line 10278 that relies on it, are superseded. From Caddy 2.5 on, a `reverse_proxy` with no `trusted_proxies` sets `X-Forwarded-For` to the address it saw and `X-Forwarded-Proto` to the scheme, and drops what the client wrote into them; `header_up` lines for these two headers only produce a warning. The final `samples/notes-api/Caddyfile`, `samples/notes-web/Caddyfile` and the Caddyfile of `docs/deployment/vps.md` say so in a comment and carry no `header_up`. Auth-Core believes Caddy's header because Caddy's address is in `Auth:Proxy:KnownProxies`.
+
+**2. The Global Constraints bullet "Production compose" is extended** by Task 15 and by two decisions taken while building:
+
+- **Decision 14, two database roles.** The image's superuser (`POSTGRES_USER`, password `POSTGRES_PASSWORD`) is the operator's: backup, restore, password changes. Auth-Core connects as a role of its own (`AUTH_DB_APP_USER`, default `auth_app`, password `AUTH_DB_APP_PASSWORD`, no default), made by `deploy/postgres-init/10-auth-app-role.sh` when the volume is first initialised: `LOGIN` only, no `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `REPLICATION` or `BYPASSRLS`, owner of the database `auth`, `CONNECT` revoked from `PUBLIC` on `auth`, `postgres` and `template1`. The script fails closed on a name or password that does not fit and says nothing of the password. The restore in `docs/operations/backup.md` uses `pg_restore --role`. The development compose is unchanged. `deploy/.env.prod.example` leaves both passwords empty (after verification round 1), so that compose refuses to start until they are set; the script's refusal of a `CHANGEME` value stays as a second line.
+- **Decision 15, four accepted risks.** The pair `0.0.0.0/1` and `128.0.0.0/1` trusts every IPv4 address and is not refused; which gateway a proxy on the host arrives from depends on the Docker engine, so the compose file has two networks (`AUTH_SUBNET`, `AUTH_PROXY_SUBNET`) and `AUTH_PROXY_KNOWN_PROXIES` trusts both gateways by default (`scripts/e2e-prod.sh` step 6 prints the one a machine uses); a process on the host can choose the address that is recorded for its requests; and certificates that lapse stop Auth-Core from signing, so `docs/operations/key-rotation.md` prints their end date and says to rotate before it.
+- The connection strings of both compose files carry `GSS Encryption Mode=Disable`, so that Npgsql does not probe for a Kerberos library that the chiseled image does not have (it printed `Cannot load library libgssapi_krb5.so.2` at every start and from every `admin` command).
+
+**3. Files changed beyond the plan's lists, and why.**
+
+| File | Why |
+| --- | --- |
+| `samples/notes-api/requirements-image.txt` | The comment names the package tag `python-v0.1.1` (the plan names `requirements.txt` only) |
+| `src/Auth.Server/Requests/JsonObjectBody.cs` | `JsonMediaType` became `internal`, so that `JsonCharsetGuard` and the body readers use one constant |
+| `tests/Auth.IntegrationTests/ClientAddressGuardTests.cs` | A host started with `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` must not start (ruling after Task 1) |
+| `tests/Auth.IntegrationTests/ErrorHandlingMiddlewareTests.cs` | The server's own `413`/`400` for a body too large or badly chunked keep their status and get the headers (ruling after Task 2) |
+| `tests/Auth.IntegrationTests/Infrastructure/ProxyEnvironment.cs`, `tests/Auth.IntegrationTests/ProxyEnvironmentTests.cs` | A test host pins every `Auth__Proxy__*` variable of the machine to blank, so that the environment of whoever runs the tests cannot change a result |
+| `tests/Auth.IntegrationTests/SecurityHeadersProductionTests.cs` | In Production `/auth/scalar/` is a `404` with the strict policy |
+| `tests/Auth.IntegrationTests/AdminArgumentsTests.cs` | The unknown-command example `delete-org` became `drop-org`, as `delete-org` is a command now |
+
+All of these came out of the fix rounds of the tasks and are justified there. Added or changed by the fix wave of verification round 1 (none is named in the plan's lists):
+
+| File | What |
+| --- | --- |
+| `samples/notes-api/Dockerfile` | Copies `clients/python/README.md` and `LICENSE` into the package build (the package's metadata names them; the build failed without them) |
+| `scripts/check-pins.py` (new) | Every `image:` and `FROM` is pinned by digest, in `deploy/`, `samples/`, `scripts/*.yml`, the Dockerfiles and the documents; the development compose passes the limiter settings; the Dockerfile copies the files that the package's metadata names; with `--self-test` |
+| `docs/design.md` | The container row names the base image by digest |
+| `scripts/e2e-prod.sh` | Step 4 compares the cookie attributes whole and case-insensitively; step 5 runs every `sql` block of "Reading the audit log" of `docs/operations/backup.md` on the restored database |
+| `src/Auth.Server/RateLimiting/SlidingWindowLimiter.cs`, `RateLimitMiddleware.cs`, `tests/Auth.IntegrationTests/SlidingWindowLimiterTests.cs`, `tests/Auth.IntegrationTests/AuditRateLimitOverflowTests.cs` (new) | The limiter keeps at most 200,000 windows: above that, a partition with no window yet is counted under one shared `overflow` partition per policy (the policy's normal limit); existing partitions keep their counters; the audit row for such a refusal is deduplicated on the overflow partition and still names the full address. Owner decision, 2026-10-07 |
+| `src/Auth.Server/Api/OpenApiSetup.cs`, `JsonCharsetGuard.cs`, `tests/Auth.IntegrationTests/OpenApiHardeningTests.cs`, `OpenApiTests.cs` | The description declares `415` on exactly the operations the charset guard covers (`POST`, `PUT`, `PATCH`, `DELETE` under `/auth/` other than refresh and logout), also the ones with no body |
+| `tests/Auth.IntegrationTests/OrgDeleteEndpointTests.cs`, `AuditAccountFlowsTests.cs`, `AuditRefreshReuseTests.cs` | Security headers on a `403` and on the `204` of `DELETE /auth/org`; the audit tests of a lock, a reset request and a refresh reuse search the rows for the secrets of their flow |
+| `deploy/docker-compose.yml`, `deploy/docker-compose.prod.yml`, `deploy/.env.prod.example` | `GSS Encryption Mode=Disable`; empty database passwords in the example |
+| `docs/deployment/vps.md`, `docs/operations/backup.md`, `docs/operations/key-rotation.md`, `docs/security/threat-model.md` | Caddy install note and pinned image, the `Degraded` health check, the end date of the certificates, deleting old keys with `sudo`, the cap on the limiter's counters, a softer claim about a relay certificate with no revocation address |
+
+**4. Other things the plan left open.** A login to an account that has no password yet is recorded as `login.failed` with the reason `unknown_address` and no subject (the answer and the row are those of an address nobody has). `password.reset_requested` is written only for a request that is queued. `DELETE /auth/org` answers `403 permissions_changed` for a company that vanished while the request waited for its lock. The sample overlays trust the proxy's one fixed address (`<address>/32`), not its whole subnet.

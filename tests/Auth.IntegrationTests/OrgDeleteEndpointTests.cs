@@ -31,6 +31,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         using var response = await DeleteAsync(token);
 
         await TenancyApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);
+        SecurityHeadersApi.AssertSecurityHeaders(response);   // the 204 carries them too
         Assert.Equal(0, await CompaniesAsync(company));
         var row = await SingleAsync(AuditKinds.OrgDeleted);
         Assert.Equal(admin, row.ActorUserId);   // by a member, not by the operator
@@ -81,6 +82,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         using var noBody = await TenancyApi.Send(Client, HttpMethod.Delete, "/auth/org", workerToken);
 
         await TenancyApi.AssertErrorAsync(wrongEverything, HttpStatusCode.Forbidden, "forbidden");
+        SecurityHeadersApi.AssertSecurityHeaders(wrongEverything);   // and so does a 403
         await TenancyApi.AssertErrorAsync(noBody, HttpStatusCode.Forbidden, "forbidden");
         Assert.Equal(0, await StreaksAsync());   // nothing was counted
     }
@@ -96,6 +98,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         using var response = await DeleteAsync(token);
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "permissions_changed");
+        SecurityHeadersApi.AssertSecurityHeaders(response);
         Assert.Equal(1, await CompaniesAsync(company));
     }
 

@@ -207,6 +207,7 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal(seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), AuditApi.Text(row, "retry_after_seconds"));
         Assert.Equal(Remote, row.ClientIp);
         Assert.Equal(10, (await AuditAsync(AuditKinds.LoginFailed)).Count);   // the ten failures that led here
+        await AssertNoSecretsAsync(WrongPassword, LockoutApi.WrongPassword);   // the password of the refused attempt and of the ten before it
     }
 
     [Fact]
@@ -272,6 +273,23 @@ public sealed class AuditAccountFlowsTests(PostgresFixture postgres, KeyMaterial
             Assert.Null(row.ActorUserId);
             Assert.Equal(Remote, row.ClientIp);   // the request's address, though the row is written from the store's own scope
         });
+    }
+
+    [Fact]
+    public async Task A_reset_request_for_an_account_holds_neither_the_link_nor_the_token_of_the_mail_that_follows()   // criterion 8
+    {
+        using (var forgot = await PostFromAsync(AccountApi.ForgotPath, new { email = Factory.SeedEmail }))
+        {
+            await AccountApi.AssertEmptyAsync(forgot, HttpStatusCode.Accepted);
+        }
+
+        await DispatchAsync();
+        var token = TokenIn(Mail.Sent[^1]);
+
+        var row = await SingleAsync(AuditKinds.PasswordResetRequested);
+        Assert.Equal(Factory.SeedEmail, row.SubjectEmail);
+        Assert.Equal(Remote, row.ClientIp);
+        await AssertNoSecretsAsync(token, Factory.SeedPassword);
     }
 
     [Fact]

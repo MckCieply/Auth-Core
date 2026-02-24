@@ -14,7 +14,7 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
     public async Task A_consumed_token_presented_after_the_leeway_is_recorded_once_with_its_account()   // criterion 8
     {
         var login = await SessionApi.LoginAsync(Client, Factory);
-        await SessionApi.RefreshOk(Client, login.RefreshToken);
+        var rotated = await SessionApi.RefreshOk(Client, login.RefreshToken);
 
         Clock.Advance(TimeSpan.FromSeconds(20));
         using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
@@ -31,7 +31,7 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
         using var again = await SessionApi.Refresh(Client, login.RefreshToken);   // the family is revoked now: nothing more to detect
         await SessionApi.AssertInvalidGrantAsync(again);
         Assert.Single(await AuditAsync(AuditKinds.RefreshReuseDetected));
-        await AssertNoSecretsAsync(login.RefreshToken);
+        await AssertNoSecretsAsync(login.RefreshToken, login.AccessToken, rotated.RefreshToken, rotated.AccessToken);   // every token of the flow
     }
 
     [Fact]
