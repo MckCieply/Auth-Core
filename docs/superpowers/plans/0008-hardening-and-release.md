@@ -123,6 +123,7 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Mon 23.02 | 12 | The production test overlay and `scripts/e2e-prod.sh` |
 | Mon 23.02 | 13 | The threat model, the backup runbook, the key rotation runbook, `scripts/check-docs.py` |
 | Mon 23.02 | 14 | The deployment guide, README, changelog, package metadata, `scripts/secret-scan.sh` and its list, and the acceptance map |
+| Tue 24.02 (before verification) | 15 | A database role of its own for Auth-Core in production: the init script, the compose file, the restore, the e2e checks, the documents |
 | Tue 24.02 | verifiers | The three verifiers, the "As built", the merge, the tags and the release (below, owner-gated) |
 
 Tasks run in order inside a day and across days; each leaves `dotnet build -warnaserror` and the tests of the files it touches green, and each task's tests are
@@ -11528,9 +11529,604 @@ git status --short
 
 - [ ] **Step 10: Hand back** — uncommitted. Files: everything listed under Files. Proposed subjects (the orchestrator may split them): `docs: deployment guide, README rewrite and changelog for v0.1.0`; `chore(python): package 0.1.1 with its licence and readme`; `chore: secret scan script and the gitleaks ignore list for the eight known false positives` (the orchestrator makes `scripts/secret-scan.sh` executable in the index); `docs: acceptance map for spec 0008`.
 
+
+## Day 5 — Tuesday 24.02 (before verification): a database role of its own
+
+Taken after Task 13, on the owner's decision of 2026-02-23 (spec 0008, "Production compose" → "Two database roles", criterion 12's last clause, Decision 14): Auth-Core must not connect to PostgreSQL as the superuser. One task; it changes the production compose file, the scripts and the documents that Tasks 9, 12, 13 and 14 made (and aligns what they say about a proxy in a container with the guide of Task 14), and it runs **before** the verification below, because the gate, the verifiers and the live checks all read its result. It changes no .NET code and no test of the .NET suite.
+
+### Task 15: A database role of its own for Auth-Core in production
+
+**Base.** HEAD `87502d8` holds Tasks 1 to 14 as built (review fixes included), and the spec as amended. They differ from the plan text in places, so the files below were read as they are now, and the edits to the documents are given as anchors (a line or a row to find, and what replaces it); if an anchor is not in the file, stop and report which one to the orchestrator, and do not improvise a place.
+
+**Files:**
+- Create: `deploy/postgres-init/10-auth-app-role.sh`
+- Modify: `deploy/docker-compose.prod.yml`, `deploy/.env.prod.example`, `scripts/prod-test.compose.yml`, `scripts/e2e-prod.sh`
+- Modify (documents of Tasks 13 and 14): `docs/operations/backup.md`, `docs/operations/key-rotation.md`, `docs/security/threat-model.md`, `docs/deployment/vps.md`, `CHANGELOG.md`, `docs/superpowers/plans/0008-acceptance-map.md`
+- No change: `deploy/docker-compose.yml` and `.env.example` (the development compose is unchanged, as the spec says), every file under `src/` and `tests/`.
+
+**Interfaces:**
+- Consumes: Task 9's `deploy/docker-compose.prod.yml` (services `postgres` and `auth`, the long bind syntax with `create_host_path: false`, `${NAME:?...}` for secrets) and `deploy/.env.prod.example`; Task 12's `scripts/e2e-prod.sh` (the helpers `fail`, `pass`, `expect_eq`, `psql_value`, `direct`, `call`, `json_body`, `cli`, the array `compose`, the variables `run`, `tmp`, `backup`, the deadlines of the readiness loops); Task 13's runbooks and the threat model; the OpenIddict, Identity and application tables that `AddAuditEvents` and the four migrations before it make in the schema `public`.
+- Produces:
+  - Two variables of the environment file: `AUTH_DB_APP_USER` (the name of the role; not a secret; blank or absent means `auth_app`; lower-case letters, digits and underscores, and not an SQL keyword) and `AUTH_DB_APP_PASSWORD` (a secret; **no default**: `${AUTH_DB_APP_PASSWORD:?...}`, so that `docker compose` refuses to start without it; letters and digits, at least 16).
+  - `deploy/postgres-init/10-auth-app-role.sh`, mounted read-only into `/docker-entrypoint-initdb.d/` of the `postgres` service: it runs once, when the volume is first made, and creates the role and gives it the database.
+  - `ConnectionStrings__Auth` of the `auth` service with `Username=${AUTH_DB_APP_USER:-auth_app}` and the new password. The superuser `auth` (`POSTGRES_USER`, `POSTGRES_PASSWORD`) is used by the operator only.
+  - The restore of `docs/operations/backup.md` in its new form (the commands below are literal; `scripts/e2e-prod.sh` step 5 runs the same ones): `pg_restore ... --no-owner --role="$AUTH_DB_APP_USER"`, a database created `OWNER $AUTH_DB_APP_USER`, `CONNECT` revoked from PUBLIC again.
+  - `scripts/e2e-prod.sh`: the function `check_app_role <when>`, called after the first start (step 2) and after the restore (step 5), and a check in step 1 that the file refuses to render without the new password.
+  - A proxy in a container is trusted by its own fixed address, never by its subnet (the pattern of `docs/deployment/vps.md`, "A proxy in a container", settled in Task 14's review): `AUTH_PROXY_KNOWN_PROXIES=<address>`, `AUTH_PROXY_KNOWN_NETWORKS` blank. The test proxy of `scripts/prod-test.compose.yml` gets `ipv4_address: ${E2E_PROD_PROXY_IP}` (`10.250.1.10`, inside the proxy subnet and not its gateway), and `scripts/e2e-prod.sh` trusts that one address, so that step 4 tests the pattern the guide recommends and step 6 tests that the host's gateway is not believed.
+
+**What was probed before this task was written** (throwaway `docker run` of `postgres:16-alpine@sha256:7218...` with no published port, on a private network; every container, network and volume removed afterwards; nothing of the repository was started):
+- The init script, as a bind mount of an executable file (the entrypoint logs `running ...`) and as a file of mode 0644 put into the directory with `docker cp` (it logs `sourcing ...`): both create the role with `rolsuper`, `rolcreaterole`, `rolcreatedb`, `rolreplication`, `rolbypassrls` all `f` and `rolcanlogin` `t`; the owner of the database `auth` is the role; `has_database_privilege('pg_monitor', 'auth', 'CONNECT')` is `f` (PUBLIC may not connect); the role cannot connect to `postgres` or `template1` (`permission denied for database`); from another container over the network the role's password is accepted and a wrong one is `password authentication failed`.
+- Every value that does not fit stops the initialisation with exit code 3 and a message that does not hold the password: a role name with an upper-case letter or a hyphen, the superuser's own name, a password of fewer than 16 characters, a password with a semicolon, the `CHANGEME...` placeholder, a reserved word as the name (`user`, `select`, `table`, `all`: refused; `auth_app`, `auth_app_prodtest` and `_x` are accepted, and `CREATE DATABASE auth OWNER _x` then works). The log of the container never held the password; the control (the same script without its two `SET` lines, run against an existing role) **did** write it, so the `SET log_statement` and `SET log_min_error_statement` lines are what keeps it out.
+- **A failed initialisation is not retried.** After the script failed, `docker start` of the same container came up as a running database with no role: the entrypoint treats a data directory that exists as initialised. The compose file has `restart: unless-stopped`, so the same happens by itself. The documents say what to do (remove the volume, which holds nothing yet, correct `.env`, start again).
+- All five migrations (`dotnet ef migrations script --idempotent`, 625 lines) ran as the role over TCP with its password, with `ON_ERROR_STOP`, and exited 0: 22 tables, 3 sequences and 53 indexes in `public`, every one owned by the role. The migrations hold no `CREATE EXTENSION`, no `CREATE ROLE`, no `GRANT`, no `SECURITY DEFINER` and nothing else that needs a superuser (`grep` of `src/Auth.Infrastructure/Persistence/Migrations/`); the application's raw SQL is `SELECT`, `INSERT`, `DELETE` and `FOR UPDATE` on its own tables. So **no .NET code assumes a superuser**. The role's own refusals: `COPY (SELECT 1) TO PROGRAM 'true'` is `permission denied to COPY to or from an external program`, `CREATE ROLE` and `CREATE DATABASE` are `permission denied`.
+- The schema `public` needs no `ALTER SCHEMA ... OWNER`: since PostgreSQL 15 it belongs to the built-in role `pg_database_owner`, which is whoever owns the database, so the role that owns the database owns it (`has_schema_privilege(role, 'public', 'CREATE')` is `t`). A database made by `CREATE DATABASE auth OWNER <role>` after a drop is the same.
+- The restore: a dump taken as the superuser (`pg_dump -U auth -d auth --format=custom --no-owner`, 78 objects), the database dropped, `CREATE DATABASE auth OWNER <role>`, `REVOKE CONNECT ... FROM PUBLIC`, then `pg_restore -U auth -d auth --no-owner --role=<role> --exit-on-error` exited 0 and every restored object (22 tables, 3 sequences, 53 indexes) is owned by the role, the data is there, and the role can write to it. **Without `--role`** the same restore exits 0 too, and every object is owned by the superuser `auth`: Auth-Core would then fail at its next migration, and could not write the tables at all. Restoring as the role itself (`-U <role>`) also gives the right owners, but only because the local socket of the image trusts every user; `--role` keeps the operator's identity and needs no password. A later `REASSIGN OWNED BY auth TO <role>` would also move whatever else the superuser owns: not used.
+- `psql -c '\password <role>'` works through `docker exec ... sh -c 'psql ... -c "\password $AUTH_DB_APP_USER"'`; answering with an empty password **clears** the password (the notice says so): the documents say so.
+- In the image, `pg_hba.conf` trusts the local socket and the loopback addresses for every role and asks for `scram-sha-256` from every other address. So the password protects the path from the `auth` container (and from anything else on its network) and not a process inside the `postgres` container, which is part of the trusted base either way; `docker compose exec postgres psql -U auth_app` needs no password.
+
+**Decisions of this task** (the spec leaves them open; each is argued).
+- **The role is made by a script in `/docker-entrypoint-initdb.d/`**, not by a one-shot service, not by Auth-Core. The image's entrypoint runs that directory exactly when the volume is first initialised (the spec's wording), as the superuser, on the socket, before the database accepts connections, so nothing can connect before the role exists and nothing runs again on a later start. A one-shot job (`docker compose run`, a second service) would run on every `up` and need the superuser's password in a second place; Auth-Core creating its own role would need the superuser. A `.sql` file cannot read the environment, so the file is a `.sh` whose only work is one `psql` call that reads both values with `\getenv`: the password is on no command line and in no process list.
+- **The script checks its inputs and fails closed**, and says nothing of the password. The name is checked against `^[a-z_][a-z0-9_]{0,62}$`, must differ from the superuser, not start with `pg_` and need no quoting (`quote_ident(name) = name`, which refuses reserved words such as `user`, `select`, `table` and `all`), so that the unquoted use in the runbook's commands (`CREATE DATABASE auth OWNER $AUTH_DB_APP_USER`) is safe; the password is letters and digits, at least 16 (it is part of a connection string, like `POSTGRES_PASSWORD`) and not the `CHANGEME...` placeholder of the example file. The statement that carries the password is run with statement logging off for the session.
+- **The role owns the database and nothing more.** `ALTER DATABASE ... OWNER TO` gives the migrations what they need (see the probe: the schema follows); `CONNECT` is revoked from PUBLIC on `auth`, `postgres` and `template1`, so the role connects to its own database only (the notes sample's job does the same for its login). The superuser is not affected.
+- **The restore runs as the superuser with `--role`**, over restoring as the role or reassigning afterwards: it keeps the operator's identity, needs no second password and no trust in `pg_hba.conf`, changes only the objects the restore creates, and was probed to give the right owners; without it the restore silently gives every object to the superuser (probed above), so the flag is part of the literal command and a check in `scripts/e2e-prod.sh` guards it. The recreated database also gets `OWNER $AUTH_DB_APP_USER` and the `REVOKE CONNECT` again, because a database made by `CREATE DATABASE` starts with PUBLIC allowed to connect. The commands run in the container through `sh -c '...'`, so that `$AUTH_DB_APP_USER` is the container's value, the same as the one the init script used, and a custom name needs no edit of the runbook.
+- **There is no migration path for an existing volume.** `v0.1.0` is the first release; the volumes that exist are development and test stacks that run the development compose, which is unchanged, and throwaway production tests. A volume made before this task has no role and the script does not run on it: the guide says to start from an empty volume.
+- **A containerised proxy is trusted by its own address** (Task 14's review). Trusting the whole proxy subnet also trusts its gateway, the address a process on the host arrives from, which would let that process choose the address recorded for its own requests (threat model, item 43). Five places still advised or tested the subnet: the comments in `deploy/docker-compose.prod.yml` (two) and `deploy/.env.prod.example`, the overlay's header, and `scripts/e2e-prod.sh` (`AUTH_PROXY_KNOWN_NETWORKS=10.250.1.0/24`). They are aligned here. An explicit `AUTH_PROXY_KNOWN_PROXIES` **replaces** the default (both gateways), so the test stack no longer trusts a host proxy: step 6 still checks what the Docker engine does (which gateway the host arrives from, for the default that a host proxy needs), and now also that a forged `X-Forwarded-For` from the host is not believed.
+
+- [ ] **Step 1: The checks that fail today.** The new e2e checks need a stack and are run by the verifiers; what can be seen to fail now without one is the compose file. From the repository root:
+
+```bash
+tmp="$(mktemp -d)"
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod.example config > /dev/null && echo "renders with the example"
+grep -v '^AUTH_DB_APP_PASSWORD=' deploy/.env.prod.example > "$tmp/no-app-password.env"
+docker compose -f deploy/docker-compose.prod.yml --env-file "$tmp/no-app-password.env" config > /dev/null 2>&1 && echo "renders WITHOUT the app password (wrong)"
+ls deploy/postgres-init 2>&1 | head -n 1
+grep -c "AUTH_DB_APP" deploy/docker-compose.prod.yml
+rm -rf "$tmp"
+```
+
+  Expected now: `renders with the example`, `renders WITHOUT the app password (wrong)`, `ls: cannot access 'deploy/postgres-init': No such file or directory`, `0`.
+
+- [ ] **Step 2: The init script.** `deploy/postgres-init/10-auth-app-role.sh` (LF; the orchestrator makes it executable in the index; it works executable or not, see its header):
+
+```sh
+#!/bin/sh
+# Creates the database role that Auth-Core connects as (spec 0008, Decision 14). The image of PostgreSQL runs this once, when the volume
+# is first initialised, as the superuser POSTGRES_USER and against POSTGRES_DB; on a volume that already holds a database it does not run.
+#
+# The role may log in and nothing else: no SUPERUSER, CREATEROLE, CREATEDB, REPLICATION or BYPASSRLS. It owns the database, so the
+# migrations that Auth-Core runs at its start can make the tables, and it is the only role besides the superuser that may connect to it
+# (nor may it connect to the maintenance databases).
+# The superuser stays for the operator (backup, restore, password changes).
+#
+# The name comes from AUTH_DB_APP_USER (lower-case letters, digits and underscores, not an SQL keyword) and the password from AUTH_DB_APP_PASSWORD (letters and
+# digits, at least 16, and not the placeholder of .env.prod.example: it is part of a connection string); both reach this container from the compose file. A value that does not fit stops
+# the initialisation, and the message never holds the password. The password is read from the environment by psql itself, so it is on no
+# command line, and statement logging is switched off for this session so that not even a failing statement writes it to the log of the
+# container.
+#
+# The file works whether the image executes it (it is executable) or reads it into its own shell (it is not): it has no `exit`, and
+# the status of its last command is the status of the script.
+psql -v ON_ERROR_STOP=1 --no-psqlrc --quiet --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+
+\getenv app_user AUTH_DB_APP_USER
+\getenv app_pw AUTH_DB_APP_PASSWORD
+SELECT current_database() AS db, current_user AS superuser \gset
+
+SELECT (:'app_user' ~ '^[a-z_][a-z0-9_]{0,62}$'
+        AND :'app_user' <> :'superuser'
+        AND :'app_user' NOT LIKE 'pg\_%'
+        AND quote_ident(:'app_user') = :'app_user'
+        AND :'app_pw' ~ '^[A-Za-z0-9]{16,}$'
+        AND :'app_pw' !~ '^CHANGEME') AS fits \gset
+\if :fits
+\else
+  DO $$ BEGIN
+    RAISE EXCEPTION 'AUTH_DB_APP_USER must be lower-case letters, digits and underscores, starting with a letter or an underscore, not the superuser, not starting with pg_ and not an SQL keyword, and AUTH_DB_APP_PASSWORD must be at least 16 letters and digits and not the placeholder of .env.prod.example';
+  END $$;
+\endif
+
+SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_user', :'app_pw') \gexec
+
+ALTER DATABASE :"db" OWNER TO :"app_user";
+-- Only the superuser and the owner may connect to the database; the role cannot even connect to the two maintenance databases.
+REVOKE CONNECT ON DATABASE :"db" FROM PUBLIC;
+REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+SQL
+```
+
+- [ ] **Step 3: The compose file.** `deploy/docker-compose.prod.yml`, two edits by anchor (the rest of the file stays):
+
+  1. In the `postgres` service, the two lines `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}` and, under `volumes:`, `- postgres-data:/var/lib/postgresql/data`, become:
+
+```yaml
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The role Auth-Core connects as (spec 0008, Decision 14): made by postgres-init/10-auth-app-role.sh when the volume is first
+      # initialised, from these two values. The image's superuser above is for the operator only (backup, restore, password changes).
+      AUTH_DB_APP_USER: ${AUTH_DB_APP_USER:-auth_app}
+      AUTH_DB_APP_PASSWORD: ${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Run once, on an empty volume, by the image's entrypoint. The long syntax with create_host_path: false, so that a missing file
+      # stops the start instead of becoming an empty directory (and a database without the role).
+      - type: bind
+        source: ./postgres-init/10-auth-app-role.sh
+        target: /docker-entrypoint-initdb.d/10-auth-app-role.sh
+        read_only: true
+        bind:
+          create_host_path: false
+```
+
+  (`./postgres-init/...` is relative to the directory of the compose file, `deploy/`, whichever directory the command runs from.)
+
+  2. In the `auth` service, the line `ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=auth;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}` becomes:
+
+```yaml
+      ConnectionStrings__Auth: Host=postgres;Port=5432;Database=auth;Username=${AUTH_DB_APP_USER:-auth_app};Password=${AUTH_DB_APP_PASSWORD:?set AUTH_DB_APP_PASSWORD in .env (letters and digits, at least 16)}
+```
+
+  Probed: with these edits `docker compose config` renders the connection string with the role, the mount with `create_host_path: false`, and without `AUTH_DB_APP_PASSWORD` it refuses and names it twice (the `auth` service and the `postgres` service). A blank `AUTH_DB_APP_PASSWORD=` is refused too (`:?`).
+
+- [ ] **Step 4: The environment example.** `deploy/.env.prod.example`: the block "The database" is replaced by (the rest stays):
+
+```bash
+# ---- The database ------------------------------------------------------------------------------------------------------
+# PostgreSQL has two roles here. The superuser "auth" is the operator's (backup, restore, password changes: docs/operations/): its password is
+# POSTGRES_PASSWORD. CHANGE: a long random value, letters and digits only. Required; it is used once, when the volume is first made, so
+# changing it later also means changing it inside PostgreSQL (docs/operations/key-rotation.md). Auth-Core does not connect as it.
+POSTGRES_PASSWORD=CHANGEMEaLongRandomValue0123456789
+# Auth-Core's own role, the only one it connects as: not a superuser, owner of the database "auth" and of its tables. It is created when the
+# volume is first made (deploy/postgres-init/10-auth-app-role.sh) from these two values, and not again: on a volume that already exists, change
+# the password inside PostgreSQL too. The name: lower-case letters, digits and underscores, not an SQL keyword (blank means auth_app). The password: CHANGE, a long
+# random value of letters and digits, at least 16 (it is part of a connection string); the script refuses the placeholder. Required.
+AUTH_DB_APP_USER=auth_app
+AUTH_DB_APP_PASSWORD=CHANGEMEanotherLongRandomValue0123456789
+```
+
+- [ ] **Step 4b: The proxy in a container is trusted by its own address.** Three files, by anchor (the rest of each stays).
+
+  1. `deploy/docker-compose.prod.yml`, in the `auth` service, the two comment lines `# default subnets below; change them with AUTH_SUBNET and AUTH_PROXY_SUBNET). A proxy in a container joins the "proxy" network,` and `# whose subnet can be trusted instead. All are written plainly (IPv4 as four decimal numbers, a network as its base address and` become:
+
+```yaml
+      # default subnets below; change them with AUTH_SUBNET and AUTH_PROXY_SUBNET). A proxy in a container joins the "proxy" network with
+      # a fixed address of its own, and that one address is trusted instead (AUTH_PROXY_KNOWN_PROXIES=<address>: an explicit value replaces
+      # the default; docs/deployment/vps.md, "A proxy in a container"), never the whole subnet, whose gateway is where a process on this host
+      # arrives from. All are written plainly (IPv4 as four decimal numbers, a network as its base address and
+```
+
+  and, under `networks:`, the comment line `# service as auth:8080. Set AUTH_PROXY_KNOWN_NETWORKS to AUTH_PROXY_SUBNET then. Nothing joins it otherwise.` becomes `# service as auth:8080. Give it a fixed address in AUTH_PROXY_SUBNET and trust that address in AUTH_PROXY_KNOWN_PROXIES, not the subnet. Nothing joins it otherwise.`
+
+  2. `deploy/.env.prod.example`, the seven lines from `# Write AUTH_PROXY_KNOWN_PROXIES= (empty) to trust no host proxy;` to `AUTH_PROXY_KNOWN_NETWORKS=` become:
+
+```bash
+# Write AUTH_PROXY_KNOWN_PROXIES= (empty) to trust no host proxy; leaving the variable out keeps the default (both gateways). An explicit
+# value replaces the default. This differs from the rate-limit settings below, where blank means the default.
+AUTH_PROXY_KNOWN_PROXIES=10.250.0.1,10.250.1.1
+# For a proxy that runs in a container: the network it joins and its subnet. Give the proxy a FIXED address in that subnet (not the gateway,
+# the first address; docs/deployment/vps.md, "A proxy in a container") and trust that one address: AUTH_PROXY_KNOWN_PROXIES=<that address>
+# (it replaces the default, so the two gateways are no longer trusted). Do not trust the whole subnet: it includes the gateway, from which
+# a process on this host reaches the published port, and such a process could then choose the address recorded for its own requests.
+# AUTH_PROXY_KNOWN_NETWORKS is for a network whose every address you control: leave it blank here.
+AUTH_PROXY_NETWORK=auth-core-proxy
+AUTH_PROXY_SUBNET=10.250.1.0/24
+AUTH_PROXY_KNOWN_NETWORKS=
+```
+
+  3. `scripts/prod-test.compose.yml`, the two comment lines `# and a reverse proxy on https://localhost:8443 (Caddy, `tls internal`: a browser warns, the script accepts it). The proxy is on the "proxy" network of the` and `# production file, whose subnet the script tells Auth-Core to trust for the client address.` become:
+
+```yaml
+# and a reverse proxy on https://localhost:8443 (Caddy, `tls internal`: a browser warns, the script accepts it). The proxy is on the "proxy" network of the
+# production file with a fixed address (E2E_PROD_PROXY_IP), the one address the script tells Auth-Core to trust for the client address, as
+# docs/deployment/vps.md recommends for a proxy in a container (never the whole subnet: it includes the gateway).
+```
+
+  and the `caddy` service's lines `    networks:` and `      - proxy` become:
+
+```yaml
+    networks:
+      proxy:
+        # A fixed address (not the gateway, the first address): the one address Auth-Core trusts for the client address.
+        ipv4_address: ${E2E_PROD_PROXY_IP:?set by scripts/e2e-prod.sh}
+```
+
+  Probed: the production file and the overlay render together with `E2E_PROD_PROXY_IP=10.250.1.10` and `AUTH_PROXY_KNOWN_PROXIES=10.250.1.10`: the caddy service shows `ipv4_address: 10.250.1.10` under the `proxy` network and the `auth` service `Auth__Proxy__KnownProxies__0: 10.250.1.10` and `Auth__Proxy__KnownNetworks__0: ""`.
+
+- [ ] **Step 5: `scripts/e2e-prod.sh`.** The checks. Each edit is by anchor in the file as it is now; the rest stays.
+
+  1. **The header.** In the list of steps, the line `#      is answered (the database is reached and migrated: /auth/health does not say so).` of step 2 becomes two lines:
+
+```bash
+#      is answered (the database is reached and migrated: /auth/health does not say so); Auth-Core's database role is not a superuser,
+#      owns the database and every table, cannot connect to the maintenance database, run a program or make a role (Decision 14).
+```
+
+  The line `#      service started again and waited for with the runbook's login (not /auth/health); the refresh cookie issued BEFORE the backup still refreshes and the company is still there.` of step 5 becomes:
+
+```bash
+#      service started again and waited for with the runbook's login (not /auth/health); the restored objects belong to Auth-Core's role
+#      again (pg_restore --role), the role still has every property of step 2, a login and the refresh cookie issued BEFORE the backup work,
+#      and the company is still there.
+```
+
+  And the line `#      is not there and with a mail relay without TLS.` of step 1 becomes `#      is not there and with a mail relay without TLS; the file does not render without the password of Auth-Core's database role.`
+
+  2. **The environment file.** After the line `POSTGRES_PASSWORD="$(openssl rand -hex 16)"` add:
+
+```bash
+APP_DB_PASSWORD="$(openssl rand -hex 16)"
+# Auth-Core's database role: a name of its own (not the default), so that the variable is exercised by the compose file, the init script and the commands of the runbook.
+APP_ROLE="auth_app_prodtest"
+```
+
+  and in the here-document of `prod.env`, after the line `POSTGRES_PASSWORD=$POSTGRES_PASSWORD`, add `AUTH_DB_APP_USER=$APP_ROLE` and `AUTH_DB_APP_PASSWORD=$APP_DB_PASSWORD`. (The loop that unsets the variables of the compose file in the shell reads the names from `deploy/.env.prod.example` and from `prod.env`, so the new ones are covered; the password is never printed.)
+
+  3. **The function.** Before the line `run="$RANDOM$RANDOM"`, add:
+
+```bash
+# check_app_role <when>: Auth-Core's database role (spec 0008, Decision 14). It is not a superuser and has none of the other privileges that
+# matter; it owns the database and every table, sequence and index of the schema public; PUBLIC may not connect to the database; the role
+# itself may not connect to the maintenance database, run a program from the database or make a role. Read as the superuser, from inside the
+# postgres container (the operator's way: the local socket needs no password). Called after the first start, where the service has migrated
+# the database as the role, and again after the restore.
+check_app_role() {
+  local when="$1" out object
+  out="$(psql_value "SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = '$APP_ROLE'")" \
+    || fail "$when: the database could not be queried"
+  expect_eq "$when: rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls and rolcanlogin of $APP_ROLE" "$out" "f|f|f|f|f|t"
+  out="$(psql_value "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'auth'")" || fail "$when: the database could not be queried"
+  expect_eq "$when: the owner of the database auth" "$out" "$APP_ROLE"
+  out="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'")" || fail "$when: the database could not be queried"
+  [[ "$out" =~ ^[0-9]+$ ]] && (( out >= 10 )) || fail "$when: the schema public holds '$out' tables: the database is not migrated"
+  out="$(psql_value "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'S', 'i', 'v', 'm', 'p', 'f') AND pg_get_userbyid(relowner) <> '$APP_ROLE'")" \
+    || fail "$when: the database could not be queried"
+  expect_eq "$when: tables, sequences and indexes of the schema public that $APP_ROLE does not own" "$out" "0"
+  for object in '"AspNetUsers"' '"OpenIddictTokens"' '"Companies"' audit_events; do
+    out="$(psql_value "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relname = '${object//\"/}'")" \
+      || fail "$when: the database could not be queried"
+    expect_eq "$when: the owner of $object" "$out" "$APP_ROLE"
+  done
+  out="$(psql_value "SELECT has_database_privilege('pg_monitor', 'auth', 'CONNECT')")" || fail "$when: the database could not be queried"
+  expect_eq "$when: PUBLIC may connect to the database auth" "$out" "f"
+  if timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d postgres -tA -c 'SELECT 1' > /dev/null 2>&1; then
+    fail "$when: $APP_ROLE can connect to the maintenance database postgres"
+  fi
+  out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d auth -tA -c "COPY (SELECT 1) TO PROGRAM 'true'" 2>&1 || true)"
+  [[ "$out" == *"permission denied"* ]] || fail "$when: $APP_ROLE may run a program from the database (answer: $out)"
+  out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d auth -tA -c "CREATE ROLE e2e_not_allowed_$run" 2>&1 || true)"
+  [[ "$out" == *"permission denied"* ]] || fail "$when: $APP_ROLE may make a role (answer: $out)"
+}
+```
+
+  4. **Step 1.** After the line `grep -q "required variable" "$tmp/config.out" || fail "step 1: docker compose did not say which variable is required"` add:
+
+```bash
+# The password of Auth-Core's database role has no default: the file does not render without it.
+grep -v '^AUTH_DB_APP_PASSWORD=' "$tmp/prod.env" > "$tmp/no-app-password.env"
+if docker compose -p "$COMPOSE_PROJECT_NAME" -f "$(host_path "$root/deploy/docker-compose.prod.yml")" --env-file "$(host_path "$tmp/no-app-password.env")" config > "$tmp/config2.out" 2>&1; then
+  fail "step 1: docker compose rendered the production file without AUTH_DB_APP_PASSWORD"
+fi
+grep -q "AUTH_DB_APP_PASSWORD" "$tmp/config2.out" || fail "step 1: docker compose did not name AUTH_DB_APP_PASSWORD as the missing variable"
+```
+
+  and in the `pass` line of step 1 replace `docker compose refuses the file without its secrets` by `docker compose refuses the file without its secrets (the password of Auth-Core's database role among them)`.
+
+  5. **Step 2.** Before the `pass "step 2: ..."` line add `check_app_role "step 2"`, and in that `pass` line replace `answers a login;` by `answers a login (as a role that is not a superuser and owns the database and its tables);`.
+
+  6. **Step 5.** The comment above the first command of step 5 (`# docs/operations/backup.md: ...`) becomes:
+
+```bash
+# docs/operations/backup.md: the database is dumped with pg_dump in the custom format, no owner; the key files, the manifest and the
+# environment file are copied. Then the disaster: the service stops, the database is dropped. The restore: recreate it owned by Auth-Core's
+# role, pg_restore as the superuser with --role so that the restored objects belong to that role, start. The commands are the runbook's, word for word.
+```
+
+  The two lines that recreate and restore:
+
+```bash
+timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d postgres -c 'CREATE DATABASE auth OWNER auth' > /dev/null || fail "step 5: could not create the database"
+timeout 300 "${compose[@]}" exec -T postgres pg_restore -U auth -d auth --no-owner --exit-on-error < "$backup/auth.dump" || fail "step 5: pg_restore failed"
+```
+
+  become:
+
+```bash
+timeout 120 "${compose[@]}" exec -T postgres sh -c 'psql -U auth -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE auth OWNER $AUTH_DB_APP_USER" -c "REVOKE CONNECT ON DATABASE auth FROM PUBLIC"' > /dev/null || fail "step 5: could not create the database"
+timeout 300 "${compose[@]}" exec -T postgres sh -c 'pg_restore -U auth -d auth --no-owner --role="$AUTH_DB_APP_USER" --exit-on-error' < "$backup/auth.dump" || fail "step 5: pg_restore failed"
+```
+
+  (The `sh -c '...'` is the container's shell: `$AUTH_DB_APP_USER` is the value the `postgres` service has, the one the init script used. Nothing in the single quotes is expanded by the host's shell.) After the line `[[ "$CLI_EXIT" == "0" && "$CLI_OUT" == *"$ORG"* ]] || fail "step 5: the company is not in the restored database"` add:
+
+```bash
+# The runbook's own check of the owners (docs/operations/backup.md, step 5 of the restore): one line, Auth-Core's role.
+owners="$(timeout 120 "${compose[@]}" exec -T postgres psql -U auth -d auth -tA -c "SELECT pg_get_userbyid(relowner), count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace GROUP BY 1" | tr -d '\r')" \
+  || fail "step 5: the owners of the restored objects could not be read"
+[[ "$owners" =~ ^${APP_ROLE}\|[0-9]+$ ]] || fail "step 5: the restored objects do not all belong to $APP_ROLE (owner and count: $owners)"
+check_app_role "step 5"
+# The role works after the restore: a login (a write of the lockout row and of the token entries) and a refresh as the role the service connects as.
+call POST /auth/login "$tmp/login.json"
+expect_status "step 5: a login after the restore" 200
+```
+
+  and in the `pass "step 5: ..."` line replace `brought the database back:` by `brought the database back, owned by Auth-Core's role again:`. (The refresh of the cookie issued before the backup, a few lines above, is the other write as that role; `$tmp/login.json` is the admin's login body of step 4.)
+
+  7. **The proxy's fixed address.** After the line `DIRECT_URL="http://127.0.0.1:$AUTH_PORT"` add:
+
+```bash
+# The test proxy's fixed address on the proxy network (inside AUTH_PROXY_SUBNET, not its gateway): the one address the service trusts, the
+# pattern of docs/deployment/vps.md ("A proxy in a container"). Trusting the whole subnet would also trust its gateway.
+PROXY_IP="10.250.1.10"
+```
+
+  In the here-document of `prod.env`, the line `AUTH_PROXY_KNOWN_NETWORKS=10.250.1.0/24` becomes three lines:
+
+```bash
+AUTH_PROXY_KNOWN_PROXIES=$PROXY_IP
+AUTH_PROXY_KNOWN_NETWORKS=
+E2E_PROD_PROXY_IP=$PROXY_IP
+```
+
+  and the two comment lines after `chmod 0600 "$tmp/prod.env"` (`# AUTH_PROXY_KNOWN_PROXIES is left out on purpose: ...` and `# compose file that is set in this shell would win ...`) become:
+
+```bash
+# AUTH_PROXY_KNOWN_PROXIES is the proxy's own address, not the default of the file (both gateways): an explicit value replaces the default.
+# A variable of the compose file that is set in this shell would win over the environment file: they are unset, so the stack gets exactly
+# the file above.
+```
+
+  8. **Step 4.** The two header comment lines `#      HSTS is sent; a failed login through the proxy is recorded with the address the proxy saw, not the one the client wrote and not` and `#      the proxy's own.` become:
+
+```bash
+#      HSTS is sent; a failed login through the proxy is recorded with the address the proxy saw, not the one the client wrote and not
+#      the proxy's own. The proxy has a fixed address on the proxy network and that one address is all the service trusts (the pattern of
+#      docs/deployment/vps.md, "A proxy in a container").
+```
+
+  In the code, after the line that reads `CADDY_IP` (`CADDY_IP="$(docker inspect ... )" || fail "step 4: docker inspect of the caddy container failed"`) add:
+
+```bash
+expect_eq "step 4: the proxy has the fixed address the service trusts" "$CADDY_IP" "$PROXY_IP"
+proxy_env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$auth_id" | tr -d '\r' | grep '^Auth__Proxy__' | sort)" \
+  || fail "step 4: docker inspect of the auth container failed"
+expect_eq "step 4: what the service trusts for the client address" "$proxy_env" "$(printf 'Auth__Proxy__KnownNetworks__0=\nAuth__Proxy__KnownProxies__0=%s' "$PROXY_IP")"
+```
+
+  and in the line `[[ "$RECORDED" != "$CADDY_IP" ]] || fail "step 4: ...: X-Forwarded-For was not honoured from the trusted proxy network"` replace `from the trusted proxy network` by `from the trusted proxy`. The assertions of step 4 hold as they were: the recorded address is not the forged `203.0.113.77` (Caddy sets the header itself; the Caddyfile names no `trusted_proxies`), not `CADDY_IP` (read from `docker inspect`; the proxy is on one network only, so the inspect prints one address, which is now also compared with the fixed one), and not empty. (`$auth_id` is set in step 2.)
+
+  9. **Step 6.** The header lines of step 6 (`#   6. which gateway a proxy on the host arrives from: ...` to `...not about the script. It runs last so that steps 1 to 5 are not lost to it.`) become:
+
+```bash
+#   6. which gateway a proxy on the host arrives from: one failed login straight to the published port, with no X-Forwarded-For, is
+#      recorded with the gateway of one of the two networks (10.250.0.1 or 10.250.1.1), the two addresses the compose file trusts BY DEFAULT
+#      (a host proxy needs them). The networks of the container and the Docker version are printed. This is a check of the Docker of THIS
+#      machine: Docker Desktop (Windows, macOS) is not a Linux VPS and may deliver the connection from another address (its own VM's); a
+#      failure there is a finding about the default of AUTH_PROXY_KNOWN_PROXIES for that Docker, not about the script. This stack trusts only
+#      its proxy's own address (step 4), so a second login from the host with a forged X-Forwarded-For must be recorded with the same
+#      connection address, not the forged one: the host's gateway is not believed. It runs last so that steps 1 to 5 are not lost to it.
+```
+
+  After the `fi` that closes the gateway check (the `if [[ "$GW_IP" != "10.250.0.1" && "$GW_IP" != "10.250.1.1" ]]; then fail ...; fi`, so that a wrong gateway is reported first) and before the `pass "step 6: ..."` line add:
+
+```bash
+# The gateway is NOT trusted in this stack (only the proxy's own address is): a forged X-Forwarded-For sent from the host is not believed.
+GW2_EMAIL="gateway-forged-$run@example.invalid"
+json_body "$tmp/gateway2.json" "{'email': '$GW2_EMAIL', 'password': 'Wrong-Password-1'}"
+curl -sS --max-time 20 -o /dev/null -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.88' --data-binary "@$tmp/gateway2.json" "$DIRECT_URL/auth/login" \
+  || fail "step 6: the login with a forged X-Forwarded-For was not answered"
+GW2_IP="$(recorded_ip "$GW2_EMAIL" || true)"
+[[ -n "$GW2_IP" && "$GW2_IP" == "$GW_IP" ]] \
+  || fail "step 6: a forged X-Forwarded-For sent from the host was recorded as '${GW2_IP:-no address}' instead of '$GW_IP': the host's gateway is trusted"
+```
+
+  and in the last `pass "step 6: ..."` line append `; a forged X-Forwarded-For from the host is not believed (only the proxy's own address is trusted)` before the closing quote.
+
+- [ ] **Step 6: The runbooks.** `docs/operations/backup.md`, edits by anchor (the rest stays):
+
+  1. Before the heading `## What to back up` add:
+
+```markdown
+## Two database roles
+
+PostgreSQL here has two roles. The **superuser** `auth` (`POSTGRES_USER`) is the operator's: every command below that talks to PostgreSQL runs as it,
+inside the `postgres` container, where the local socket needs no password. **Auth-Core's own role** (`AUTH_DB_APP_USER`, `auth_app` unless you
+changed it, with the password `AUTH_DB_APP_PASSWORD`) is not a superuser, owns the database `auth` and everything in it, and is the only way
+Auth-Core connects. The image creates it when the volume is first made ([`deploy/postgres-init/10-auth-app-role.sh`](../../deploy/postgres-init/10-auth-app-role.sh)).
+A dump holds no roles and (as made here) no owners, so a restore has to give the restored objects back to Auth-Core's role: step 3 of the restore
+does, and an object that stays with the superuser stops the next migration of Auth-Core.
+```
+
+  2. In the paragraph after the nightly backup, the sentence `` The custom format is compressed and restores with `pg_restore`; `--no-owner` lets it restore into the role `auth` whatever the dump was made as. `` (in the file it wraps after `whatever the dump was`) becomes: `` The custom format is compressed and restores with `pg_restore`; `--no-owner` leaves the owners out of the dump, so who owns the restored objects is decided when you restore (step 3 below). ``
+
+  3. Step 2 of the restore becomes:
+
+````markdown
+2. **Recreate the database**, owned by Auth-Core's role (the connection is to the `postgres` database, so the target can be dropped). A new
+   database starts with every role allowed to connect, so the second command takes that away again:
+
+   ```bash
+   $C exec -T postgres psql -U auth -d postgres -c 'DROP DATABASE IF EXISTS auth WITH (FORCE)'
+   $C exec -T postgres sh -c 'psql -U auth -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE auth OWNER $AUTH_DB_APP_USER" -c "REVOKE CONNECT ON DATABASE auth FROM PUBLIC"'
+   ```
+
+   (`sh -c '...'` runs the command in the container, where `$AUTH_DB_APP_USER` is the name the volume was made with.)
+````
+
+  and step 3 becomes:
+
+````markdown
+3. **Restore the dump** as the superuser, **as Auth-Core's role** (`--role`): the restored tables, sequences and indexes then belong to it.
+   Without `--role` the restore succeeds and every object belongs to the superuser, and Auth-Core fails at its next migration:
+
+   ```bash
+   $C exec -T postgres sh -c 'pg_restore -U auth -d auth --no-owner --role="$AUTH_DB_APP_USER" --exit-on-error' < backups/auth-DATE.dump
+   ```
+````
+
+  4. In step 5, after the `list-orgs` block and before the paragraph that starts `Then sign in as someone and refresh.`, add:
+
+````markdown
+   The restored objects must all belong to Auth-Core's role: this prints one line, with its name and the number of objects (the superuser `auth`
+   in that line means step 3 was run without `--role`):
+
+   ```bash
+   $C exec -T postgres psql -U auth -d auth -tA -c "SELECT pg_get_userbyid(relowner), count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace GROUP BY 1"
+   ```
+````
+
+  5. The paragraph that starts `If you restored into a **new server**:` is replaced by:
+
+```markdown
+If you restored into a **new server**: install Docker, put `deploy/` (with its `postgres-init/` directory), `.env`, the keys and the manifest in place
+(restore the keys with `sudo cp -a`, or run the `chown` and `chmod` of [`key-rotation.md`](key-rotation.md) again), and run `$C up -d postgres`. On the
+empty volume the image runs `deploy/postgres-init/10-auth-app-role.sh`, which makes Auth-Core's role and the empty database it owns from
+`AUTH_DB_APP_USER` and `AUTH_DB_APP_PASSWORD` in `.env` (the name and the password may differ from the old server's: the dump holds no role).
+Wait until `$C exec -T postgres pg_isready -h 127.0.0.1 -U auth -d auth` says it accepts connections (over TCP: on a fresh volume the image first
+runs a temporary server that listens on its socket only), then do steps 2 and 3, and step 5. Skip step 1: there is no `auth` container yet to
+stop. In step 4 use `$C up -d auth` instead of `$C start auth`: it creates the container, which `start` cannot. If the first start of `postgres`
+stopped in the script (its log says `AUTH_DB_APP_USER must be ...`), the volume already counts as made and a second start skips the script: on a
+server whose database is still empty, remove the volume (`$C down -v`), correct `.env` and start again.
+```
+
+  `docs/operations/key-rotation.md`: the bullet that starts `` - If the **database or `.env`** leaked as well: `` (it runs to the end of the code block and the line `(Letters and digits only, because ... recreate both services.)`) is replaced by:
+
+````markdown
+- If the **database or `.env`** leaked as well: change the passwords of **both** database roles, the operator's superuser `auth` (`POSTGRES_PASSWORD`)
+  and Auth-Core's own role (`AUTH_DB_APP_USER`, `AUTH_DB_APP_PASSWORD`), inside PostgreSQL and then in `.env`; change the relay's password
+  (`AUTH_SMTP_PASSWORD`) at the relay and in `.env`; and consider every password hash exposed: ask people to reset their passwords (the audit
+  log shows who signed in meanwhile). Each command asks for the new password itself, twice, so it is in no argument and no shell history
+  (an empty answer removes the password: type one):
+
+  ```bash
+  $C exec postgres psql -U auth -d postgres -c '\password auth'
+  $C exec postgres sh -c 'psql -U auth -d postgres -c "\password $AUTH_DB_APP_USER"'
+  ```
+
+  (Letters and digits only, at least 16, because the value is part of a connection string. Put both in `.env` at once, then `$C up -d`: compose
+  recreates the services whose environment changed. `postgres` reads the two passwords only when the volume is first made, so recreating it
+  changes nothing in the database; `auth` gets the new connection string. Until it does, its new connections fail.)
+````
+
+- [ ] **Step 7: The threat model and the guide.** `docs/security/threat-model.md`:
+
+  1. In the table "PostgreSQL", the row that starts `| S | Another container or host connects as `auth` |` becomes:
+
+```markdown
+| S | Another container or host connects as `auth` or as Auth-Core's role | No published port; a private network; a long random password for each role from `.env`; Auth-Core's role may connect to its own database only (`CONNECT` is revoked from PUBLIC on it and on the maintenance databases, `deploy/postgres-init/10-auth-app-role.sh`) | The passwords are in the containers' environment. Inside the `postgres` container the local socket and the loopback addresses trust every role (which is why the operator's commands need no password): a process in that container is part of the trusted base |
+```
+
+  and the row that starts `| E | Code in Auth-Core runs arbitrary SQL |` becomes:
+
+```markdown
+| E | Code in Auth-Core runs arbitrary SQL | EF Core parameterises every query; the few raw statements (`FromSql`, `ExecuteSqlAsync`, `SqlQuery`, all with interpolated values, which EF sends as parameters) never concatenate input into the text; **Auth-Core connects as a role of its own that is not a superuser** (none of `SUPERUSER`, `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS`; spec 0008, Decision 14; `scripts/e2e-prod.sh`, `check_app_role`, shows the attributes and that the role cannot connect to the maintenance database, run `COPY ... TO PROGRAM` or make a role, after the first start and after a restore) | A flaw that ran SQL reaches everything that role owns, which is all of Auth-Core's data (accounts, password hashes, sessions, companies, the audit log), but not the rest of PostgreSQL and not the host: it cannot run a program in the postgres container |
+```
+
+  2. The sub-heading `### Pending the owner's decision` and the paragraph under it (`Found while building ... accepted them yet.`) are removed. Items 41 to 44 stay where they are, now ordinary items of the list of accepted risks, each with the decision that accepted it: append `; accepted by Decision 15 (spec 0008)` before the final full stop of items 41, 42 and 43 (the text in the brackets stays), and `. Accepted by Decision 15 (spec 0008)` as a last sentence of item 44. Item 45 (`**Auth-Core connects to PostgreSQL as its superuser**` ...) is **removed**: Decision 14 closes it. In its place, as item 45:
+
+```markdown
+45. **Auth-Core's database role owns all of Auth-Core's data.** A flaw that ran SQL reaches the accounts, the password hashes, the sessions, the companies and the audit log, but not the rest of PostgreSQL and not the host (spec 0008, Decision 14).
+```
+
+  3. In the intro of "Residual risks", the sentence `Items 1 to 40 are the risks accepted by specs 0002 to 0008. The risks that no spec has accepted are listed apart, after them.` (it wraps after `accepted by`) becomes `Items 1 to 45 are the risks accepted by specs 0002 to 0008 (41 to 44 by Decision 15; 45 is what Decision 14 leaves).`
+
+  4. In the section "Accepted earlier and closed by spec 0008", the intro `These items of specs 0003 to 0005 no longer stand as they were written; they are named so that none is lost.` becomes `These items of specs 0003 to 0005, and one found while building spec 0008, no longer stand as they were written; they are named so that none is lost.` Then add as the last bullet:
+
+```markdown
+- Auth-Core connecting to PostgreSQL as its superuser, found while the production compose file was built: closed by spec 0008, Decision 14 (`deploy/postgres-init/10-auth-app-role.sh`, `scripts/e2e-prod.sh`); what is left of it is item 45.
+```
+
+  `docs/deployment/vps.md` (Task 14), by anchor:
+
+  1. In step 1, the sentence `You need two files and nothing else from the repository: the compose file and the example of its environment.` becomes `You need three files and nothing else from the repository: the compose file, the script that makes Auth-Core's database role, and the example of its environment.` In the code block, the line `mkdir -p deploy` becomes `mkdir -p deploy/postgres-init`, and after the line that fetches `docker-compose.prod.yml` a line is added:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
+```
+
+  (The lines `sudo chown "$USER" /srv/auth-core`, the fetch of `.env.prod.example` and `chmod 600 .env` stay.)
+
+  1b. In the code block of step 1, after the `curl` of `10-auth-app-role.sh` add the line `chmod 644 deploy/postgres-init/10-auth-app-role.sh` (the image's database user, uid 70, reads the file through the bind mount: a `umask` of 077 would leave it unreadable and the first start would fail).
+
+  1c. In step 5, the sentence `The service creates and migrates its database on its own at start.` becomes `The service migrates its database on its own at start (PostgreSQL creates it, owned by Auth-Core's role, at the first start).`
+
+  2. In the table of step 4, after the row that starts `` | `POSTGRES_PASSWORD` | ``, add the row ``| `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16: the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it) |`` and change the `POSTGRES_PASSWORD` row's text to `` a long random value, letters and digits only: the password of the superuser, which only you use (backups, restores) ``. Under the table add a paragraph:
+
+```markdown
+**Two database roles.** Auth-Core connects to PostgreSQL as a role of its own that is not a superuser and owns only its database; the superuser stays for you. Both are
+created when the volume is first made, from `.env`. They are **not** created later: if the first start stops with a message that starts `AUTH_DB_APP_USER must be`
+(it names the rule, never the password), the volume already counts as made and a second start skips the step, so remove the volume, which holds nothing yet
+(`docker compose -f deploy/docker-compose.prod.yml --env-file .env down -v`), correct `.env` and start again. Start from an empty volume: a volume made by anything else has no such role.
+```
+
+  3. In the table "When something is wrong", the row `"bind source path does not exist"` gets the cause `, or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1)`: its text becomes `` `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it), or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1) ``. Then, before the row that starts `` | `docker compose` says "required variable ... is missing" ``, add:
+
+```markdown
+| `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
+```
+
+  `CHANGELOG.md`: in the `Production.` bullet, `a named network for a proxy in a container), ` becomes `a named network for a proxy in a container; Auth-Core connects to PostgreSQL as a role of its own that is not a superuser), `.
+
+  `docs/superpowers/plans/0008-acceptance-map.md` (Task 14 left two markers for this task in the row of criterion 12):
+  - In the criterion of row 12, ` (role checks: Task 15)` becomes `; Auth-Core's database role is not a superuser and owns the tables, and a restored database is owned by it again`.
+  - In the tests cell of row 12, the closing clause `; the clause on Auth-Core's database role (not a superuser, owns the tables, a restored database owned by it again) is added by Task 15` becomes `` ; the clause on Auth-Core's database role: `scripts/e2e-prod.sh` `check_app_role` in step 2 (the role's attributes, the owners of the database and of the tables, sequences and indexes, no connection to the maintenance database, no `COPY ... TO PROGRAM`, no `CREATE ROLE`) and in step 5 (the same after the restore, the owners line of the runbook, a login), and, in step 1, the refusal to render without `AUTH_DB_APP_PASSWORD` ``.
+  - In the tests cell of row 13, append `` ; the restore uses `--role` and a database created `OWNER $AUTH_DB_APP_USER`, and step 5 runs the runbook's commands, then its owners query ``.
+  - In the table "Contract sentences that are not acceptance criteria", after the row that starts `| The image: labels from build arguments`, add the row `` | Two database roles: the superuser for the operator, Auth-Core's own role created when the volume is first initialised, owning the database; the migrations run as it | `deploy/postgres-init/10-auth-app-role.sh` (probed: all five migrations run as the role; Step 8 of Task 15); `scripts/e2e-prod.sh` steps 1, 2 and 5 | ``.
+
+- [ ] **Step 8: Check the files, and probe the script on a throwaway container.** None of this starts the Auth-Core stack, publishes a port or touches a container that is not the probe's. From the repository root:
+
+```bash
+bash -n scripts/e2e-prod.sh
+tmp="$(mktemp -d)"
+grep -v '^AUTH_DB_APP_PASSWORD=' deploy/.env.prod.example > "$tmp/no-app-password.env"
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod.example config | grep -E "Username=|AUTH_DB_APP|10-auth-app-role|create_host_path"
+docker compose -f deploy/docker-compose.prod.yml --env-file "$tmp/no-app-password.env" config 2>&1 | head -n 2
+{ cat deploy/.env.prod.example; printf 'E2E_PROD_PROXY_IP=10.250.1.10\nE2E_PROD_PKI_DIR=%s\nE2E_PROD_CADDYFILE=%s\n' "$PWD" "$PWD/scripts/prod-test.Caddyfile"; } > "$tmp/overlay.env"
+docker compose -f deploy/docker-compose.prod.yml -f scripts/prod-test.compose.yml --env-file "$tmp/overlay.env" config | grep -E "ipv4_address"
+C:/p6v/Scripts/python.exe scripts/check-docs.py docs/operations/backup.md docs/operations/key-rotation.md docs/security/threat-model.md docs/deployment/vps.md CHANGELOG.md
+scripts/secret-scan.sh
+rm -rf "$tmp"
+```
+
+  Expected: no output from `bash -n`; the rendered file shows `Username=auth_app`, `AUTH_DB_APP_USER: auth_app`, `AUTH_DB_APP_PASSWORD: CHANGEME...`, the mount of `10-auth-app-role.sh` and `create_host_path: false`; the second render stops with `required variable AUTH_DB_APP_PASSWORD is missing a value` (twice); the overlay renders with `ipv4_address: 10.250.1.10` for the proxy; `all links, paths, files and tests resolve` (the variables `AUTH_DB_APP_USER` and `AUTH_DB_APP_PASSWORD` are in the compose file and the example; the path of the script exists); `PASS` twice (the example's placeholder is not a secret and has no `password` assignment that gitleaks flags; if it does, report it: do not list it).
+
+  The probe of the script (the same one this plan was written from; it needs only Docker and the image that `docker-compose.prod.yml` pins). It is a separate block: it makes its own temporary directory and the two throwaway passwords of its throwaway container, so that it does not depend on any variable of the block above:
+
+```bash
+tmp="$(mktemp -d)"
+SUPER_PW="$(openssl rand -hex 16)"; APP_PW="$(openssl rand -hex 16)"
+IMG="postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
+export MSYS_NO_PATHCONV=1
+docker network create probe-net > /dev/null
+docker run -d --name probe-pg --network probe-net -e POSTGRES_DB=auth -e POSTGRES_USER=auth -e POSTGRES_PASSWORD="$SUPER_PW" \
+  -e AUTH_DB_APP_USER=auth_app -e AUTH_DB_APP_PASSWORD="$APP_PW" \
+  -v "$PWD/deploy/postgres-init/10-auth-app-role.sh:/docker-entrypoint-initdb.d/10-auth-app-role.sh:ro" "$IMG" > /dev/null
+for _ in $(seq 1 40); do docker exec probe-pg pg_isready -h 127.0.0.1 -U auth -d auth > /dev/null 2>&1 && break; sleep 1; done
+docker exec probe-pg psql -U auth -d auth -tA -c "SELECT rolsuper, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'auth_app'" \
+  -c "SELECT pg_get_userbyid(datdba), has_database_privilege('pg_monitor', 'auth', 'CONNECT') FROM pg_database WHERE datname = 'auth'"
+docker exec probe-pg psql -U auth_app -d postgres -c 'SELECT 1' 2>&1 | head -n 1
+docker exec probe-pg psql -U auth_app -d auth -c "COPY (SELECT 1) TO PROGRAM 'true'" 2>&1 | head -n 1
+docker run --rm --network probe-net -e PGPASSWORD="$APP_PW" "$IMG" psql -h probe-pg -U auth_app -d auth -tA -c 'SELECT current_user'
+echo "the password is in the log of the container $(docker logs probe-pg 2>&1 | grep -c "$APP_PW") time(s)"
+"C:/Program Files/dotnet/dotnet.exe" tool restore > /dev/null
+"C:/Program Files/dotnet/dotnet.exe" ef migrations script --idempotent -p src/Auth.Infrastructure -s src/Auth.Server -o "$tmp/migrate.sql" > /dev/null
+docker exec -i -e PGPASSWORD="$APP_PW" probe-pg psql -h 127.0.0.1 -U auth_app -d auth -v ON_ERROR_STOP=1 -q < "$tmp/migrate.sql"; echo "migrations as the role: exit $?"
+docker exec probe-pg pg_dump -U auth -d auth --format=custom --no-owner > "$tmp/dump.bin"
+docker exec probe-pg psql -U auth -d postgres -c 'DROP DATABASE IF EXISTS auth WITH (FORCE)'
+docker exec probe-pg sh -c 'psql -U auth -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE auth OWNER $AUTH_DB_APP_USER" -c "REVOKE CONNECT ON DATABASE auth FROM PUBLIC"'
+docker exec -i probe-pg sh -c 'pg_restore -U auth -d auth --no-owner --role="$AUTH_DB_APP_USER" --exit-on-error' < "$tmp/dump.bin"; echo "restore: exit $?"
+docker exec probe-pg psql -U auth -d auth -tA -c "SELECT pg_get_userbyid(relowner), count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace GROUP BY 1"
+docker rm -fv probe-pg > /dev/null; docker network rm probe-net > /dev/null; rm -rf "$tmp"; unset SUPER_PW APP_PW
+```
+
+  Expected, in order: `f|f|f|f|f|t`; `auth_app|f`; `FATAL:  permission denied for database "postgres"` (inside the first lines of psql's error); `ERROR:  permission denied to COPY to or from an external program`; `auth_app`; `the password is in the log of the container 0 time(s)`; `migrations as the role: exit 0`; `DROP DATABASE`, `CREATE DATABASE`, `REVOKE`; `restore: exit 0`; one line `auth_app|78` (the number of objects may differ if a migration was added since: what matters is the single line and the role's name, and that it is not `auth`). If the first start of `probe-pg` stops (`docker ps -a` shows it exited), read `docker logs probe-pg`: the message names the rule. The container, its anonymous volume and the network are removed by the last line (`docker rm -fv`); `docker ps -a`, `docker network ls` and `docker volume ls -f dangling=true` must not list anything of the probe.
+
+- [ ] **Step 9: Hand back** — uncommitted. Files: everything listed under Files. Proposed subjects (the orchestrator may split them): `feat(deploy): a database role of its own for Auth-Core in production`; `test(deploy): e2e-prod checks the role and a restore that gives its objects back, and trusts the test proxy by its own address`; `docs: two database roles in the backup runbook, the rotation runbook, the threat model and the guide`. The orchestrator makes `deploy/postgres-init/10-auth-app-role.sh` executable in the index. Report: the output of the probe, whether `docker compose config` and the document check were clean, and that nothing was started but the probe.
+
 ---
 
 ## Verification and release (Tue 24.02)
+
+**Task 15 runs first.** The task above ("A database role of its own for Auth-Core in production", Tuesday 24.02 before verification) is an implementer task like the others and is done, and committed by the orchestrator, **before** anything below: the gate, the three verifiers, the live checks (`scripts/e2e-prod.sh` now checks the role and a restore that gives the objects back to it) and the backup runbook that the security verifier follows by hand all read its result.
 
 Nothing here is a task for an implementer. The orchestrator runs the gate, dispatches the three verifiers, records the result, and, **each after its own "yes" from the owner**, merges, tags
 and releases. Only one verifier builds and tests in the tree; only one uses the Docker stack and the ports 8080, 8025, 8088 and 8443, with a `COMPOSE_PROJECT_NAME` of its own, one stack at a time (the other
