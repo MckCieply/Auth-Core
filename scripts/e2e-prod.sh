@@ -45,6 +45,8 @@
 # authority and the environment file are made in a mktemp -d directory (removed on exit, unless E2E_KEEP_STACK=1 keeps the stack: its
 # containers mount files from there); request bodies and cookies go through files.
 set -euo pipefail
+# Git Bash: the paths below go to the native git and are converted only when path conversion is on; the docker call turns it off itself.
+unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-prodtest}"
@@ -266,7 +268,8 @@ fi
 grep -q "AUTH_DB_APP_PASSWORD" "$tmp/config2.out" || fail "step 1: docker compose did not name AUTH_DB_APP_PASSWORD as the missing variable"
 if [[ "${E2E_PROD_SKIP_BUILD:-0}" != "1" ]]; then
   echo "building the image under its GHCR name (the first build takes a few minutes)..."
-  docker build -q -f "$(host_path "$root/src/Auth.Server/Dockerfile")" --build-arg "VERSION=$VERSION" --build-arg "REVISION=$(git -C "$root" rev-parse HEAD)" \
+  revision="$(git -C "$root" rev-parse HEAD)" || fail "step 1: git rev-parse failed"
+  docker build -q -f "$(host_path "$root/src/Auth.Server/Dockerfile")" --build-arg "VERSION=$VERSION" --build-arg "REVISION=$revision" \
     -t "$IMAGE" "$(host_path "$root")" > "$tmp/build.out" 2>&1 || { tail -n 20 "$tmp/build.out" >&2; fail "step 1: the image did not build"; }
 fi
 docker image inspect "$IMAGE" > /dev/null 2>&1 || fail "step 1: the image $IMAGE is not there (build it, or unset E2E_PROD_SKIP_BUILD)"
@@ -286,9 +289,10 @@ pass "step 1: docker compose refuses the file without its secrets (the password 
 # --- Step 2: the image, the container, the headers ------------------------------------------------------------------------------------
 labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}' | tr -d '\r')" || fail "step 2: docker image inspect of $IMAGE failed"
 for expected in '"org.opencontainers.image.source":"https://github.com/MckCieply/Auth-Core"' "\"org.opencontainers.image.version\":\"$VERSION\"" \
-                '"org.opencontainers.image.licenses":"MIT"' '"org.opencontainers.image.revision":"'; do
+                '"org.opencontainers.image.licenses":"MIT"'; do
   [[ "$labels" == *"$expected"* ]] || fail "step 2: the image has no label $expected"
 done
+[[ "$labels" =~ \"org\.opencontainers\.image\.revision\":\"[0-9a-f]{40}\" ]] || fail "step 2: the image has no revision label holding a full commit hash"
 "${compose[@]}" up -d > "$tmp/up.log" 2>&1 || { tail -n 20 "$tmp/up.log" >&2; fail "step 2: docker compose up failed"; }
 wait_ok 120 "$DIRECT_URL/auth/health" || fail "step 2: $DIRECT_URL/auth/health did not return 200 within 120s (docker compose -p $COMPOSE_PROJECT_NAME logs auth)"
 wait_ok 60 -k "$PROXY_URL/auth/health" || fail "step 2: $PROXY_URL/auth/health (through the proxy) did not return 200 within 60s"

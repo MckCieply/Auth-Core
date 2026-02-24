@@ -7,8 +7,9 @@
 # (nor may it connect to the maintenance databases).
 # The superuser stays for the operator (backup, restore, password changes).
 #
-# The name comes from AUTH_DB_APP_USER (lower-case letters, digits and underscores, not an SQL keyword, not public, not starting with pg_, not the superuser's name) and the password from AUTH_DB_APP_PASSWORD (letters and
-# digits, at least 16, and not the placeholder of .env.prod.example: it is part of a connection string); both reach this container from the compose file. A value that does not fit stops
+# The name comes from AUTH_DB_APP_USER (lower-case letters, digits and underscores, not an SQL keyword, not public, not starting with
+# pg_, not the superuser's name) and the password from AUTH_DB_APP_PASSWORD (letters and digits, at least 16, and not the placeholder of
+# .env.prod.example: it is part of a connection string); both reach this container from the compose file. A value that does not fit stops
 # the initialisation, and the message never holds the password. The password is read from the environment by psql itself, so it is on no
 # command line, and statement logging is switched off for this session so that not even a failing statement writes it to the log of the
 # container.

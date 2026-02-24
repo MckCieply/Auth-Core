@@ -12,6 +12,8 @@
 #
 # Run from anywhere in the repository (a worktree too): scripts/secret-scan.sh. Needs docker and tar. Exit code: 0 clean, 1 findings.
 set -euo pipefail
+# Git Bash: the paths below go to the native git and are converted only when path conversion is on; the docker call turns it off itself.
+unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
 
 IMAGE="zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
