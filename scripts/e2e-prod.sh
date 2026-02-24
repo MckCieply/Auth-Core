@@ -241,9 +241,9 @@ check_app_role() {
   done
   out="$(psql_value "SELECT has_database_privilege('pg_monitor', 'auth', 'CONNECT')")" || fail "$when: the database could not be queried"
   expect_eq "$when: PUBLIC may connect to the database auth" "$out" "f"
-  if timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d postgres -tA -c 'SELECT 1' > /dev/null 2>&1; then
-    fail "$when: $APP_ROLE can connect to the maintenance database postgres"
-  fi
+  out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d postgres -tA -c 'SELECT 1' 2>&1 || true)"
+  out="${out//$'\r'/}"
+  [[ "$out" == *'permission denied for database "postgres"'* ]] || fail "$when: $APP_ROLE can connect to the maintenance database postgres (answer: $out)"
   out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d auth -tA -c "COPY (SELECT 1) TO PROGRAM 'true'" 2>&1 || true)"
   [[ "$out" == *"permission denied"* ]] || fail "$when: $APP_ROLE may run a program from the database (answer: $out)"
   out="$(timeout 120 "${compose[@]}" exec -T postgres psql -U "$APP_ROLE" -d auth -tA -c "CREATE ROLE e2e_not_allowed_$run" 2>&1 || true)"
@@ -415,7 +415,7 @@ expect_eq "step 4: what the service trusts for the client address" "$proxy_env" 
 pass "step 4: accept, login and refresh through the proxy; the cookie is HttpOnly, Secure, SameSite=Strict, Path=/auth; HSTS; the recorded address ($RECORDED) is neither a forged one nor the proxy's own"
 
 # --- Step 5: the backup runbook, command for command ----------------------------------------------------------------------------
-# docs/operations/backup.md: the database is dumped with pg_dump in the custom format, no owner; the key files, the manifest and the
+# docs/operations/backup.md: the database is dumped with pg_dump in the custom format (its owners are dropped at the restore); the key files, the manifest and the
 # environment file are copied. Then the disaster: the service stops, the database is dropped. The restore: recreate it owned by Auth-Core's
 # role, pg_restore as the superuser with --role so that the restored objects belong to that role, start. The commands are the runbook's, word for word.
 timeout 300 "${compose[@]}" exec -T postgres pg_dump -U auth -d auth --format=custom --no-owner > "$backup/auth.dump" \
@@ -480,8 +480,9 @@ fi
 # The gateway is NOT trusted in this stack (only the proxy's own address is): a forged X-Forwarded-For sent from the host is not believed.
 GW2_EMAIL="gateway-forged-$run@example.invalid"
 json_body "$tmp/gateway2.json" "{'email': '$GW2_EMAIL', 'password': 'Wrong-Password-1'}"
-curl -sS --max-time 20 -o /dev/null -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.88' --data-binary "@$tmp/gateway2.json" "$DIRECT_URL/auth/login" \
+GW2_CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.88' --data-binary "@$tmp/gateway2.json" "$DIRECT_URL/auth/login")" \
   || fail "step 6: the login with a forged X-Forwarded-For was not answered"
+[[ "$GW2_CODE" == "401" ]] || fail "step 6: the login with a forged X-Forwarded-For answered HTTP $GW2_CODE, expected 401"
 GW2_IP="$(recorded_ip "$GW2_EMAIL" || true)"
 [[ -n "$GW2_IP" && "$GW2_IP" == "$GW_IP" ]] \
   || fail "step 6: a forged X-Forwarded-For sent from the host was recorded as '${GW2_IP:-no address}' instead of '$GW_IP': the host's gateway is trusted"

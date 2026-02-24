@@ -18,7 +18,7 @@ PostgreSQL here has two roles. The **superuser** `auth` (`POSTGRES_USER`) is the
 inside the `postgres` container, where the local socket needs no password. **Auth-Core's own role** (`AUTH_DB_APP_USER`, `auth_app` unless you
 changed it, with the password `AUTH_DB_APP_PASSWORD`) is not a superuser, owns the database `auth` and everything in it, and is the only way
 Auth-Core connects. The image creates it when the volume is first made ([`deploy/postgres-init/10-auth-app-role.sh`](../../deploy/postgres-init/10-auth-app-role.sh)).
-A dump holds no roles and (as made here) no owners, so a restore has to give the restored objects back to Auth-Core's role: step 3 of the restore
+A dump holds no roles, and the owners it names are dropped at the restore (`--no-owner`), so a restore has to give the restored objects back to Auth-Core's role: step 3 of the restore
 does, and an object that stays with the superuser stops the next migration of Auth-Core.
 
 ## What to back up
@@ -53,7 +53,7 @@ find backups -name 'auth-*.dump' -mtime +14 -delete
 17 3 * * *  /usr/local/bin/auth-core-backup
 ```
 
-The custom format is compressed and restores with `pg_restore`; `--no-owner` leaves the owners out of the dump, so who owns the restored objects is decided when you restore (step 3 below). A failed dump leaves a short or empty file: the script stops at the failed command (`set -e`), but look at the size of the newest
+The custom format is compressed and restores with `pg_restore`; `--no-owner` changes nothing in a custom-format dump: the dump still names each object's owner. The restore drops those names (pg_restore's `--no-owner`) and gives the objects to Auth-Core's role (`--role`, step 3). A failed dump leaves a short or empty file: the script stops at the failed command (`set -e`), but look at the size of the newest
 dump now and then. Copy `backups/` and (once, and after every key rotation) the key files, the manifest and `.env` off the host. Gather them
 in a directory of their own, apart from the dump, then encrypt it and copy it away (the paths are those of `AUTH_KEYS_DIR`,
 `AUTH_MANIFEST` and your `.env`):
