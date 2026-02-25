@@ -516,3 +516,81 @@ digests. Still to verify:
   a test password of the Angular sample, to be listed in `.gitleaksignore`) and the
   dependency checks (`dotnet list package --vulnerable --include-transitive`,
   `npm audit`, `pip-audit` 2.10.1), which query public advisory databases.
+
+## As built (owner, 2026-02-25)
+
+Recorded after implementation and local verification (plan 0008 with Task 15,
+[acceptance map](../plans/0008-acceptance-map.md)). What entered this stage stays in it;
+this section records it rather than rewriting the contract above. Where a sentence above
+and this section differ, this section is how the software behaves.
+
+**Decision taken during verification (owner, 2026-02-24).**
+
+16. **The limiter's counters are capped.** Above 200,000 counters, a request from an
+    address that has none yet is counted, per policy, in one shared counter with the
+    policy's normal limit; existing addresses keep their own. Normally nothing changes;
+    during a flood from that many sources, new addresses share their limits until the
+    once-a-minute sweep brings the count down (measured: 57 MB at the cap, back to
+    normal about two minutes after the flood). `rate_limit.hit` rows of that shared
+    counter still record the real address.
+
+**Contract as built.** As specified, with these readings:
+
+- **Trusted proxies** are refused, with a message that names the key and never the value,
+  when they are not written plainly: short, hexadecimal or octal IPv4, an IPv6 scope id,
+  an IPv4-mapped IPv6 entry, an IPv6 range inside or holding the mapped range (such as
+  `::/64`), a network written with bits beyond its prefix, and a prefix of 0. The host
+  refuses to start when the framework's own switch `ASPNETCORE_FORWARDEDHEADERS_ENABLED`
+  is on, since it would trust every sender. The pair `0.0.0.0/1` and `128.0.0.0/1` is
+  not refused (Decision 15).
+- **The limiter** counts on the monotonic clock, so a step of the wall clock changes
+  nothing. `rate_limit.hit` is written at most once per limiter partition (an address, or
+  the `/64` of an IPv6 one) and policy per minute: within "at most once per address".
+- **A rejected request body.** A body the server refuses while reading it (too large,
+  malformed chunks) is answered by the outermost handler with the server's own status
+  (`413` or `400`), `{"error": "invalid_request"}` and the security headers, not with
+  `500`. In practice the 8 KiB cap of every reader answers `400 invalid_request` first.
+- **OpenAPI** declares `415` on every `POST`, `PUT`, `PATCH` and `DELETE` under `/auth/`
+  except refresh and logout, which is where the charset guard answers it, body or no
+  body.
+- **Invitations.** An address typed in punycode (`x@xn--e1afmkfd.xn--p1ai`) passes the
+  domain rule but is still refused by the earlier address check, which compares it with
+  its decoded form; the same address typed in its own script (`x@пример.рф`) is invited.
+- **Audit.** `login.succeeded` and `logout` are written in the same transaction as the
+  session they record: if the row cannot be written, the login or logout fails with `500`
+  and no session is issued or ended. `password.reset_requested` is written only when a
+  mail is queued, not when the mail limit refuses it. `"forced": true` on a
+  `member.removed` row records that the operator passed `--force`. A login to an account
+  that has no password yet is recorded as `unknown_address`. When an audit write that
+  stands alone fails, EF Core logs its own error lines next to the one warning of the
+  audit log. A row exactly at the retention is kept ("older than").
+- **Logout** completes once the cookie is read, even when the client goes away.
+- **`DELETE /auth/org`** answers `403 permissions_changed` when the company was deleted by
+  another request while this one waited for its lock. A missing `org:delete` is
+  `403 forbidden`, as on every company endpoint; `permission_not_held` is rule 1 only.
+- **Production compose.** It has two networks (Auth-Core's and the proxy's). A proxy on
+  the host arrives from the gateway of either, depending on the Docker engine (on Docker
+  Desktop it changed between starts), so both gateways are trusted by default; an
+  explicit empty `AUTH_PROXY_KNOWN_PROXIES=` trusts nothing. A proxy in a container is
+  trusted by its own fixed address (a `/32`), never by its network, which would also
+  trust the gateway. The SMTP credentials must be present (empty means a relay without
+  authentication). Bind mounts refuse a missing host path. The example environment file
+  ships empty secrets, so compose refuses to start until they are filled; the database
+  init also refuses the `CHANGEME` placeholders and SQL keywords or `public` as the role
+  name. Connection strings turn off GSS encryption (`GSS Encryption Mode=Disable`), which
+  the image cannot use; TLS and password authentication are unchanged.
+- **The samples' proxies** trust Auth-Core's proxy by its single address (`/32`), and use
+  no `header_up`: Caddy replaces `X-Forwarded-For` and `X-Forwarded-Proto` from
+  untrusted peers itself.
+- **Second development seed user:** the first role by name, ordinal order, holding
+  neither `members:manage` nor `*` (as amended in the brainstorm).
+- **The image** is built for `linux/amd64` only.
+
+**Verified** on 2026-02-24 by three verifiers (realization, end to end on a live stack,
+security) in two rounds and one small third round approved by the owner; the log is in the
+acceptance map. Live: all e2e scripts of specs 0001–0008, the production compose in
+Production with mail over STARTTLS and the revocation list fetched from a read-only
+container, the backup runbook by hand (the restored objects owned by Auth-Core's role, a
+cookie from before the backup still refreshing), and the forged `X-Forwarded-For` ignored.
+Criterion 17: the secret scan is clean; no vulnerable .NET or Python package; npm lists
+exactly the Angular 21.1.4 advisories accepted by spec 0007 Decision 13.

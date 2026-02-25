@@ -126,6 +126,10 @@ DoS open. See
 [`docs/superpowers/specs/0003-lockout-and-abuse-resistance.md`](superpowers/specs/0003-lockout-and-abuse-resistance.md)
 → "Deferred / follow-ups".
 
+*As built (spec 0008):* the per-IP rate limiting and the trusted-proxy rule were built in week 6 with Auth-Core's own
+sliding-window limiter, not the framework's; the security headers, the basic audit log and the threat model of the
+"Security and ops" row are in too.
+
 ## Architecture and contracts
 
 The browser sees one origin; the reverse proxy splits `/api` to the consumer
@@ -257,6 +261,9 @@ before release.
   - Threat model (STRIDE), security headers, basic audit log
   - Key rotation plan, backup runbook, README
   - Tag `v0.1.0`, image published to GHCR
+  - *As built (spec 0008):* released without CI (Decision 1); the audit log, company deletion, a production compose
+    file with a database role of its own for Auth-Core (Decision 14) and the limiter's cap (Decision 16) were added; the
+    threat model, the runbooks and the deployment guide are under `docs/`.
   - Buffer for slips
 
 **Stretch, cut first:** per-company config in the speech-to-mail database; full

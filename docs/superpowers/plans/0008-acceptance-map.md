@@ -67,8 +67,30 @@ The Angular tests: `cd samples/notes-web && npx ng test --watch=false`. The live
 
 ## Plan-vs-implementation notes
 
-(The orchestrator writes this section after the verification: what the plan said and what was built, and why they differ.)
+What the plan said and what was built, where they differ; the spec's "As built (owner, 2026-02-25)" records the behaviour these lead to.
+
+- **Task 15 was added** by an amendment of the spec (Decisions 14 and 15) and of the plan: a database role of its own for Auth-Core in production, created by `deploy/postgres-init/10-auth-app-role.sh`, restored with `pg_restore --role`.
+- **Proxy entries** are refused when not written plainly (short, hexadecimal or octal IPv4, a scope id, IPv4-mapped forms and ranges, bits beyond the prefix, `/0`), and the host refuses to start with `ASPNETCORE_FORWARDEDHEADERS_ENABLED`: rulings of the Task 1 review.
+- **The limiter** counts on the monotonic clock (Task 1 review), `rate_limit.hit` is deduplicated per limiter partition (Task 5 review), and its counters are capped at 200,000 with a shared overflow counter (Decision 16, from the security verifier).
+- **A body the server rejects** is answered `invalid_request` with its own status and the headers, not `500` (Task 2 review); OpenAPI declares `415` on every write operation the charset guard covers (verifier 1).
+- **`login.succeeded` and `logout`** are written in the transaction of the session (plan review, Task 5).
+- **Production compose** trusts both bridge gateways by default (Task 9 review; the live run saw a proxy on the host arrive from either, varying between starts on Docker Desktop), a container proxy by its own `/32` (Task 14 review), ships empty secrets in its example (verifier 3), and turns off GSS encryption, which the image cannot use (verifier 2).
+- **Caddyfiles** use no `header_up`: Caddy 2.5+ replaces the forwarded headers from untrusted peers (Task 10 review); the plan's text that shows it is superseded by its "As built".
+- **Files beyond the plan's lists**: see the plan's "As built".
+- **Criterion 17, npm**: the 6 runtime `@angular/*` 21.1.4 packages and 17 development-tooling packages with advisories are addressed by spec 0007 Decision 13 and the sample's README; no other package has an advisory. `pip-audit` of the verifier's own environment lists advisories in `pip` 25.0.1 only, which is tooling, not a dependency of the package or the sample.
 
 ## Local verification log
 
-(The orchestrator writes this section: which command or script ran, when, with what result, for each verifier and each round.)
+All on 2026-02-24, at the head named; counts are tests passed of tests run.
+
+| What | Head | Result |
+| --- | --- | --- |
+| Gate: `dotnet build -warnaserror`; .NET suite; `InvitationDomainTests` with invariant globalization; Python package (hatchling 1.32.4, the wheel test runs); notes-api; notes-web unit tests and production build; `check-docs.py`; `secret-scan.sh` | `0de2165` | clean; 1386/1386; 28/28; 212; 97; 387 and build; pass; PASS ×2 |
+| Verifier 1, realization, round 1 | `0de2165` | FAIL: 9 (3 Minor, 6 Low), no spec violation in code |
+| Verifier 2, end to end, round 1: five older scripts (limiter off), `e2e-hardening.sh`, `e2e-notes.sh`, `e2e-web.sh` (Chromium, WebKit), `e2e-prod.sh`, the backup runbook by hand, a forged `X-Forwarded-For`, the key blocks | `0de2165` | FAIL: 2 Important (the notes image did not build after the package gained its readme and licence; a case-sensitive cookie check), 2 Low; the rest PASS |
+| Verifier 3, security, round 1: headers, proxy rule, audit secrets, `DELETE /auth/org`, limiter memory, outage path, container flags and pins, the database role, criterion 17 | `0de2165` | FAIL: 5 Low; secret scan PASS ×2, .NET none vulnerable, npm as expected, pip-audit of the sample clean |
+| Fix wave 1 (17 items) | `f546643` | .NET 1395/1395 |
+| Verifier 1, round 2 | `f546643` | 3 new Low |
+| Verifier 2, round 2: every script unpatched, the backup runbook by hand with its audit queries | `f546643` | PASS (one start of `e2e-web.sh` met an unhealthy PostgreSQL; the retry passed) |
+| Verifier 3, round 2: the overflow cap measured (57 MB at the cap, recovery in about two minutes), GSS option, `check-pins.py` | `f546643` | 1 new Low |
+| Round 3 (owner-approved): the four Lows and a start period for PostgreSQL's health check; short review | `3bbb7f9`, `83f341c` | all addressed |
