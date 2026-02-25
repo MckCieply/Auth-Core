@@ -30,7 +30,7 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
         Assert.Equal("Development", me.GetProperty("org_name").GetString());
         Assert.Equal(["admin"], me.GetProperty("roles").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(
-            ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             me.GetProperty("permissions").EnumerateArray().Select(e => e.GetString()));
     }
 
@@ -290,7 +290,7 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
     [Fact]
     public async Task A_method_the_path_does_not_have_is_a_405_that_is_still_never_stored()
     {
-        using var response = await TenancyApi.Send(Client, HttpMethod.Delete, OrgEndpoints.OrgPath, await AdminTokenAsync());
+        using var response = await TenancyApi.Send(Client, HttpMethod.Put, OrgEndpoints.OrgPath, await AdminTokenAsync());
 
         Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
         AccountApi.AssertNeverStoredAndNoCookie(response);

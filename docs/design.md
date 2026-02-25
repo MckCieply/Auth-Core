@@ -57,10 +57,10 @@ maintenance. Versions are pinned in `Directory.Packages.props` at bootstrap.
 | Rate limiting       | Built-in `Microsoft.AspNetCore.RateLimiting`                  | Per-IP and per-account limits on login, forgot and reset        |
 | Email               | `MailKit`; Mailpit in dev and tests                          | Microsoft's recommended SMTP client; templates as `.resx` for PL/EN |
 | Manifest            | `YamlDotNet`                                                   | Parses `auth.yaml`                                              |
-| Admin CLI           | Four hand-parsed subcommands of the same binary (no library; spec 0005) | One image: `auth-server admin create-org ...`        |
+| Admin CLI           | Five hand-parsed subcommands of the same binary (no library; spec 0005) | One image: `auth-server admin create-org ...`        |
 | API docs            | Built-in `Microsoft.AspNetCore.OpenApi` + `Scalar.AspNetCore` (dev only) | OpenAPI document for typed clients later                        |
 | Logging and health  | Built-in `ILogger` (JSON console), built-in health checks     | OpenTelemetry comes after the MVP                              |
-| Container           | `mcr.microsoft.com/dotnet/aspnet:10.0` chiseled image, non-root | Small image, no shell, smaller attack surface                  |
+| Container           | `mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled@sha256:48e51f2f6798897be7ac4e775c049ed8fe60d3190f637e1f9c9dc7513efa659c` chiseled image, non-root (pinned by digest in the Dockerfile) | Small image, no shell, smaller attack surface                  |
 
 **Tests and tooling**
 
@@ -125,6 +125,10 @@ throttle distributed / multi-IP attacks and leaves a targeted account-lockout
 DoS open. See
 [`docs/superpowers/specs/0003-lockout-and-abuse-resistance.md`](superpowers/specs/0003-lockout-and-abuse-resistance.md)
 → "Deferred / follow-ups".
+
+*As built (spec 0008):* the per-IP rate limiting and the trusted-proxy rule were built in week 6 with Auth-Core's own
+sliding-window limiter, not the framework's; the security headers, the basic audit log and the threat model of the
+"Security and ops" row are in too.
 
 ## Architecture and contracts
 
@@ -257,6 +261,9 @@ before release.
   - Threat model (STRIDE), security headers, basic audit log
   - Key rotation plan, backup runbook, README
   - Tag `v0.1.0`, image published to GHCR
+  - *As built (spec 0008):* released without CI (Decision 1); the audit log, company deletion, a production compose
+    file with a database role of its own for Auth-Core (Decision 14) and the limiter's cap (Decision 16) were added; the
+    threat model, the runbooks and the deployment guide are under `docs/`.
   - Buffer for slips
 
 **Stretch, cut first:** per-company config in the speech-to-mail database; full

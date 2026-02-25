@@ -4,14 +4,18 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
 using Auth.Server.Admin;
 using Auth.Server.Api;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
+using Auth.Server.Network;
+using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -23,16 +27,27 @@ if (args is ["admin", .. var adminArguments])
 }
 
 var builder = WebApplication.CreateBuilder(args);
+// No Server header (spec 0008). Only a live stack shows it: the test server never sends one.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 // Fail fast on missing or broken key material, before anything else is built.
 var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
+// Fail fast on a bad proxy list, a bad rate limit or a bad audit retention, naming the key (spec 0008).
+var proxies = ProxySettings.Load(builder.Configuration);
+builder.Services.AddSingleton(proxies);
+builder.Services.AddSingleton(RateLimitSettings.Load(builder.Configuration));
+builder.Services.AddSingleton(AuditSettings.Load(builder.Configuration));
+builder.Services.AddSingleton<SlidingWindowLimiter>();
+builder.Services.AddSingleton<RateLimitAudit>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
 builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+// Nothing of Auth-Core uses Data Protection, and the production container's file system is read-only: keys stay in memory.
+builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
 builder.Services.AddAuthOpenApi();
 builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRootPath);
 builder.Services.AddAuthPersistence(builder.Configuration);
@@ -41,6 +56,7 @@ builder.Services.TryAddSingleton(TimeProvider.System);
 builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LockoutPruner>();
+builder.Services.AddSingleton<AuditPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();
 builder.Services.AddSingleton<MailDispatchSignal>();
@@ -51,6 +67,7 @@ builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
 builder.Services.AddHostedService<LockoutPruningService>();
+builder.Services.AddHostedService<AuditPruningService>();
 builder.Services.AddHostedService<MailDispatchService>();
 builder.Services.AddHostedService<EmailPruningService>();
 
@@ -70,8 +87,16 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
-// Before authentication, so that the 401 of a missing or invalid token is marked never to be stored too.
-app.UseNoStoreForTenancyPaths();
+// The outermost handler and the headers come first: whatever the pipeline answers, a 404, a 429 or an exception included, has
+// them. Routing comes right after them: called here, it is not put in front of them by WebApplication, so that an exception of
+// the route matcher is answered by the handler too. Then the client address (the rate limiter and the audit log are about it)
+// and the limiter, then the JSON charset guard: all before authentication, because login is answered inside it.
+app.UseErrorHandling();
+app.UseSecurityHeaders();
+app.UseRouting();
+app.UseClientAddress(proxies);
+app.UseMiddleware<RateLimitMiddleware>();
+app.UseJsonCharsetGuard();
 app.UseAuthentication();
 app.UseAuthorization();
 

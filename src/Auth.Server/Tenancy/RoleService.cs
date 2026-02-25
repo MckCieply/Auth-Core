@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,7 @@ namespace Auth.Server.Tenancy;
 /// a set of permissions from the catalog, or <c>*</c>. Everything that changes anything runs in one transaction that
 /// begins by locking the company, so that the last-manager check and the change cannot be interleaved with another.
 /// </summary>
-public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock)
+public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
 {
     /// <summary>
     /// The company's roles sorted by name, ordinally, each with the permissions it holds that are still in the catalog and
@@ -70,6 +71,17 @@ public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHo
 
         var role = new CompanyRole { CompanyId = companyId, Name = name, NormalizedName = normalizedName, Permissions = held };
         db.CompanyRoles.Add(role);
+        // The row is written by the same save as the role.
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.RoleCreated,
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = role.Id,
+                Details = new Dictionary<string, object?> { ["name"] = name, ["permissions"] = held },
+            },
+            entered.Value);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Ok(new RoleItem(role.Id, role.Name, held, 0));
@@ -124,9 +136,27 @@ public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHo
             return Outcome.Fail(TenancyErrors.LastManager);
         }
 
+        var previousName = role.Name;
+        var previousPermissions = role.Permissions;
         role.Name = name;
         role.NormalizedName = normalizedName;
         role.Permissions = held;
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.RoleUpdated,
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = roleId,
+                Details = new Dictionary<string, object?>
+                {
+                    ["name"] = name,
+                    ["permissions"] = held,
+                    ["previous_name"] = previousName,
+                    ["previous_permissions"] = previousPermissions,
+                },
+            },
+            entered.Value);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
@@ -169,6 +199,16 @@ public sealed class RoleService(AuthDbContext db, CompanyGuard guard, ManifestHo
         }
 
         db.CompanyRoles.Remove(role);
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.RoleDeleted,
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = roleId,
+                Details = new Dictionary<string, object?> { ["name"] = role.Name, ["permissions"] = role.Permissions },
+            },
+            entered.Value);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;

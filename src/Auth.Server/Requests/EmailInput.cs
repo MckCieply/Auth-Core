@@ -75,8 +75,9 @@ public static class EmailInput
     /// <list type="bullet">
     /// <item>one that <see cref="MayStandForAnotherAddress">may stand for another address</see>;</item>
     /// <item>one whose domain is a literal (<c>joe@[10.0.0.5]</c>), has no dot (<c>joe@localhost</c>, <c>joe@intranet</c>)
-    /// or ends in a part of digits only (<c>joe@10.0.0.5</c>). Here a member, not an account, chooses where a mail goes,
-    /// and a manager must not make the instance's mail relay deliver to an internal host.</item>
+    /// or ends in a label that is neither <c>xn--</c> plus more nor two or more letters (<c>joe@10.0.0.5</c>,
+    /// <c>joe@127.0x1</c>, <c>joe@host.123</c>). Here a member, not an account, chooses where a mail goes, and a manager must
+    /// not make the instance's mail relay deliver to an internal host.</item>
     /// </list>
     /// The domain rule must hold for the domain the relay is given, not only for the one typed. The transport hands the
     /// relay MimeKit's IDN-encoded form of the address or, to a relay that takes UTF-8 addresses, the address as typed,
@@ -96,20 +97,48 @@ public static class EmailInput
         }
 
         var domain = email[(at + 1)..];
-        return IsDomainName(domain)
+        return IsDomainName(domain, encoded: false)
             && KeepsItsShapeThroughIdna(domain)
             && EncodedDomainOf(email) is { } sent
-            && IsDomainName(sent);
+            && IsDomainName(sent, encoded: true);
     }
 
-    /// <summary>A name with a dot between non-empty labels whose last label is not all digits; not a literal.</summary>
-    private static bool IsDomainName(string domain)
+    /// <summary>
+    /// A name with a dot between non-empty labels whose last label can be the end of a real domain name (see
+    /// <see cref="IsTopLevelLabel"/>); not a literal. Numbers, hexadecimal forms (<c>127.0x1</c>) and names such as <c>host.123</c>
+    /// are not domain names: a resolver may turn them into an address.
+    /// </summary>
+    private static bool IsDomainName(string domain, bool encoded)
     {
         var labels = domain.Split('.');
         return labels.Length > 1
             && labels.All(label => label.Length > 0)
-            && !labels[^1].All(char.IsAsciiDigit)
+            && IsTopLevelLabel(labels[^1], encoded)
             && !domain.StartsWith('[');
+    }
+
+    /// <summary>
+    /// The last label of a domain: <c>xn--</c> and more, or two or more letters. As the relay gets it (<paramref name="encoded"/>)
+    /// the letters are ASCII. As typed they are letters of any script, with their combining marks, so that
+    /// <c>x@пример.рф</c> still passes. Decided by the characters alone, so that the host's IDN tables and its globalisation
+    /// mode change nothing.
+    /// </summary>
+    private static bool IsTopLevelLabel(string label, bool encoded)
+    {
+        if (label.StartsWith("xn--", StringComparison.OrdinalIgnoreCase))
+        {
+            return label.Length > 4 && label[4..].All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
+        }
+
+        if (encoded)
+        {
+            return label.Length >= 2 && label.All(char.IsAsciiLetter);
+        }
+
+        var runes = label.EnumerateRunes().ToList();
+        return runes.Count(Rune.IsLetter) >= 2
+            && runes.All(rune => Rune.IsLetter(rune)
+                || Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark);
     }
 
     /// <summary>

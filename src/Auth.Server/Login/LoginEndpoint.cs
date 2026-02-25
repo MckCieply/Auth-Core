@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
 using Auth.Server.Account;
+using Auth.Server.Audit;
 using Auth.Server.Lockout;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
@@ -13,7 +14,6 @@ using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
-using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Server.Login;
@@ -34,7 +34,7 @@ public static class LoginEndpoint
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, UserManager<ApplicationUser> users, IOptions<TokenOptions> tokens, TimeProvider clock, LoginStreakStore streaks,
-        DecoyPasswordHash decoy, MembershipReader memberships)
+        DecoyPasswordHash decoy, MembershipReader memberships, AuditLog audit)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(users);
@@ -43,6 +43,7 @@ public static class LoginEndpoint
         ArgumentNullException.ThrowIfNull(streaks);
         ArgumentNullException.ThrowIfNull(decoy);
         ArgumentNullException.ThrowIfNull(memberships);
+        ArgumentNullException.ThrowIfNull(audit);
 
         var request = http.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("The login endpoint was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
@@ -53,6 +54,13 @@ public static class LoginEndpoint
         var decision = await streaks.RegisterAttemptAsync(identifier, http.RequestAborted);
         if (!decision.Allowed)
         {
+            // Nothing is looked up while a cooldown runs, so the row names the address as typed (spec 0008 -> Audit log).
+            await audit.WriteAloneAsync(new AuditEntry
+            {
+                Kind = AuditKinds.LoginLocked,
+                SubjectEmail = request.Username,
+                Details = new Dictionary<string, object?> { ["retry_after_seconds"] = TooManyAttemptsResult.SecondsOf(decision.RetryAfter) },
+            });
             return new TooManyAttemptsResult(decision.RetryAfter);
         }
 
@@ -63,11 +71,13 @@ public static class LoginEndpoint
             // No account, or one without a password: still pay for one verification, so this answer takes as long
             // as a wrong password does.
             _ = users.PasswordHasher.VerifyHashedPassword(user ?? new ApplicationUser(), decoy.Value, password);
+            await RecordFailureAsync(audit, "unknown_address", null, request.Username ?? string.Empty);
             return new InvalidCredentialsResult();
         }
 
         if (!await users.CheckPasswordAsync(user, password))
         {
+            await RecordFailureAsync(audit, "wrong_password", user, request.Username ?? string.Empty);
             return new InvalidCredentialsResult();
         }
 
@@ -79,12 +89,14 @@ public static class LoginEndpoint
         // gets no session (spec 0004, Decision 3). Only someone who knows the password can see this answer.
         if (!user.EmailConfirmed)
         {
+            await RecordFailureAsync(audit, "unconfirmed_address", user, request.Username ?? string.Empty);
             return AccountResults.EmailNotVerified();
         }
 
         // Likewise an account that belongs to no company (spec 0005): it has nothing to put into a token.
         if (await memberships.ReadAsync(user.Id, http.RequestAborted) is not { } tenant)
         {
+            await RecordFailureAsync(audit, "no_company", user, request.Username ?? string.Empty);
             return AccountResults.NoMembership();
         }
 
@@ -112,8 +124,30 @@ public static class LoginEndpoint
         principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
         http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
 
-        return Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        // The session and its row are one change: AtomicSignInResult issues the one inside a transaction that also holds the other.
+        return new AtomicSignInResult(principal, new AuditEntry
+        {
+            Kind = AuditKinds.LoginSucceeded,
+            ActorUserId = user.Id,
+            SubjectUserId = user.Id,
+            SubjectEmail = user.Email,
+            OrgId = tenant.CompanyId,
+            OrgName = tenant.CompanyName,
+        });
     }
+
+    /// <summary>
+    /// A failed login: the account as stored when there is one, else the address as typed. One insert whatever the reason, so the
+    /// answers of an unknown address and of a wrong password stay as slow as each other.
+    /// </summary>
+    private static Task RecordFailureAsync(AuditLog audit, string reason, ApplicationUser? user, string typedEmail) =>
+        audit.WriteAloneAsync(new AuditEntry
+        {
+            Kind = AuditKinds.LoginFailed,
+            SubjectUserId = user?.Id,
+            SubjectEmail = user?.Email ?? typedEmail,
+            Details = new Dictionary<string, object?> { ["reason"] = reason },
+        });
 
     /// <summary>
     /// The single failure result for unknown email and wrong password alike, so that status, body and headers are

@@ -12,7 +12,7 @@ public sealed class PermissionCatalogTests
         var expanded = Catalog.Expand(["*"]);
 
         Assert.Equal(
-            ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             expanded);
         Assert.DoesNotContain("*", expanded);
     }

@@ -1,3 +1,5 @@
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Microsoft.Net.Http.Headers;
 using OpenIddict.Abstractions;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -16,15 +18,31 @@ public static class LogoutEndpoint
 {
     public const string LogoutPath = "/auth/logout";
 
-    public static async Task<IResult> HandleAsync(HttpContext http, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations)
+    public static async Task<IResult> HandleAsync(
+        HttpContext http, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations, AuthDbContext db, AuditLog audit)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(tokens);
         ArgumentNullException.ThrowIfNull(authorizations);
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(audit);
 
         if (RefreshCookie.TryRead(http.Request, out var reference))
         {
-            await RevokeFamilyAsync(reference, tokens, authorizations, http.RequestAborted);
+            // The revocation and the row of the logout are one transaction (spec 0008: a change and its row are written together, or
+            // neither is). OpenIddict's stores use the request's AuthDbContext, so their saves join it. If the row cannot be written the
+            // logout is a 500 and the session is still there. Not the request's token: a client that goes away now must not leave the
+            // outcome open (a half-done logout would keep the session alive).
+            await using var transaction = await db.Database.BeginTransactionAsync(CancellationToken.None);
+            var subject = await RevokeFamilyAsync(reference, tokens, authorizations, CancellationToken.None);
+            if (Guid.TryParse(subject, out var userId))
+            {
+                // The account the cookie's session belonged to, from the token store; a logout with no valid cookie writes nothing.
+                audit.Stage(new AuditEntry { Kind = AuditKinds.Logout, ActorUserId = userId, SubjectUserId = userId });
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+
+            await transaction.CommitAsync(CancellationToken.None);
         }
 
         RefreshCookie.Clear(http.Response);
@@ -34,22 +52,26 @@ public static class LogoutEndpoint
 
     /// <summary>
     /// Revokes the authorization the token belongs to, and every token under it. A consumed token of the family
-    /// counts too: a stale tab logging out must still end the session.
+    /// counts too: a stale tab logging out must still end the session. Returns the account of the session when the token was a
+    /// refresh token that had not been revoked yet, so that the logout can be recorded; <see langword="null"/> otherwise.
     /// </summary>
-    private static async Task RevokeFamilyAsync(
+    private static async Task<string?> RevokeFamilyAsync(
         string reference, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations, CancellationToken cancellationToken)
     {
         var token = await tokens.FindByReferenceIdAsync(reference, cancellationToken);
         if (token is null || !await tokens.HasTypeAsync(token, TokenTypeIdentifiers.RefreshToken, cancellationToken))
         {
-            return;
+            return null;
         }
 
+        var subject = await tokens.HasStatusAsync(token, Statuses.Revoked, cancellationToken)
+            ? null
+            : await tokens.GetSubjectAsync(token, cancellationToken);
         var family = await tokens.GetAuthorizationIdAsync(token, cancellationToken);
         if (string.IsNullOrEmpty(family))
         {
             await tokens.TryRevokeAsync(token, cancellationToken);
-            return;
+            return subject;
         }
 
         if (await authorizations.FindByIdAsync(family, cancellationToken) is { } authorization)
@@ -58,5 +80,6 @@ public static class LogoutEndpoint
         }
 
         await tokens.RevokeByAuthorizationIdAsync(family, cancellationToken);
+        return subject;
     }
 }

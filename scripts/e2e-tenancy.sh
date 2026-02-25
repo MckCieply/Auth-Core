@@ -40,8 +40,10 @@
 # this one last - they must still pass with the seed users as members of the development company):
 #   cp .env.example .env                  # then set real local values (git-ignored)
 #   scripts/dev-keys.sh                   # dev signing/encryption keys into .secrets/ (git-ignored)
+#   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, never "auth-core" (the development stack): a bare down -v would wipe it; the scripts default to this name and refuse "auth-core"
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
-#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#                                         # the per-IP limiter is off for the older checks (spec 0008): the lockout script makes about 58 logins a minute and the mail script exactly 10 mail requests; scripts/e2e-hardening.sh runs last on the stack recreated with the defaults
 #   scripts/e2e-login.sh                  # spec 0001 regression
 #   scripts/e2e-refresh.sh                # spec 0002 regression
 #   scripts/e2e-lockout.sh                # spec 0003 regression
@@ -62,6 +64,9 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
+# The stack of these scripts is its own compose project, never "auth-core" (the development stack): the restarts and one-off containers below meet the same stack as the down -v of the header.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-hardening}"
+[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
@@ -252,7 +257,7 @@ login seed E2E_SEED_EMAIL E2E_SEED_PASSWORD
 PAYLOAD="$(jwt_payload "$tmp/seed.auth")"
 BODY="$PAYLOAD"
 expect_eq "step 2: roles" "$(val 'd["roles"]')" "['admin']"
-expect_eq "step 2: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 2: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 call GET /auth/me "" "$tmp/seed.auth"
 expect_status "step 2: GET /auth/me" 200
 expect_no_store "step 2: GET /auth/me"
@@ -312,13 +317,13 @@ login admin E2E_ADMIN_EMAIL E2E_PASSWORD
 BODY="$(jwt_payload "$tmp/admin.auth")"
 expect_eq "step 5: org_id" "$(val 'd["org_id"]')" "$A"
 expect_eq "step 5: roles" "$(val 'd["roles"]')" "['admin']"
-expect_eq "step 5: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 5: permissions" "$(val 'd["permissions"]')" "['documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 pass "step 5: ADMIN's token carries org_id of company A, roles [admin] and the expanded, sorted permissions without a star"
 
 # --- Step 6: ADMIN invites WORKER through the API ---------------------------------------------------------------------
 call GET /auth/org/roles "" "$tmp/admin.auth"
 expect_status "step 6: GET /auth/org/roles" 200
-expect_eq "step 6: catalog" "$(val 'd["catalog"]')" "['*', 'documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:manage', 'roles:manage']"
+expect_eq "step 6: catalog" "$(val 'd["catalog"]')" "['*', 'documents:approve', 'documents:read', 'documents:write', 'members:manage', 'org:delete', 'org:manage', 'roles:manage']"
 USER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "user"][0]')"
 ADMIN_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "admin"][0]')"
 export E2E_USER_ROLE="$USER_ROLE" E2E_ADMIN_ROLE="$ADMIN_ROLE"

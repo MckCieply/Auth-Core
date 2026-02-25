@@ -17,7 +17,7 @@ The package is `auth-core-fastapi` (import name `auth_core_fastapi`). It is inst
 its only dependencies are FastAPI and `PyJWT[crypto]`. In your `requirements.txt` or `pyproject.toml`:
 
 ```
-auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.0#subdirectory=clients/python
+auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.1#subdirectory=clients/python
 ```
 
 Pin the tag: the package is versioned with the token contract. A git tag can be moved, so for production pin the install
@@ -43,8 +43,9 @@ default_roles:
 ```
 
 - `permissions` are the strings your code passes to `require_permission`. Name them `resource:action`.
-- `members:manage`, `roles:manage` and `org:manage` are built in: they guard Auth-Core's company API, so you do not list
-  them, but a role may hold them. `"*"` stands for every permission of the catalog.
+- `members:manage`, `roles:manage`, `org:manage` and `org:delete` are built in: they guard Auth-Core's company API, so you do
+  not list them, but a role may hold them. `"*"` stands for every permission of the catalog (so the admin holds `org:delete`,
+  which lets them delete the whole company).
 - At least one default role must hold `members:manage` or `"*"`, so that the first admin of a company can manage it.
 - Auth-Core reads the file at startup (`Auth__Manifest__Path`; the overlay of step 6 mounts it). A broken file never stops
   the service: the last valid manifest stays active and `/auth/health` says `Degraded`.
@@ -183,7 +184,7 @@ A product that has to keep running both ways decides that itself.
 Your browser talks to **one origin**: `/auth` goes to Auth-Core and `/api` to your backend, behind one proxy
 ([ADR 0004](../adr/0004-same-origin-cookie-refresh.md): the refresh cookie has `Path=/auth` and is `SameSite=Strict`).
 The sample does this with a compose overlay on top of the repository's development stack,
-[`samples/notes-api/compose.yml`](../../samples/notes-api/compose.yml), and a 17-line proxy file,
+[`samples/notes-api/compose.yml`](../../samples/notes-api/compose.yml), and a 24-line proxy file,
 [`samples/notes-api/Caddyfile`](../../samples/notes-api/Caddyfile):
 
 ```
@@ -195,6 +196,10 @@ What the overlay does, and what yours must do:
 - **A proxy** (Caddy) on one port, routing `/auth/*` to Auth-Core and `/api/*` to your backend. Your backend publishes
   no port and is reachable only through the proxy. Auth-Core's own port is published on the loopback interface, for
   development only; in production only the proxy faces the network.
+- **The proxy has a fixed address on its network, and Auth-Core trusts only that address.** The overlay gives the proxy one
+  (`ipv4_address` in a network with a fixed subnet) and tells Auth-Core to trust that address and no other:
+  `Auth__Proxy__KnownProxies__0: <ip>`, or `Auth__Proxy__KnownNetworks__0: <ip>/32` as the overlay does. Without it Auth-Core reads no forwarded
+  header: every user behind the proxy shares one set of rate limits, and the audit log records only the proxy's address.
 - **Auth-Core's issuer is the origin the browser uses** (`Auth__Tokens__Issuer: http://localhost:8088/auth` in the
   overlay), and its audience is yours (`Auth__Tokens__Audience`). The backend gets the same two values and fetches the keys
   over the internal network (`AUTH_JWKS_URL: http://auth:8080/auth/.well-known/jwks.json`).

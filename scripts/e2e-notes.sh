@@ -18,6 +18,9 @@
 #   6. Auth-Core is stopped and the sample is restarted, so it holds no keys: a valid token gets 503 auth_unavailable.
 #      After Auth-Core starts again, the same request gets 200 (the sample asks for the keys again at most every
 #      10 seconds, so the first answers after the restart may still be 503) - criterion 5.
+#   7. The proxy's headers reach the browser (nosniff and DENY on /api, Auth-Core's own on /auth), and the client address that
+#      Auth-Core records for a request through the proxy is the one the proxy saw: not the proxy's, and not the one the client wrote
+#      into X-Forwarded-For (spec 0008, criteria 2 and 15).
 #
 # Full sequence, from the repo root (a clean stack: the development company is made from the manifest of the sample the
 # first time the service starts, so a volume of an earlier stack that used another manifest makes step 1 fail):
@@ -27,7 +30,7 @@
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
 #   scripts/e2e-notes.sh                  # this script: brings the stack up (builds the images), then drives it
 #   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
-# The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it), not as "auth-core"
+# The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it; "auth-core" is refused), not as "auth-core"
 # that deploy/docker-compose.yml names: its containers and volumes stay apart from a development stack of the same
 # clone, and the down -v above removes only them. (Host ports 8088, 8080 and 8025 are still shared: stop the other stack.)
 # The earlier e2e scripts run on the stack WITHOUT the overlay (deploy/docker-compose.yml alone), as before.
@@ -48,6 +51,7 @@ BASE_URL="${BASE_URL:-http://localhost:8088}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 # deploy/docker-compose.yml names the project "auth-core", which every other stack of the clone uses; run apart from them
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-notes}"
+[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
@@ -401,5 +405,33 @@ for _ in $(seq 1 30); do
 done
 [[ "$ok" == "1" ]] || fail "step 6: the same request was not a 200 within 60s of Auth-Core's start"
 pass "step 6: with Auth-Core down and no key held, a valid token is a 503 auth_unavailable (no token is still 401); after Auth-Core is back the same request is a 200"
+
+# --- Step 7: the headers of the proxy, and the client address behind it (spec 0008) -----------------------------------------
+call GET /api/health
+expect_status "step 7: GET /api/health" 200
+[[ "$(header x-content-type-options)" == "nosniff" ]] || fail "step 7: /api/health has no X-Content-Type-Options: nosniff"
+[[ "$(header x-frame-options)" == "DENY" ]] || fail "step 7: /api/health has no X-Frame-Options: DENY"
+call GET /auth/health
+expect_status "step 7: GET /auth/health" 200
+[[ "$(header x-content-type-options)" == "nosniff" && "$(header x-frame-options)" == "DENY" ]] \
+  || fail "step 7: the headers of Auth-Core do not reach the browser"
+[[ "$(header content-security-policy)" == "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" ]] \
+  || fail "step 7: /auth/health has not the policy of Auth-Core"
+SPOOFED_EMAIL="nobody-$run@example.invalid"
+json_body "$tmp/spoof.json" "{'email': '$SPOOFED_EMAIL', 'password': 'Wrong-Password-1'}"
+SPOOF_CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/auth/login" -H 'Content-Type: application/json' \
+  -H 'X-Forwarded-For: 203.0.113.99' --data-binary "@$tmp/spoof.json")" || fail "step 7: the login through the proxy did not answer"
+[[ "$SPOOF_CODE" == "401" ]] || fail "step 7: the login of an unknown address through the proxy answered HTTP $SPOOF_CODE, expected 401"
+RECORDED="$("${compose[@]}" exec -T postgres psql -U auth -d auth -tA \
+  -c "SELECT client_ip FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$SPOOFED_EMAIL'" | tr -d '\r')"
+[[ "$RECORDED" =~ ^[0-9a-f.:]+$ ]] || fail "step 7: the failed login through the proxy is not in the audit log as one address"
+# The proxy's own address, read from the running container (not from the default of the overlay: .env may have changed it).
+PROXY_CONTAINER="$("${compose[@]}" ps -q caddy)" || fail "step 7: could not ask compose for the proxy (caddy) container"
+[[ -n "$PROXY_CONTAINER" ]] || fail "step 7: the proxy (caddy) is not running"
+PROXY_ADDRESS="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{println .IPAddress}}{{end}}' "$PROXY_CONTAINER" | tr -d '\r' | { grep -E '^[0-9.]+$' || true; } | head -n1)" || fail "step 7: docker inspect of the proxy container failed"
+[[ -n "$PROXY_ADDRESS" ]] || fail "step 7: could not read the address of the proxy container"
+[[ "$RECORDED" != "203.0.113.99" ]] || fail "step 7: the recorded address is the one the client wrote into X-Forwarded-For"
+[[ "$RECORDED" != "$PROXY_ADDRESS" ]] || fail "step 7: the recorded address is the proxy's: the proxy is not trusted"
+pass "step 7: the proxy's headers reach the browser, and Auth-Core records the address the proxy saw, not the proxy's and not a forged one"
 
 echo "ALL PASS"

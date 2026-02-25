@@ -202,3 +202,13 @@ once on a real phone (iOS Safari and Android Chrome), because cookie handling di
 Known limits, in the spec's words: another open tab keeps its token until it expires (up to 10 minutes) after a sign-out in one tab,
 because tabs are not synchronised; and a token in memory can be read by script running in the page, which the
 `Content-Security-Policy` of step 6 limits to your own files.
+
+## The limits and an outage (spec 0008)
+
+Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for an invitation and 300 others a minute) and
+answers `429 {"error":"too_many_requests","retry_after_seconds":n}` with `Retry-After` when a limit is reached. The sample's interceptor
+shows "Try again in N s." for such an answer from any endpoint of your origin and **does not sign the person out**: only a `401 invalid_grant`
+from the refresh ends the session. During a database outage a refresh answers `503 temporarily_unavailable` with `Retry-After: 5` instead of
+`401`; the cookie is neither cleared nor rotated, so the same cookie works once the database is back, and the sample keeps the session too.
+Keep both rules in your own interceptor: a `429` or a `503` is never a reason to sign out. People behind one shared address (a NAT) share these
+limits. The lockout of one account after repeated wrong passwords (`429 too_many_attempts`, spec 0003) is a different answer, which the sign-in screen words itself.

@@ -26,6 +26,8 @@ RUN pip install --require-hashes --only-binary=:all: -r requirements-image.txt
 # afterwards: the image runs the sample, it does not build anything.
 COPY samples/notes-api/requirements-build.txt /tmp/requirements-build.txt
 COPY clients/python/pyproject.toml /tmp/auth-core-fastapi/pyproject.toml
+# The metadata names a readme and a licence file (pyproject.toml: readme, license-files); the build fails without them.
+COPY clients/python/README.md clients/python/LICENSE /tmp/auth-core-fastapi/
 COPY clients/python/src /tmp/auth-core-fastapi/src
 RUN pip install --require-hashes --only-binary=:all: -r /tmp/requirements-build.txt \
     && pip install --no-build-isolation --no-deps /tmp/auth-core-fastapi \

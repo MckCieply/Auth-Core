@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Auth.Server.Tenancy;
 
 /// <summary>
-/// The permissions of an instance (spec 0005 → Concepts): the three built-in ones that guard the company API, plus
+/// The permissions of an instance (spec 0005 → Concepts): the four built-in ones that guard the company API, plus
 /// the ones the product declares in its manifest. A role holds permissions from the catalog, or <c>*</c>, which is
 /// all of them, now and after the catalog grows.
 /// </summary>
@@ -14,7 +14,10 @@ public sealed partial class PermissionCatalog
     public const string RolesManage = "roles:manage";
     public const string OrgManage = "org:manage";
 
-    public static readonly IReadOnlyList<string> BuiltIn = [MembersManage, OrgManage, RolesManage];
+    /// <summary>Deletes the company (<c>DELETE /auth/org</c>, spec 0008). In the catalog whether or not the manifest lists it.</summary>
+    public const string OrgDelete = "org:delete";
+
+    public static readonly IReadOnlyList<string> BuiltIn = [MembersManage, OrgDelete, OrgManage, RolesManage];
 
     private readonly HashSet<string> _members;
 

@@ -4,6 +4,8 @@ import { signOut, submitLogin } from './support/session';
 
 const CSP =
   /^default-src 'self'; script-src 'self'; style-src 'self' 'nonce-([0-9a-f-]{36})'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'$/;
+// Auth-Core's own policy on every answer of /auth (spec 0008): it allows nothing; the app's policy above is the app's.
+const AUTH_CORE_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 test('the app answers with the Content-Security-Policy and the other headers of the spec', async ({ page }) => {
   const response = await page.goto('/login');
@@ -116,9 +118,14 @@ test('/auth and /api without a slash go to their services, not to the app', asyn
   for (const path of ['/auth', '/api']) {
     const answer = await page.request.get(path, { maxRedirects: 0 });
     expect(await answer.text(), path).not.toContain('<app-root');
-    expect(answer.headers()['content-security-policy'], path).toBeUndefined();
-    expect(answer.headers()['referrer-policy'], path).toBeUndefined();
   }
+  // Auth-Core sends its own headers on every answer, its 404 included; the notes service sends none of these two.
+  const auth = await page.request.get('/auth', { maxRedirects: 0 });
+  expect(auth.headers()['content-security-policy']).toBe(AUTH_CORE_POLICY);
+  expect(auth.headers()['referrer-policy']).toBe('no-referrer');
+  const api = await page.request.get('/api', { maxRedirects: 0 });
+  expect(api.headers()['content-security-policy']).toBeUndefined();
+  expect(api.headers()['referrer-policy']).toBeUndefined();
 });
 
 test('a conditional request for a page of the app is answered in full, with the nonce of its own response', async ({ page }) => {
@@ -180,12 +187,15 @@ test('the file server serves nothing outside the build', async ({ page }) => {
 });
 
 test('the headers of the app are not put on /auth and /api, which set their own', async ({ page }) => {
-  for (const path of ['/auth/health', '/api/health']) {
-    const answer = await page.request.get(path);
-    expect(answer.status(), path).toBe(200);
-    expect(answer.headers()['content-security-policy'], path).toBeUndefined();
-    expect(answer.headers()['referrer-policy'], path).toBeUndefined();
-  }
+  const auth = await page.request.get('/auth/health');
+  expect(auth.status()).toBe(200);
+  // Auth-Core's policy, not the app's (the app's names 'self' sources and a style nonce; Auth-Core's allows nothing).
+  expect(auth.headers()['content-security-policy']).toBe(AUTH_CORE_POLICY);
+  expect(auth.headers()['referrer-policy']).toBe('no-referrer');
+  const api = await page.request.get('/api/health');
+  expect(api.status()).toBe(200);
+  expect(api.headers()['content-security-policy']).toBeUndefined();
+  expect(api.headers()['referrer-policy']).toBeUndefined();
 });
 
 test('the style nonce works: every style element carries it, nothing is blocked, and the page has no inline script', async ({ page }) => {

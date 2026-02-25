@@ -13,7 +13,7 @@ public static class JsonObjectBody
     /// <summary>Largest accepted request body, in bytes.</summary>
     public const int MaxBytes = 8 * 1024;
 
-    private const string JsonMediaType = "application/json";
+    internal const string JsonMediaType = "application/json";
 
     public static bool IsJson(string? contentType) =>
         MediaTypeHeaderValue.TryParse(contentType, out var parsed)

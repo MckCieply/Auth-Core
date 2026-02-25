@@ -25,8 +25,9 @@ public static class AccountEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        // The health check has no OpenAPI metadata of its own: the description adds it (see OpenApiSetup).
-        app.MapHealthChecks(HealthPath);
+        // The health check has no OpenAPI metadata of its own: the description adds it (see OpenApiSetup). GET and HEAD only: any
+        // other method is the framework's 405 with `Allow: GET, HEAD` (spec 0008).
+        app.MapHealthChecks(HealthPath).WithMetadata(new HttpMethodMetadata(["GET", "HEAD"]));
 
         app.MapPost(JsonLoginRequestHandler.LoginPath, LoginEndpoint.HandleAsync)
             .WithTags("Sessions")
@@ -44,7 +45,8 @@ public static class AccountEndpoints
                 + "`401 invalid_grant`.")
             .Produces<RefreshResponse>()
             .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up.")
-            .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant");
+            .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant")
+            .ProducesTemporarilyUnavailable();
         app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync)
             .WithTags("Sessions")
             .ReadsRefreshCookie("The refresh token whose session ends. Missing or unknown: the answer is the same `204`.")

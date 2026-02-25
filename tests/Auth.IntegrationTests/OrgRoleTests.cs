@@ -62,7 +62,7 @@ public sealed class OrgRoleTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["*"], Strings(roles[1].GetProperty("permissions")));   // star is shown as it is
         Assert.Equal([0, 1, 2], roles.Select(r => r.GetProperty("members").GetInt32()));
         Assert.Equal(
-            ["*", "members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["*", "members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             Strings(list.GetProperty("catalog")));
     }
 
@@ -122,7 +122,7 @@ public sealed class OrgRoleTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         var list = await ListAsync(token);
 
-        Assert.Equal(["*", "members:manage", "orders:read", "org:manage", "roles:manage"], Strings(list.GetProperty("catalog")));
+        Assert.Equal(["*", "members:manage", "orders:read", "org:delete", "org:manage", "roles:manage"], Strings(list.GetProperty("catalog")));
     }
 
     // ---- creating
@@ -500,7 +500,7 @@ public sealed class OrgRoleTests(PostgresFixture postgres, KeyMaterialFixture ke
         }
 
         var everything = await CreateCompanyAsync("Globex");
-        await AddRoleAsync(everything, "caller", "members:manage", "roles:manage", "org:manage", "reports:read", "reports:approve", "templates:manage");
+        await AddRoleAsync(everything, "caller", "members:manage", "roles:manage", "org:manage", "org:delete", "reports:read", "reports:approve", "templates:manage");
         await AddMemberAsync(everything, "caller@globex.test", "caller");
         var starRole = await AddRoleAsync(everything, "root", "*");
         var listed = (await SessionApi.LoginAsync(Client, "caller@globex.test", UserPassword)).AccessToken;

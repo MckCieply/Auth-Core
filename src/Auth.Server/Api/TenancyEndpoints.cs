@@ -42,6 +42,18 @@ public static class TenancyEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesGuarded();
+        company.MapDelete("", OrgEndpoints.DeleteAsync)
+            .WithDescription(
+                "Deletes the caller's company with its roles, members, invitations and the mails queued for them; the accounts stay. "
+                + "Needs the permission `org:delete`, the company's name exactly and the caller's own password. The members' sessions end: "
+                + "an access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new login `403 no_membership`. "
+                + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`.")
+            .ReadsJson<DeleteOrgRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld)
+            .ProducesTooManyAttempts()
+            .ProducesGuarded();
 
         company.MapGet("invites", OrgInviteEndpoints.ListAsync)
             .Produces<InvitesResponse>()

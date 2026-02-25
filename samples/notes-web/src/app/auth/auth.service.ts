@@ -21,12 +21,17 @@ export type Failure =
   | { kind: 'weak_password'; rules: string[] }
   | { kind: 'already_member' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
+  | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
 
-export type RefreshResult = 'ok' | 'rejected' | 'unavailable';
+/**
+ * 'unavailable': the refresh could not be done and the session stays. 'limited': the same, and the answer was a 429 too_many_requests,
+ * whose "Try again in N s." the interceptor has already put in the bar (the caller must not replace it).
+ */
+export type RefreshResult = 'ok' | 'rejected' | 'unavailable' | 'limited';
 
 /** The messages of the bar above the screens. */
-export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden';
+export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden' | 'wait';
 
 export type LoginResult = { ok: true } | { ok: false; failure: Failure };
 
@@ -43,6 +48,12 @@ export function errorCode(error: HttpErrorResponse): string | undefined {
   return isRecord(body) && typeof body['error'] === 'string' ? body['error'] : undefined;
 }
 
+/** The `retry_after_seconds` of a 429 body, rounded up to a whole second, or a minute when it has none that is a positive number. */
+export function retryAfterOf(error: HttpErrorResponse): number {
+  const seconds = isRecord(error.error) ? error.error['retry_after_seconds'] : undefined;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : DEFAULT_WAIT_SECONDS;
+}
+
 /** Reads the answers of Auth-Core's account endpoints. Anything it does not know is "other". */
 export function failureOf(error: unknown): Failure {
   if (!(error instanceof HttpErrorResponse)) {
@@ -50,11 +61,10 @@ export function failureOf(error: unknown): Failure {
   }
   const code = errorCode(error);
   if (error.status === 429 && code === 'too_many_attempts') {
-    const seconds = isRecord(error.error) ? error.error['retry_after_seconds'] : undefined;
-    return {
-      kind: 'too_many_attempts',
-      retryAfterSeconds: typeof seconds === 'number' && seconds > 0 ? seconds : DEFAULT_WAIT_SECONDS,
-    };
+    return { kind: 'too_many_attempts', retryAfterSeconds: retryAfterOf(error) };
+  }
+  if (error.status === 429 && code === 'too_many_requests') {
+    return { kind: 'too_many_requests', retryAfterSeconds: retryAfterOf(error) };
   }
   if (error.status === 401 && code === 'invalid_credentials') {
     return { kind: 'invalid_credentials' };
@@ -120,6 +130,7 @@ export class AuthService {
   private readonly accessToken = signal<string | null>(null);
   private readonly meState = signal<Me | null>(null);
   private readonly noticeState = signal<AuthNotice | null>(null);
+  private readonly noticeSecondsState = signal(0);
   private refreshing: Promise<RefreshResult> | null = null;
   // The /auth/me that is on its way, and the session and token it was asked for.
   private asking: { generation: number; token: string | null; answer: Promise<boolean> } | null = null;
@@ -132,10 +143,13 @@ export class AuthService {
   readonly me = this.meState.asReadonly();
   /** The message of the bar, if there is one. */
   readonly notice = this.noticeState.asReadonly();
+  /** The number of the 'wait' notice: the seconds the server asked the person to wait. */
+  readonly noticeSeconds = this.noticeSecondsState.asReadonly();
 
   /** Run once before the first route is resolved (app.config.ts): is there a session to resume? */
   async start(): Promise<void> {
     const result = await this.refresh();
+    // 'limited' sets nothing: the bar already says "Try again in N s." for the 429 of this very refresh.
     if (result === 'unavailable') {
       this.noticeState.set('unreachable');
     } else if (result === 'ok' && !(await this.loadMe(REFRESH_TIMEOUT_MS)) && this.noticeState() === null) {
@@ -235,7 +249,8 @@ export class AuthService {
     this.meState.set(null);
   }
 
-  showNotice(notice: AuthNotice): void {
+  showNotice(notice: AuthNotice, seconds = 0): void {
+    this.noticeSecondsState.set(seconds);
     this.noticeState.set(notice);
   }
 
@@ -267,6 +282,9 @@ export class AuthService {
           this.dropSession();
         }
         return 'rejected';
+      }
+      if (error instanceof HttpErrorResponse && error.status === 429 && errorCode(error) === 'too_many_requests') {
+        return 'limited';
       }
       return 'unavailable';
     }

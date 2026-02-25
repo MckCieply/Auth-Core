@@ -15,7 +15,8 @@ public sealed record OrgListing(Guid Id, string Name, int Members);
 /// <c>--force</c> lifts rule 2.
 /// </summary>
 public sealed class OperatorCommands(
-    AuthDbContext db, CompanyService companies, InvitationService invitations, MemberService members, ILookupNormalizer normalizer)
+    AuthDbContext db, CompanyService companies, InvitationService invitations, MemberService members, CompanyDeletionService deletion,
+    ILookupNormalizer normalizer)
 {
     public Task<Outcome<Guid>> CreateOrgAsync(string name, CancellationToken cancellationToken) =>
         companies.CreateAsync(name, cancellationToken);
@@ -66,5 +67,18 @@ public sealed class OperatorCommands(
         return userId is { } id
             ? await members.RemoveAsync(Actor.Operator, orgId, id, force, cancellationToken)
             : Outcome.Fail(TenancyErrors.NotFound);
+    }
+
+    /// <summary>
+    /// Deletes a company as the operator, who is not bound by safety rule 1. <paramref name="confirm"/> must be exactly the company's
+    /// name (<c>invalid_request</c> otherwise): the command is not to be typed by accident.
+    /// </summary>
+    public async Task<Outcome> DeleteOrgAsync(string org, string confirm, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(confirm);
+
+        return IdInput.TryParse(org, out var orgId)
+            ? await deletion.DeleteAsync(Actor.Operator, orgId, confirm, cancellationToken)
+            : Outcome.Fail(TenancyErrors.InvalidRequest);
     }
 }

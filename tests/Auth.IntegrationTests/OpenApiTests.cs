@@ -11,7 +11,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0005, as "METHOD path".
+    // Every endpoint of specs 0001–0008, as "METHOD path".
     private static readonly string[] Endpoints =
     [
         "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
@@ -20,6 +20,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/me",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
+        "DELETE /auth/org",
         "GET /auth/org/members", "PUT /auth/org/members/{user_id}/role", "DELETE /auth/org/members/{user_id}",
         "GET /auth/org/invites", "POST /auth/org/invites", "POST /auth/org/invites/{id}/resend", "DELETE /auth/org/invites/{id}",
         "GET /auth/org/roles", "POST /auth/org/roles", "PUT /auth/org/roles/{id}", "DELETE /auth/org/roles/{id}",
@@ -106,7 +107,8 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.NotEmpty(routes);
         foreach (var route in routes)
         {
-            var methods = route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["GET"];
+            // HEAD answers wherever GET does (the health check): the description says it once, under GET.
+            var methods = (route.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["GET"]).Where(m => m != "HEAD");
             foreach (var method in methods)
             {
                 Assert.True(operations.ContainsKey($"{method} {PathOf(route)}"), $"{method} {PathOf(route)} is not described.");
@@ -145,29 +147,31 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Theory]
-    [InlineData("POST /auth/login", "200,400,401,403,429")]
-    [InlineData("POST /auth/refresh", "200,401")]
-    [InlineData("POST /auth/logout", "204")]
-    [InlineData("POST /auth/password/forgot", "202,400,429")]
-    [InlineData("POST /auth/password/reset", "204,400")]
-    [InlineData("POST /auth/email/verify/request", "202,400,429")]
-    [InlineData("POST /auth/email/verify", "204,400")]
-    [InlineData("GET /auth/me", "200,401,403")]
-    [InlineData("POST /auth/invites/preview", "200,400,409")]
-    [InlineData("POST /auth/invites/accept", "204,400,409")]
-    [InlineData("GET /auth/org", "200,401,403")]
-    [InlineData("PATCH /auth/org", "204,400,401,403")]
-    [InlineData("GET /auth/org/members", "200,401,403")]
-    [InlineData("PUT /auth/org/members/{user_id}/role", "204,400,401,403,404,409")]
-    [InlineData("DELETE /auth/org/members/{user_id}", "204,400,401,403,404,409")]
-    [InlineData("GET /auth/org/invites", "200,401,403")]
-    [InlineData("POST /auth/org/invites", "202,400,401,403,404,409,429")]
-    [InlineData("POST /auth/org/invites/{id}/resend", "202,400,401,403,404,429")]
-    [InlineData("DELETE /auth/org/invites/{id}", "204,400,401,403,404")]
-    [InlineData("GET /auth/org/roles", "200,401,403")]
-    [InlineData("POST /auth/org/roles", "201,400,401,403,409")]
-    [InlineData("PUT /auth/org/roles/{id}", "204,400,401,403,404,409")]
-    [InlineData("DELETE /auth/org/roles/{id}", "204,400,401,403,404,409")]
+    // Every operation can also say 429 (the per-IP limit), and every POST, PUT, PATCH and DELETE but refresh and logout 415 (spec 0008: the charset guard).
+    [InlineData("POST /auth/login", "200,400,401,403,415,429")]
+    [InlineData("POST /auth/refresh", "200,401,429,503")]
+    [InlineData("POST /auth/logout", "204,429")]
+    [InlineData("POST /auth/password/forgot", "202,400,415,429")]
+    [InlineData("POST /auth/password/reset", "204,400,415,429")]
+    [InlineData("POST /auth/email/verify/request", "202,400,415,429")]
+    [InlineData("POST /auth/email/verify", "204,400,415,429")]
+    [InlineData("GET /auth/me", "200,401,403,429")]
+    [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
+    [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
+    [InlineData("GET /auth/org", "200,401,403,429")]
+    [InlineData("PATCH /auth/org", "204,400,401,403,415,429")]
+    [InlineData("DELETE /auth/org", "204,400,401,403,415,429")]
+    [InlineData("GET /auth/org/members", "200,401,403,429")]
+    [InlineData("PUT /auth/org/members/{user_id}/role", "204,400,401,403,404,409,415,429")]
+    [InlineData("DELETE /auth/org/members/{user_id}", "204,400,401,403,404,409,415,429")]
+    [InlineData("GET /auth/org/invites", "200,401,403,429")]
+    [InlineData("POST /auth/org/invites", "202,400,401,403,404,409,415,429")]
+    [InlineData("POST /auth/org/invites/{id}/resend", "202,400,401,403,404,415,429")]
+    [InlineData("DELETE /auth/org/invites/{id}", "204,400,401,403,404,415,429")]
+    [InlineData("GET /auth/org/roles", "200,401,403,429")]
+    [InlineData("POST /auth/org/roles", "201,400,401,403,409,415,429")]
+    [InlineData("PUT /auth/org/roles/{id}", "204,400,401,403,404,409,415,429")]
+    [InlineData("DELETE /auth/org/roles/{id}", "204,400,401,403,404,409,415,429")]
     public async Task Each_endpoint_describes_the_statuses_of_the_contract(string endpoint, string statuses)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -208,6 +212,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/org/roles")]
     [InlineData("PUT /auth/org/roles/{id}")]
     [InlineData("DELETE /auth/org/roles/{id}")]
+    [InlineData("DELETE /auth/org")]
     public async Task Each_endpoint_under_safety_rule_1_lists_permission_not_held_under_403(string endpoint)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -226,6 +231,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/invites/preview", "token")]
     [InlineData("POST /auth/invites/accept", "password,token")]
     [InlineData("PATCH /auth/org", "name")]
+    [InlineData("DELETE /auth/org", "name,password")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "role_id")]
     [InlineData("POST /auth/org/roles", "name,permissions")]
@@ -328,7 +334,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task Every_429_carries_retry_after()   // criterion 24
+    public async Task Every_429_carries_retry_after()   // criterion 24; spec 0008: on every operation
     {
         await using var factory = new AuthAppFactory(postgres, keys);
         var limited = 0;
@@ -344,7 +350,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
             }
         }
 
-        Assert.Equal(5, limited);   // login, the two mail requests, invite and resend
+        Assert.Equal(Endpoints.Length, limited);   // every operation can say 429 now (spec 0008)
     }
 
     [Fact]

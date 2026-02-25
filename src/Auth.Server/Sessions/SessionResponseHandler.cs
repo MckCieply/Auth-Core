@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Auth.Server.Api;
 using Auth.Server.Login;
 using Microsoft.AspNetCore;
 using OpenIddict.Abstractions;
@@ -11,7 +12,9 @@ namespace Auth.Server.Sessions;
 /// <summary>
 /// Moves the refresh token of a successful token response out of the body and into the <c>auth_rt</c> cookie. The
 /// refresh token never reaches a response body (spec 0002, criterion 8). On <c>/auth/refresh</c> it also writes the
-/// response itself: <c>{"access_token"}</c> on success, one uniform <c>401 {"error":"invalid_grant"}</c> on failure.
+/// response itself: <c>{"access_token"}</c> on success; on failure one uniform <c>401 {"error":"invalid_grant"}</c>, except
+/// that a <c>server_error</c> (the service could not do its work, which is not the client's doing) is
+/// <c>503 {"error":"temporarily_unavailable"}</c> with <c>Retry-After: 5</c>, so that the person stays signed in.
 /// </summary>
 public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ApplyTokenResponseContext>
 {
@@ -39,9 +42,17 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
 
         if (!string.IsNullOrEmpty(context.Response.Error))
         {
+            // A refresh that failed for a reason that is not the client's (OpenIddict says server_error) is a 503, and the person
+            // stays signed in: the cookie is neither cleared nor rotated (spec 0008 → POST /auth/refresh during an outage).
+            if (isRefresh && string.Equals(context.Response.Error, Errors.ServerError, StringComparison.Ordinal))
+            {
+                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                http.Response.Headers.RetryAfter = ErrorHandlingMiddleware.RefreshRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = ErrorHandlingMiddleware.TemporarilyUnavailable }, context);
+            }
             // invalid_request is the wrong-method case: a malformed request, answered like login's 400. Every other
             // error on this path is a refresh failure and gets the one uniform answer (spec 0002, criterion 7).
-            if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
+            else if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
             {
                 http.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = Errors.InvalidGrant }, context);
@@ -76,8 +87,9 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
 
     /// <summary>
     /// Writes the refresh response itself, because OpenIddict's JSON writer indents its output and the contract is
-    /// the compact <c>{"access_token":"…"}</c> / <c>{"error":"invalid_grant"}</c>. It sets the same headers as that
-    /// writer and, like it, marks the request handled so nothing writes to the response a second time.
+    /// the compact <c>{"access_token":"…"}</c> / <c>{"error":"invalid_grant"}</c> / <c>{"error":"temporarily_unavailable"}</c>
+    /// (the last with its <c>Retry-After</c>, set by the caller). It sets the same headers as that writer and, like it,
+    /// marks the request handled so nothing writes to the response a second time.
     /// </summary>
     private static async ValueTask WriteCompactAsync(
         HttpResponse response, OpenIddictResponse body, OpenIddictServerEvents.ApplyTokenResponseContext context)

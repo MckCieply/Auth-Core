@@ -35,7 +35,7 @@ public static class MailRequestEndpoint
             return AccountResults.InvalidRequest();
         }
 
-        var decision = await requests.SubmitAsync(kind, normalized, http.RequestAborted);
+        var decision = await requests.SubmitAsync(kind, normalized, http.RequestAborted, typedEmail: fields[0]);
         if (!decision.Allowed)
         {
             return new TooManyAttemptsResult(decision.RetryAfter);

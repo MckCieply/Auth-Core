@@ -33,7 +33,7 @@ public abstract class SessionTestBase : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         Client.Dispose();
         await Factory.DisposeAsync();

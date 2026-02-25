@@ -1,0 +1,25 @@
+# The reverse proxy of the production test stack (spec 0008): HTTPS with a certificate from Caddy's own authority, HSTS, and the client
+# address handed to Auth-Core. Test only: see docs/deployment/vps.md for the Caddyfile of a real server.
+{
+	admin off
+	skip_install_trust
+	default_sni localhost
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://localhost:8443 {
+	tls internal
+	header Strict-Transport-Security "max-age=31536000"
+	handle /auth/* {
+		# Auth-Core limits and records requests per client address (spec 0008). Caddy sets X-Forwarded-For to the address it saw and
+		# X-Forwarded-Proto to the scheme, and drops what a client wrote into them, because this file names no trusted_proxies
+		# (Caddy 2.5+); a header_up here would only print a warning, and with trusted_proxies it would discard the real chain.
+		# Step 4 of scripts/e2e-prod.sh proves it.
+		reverse_proxy auth:8080
+	}
+	handle {
+		respond "not found" 404
+	}
+}

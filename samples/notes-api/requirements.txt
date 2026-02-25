@@ -1,7 +1,7 @@
 # The sample's own dependencies. The package itself is not listed: a product installs it from a tag of the Auth-Core
 # repository with this line (docs/integration/python-fastapi.md, step 1):
 #
-#   auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.0#subdirectory=clients/python
+#   auth-core-fastapi @ git+https://github.com/MckCieply/Auth-Core@python-v0.1.1#subdirectory=clients/python
 #
 # The Dockerfile of this sample installs it from the clone (clients/python) instead, so that the sample builds
 # from one clone, with no tag and no GitHub.

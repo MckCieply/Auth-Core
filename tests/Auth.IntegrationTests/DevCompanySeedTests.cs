@@ -93,15 +93,50 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Fact]
-    public async Task Second_seed_user_gets_the_first_default_role_in_the_order_of_the_manifest_that_does_not_manage_members()
+    public async Task Second_seed_user_gets_the_first_role_by_name_that_holds_neither_members_manage_nor_star()   // spec 0008 → Fixes
     {
         await using var factory = WithSecondUser(Factory())
             .WithManifest("permissions: [a:b]\ndefault_roles:\n  owner: [\"*\"]\n  zeta: [a:b]\n  alpha: [a:b]\n");
         _ = factory.Services;
 
-        // Not `alpha`, which comes first by name, and not a role called `user`: the order of the file decides.
-        Assert.Equal(("Development", "zeta"), await MembershipOfAsync(factory, UnverifiedEmail));
+        // The roles are read from the database and ordered by name, not taken in the order of the file: alpha, not zeta.
+        Assert.Equal(("Development", "alpha"), await MembershipOfAsync(factory, UnverifiedEmail));
         Assert.Equal(("Development", "owner"), await MembershipOfAsync(factory, factory.SeedEmail));
+    }
+
+    [Fact]
+    public async Task Second_seed_user_takes_a_role_the_company_has_not_one_the_manifest_names()   // read from the database, not from the manifest
+    {
+        var database = UniqueDatabase();
+        await using var first = Factory(database);
+        _ = first.Services;   // the company is made with admin and user
+
+        await using var second = WithSecondUser(Factory(database))
+            .WithManifest("permissions: [a:b]\ndefault_roles:\n  boss: [\"*\"]\n  zeta: [a:b]\n");
+        _ = second.Services;
+
+        Assert.Equal(("Development", "user"), await MembershipOfAsync(second, UnverifiedEmail));   // zeta is only in the manifest
+    }
+
+    [Fact]
+    public async Task The_name_order_is_ordinal_so_upper_case_comes_first()
+    {
+        await using var factory = WithSecondUser(Factory())
+            .WithManifest("permissions: [a:b]\ndefault_roles:\n  owner: [\"*\"]\n  alpha: [a:b]\n  Zeta: [a:b]\n");
+        _ = factory.Services;
+
+        // Ordinal: 'Z' (U+005A) sorts before 'a' (U+0061), unlike a culture-aware order, which would give alpha.
+        Assert.Equal(("Development", "Zeta"), await MembershipOfAsync(factory, UnverifiedEmail));
+    }
+
+    [Fact]
+    public async Task A_role_that_holds_members_manage_or_star_is_never_the_second_users()
+    {
+        await using var factory = WithSecondUser(Factory())
+            .WithManifest("permissions: [a:b]\ndefault_roles:\n  aaa: [members:manage]\n  bbb: [\"*\"]\n  ccc: [a:b]\n");
+        _ = factory.Services;
+
+        Assert.Equal(("Development", "ccc"), await MembershipOfAsync(factory, UnverifiedEmail));
     }
 
     [Fact]

@@ -23,8 +23,10 @@
 # this one last):
 #   cp .env.example .env                  # then set real local values (git-ignored)
 #   scripts/dev-keys.sh                   # dev signing/encryption keys into .secrets/ (git-ignored)
+#   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, never "auth-core" (the development stack): a bare down -v would wipe it; the scripts default to this name and refuse "auth-core"
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
-#   docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build    # start postgres, mailpit, auth
+#                                         # the per-IP limiter is off for the older checks (spec 0008): the lockout script makes about 58 logins a minute and the mail script exactly 10 mail requests; scripts/e2e-hardening.sh runs last on the stack recreated with the defaults
 #   scripts/e2e-login.sh                  # spec 0001 regression
 #   scripts/e2e-refresh.sh                # spec 0002 regression
 #   scripts/e2e-lockout.sh                # spec 0003 regression
@@ -46,6 +48,9 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
+# The stack of these scripts is its own compose project, never "auth-core" (the development stack): the restarts and one-off containers below meet the same stack as the down -v of the header.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-hardening}"
+[[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"

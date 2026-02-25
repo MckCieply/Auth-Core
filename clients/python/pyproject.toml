@@ -6,8 +6,15 @@ build-backend = "hatchling.build"
 name = "auth-core-fastapi"
 dynamic = ["version"]
 description = "Verify Auth-Core access tokens in a FastAPI backend"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = ["fastapi>=0.142", "PyJWT[crypto]>=2.15"]
+
+[project.urls]
+Repository = "https://github.com/MckCieply/Auth-Core"
+Documentation = "https://github.com/MckCieply/Auth-Core/blob/main/docs/integration/python-fastapi.md"
 
 [project.optional-dependencies]
 test = ["pytest>=8", "httpx>=0.27"]

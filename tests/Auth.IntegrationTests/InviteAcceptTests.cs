@@ -308,7 +308,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
 
         Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
         Assert.Equal(
-            ["members:manage", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             AccessTokens.Array(session.AccessToken, "permissions"));
     }
 

@@ -8,7 +8,7 @@ import {
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable, catchError, defer, from, last, of, switchMap, tap, throwError, timeout } from 'rxjs';
-import { AuthService, errorCode } from './auth.service';
+import { AuthService, errorCode, retryAfterOf } from './auth.service';
 
 /** Paths that start like this get the access token. A product edits these two lists (guide, step 3). */
 export const TOKEN_PATH_PREFIXES: readonly string[] = ['/api/', '/auth/org'];
@@ -40,11 +40,28 @@ export function wantsToken(url: string, origin: string = window.location.origin)
 }
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  const answer = wantsToken(req.url) ? send(req, next, inject(AuthService), inject(Router)) : next(req);
+  const auth = inject(AuthService);
+  const answer = wantsToken(req.url) ? send(req, next, auth, inject(Router)) : next(req);
   // Built from observables, never promises: when the time is up the timeout unsubscribes, and that cancels the request in flight
-  // and ends the chain (no refresh, no second try, no /login) for a caller that has already been told it failed.
-  return ownUrl(req.url) === null ? answer : answer.pipe(timeout(REQUEST_TIMEOUT_MS));
+  // and ends the chain (no refresh, no second try, no /login) for a caller that has already been told it failed. A 429 from any endpoint
+  // of the app's own origin is announced on the way out, whatever the endpoint is.
+  return ownUrl(req.url) === null
+    ? answer
+    : answer.pipe(
+        timeout(REQUEST_TIMEOUT_MS),
+        tap({ error: (error: unknown) => announceTooManyRequests(error, auth) }),
+      );
 };
+
+/**
+ * A 429 too_many_requests (the limit per address, spec 0008): the notice bar says when to try again. It signs nobody out and
+ * ends no session: only a 401 does.
+ */
+function announceTooManyRequests(error: unknown, auth: AuthService): void {
+  if (error instanceof HttpErrorResponse && error.status === 429 && errorCode(error) === 'too_many_requests') {
+    auth.showNotice('wait', retryAfterOf(error));
+  }
+}
 
 function send(
   req: HttpRequest<unknown>,
@@ -114,9 +131,10 @@ function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | nu
         if (auth.token() === null) {
           goToLogin(router); // not when a new sign-in happened while the refresh was away: that session is fine
         }
-      } else {
+      } else if (result === 'unavailable') {
         auth.showNotice('unreachable');
       }
+      // 'limited' sets nothing: the bar already says "Try again in N s." for the 429 of this very refresh.
       return false;
     });
     return from(renewed);

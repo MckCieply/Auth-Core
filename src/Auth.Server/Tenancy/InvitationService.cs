@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Requests;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,7 @@ namespace Auth.Server.Tenancy;
 /// operator commands both call it, so the rules are the same on both. Everything that changes anything runs in one
 /// transaction that begins by locking the company and reading the actor again (see <see cref="CompanyGuard"/>).
 /// </summary>
-public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock)
+public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
 {
     /// <summary>
     /// Invites an address to the company with a role: makes the invitation, applies the mail limit of the company and
@@ -86,7 +87,8 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
             return Outcome.Fail(TenancyErrors.InvitePending);
         }
 
-        return await QueueMailAsync(companyId, inviteId, normalizedEmail, now, transaction, cancellationToken);
+        return await QueueMailAsync(
+            companyId, inviteId, normalizedEmail, now, transaction, AuditKinds.InviteSent, email, role.Name, current, cancellationToken);
     }
 
     /// <summary>The company's invitations that have not expired, sorted by address, ordinally.</summary>
@@ -136,7 +138,9 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
             return Outcome.Fail(TenancyErrors.PermissionNotHeld);
         }
 
-        return await QueueMailAsync(companyId, invite.Id, invite.NormalizedEmail, now, transaction, cancellationToken);
+        return await QueueMailAsync(
+            companyId, invite.Id, invite.NormalizedEmail, now, transaction, AuditKinds.InviteResent, invite.Email,
+            await RoleNameAsync(invite.RoleId, cancellationToken), entered.Value!, cancellationToken);
     }
 
     /// <summary>Makes the link of a pending invitation stop working at once, and removes it from the list. Not subject to the mail limit.</summary>
@@ -167,6 +171,18 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
         }
 
         await db.Invites.Where(i => i.Id == inviteId).ExecuteDeleteAsync(cancellationToken);
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = AuditKinds.InviteCancelled,
+                SubjectEmail = invite.Email,
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = inviteId,
+                Details = new Dictionary<string, object?> { ["role"] = await RoleNameAsync(invite.RoleId, cancellationToken) },
+            },
+            entered.Value);
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
     }
@@ -181,10 +197,16 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
         return actor.MayGrant(held, manifest.Current.Catalog);
     }
 
-    /// <summary>Applies the mail limit of the company and address and, if it lets the mail through, queues it and commits.</summary>
+    private Task<string> RoleNameAsync(Guid roleId, CancellationToken cancellationToken) =>
+        db.CompanyRoles.AsNoTracking().Where(r => r.Id == roleId).Select(r => r.Name).SingleAsync(cancellationToken);
+
+    /// <summary>
+    /// Applies the mail limit of the company and address and, if it lets the mail through, queues it, records it in the audit log
+    /// (the row is written by the same save) and commits.
+    /// </summary>
     private async Task<Outcome> QueueMailAsync(
         Guid companyId, Guid inviteId, string normalizedEmail, DateTimeOffset now,
-        IDbContextTransaction transaction, CancellationToken cancellationToken)
+        IDbContextTransaction transaction, string auditKind, string email, string roleName, Actor actor, CancellationToken cancellationToken)
     {
         var decision = await MailLimits.RegisterAsync(
             db, InviteTokens.LimitIdentifierOf(companyId, normalizedEmail), MailKind.Invitation, now, cancellationToken);
@@ -202,6 +224,17 @@ public sealed class InvitationService(AuthDbContext db, CompanyGuard guard, Mani
             RequestedAt = now,
             NextAttemptAt = now,
         });
+        audit.Stage(
+            new AuditEntry
+            {
+                Kind = auditKind,
+                SubjectEmail = email,
+                OrgId = companyId,
+                OrgName = await audit.CompanyNameAsync(companyId, cancellationToken),
+                TargetId = inviteId,
+                Details = new Dictionary<string, object?> { ["role"] = roleName },
+            },
+            actor);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
