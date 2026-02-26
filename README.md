@@ -1,14 +1,17 @@
 # Auth-Core
 
-One reusable, self-hosted authentication service in .NET that every project drops in instead of rebuilding login, tenancy, RBAC and token
-refresh. One instance per product, behind the product's own reverse proxy at `/auth`; headless: each product owns its screens.
+A self-hosted authentication service in .NET: sign-in, companies, roles and token refresh, ready to put in front of any product.
 
-> **Version 0.1.0.** The image is `ghcr.io/mckcieply/auth-core:0.1.0`. Sign-in with RS256 tokens and a rotating refresh cookie, lockout and
-> per-IP rate limits, password reset and email verification by mail, companies with members, roles and invitations, an operator CLI, an
-> audit log, security headers, an OpenAPI description, a Python package and an Angular sample, a production compose file and the runbooks to
-> run it. See the [changelog](CHANGELOG.md), the [deployment guide](docs/deployment/vps.md) and the [threat model](docs/security/threat-model.md).
+> **Version 0.1.0.** Image `ghcr.io/mckcieply/auth-core:0.1.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
 
-## How it fits
+## What it is
+
+- **One service per product.** It runs next to your product, behind the same reverse proxy, at `/auth` of the product's own domain. It has its
+  own PostgreSQL database, users and signing keys.
+- **Headless.** A REST API with no screens: your frontend owns the login, reset and invitation pages, in its own look.
+- **Standard tokens.** Short RS256 JWT access tokens that carry the user, the company, the roles and the permissions. Any backend in any language
+  checks them offline against the public keys at `/auth/.well-known/jwks.json`.
+- **Companies built in.** Users belong to companies, with members, roles, invitations and a permission catalog that your product declares.
 
 ```
 Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
@@ -16,10 +19,86 @@ Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
                 └── /auth ──> Auth-Core  (issues tokens, serves the keys, manages companies)
 ```
 
-The refresh token is an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie; the access token (10 minutes) lives in the SPA's memory. A backend never calls
-Auth-Core per request: it verifies the token with the public keys at `/auth/.well-known/jwks.json`.
+## Why use it
 
-## Run it in development
+- **Stop rebuilding login.** Sign-in, sessions, password reset, email verification, invitations, companies and roles come as one container
+  and a database, the same in every product.
+- **Safe defaults.** The refresh token is an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie that rotates on every use, with reuse
+  detection; the access token (10 minutes) lives in the frontend's memory only. Lockout with growing cooldowns, per-IP rate limits, security
+  headers and an audit log are on from the start.
+- **No call per request.** A backend verifies tokens locally, so Auth-Core is not in the path of every API call.
+- **Your data, your server.** No external identity provider and no per-user fees. It runs on a small VPS with Docker.
+- **Ready to run.** A production compose file (read-only service, no capabilities, its own database role), a deployment guide, backup and
+  key-rotation runbooks and a STRIDE threat model.
+
+It is not for everything:
+
+- **No SSO between products.** Each product has its own instance and its own users.
+- **Never in scope:** SAML, SCIM, LDAP, multi-realm mode, fine-grained resource permissions ("is this my document?" stays in your product).
+- **An internal tool, public as a portfolio piece.** There is no support, docs site or marketing.
+
+## How to use it
+
+### 1. Declare your product's permissions
+
+A manifest lists the permissions your code checks and the roles a new company starts with ([`deploy/auth.yaml`](deploy/auth.yaml) is the
+example):
+
+```yaml
+permissions: [documents:read, documents:write, documents:approve]
+default_roles:
+  admin: ["*"]
+  user: [documents:read, documents:write]
+```
+
+### 2. Run it on your server
+
+You need an x86-64 Linux server with Docker, a domain and an SMTP relay with TLS. The compose file is
+[`deploy/docker-compose.prod.yml`](deploy/docker-compose.prod.yml); [`docs/deployment/vps.md`](docs/deployment/vps.md) takes you from nothing
+to a first sign-in, with a `Caddyfile` for HTTPS.
+
+### 3. Create the first company
+
+The operator's commands are subcommands of the service's own binary, so they run from its image (`$C` is the compose command of the
+deployment guide):
+
+```bash
+$C run --rm -T --no-deps auth admin create-org --name "Acme"            # prints the company id
+$C run --rm -T --no-deps auth admin invite --org <id> --email boss@acme.example --role admin
+```
+
+The invited admin gets a mail, sets a password on your frontend's invitation screen and signs in. Anyone who holds `members:manage`
+invites the rest of the company through the company API (`POST /auth/org/invites`).
+
+### 4. Connect your backend
+
+A FastAPI backend uses the package in [`clients/python/`](clients/python/) (`auth-core-fastapi`, installed from the repository at a tag):
+
+```python
+from fastapi import Depends, FastAPI
+from auth_core_fastapi import AuthCore, Principal
+
+app = FastAPI()
+auth = AuthCore(issuer="https://app.example.com/auth", audience="my-product-api")
+auth.install(app)
+
+
+@app.post("/api/documents")
+def add(user: Principal = Depends(auth.require_permission("documents:write"))):
+    return {"company": user.org_id}   # every query is filtered by user.org_id
+```
+
+The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product `samples/notes-api`. A backend
+in another language checks the JWT with any library that reads a JWKS.
+
+### 5. Connect your frontend
+
+An Angular app copies three files (a service, an interceptor and a guard) and adds the screens the mail links open. The guide is
+[`docs/integration/angular.md`](docs/integration/angular.md), with the working app `samples/notes-web`.
+
+The API is described in OpenAPI at `/auth/openapi/v1.json`.
+
+## Develop it
 
 Needs the .NET 10 SDK, Docker with Compose, `openssl`, and Python 3 with `PyJWT[crypto]` for the e2e checks.
 
@@ -27,7 +106,7 @@ Needs the .NET 10 SDK, Docker with Compose, `openssl`, and Python 3 with `PyJWT[
 cp .env.example .env            # set local values; git-ignored
 scripts/dev-keys.sh             # dev signing/encryption keys into .secrets/ (git-ignored)
 # On Windows (Git Bash) run it as: MSYS2_ARG_CONV_EXCL='/CN=' scripts/dev-keys.sh
-export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own for this sequence, never "auth-core" (your development stack)
+export COMPOSE_PROJECT_NAME=auth-core-hardening   # a Compose project of its own, so the checks never touch another stack
 AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 scripts/e2e-login.sh            # login → JWKS → PyJWT verify → restart → verify again
 scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → logout (~30 s)
@@ -45,9 +124,8 @@ started with the limiter off; `scripts/e2e-hardening.sh` runs last, on the same 
 `http://localhost:8025`. The API is described at `http://localhost:8080/auth/openapi/v1.json`; in Development an interactive reference is at
 `http://localhost:8080/auth/scalar`.
 
-The operator's commands are subcommands of the service's own binary, so they run from its image. With a development stack up, set `COMPOSE_PROJECT_NAME` to that
-stack's project (the function refuses to run without it), then create a company and invite its first admin (the invitation is mailed at the server's next poll,
-within a minute, and only while the server is running):
+With a development stack up, set `COMPOSE_PROJECT_NAME` to that stack's project (the function refuses to run without it) to use the operator's
+commands (the invitation is mailed at the server's next poll, within a minute, and only while the server is running):
 
 ```bash
 auth() { docker compose -p "${COMPOSE_PROJECT_NAME:?set it to the project of your stack}" -f deploy/docker-compose.yml --env-file .env run --rm -T --no-deps auth admin "$@"; }
@@ -80,29 +158,12 @@ pip install -e "clients/python[test]" -r samples/notes-api/requirements.txt
 
 The Angular app has its own: `cd samples/notes-web && npx ng test --watch=false`.
 
-## Run it for real
+## Operations
 
-The image is public and the compose file is `deploy/docker-compose.prod.yml`: PostgreSQL pinned by digest, the service read-only with no capabilities, the
-port on `127.0.0.1` only. An x86-64 (amd64) server with Docker, a domain and an SMTP relay is enough (the image is built for `linux/amd64` only); the guide goes from nothing to a first sign-in,
-with a `Caddyfile` for HTTPS, upgrading and troubleshooting:
-
-- [`docs/deployment/vps.md`](docs/deployment/vps.md): the deployment guide.
+- [`docs/deployment/vps.md`](docs/deployment/vps.md): the deployment guide, upgrading and troubleshooting.
 - [`docs/operations/backup.md`](docs/operations/backup.md): what to back up, a nightly dump, a restore step by step, and the audit queries.
 - [`docs/operations/key-rotation.md`](docs/operations/key-rotation.md): generating production keys, planned and emergency rotation (it signs everyone out).
 - [`docs/security/threat-model.md`](docs/security/threat-model.md): STRIDE for each element, and the residual risks that are accepted.
-
-## Connect a product
-
-- A Python (FastAPI) backend: [`clients/python/`](clients/python/) (`auth-core-fastapi`, installed from the repository at a tag) and
-  [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product `samples/notes-api` as the worked example.
-- An Angular frontend: [`docs/integration/angular.md`](docs/integration/angular.md), with `samples/notes-web`.
-
-## What this is (and is not)
-
-- **Internal tool, not a product for sale.** The repository is public as a portfolio piece; there is no support, docs site or marketing.
-- **Consumers are unrelated projects.** No SSO and no shared users between them; one instance per consumer, with its own database, users and keys.
-- **Headless REST API.** Each app owns its login screens; the service issues standard JWTs that any language can verify.
-- **Never in scope:** SAML, SCIM, LDAP, multi-realm mode, fine-grained resource permissions.
 
 ## Stack
 
