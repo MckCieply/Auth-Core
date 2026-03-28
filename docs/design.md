@@ -303,6 +303,49 @@ it.
 | Self-service org signup mode                                          | 2             |
 | Breached-password check, stronger rate limiting                       | 2             |
 
+## Phase 2: sign-up and social login
+
+_Planned 2026-03-28, after `v0.1.0`._ Two items of the table above move in, because the next products are sold to
+companies that should be able to start on their own: **self-service org signup** and **social login (Google,
+Microsoft, GitHub) with account linking**. Milestone of the phase: `v0.2.0` tagged — a visitor creates a company
+with an email address or with a Google, Microsoft or GitHub account, and a person who already has an account links
+a provider to it.
+
+**What the end user sees.**
+
+- **Sign-up.** The product's sign-up screen asks for an email address and a company name and always answers "check
+  your inbox". A new address gets a link; the link opens the product's screen where the person chooses a password
+  (twice) and confirms the company's name; the company is then created and the person is its first admin. An address
+  that already has an account gets a mail that says so instead. An unused link expires and leaves nothing behind.
+- **"Continue with Google / Microsoft / GitHub".** The person signs in at the provider and comes back to the
+  product. A provider already linked signs them in. A provider account whose email matches an existing account
+  asks for that account's password once, then links. A new person names their company (when sign-up is on) and is
+  signed in. An invitation can be accepted with a provider too.
+- **Linked logins.** A settings screen lists the linked providers; a provider can be linked or unlinked, but never
+  the last way to sign in. A person who signed up with a provider can set a password through "forgot password".
+
+**Rules that hold across the phase.**
+
+- Sign-up is off unless the product's manifest turns it on; a product that does not turn it on sees no change.
+- Auth-Core stays headless (ADR 0002): it has no login pages of its own. The only redirects are the round trip to
+  the provider and back, and they land on the product's own screens.
+- The provider's answer comes back to Auth-Core, not to the browser's code: provider secrets never reach the
+  browser, and the return addresses come from configuration only.
+- No user enumeration: a sign-up answers the same for every address.
+- Access tokens do not change: a backend that verifies tokens today needs no change.
+
+**Slices.** Each slice ships its backend, the screens of `samples/notes-web` and its end-to-end tests.
+
+| Slice | Content                                                                                                  | Milestone                                                        |
+| ----- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| 0009  | Self-service sign-up: request, mail, completion, expiry, manifest switch; sample screens                 | A visitor creates a company by mail and signs in                 |
+| 0010  | Google and Microsoft: the provider round trip, sign-in, linking with the password, sign-up and invitations through a provider; sample buttons and screens | "Continue with Google" works end to end against a test provider |
+| 0011  | GitHub; listing, linking and unlinking providers; accounts without a password; sample settings screen    | A person manages their linked logins                             |
+| 0012  | Threat model, guides and runbooks for the new flows; release                                             | `v0.2.0` tagged                                                  |
+
+**Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
+per user, and any provider beyond the three.
+
 ## Repo bootstrap
 
 Start the repo private and flip it to public when ready; history, PRs and CI runs
