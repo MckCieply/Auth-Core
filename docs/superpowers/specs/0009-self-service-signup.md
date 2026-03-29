@@ -101,7 +101,10 @@ When the mail is sent:
 - **Otherwise**, if the pending sign-up still exists: a new link token is issued for it (the previous link of the
   address stops working), valid 24 hours from the sending, and the mail "complete your sign-up" goes out with the
   link `<CompleteSignup>?token=<43 characters>` and the company name.
-- If the pending sign-up is gone (expired, completed or replaced by an account), nothing is sent.
+- If there is no account and the pending sign-up is gone (expired or replaced), nothing is sent.
+
+The account is checked first (Amendment 1): an address that has an account by the time the mail is sent gets the
+"you already have an account" mail, whether or not its pending sign-up still exists.
 
 Both mails follow spec 0004: the instance's locale (`pl` or `en`), HTML and text parts, the app name, the queue,
 its retries and its delivery rules. A failed sending leaves the previous link valid.
@@ -143,9 +146,10 @@ exists.
 ### Pending sign-ups
 
 One per address (the normalised address of spec 0004). It holds the typed address, the company name, the hash of
-its current link token (none until the first mail is sent), and the time it expires. It is not an account: login,
-`forgot password` and invitations do not see it. The hourly clean-up of spec 0004 deletes pending sign-ups whose
-time has passed.
+its current link token (none until the first mail is sent), the time its link expires (24 hours after that mail),
+and the time the pending sign-up itself expires (24 hours after the latest request, moved to the link's time when a
+mail is sent; Amendment 2). It is not an account: login, `forgot password` and invitations do not see it. The
+hourly clean-up of spec 0004 deletes pending sign-ups whose time has passed.
 
 ### Manifest
 
@@ -282,6 +286,23 @@ The four operations are in the OpenAPI document with their answers.
     so that upgrading an instance never fails for a missing key.
 13. **`GET /auth/options`** tells a product's screens whether to offer sign-up, so a product does not repeat its
     manifest in its frontend.
+
+### Amendment (owner, 2026-03-29)
+
+Settled while planning; the contract above already reads this way.
+
+1. **The account is checked first when a sign-up mail is sent.** A request queued before an account came into
+   being (an invitation accepted, or the sign-up completed) and sent after it gets the "you already have an account"
+   mail; nothing is sent only when there is neither an account nor a live pending sign-up.
+2. **A pending sign-up has two times**: when its link expires, and when the row itself expires. With one time a
+   second request would either stretch an old link past 24 hours or let the row expire before its new mail is sent.
+3. **Earlier answers of the pipeline win**: the `415` of a JSON body in another charset and the per-IP `429` of
+   spec 0008 come before `403 signup_disabled`.
+4. **A request or completion for an address whose mail is being sent waits for that sending** (at most the 20 s
+   deadline of spec 0004), as an invitation does; the threat model records it.
+5. **The tests that pin the contract of earlier specs are extended**, not left untouched: the OpenAPI operations,
+   the list of audit kinds (now 24) and the manifest activation test.
+6. **A `signup:` key with no value counts as absent**; an empty string is invalid.
 
 ## Verification notes (for the local verifiers)
 
