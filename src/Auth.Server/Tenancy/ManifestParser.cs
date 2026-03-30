@@ -130,7 +130,13 @@ public static class ManifestParser
             return Fail($"at least one default role must hold '{PermissionCatalog.MembersManage}' or '*', so that the first admin of a company can manage it");
         }
 
-        return new ManifestParseResult(new Manifest(permissions, defaults), null);
+        // A missing value (`signup:` or `signup: ~`) is the same as a missing key. Any other text must be one of the two names exactly.
+        if (!SignupModes.TryParse(document.Signup ?? SignupModes.InviteOnlyName, out var signup))
+        {
+            return Fail($"signup must be '{SignupModes.InviteOnlyName}' or '{SignupModes.SelfServiceName}'");
+        }
+
+        return new ManifestParseResult(new Manifest(permissions, defaults, signup), null);
     }
 
     private static ManifestParseResult Fail(string error) => new(null, Printable(error));
@@ -168,6 +174,9 @@ public static class ManifestParser
     internal sealed class ManifestDocument
     {
         public List<string?>? Permissions { get; set; }
+
+        // `invite-only` or `self-service` (spec 0009); a text so that any other value reaches the check above instead of a binding error.
+        public string? Signup { get; set; }
 
         // Ordered: the roles keep the order of the file, which the development seeder reads.
         public OrderedDictionary<string, List<string?>?>? DefaultRoles { get; set; }

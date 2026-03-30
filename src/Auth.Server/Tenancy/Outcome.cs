@@ -22,14 +22,16 @@ public static class TenancyErrors
     public const string TooManyRequests = "too_many_requests";
     public const string UnsupportedMediaType = "unsupported_media_type";
     public const string WrongPassword = "wrong_password";
+    public const string SignupDisabled = "signup_disabled";
+    public const string AlreadyRegistered = "already_registered";
 
     public static int StatusOf(string error) => error switch
     {
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission => StatusCodes.Status400BadRequest,
-        Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword => StatusCodes.Status403Forbidden,
+        Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
-        AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken
+        AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
             => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),

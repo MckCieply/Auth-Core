@@ -13,6 +13,7 @@ using Auth.Server.Network;
 using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
+using Auth.Server.Signup;
 using Auth.Server.Tenancy;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore.DataProtection;
@@ -45,7 +46,7 @@ builder.Services.AddSingleton<RateLimitAudit>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
-builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest");
+builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest").AddCheck<SignupHealthCheck>("signup");
 // Nothing of Auth-Core uses Data Protection, and the production container's file system is read-only: keys stay in memory.
 builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
 builder.Services.AddAuthOpenApi();
@@ -63,6 +64,7 @@ builder.Services.AddSingleton<MailDispatchSignal>();
 builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();
+builder.Services.AddSingleton<SignupGate>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();
@@ -84,6 +86,9 @@ if (app.Configuration.GetValue<bool>("Auth:Database:MigrateOnStartup"))
 
 // Which manifest is active: the product's file, or the last valid one. Never a reason to stop.
 await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lifetime.ApplicationStopping);
+
+// A manifest that asks for self-service sign-up without the completion address leaves it off: say so (spec 0009).
+app.Services.GetRequiredService<SignupGate>().WarnIfMissingAddress();
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 

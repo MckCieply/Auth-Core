@@ -48,6 +48,12 @@ public sealed class MailSettings
     /// <summary>The product's invitation screen (spec 0005): the link of an invitation mail is this URL plus <c>token</c>.</summary>
     public required Uri AcceptInviteUrl { get; init; }
 
+    /// <summary>
+    /// The product's screen that finishes a sign-up (spec 0009): the link of the "complete your sign-up" mail is this URL plus
+    /// <c>token</c>. <see langword="null"/> when it is not configured, and sign-up is then off.
+    /// </summary>
+    public Uri? CompleteSignupUrl { get; init; }
+
     public required string FromAddress { get; init; }
 
     public required SmtpSettings Smtp { get; init; }
@@ -60,6 +66,7 @@ public static class MailSettingsLoader
     public const string ResetPasswordUrlKey = "Auth:App:FrontendUrls:ResetPassword";
     public const string VerifyEmailUrlKey = "Auth:App:FrontendUrls:VerifyEmail";
     public const string AcceptInviteUrlKey = "Auth:App:FrontendUrls:AcceptInvite";
+    public const string CompleteSignupUrlKey = "Auth:App:FrontendUrls:CompleteSignup";
     public const string FromKey = "Auth:Email:From";
     public const string SmtpHostKey = "Auth:Email:Smtp:Host";
     public const string SmtpPortKey = "Auth:Email:Smtp:Port";
@@ -130,6 +137,7 @@ public static class MailSettingsLoader
             ResetPasswordUrl = FrontendUrl(configuration, ResetPasswordUrlKey, isDevelopment),
             VerifyEmailUrl = FrontendUrl(configuration, VerifyEmailUrlKey, isDevelopment),
             AcceptInviteUrl = FrontendUrl(configuration, AcceptInviteUrlKey, isDevelopment),
+            CompleteSignupUrl = OptionalFrontendUrl(configuration, CompleteSignupUrlKey, isDevelopment),
             FromAddress = from,
             Smtp = new SmtpSettings
             {
@@ -158,6 +166,10 @@ public static class MailSettingsLoader
 
         return url;
     }
+
+    /// <summary>Not set (missing, empty or only white space): <see langword="null"/>. Set: the rules of every frontend address.</summary>
+    private static Uri? OptionalFrontendUrl(IConfiguration configuration, string key, bool isDevelopment) =>
+        string.IsNullOrWhiteSpace(configuration[key]) ? null : FrontendUrl(configuration, key, isDevelopment);
 
     private static string Required(IConfiguration configuration, string key)
     {
