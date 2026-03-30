@@ -28,6 +28,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
 
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    public DbSet<PendingSignup> PendingSignups => Set<PendingSignup>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -119,6 +121,19 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         {
             manifest.HasKey(m => m.Id);
             manifest.Property(m => m.Id).ValueGeneratedNever();
+        });
+
+        // Spec 0009. Not an account: no foreign key to one.
+        builder.Entity<PendingSignup>(pending =>
+        {
+            pending.HasKey(p => p.NormalizedEmail);
+            pending.Property(p => p.NormalizedEmail).HasMaxLength(256);
+            pending.Property(p => p.Email).HasMaxLength(256);
+            pending.Property(p => p.CompanyName).HasMaxLength(100);
+            // A link is looked up by its hash when it is used; rows without a link yet (null) do not collide.
+            pending.HasIndex(p => p.TokenHash).IsUnique();
+            // The clean-up selects by expiry.
+            pending.HasIndex(p => p.ExpiresAt);
         });
 
         // Spec 0008 → Audit log. The names are the contract's (snake_case): the backup runbook queries them. No foreign keys on purpose.
