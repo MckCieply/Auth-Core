@@ -35,7 +35,7 @@ public static class RatePolicies
 
     /// <summary>
     /// The policy of a request, chosen by method and path (the path compared without regard to case or one trailing slash), or
-    /// <see langword="null"/> for a request outside <c>/auth/</c>. Only a <c>POST</c> to the five specific paths is not "general".
+    /// <see langword="null"/> for a request outside <c>/auth/</c>. Only a <c>POST</c> to the specific paths is not "general".
     /// </summary>
     public static RatePolicy? Classify(string method, PathString path)
     {
@@ -63,7 +63,8 @@ public static class RatePolicies
             return RatePolicy.Refresh;
         }
 
-        if (trimmed.Equals("/auth/password/forgot", StringComparison.OrdinalIgnoreCase)
+        if (trimmed.Equals("/auth/signup", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/password/forgot", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/password/reset", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/email/verify/request", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/email/verify", StringComparison.OrdinalIgnoreCase))
@@ -72,7 +73,9 @@ public static class RatePolicies
         }
 
         if (trimmed.Equals("/auth/invites/preview", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("/auth/invites/accept", StringComparison.OrdinalIgnoreCase))
+            || trimmed.Equals("/auth/invites/accept", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/signup/preview", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/signup/complete", StringComparison.OrdinalIgnoreCase))
         {
             return RatePolicy.Invite;
         }

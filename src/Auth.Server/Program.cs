@@ -107,6 +107,7 @@ app.UseAuthorization();
 
 app.MapAccountApi();
 app.MapTenancyApi();
+app.MapSignupApi();
 app.MapAuthOpenApi();
 
 app.Run();
