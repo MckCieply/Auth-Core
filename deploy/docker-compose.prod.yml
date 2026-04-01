@@ -86,6 +86,9 @@ services:
       Auth__App__FrontendUrls__ResetPassword: ${AUTH_FRONTEND_RESET_URL:?set AUTH_FRONTEND_RESET_URL in .env}
       Auth__App__FrontendUrls__VerifyEmail: ${AUTH_FRONTEND_VERIFY_URL:?set AUTH_FRONTEND_VERIFY_URL in .env}
       Auth__App__FrontendUrls__AcceptInvite: ${AUTH_FRONTEND_INVITE_URL:?set AUTH_FRONTEND_INVITE_URL in .env}
+      # Optional (spec 0009): the screen of the frontend that finishes a self-service sign-up. Blank keeps sign-up off; it is on only with this and
+      # `signup: self-service` in the manifest (a manifest that asks for it without this makes /auth/health say Degraded).
+      Auth__App__FrontendUrls__CompleteSignup: ${AUTH_FRONTEND_SIGNUP_URL:-}
       # The sender and the SMTP relay. The relay must offer TLS: "none" is refused outside Development.
       Auth__Email__From: ${AUTH_EMAIL_FROM:?set AUTH_EMAIL_FROM in .env}
       Auth__Email__Smtp__Host: ${AUTH_SMTP_HOST:?set AUTH_SMTP_HOST in .env}

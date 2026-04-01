@@ -30,3 +30,4 @@ services:
       Auth__App__FrontendUrls__ResetPassword: http://localhost:8088/reset
       Auth__App__FrontendUrls__VerifyEmail: http://localhost:8088/verify
       Auth__App__FrontendUrls__AcceptInvite: http://localhost:8088/invite
+      Auth__App__FrontendUrls__CompleteSignup: http://localhost:8088/complete-signup
