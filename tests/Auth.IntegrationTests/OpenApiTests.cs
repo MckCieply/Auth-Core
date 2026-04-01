@@ -21,6 +21,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/options",
         "POST /auth/signup",
         "POST /auth/signup/preview",
+        "POST /auth/signup/complete",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -162,6 +163,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
     [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
+    [InlineData("POST /auth/signup/complete", "204,400,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -207,6 +209,13 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("role_in_use", Description(operations["DELETE /auth/org/roles/{id}"], "409"));
         Assert.Contains("unknown_permission", Description(operations["POST /auth/org/roles"], "400"));
         Assert.Contains("not_found", Description(operations["DELETE /auth/org/invites/{id}"], "404"));
+        Assert.All(
+            ["POST /auth/signup", "POST /auth/signup/preview", "POST /auth/signup/complete"],
+            endpoint => Assert.Contains("signup_disabled", Description(operations[endpoint], "403")));
+        Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/signup/complete"], "400")));
+        Assert.Contains("already_registered", Description(operations["POST /auth/signup/complete"], "409"));
+        Assert.Contains("invalid_token", Description(operations["POST /auth/signup/preview"], "400"));
+        Assert.Contains("too_many_attempts", Description(operations["POST /auth/signup"], "429"));
     }
 
     [Theory]
@@ -238,6 +247,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/invites/accept", "password,token")]
     [InlineData("POST /auth/signup", "company_name,email")]
     [InlineData("POST /auth/signup/preview", "token")]
+    [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
@@ -385,7 +395,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         await using var factory = new AuthAppFactory(postgres, keys);
         var operations = Operations(await DescriptionAsync(factory));
 
-        foreach (var endpoint in new[] { "POST /auth/password/reset", "POST /auth/invites/accept" })
+        foreach (var endpoint in new[] { "POST /auth/password/reset", "POST /auth/invites/accept", "POST /auth/signup/complete" })
         {
             var schema = operations[endpoint]["responses"]!["400"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>();
             Assert.EndsWith("WeakPasswordBody", schema);

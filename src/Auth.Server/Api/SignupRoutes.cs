@@ -43,6 +43,19 @@ public static class SignupRoutes
             .ProducesError(StatusCodes.Status400BadRequest, AccountResults.InvalidRequestError, AccountResults.InvalidTokenError)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled);
 
+        app.MapPost(SignupCompleteEndpoint.Path, SignupCompleteEndpoint.HandleAsync)
+            .WithTags("Sign-up")
+            .WithDescription(
+                "Finishes a sign-up: in one transaction the account (its email confirmed), the company (named as given here, with a copy of "
+                + "the default roles) and the membership with the first admin's role are made, and the pending sign-up is used up. The person "
+                + "is not signed in. The checks are made in this order: the token, the password (a weak one leaves the token usable), the "
+                + "account (`409 already_registered` when one has the address by now).")
+            .ReadsJson<SignupCompleteRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesPasswordError(AccountResults.InvalidRequestError, AccountResults.InvalidTokenError, AccountResults.WeakPasswordError)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
+
         return app;
     }
 }
