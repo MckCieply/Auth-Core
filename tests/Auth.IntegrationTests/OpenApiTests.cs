@@ -20,6 +20,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/me",
         "GET /auth/options",
         "POST /auth/signup",
+        "POST /auth/signup/preview",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -160,6 +161,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("GET /auth/me", "200,401,403,429")]
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
+    [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -235,6 +237,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/invites/preview", "token")]
     [InlineData("POST /auth/invites/accept", "password,token")]
     [InlineData("POST /auth/signup", "company_name,email")]
+    [InlineData("POST /auth/signup/preview", "token")]
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
@@ -265,6 +268,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["signup"], Properties("OptionsResponse"));
+        Assert.Equal(["company_name", "email"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));

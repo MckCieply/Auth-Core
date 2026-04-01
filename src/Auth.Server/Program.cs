@@ -65,6 +65,7 @@ builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<SignupGate>();
+builder.Services.AddScoped<SignupService>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
 builder.Services.AddHostedService<TokenPruningService>();

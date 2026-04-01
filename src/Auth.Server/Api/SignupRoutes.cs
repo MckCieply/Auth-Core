@@ -33,6 +33,16 @@ public static class SignupRoutes
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled)
             .ProducesTooManyAttempts();
 
+        app.MapPost(SignupPreviewEndpoint.Path, SignupPreviewEndpoint.HandleAsync)
+            .WithTags("Sign-up")
+            .WithDescription(
+                "Shows what the link of the mail is for: the address as it was typed and the company name of the request. It changes nothing "
+                + "and the link stays usable. A token that is unknown, used, expired or replaced by a newer mail is `invalid_token`.")
+            .ReadsJson<SignupPreviewRequest>()
+            .Produces<SignupPreviewResponse>()
+            .ProducesError(StatusCodes.Status400BadRequest, AccountResults.InvalidRequestError, AccountResults.InvalidTokenError)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled);
+
         return app;
     }
 }
