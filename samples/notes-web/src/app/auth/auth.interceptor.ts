@@ -175,9 +175,9 @@ function isMe(req: HttpRequest<unknown>): boolean {
 
 function goToLogin(router: Router): void {
   // While a navigation runs, router.url is still the page the person is leaving: the page they are on the way to is the one
-  // to come back to. A target that carries a mail token (/reset, /verify, /invite) is never put in the address of the login
-  // screen: the person comes back to the page they are on, or to /notes. (Either way the guard and safeReturnUrl check what the
-  // login screen follows.)
+  // to come back to. A target that carries a mail token (/reset, /verify, /invite, /complete-signup) is never put in the address
+  // of the login screen: the person comes back to the page they are on, or to /notes. (Either way the guard and safeReturnUrl
+  // check what the login screen follows.)
   const pending = router.currentNavigation();
   const candidates = [pending === null ? null : router.serializeUrl(pending.finalUrl ?? pending.extractedUrl), router.url];
   const here = candidates.find((url) => url !== null && !router.parseUrl(url).queryParamMap.has('token')) ?? '/notes';

@@ -98,6 +98,17 @@ export const texts = {
     invalidRequest: 'Check the email address and the company name.',
   },
 
+  completeSignup: {
+    title: 'Finish creating your account',
+    loading: 'Opening your sign-up...',
+    setsPassword: (email: string): string => `This sets the password for ${email}.`,
+    submit: 'Create company',
+    signUpAgain: 'Sign up again',
+    alreadyRegistered: 'An account with this address already exists.',
+    companyRequired: 'Enter the name of your company.',
+    invalidRequest: 'Check the company name.',
+  },
+
   notes: {
     title: 'Notes',
     signOut: 'Sign out',

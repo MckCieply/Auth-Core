@@ -8,6 +8,7 @@ import { vi } from 'vitest';
 import { has, pageText, settle, submitForm, typeInto } from '../../testing/helpers';
 import { authInterceptor } from '../auth/auth.interceptor';
 import { AuthService } from '../auth/auth.service';
+import { CompleteSignupPage } from './complete-signup';
 import { ForgotPage } from './forgot';
 import { InvitePage } from './invite';
 import { ResetPage } from './reset';
@@ -87,6 +88,18 @@ describe('the mail and link screens when the address has made too many requests'
     await expectNoticeOnly(opened, '/auth/password/reset');
     expect(has(opened.fixture, '#password')).toBe(true);
     expect(has(opened.fixture, '[data-testid="reset-done"]')).toBe(false);
+  });
+
+  it('CompleteSignupPage: keeps the form, leaves the words to the notice bar', async () => {
+    const opened = await open(CompleteSignupPage, '/complete-signup?token=tok-s');
+    opened.ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma' });
+    await settle(opened.fixture);
+    typeInto(opened.fixture, '#password', 'Chosen-Passw0rd');
+    typeInto(opened.fixture, '#repeat', 'Chosen-Passw0rd');
+    submitForm(opened.fixture);
+    await expectNoticeOnly(opened, '/auth/signup/complete');
+    expect(has(opened.fixture, '#password')).toBe(true);
+    expect(TestBed.inject(Router).navigate).not.toHaveBeenCalledWith(['/login'], expect.anything());
   });
 
   it('InvitePage: keeps the form, leaves the words to the notice bar', async () => {
