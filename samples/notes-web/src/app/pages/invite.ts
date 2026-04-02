@@ -115,6 +115,8 @@ export class InvitePage implements OnInit {
       this.phase.set('invalid');
     } else if (result.failure.kind === 'already_member') {
       this.phase.set('member');
+    } else if (result.failure.kind === 'too_many_requests') {
+      // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {
       this.error.set(this.common.somethingWrong);
     }

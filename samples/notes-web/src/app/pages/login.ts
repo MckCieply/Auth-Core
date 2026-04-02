@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AccountApi } from '../account-api';
@@ -36,10 +36,13 @@ function startEmail(router: Router): string {
         <p class="status" role="status">{{ text }}</p>
       }
       <p><a routerLink="/forgot">{{ t.forgot }}</a></p>
+      @if (signupOpen()) {
+        <p><a routerLink="/signup" data-testid="create-account">{{ t.createAccount }}</a></p>
+      }
     </main>
   `,
 })
-export class LoginPage {
+export class LoginPage implements OnInit {
   protected readonly t = texts.login;
   protected readonly common = texts.common;
   private readonly auth = inject(AuthService);
@@ -56,6 +59,12 @@ export class LoginPage {
   protected readonly info = signal<string | null>(null);
   protected readonly canResend = signal(false);
   protected readonly resending = signal(false);
+  /** True while GET /auth/options says a visitor may start a company: then the screen offers "Create an account". */
+  protected readonly signupOpen = signal(false);
+
+  ngOnInit(): void {
+    void this.account.options().then((options) => this.signupOpen.set(options.signup === 'self-service'));
+  }
 
   protected async submit(): Promise<void> {
     if (this.busy() || this.form.invalid) {

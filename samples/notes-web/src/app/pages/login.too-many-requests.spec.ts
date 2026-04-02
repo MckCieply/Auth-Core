@@ -22,6 +22,7 @@ describe('LoginPage when the address has made too many requests', () => {
     await harness.navigateByUrl('/login', LoginPage);
     vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
     const ctrl = TestBed.inject(HttpTestingController);
+    ctrl.expectOne('/auth/options').flush({ signup: 'invite-only' }); // the sign-in screen asks what a visitor may do
     const auth = TestBed.inject(AuthService);
 
     typeInto(harness.fixture, '#email', 'admin@example.test');

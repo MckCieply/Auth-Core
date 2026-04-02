@@ -60,7 +60,7 @@ describe('routes', () => {
     expect(TestBed.inject(Router).url).toBe(expected);
   });
 
-  it.each(['/login', '/forgot', '/reset', '/verify', '/invite'])('%s needs no token', async (url) => {
+  it.each(['/login', '/forgot', '/reset', '/verify', '/invite', '/signup'])('%s needs no token', async (url) => {
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl(url);
     expect(TestBed.inject(Router).url).toBe(url);

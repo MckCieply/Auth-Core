@@ -20,6 +20,9 @@ export type Failure =
   | { kind: 'invalid_token' }
   | { kind: 'weak_password'; rules: string[] }
   | { kind: 'already_member' }
+  | { kind: 'already_registered' }
+  | { kind: 'signup_disabled' }
+  | { kind: 'invalid_request' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
@@ -84,6 +87,12 @@ export function failureOf(error: unknown): Failure {
   }
   if (error.status === 409 && code === 'already_member') {
     return { kind: 'already_member' };
+  }
+  if (error.status === 409 && code === 'already_registered') {
+    return { kind: 'already_registered' };
+  }
+  if (error.status === 403 && code === 'signup_disabled') {
+    return { kind: 'signup_disabled' };
   }
   return { kind: 'other' };
 }

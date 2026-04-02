@@ -1,7 +1,7 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { Failure, failureOf, isRecord } from './auth/auth.service';
+import { Failure, errorCode, failureOf, isRecord } from './auth/auth.service';
 
 export type Outcome<T = void> = { ok: true; value: T } | { ok: false; failure: Failure };
 
@@ -10,6 +10,17 @@ export interface InvitePreview {
   org_name: string;
   email: string;
   role: string;
+}
+
+/** What GET /auth/options answers, as far as the screens care: whether a visitor may start a company of their own. */
+export interface SiteOptions {
+  signup: 'self-service' | 'invite-only';
+}
+
+/** What POST /auth/signup/preview answers: the address as it was typed and the company name of the request. */
+export interface SignupPreview {
+  email: string;
+  company_name: string;
 }
 
 /** Auth-Core's endpoints for the mail links and the account, which need no access token. */
@@ -52,6 +63,51 @@ export class AccountApi {
 
   acceptInvite(token: string, password: string): Promise<Outcome> {
     return this.post('/auth/invites/accept', { token, password });
+  }
+
+  /**
+   * Whether the product's screens may offer sign-up. A call that fails, and an answer this app does not know, mean "invite-only":
+   * the link "Create an account" is then not offered, which is the safe side.
+   */
+  async options(): Promise<SiteOptions> {
+    try {
+      const body = await firstValueFrom(this.http.get<unknown>('/auth/options'));
+      return { signup: isRecord(body) && body['signup'] === 'self-service' ? 'self-service' : 'invite-only' };
+    } catch {
+      return { signup: 'invite-only' };
+    }
+  }
+
+  signUp(email: string, companyName: string): Promise<Outcome> {
+    return this.postForm('/auth/signup', { email, company_name: companyName });
+  }
+
+  async previewSignup(token: string): Promise<Outcome<SignupPreview>> {
+    const outcome = await this.post<unknown>('/auth/signup/preview', { token });
+    if (!outcome.ok) {
+      return outcome;
+    }
+    const body = outcome.value;
+    if (isRecord(body) && typeof body['email'] === 'string' && typeof body['company_name'] === 'string') {
+      return { ok: true, value: { email: body['email'], company_name: body['company_name'] } };
+    }
+    return { ok: false, failure: { kind: 'other' } };
+  }
+
+  completeSignup(token: string, password: string, companyName: string): Promise<Outcome> {
+    return this.postForm('/auth/signup/complete', { token, password, company_name: companyName });
+  }
+
+  /** Like `post`, but a `400 invalid_request` is a failure of its own: each sign-up form has a text for it. */
+  private async postForm<T = void>(url: string, body: unknown): Promise<Outcome<T>> {
+    try {
+      return { ok: true, value: await firstValueFrom(this.http.post<T>(url, body)) };
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request') {
+        return { ok: false, failure: { kind: 'invalid_request' } };
+      }
+      return { ok: false, failure: failureOf(error) };
+    }
   }
 
   private async post<T = void>(url: string, body: unknown): Promise<Outcome<T>> {
