@@ -7,7 +7,7 @@
 - **Author:** Alex
 - **Spec:** [`docs/superpowers/specs/0009-self-service-signup.md`](../specs/0009-self-service-signup.md)
   — the plan argues from the spec; where they disagree, **the spec wins** and the
-  disagreement is a finding (see [`docs/workflow.md`](../../workflow.md)). The spec is not changed by this plan; the points
+  disagreement is a finding (see [`docs/workflow.md`](../../workflow.md)). The spec is not changed by this plan (the owner amended it on 2026-04-03, Amendment 2: the completion signs the person in; the section "Amendment (2026-04-03)" below, Tasks 14 and 15, builds it); the points
   that cannot be built as written, or that the spec leaves open, are listed in "Open questions for the owner" at the end (there are none left: the choices the plan took are recorded in "Decisions taken in this plan").
 - **Based on:** `3feb9fd` (`main` at `85df18b` with the phase brief in `docs/design.md` and spec 0009 on top of it). Every anchor of an edit below was
   checked against this base.
@@ -22,7 +22,8 @@ the accounts. The **dispatcher** decides what to send when the row is handled: t
 mails (it is locked, it holds the hash of the current link token), and an account under the address turns the mail into "you already have an account"
 with no link. `POST /auth/signup/complete` consumes the token with one `DELETE ... RETURNING`, takes the advisory lock that invitation acceptance uses,
 checks the password and the account, and then in one transaction creates the account (email confirmed), the company (`CompanyService.CreateAsync`, `via`
-`signup`) and the membership with the first admin's role, with the audit rows. A `SignupGate` (manifest key **and** completion address) decides whether
+`signup`) and the membership with the first admin's role, with the audit rows, and (Amendment 2, Tasks 14 and 15) signs the person in inside that same
+transaction: the endpoint is a pass-through request of OpenIddict beside `/auth/login`, and `AtomicSignInResult` issues the session and writes `login.succeeded` before the one commit. A `SignupGate` (manifest key **and** completion address) decides whether
 sign-up is on; `GET /auth/options` tells a product's screens. The sample frontend gets `/signup`, `/complete-signup` and a link on `/login`.
 
 **Tech Stack:** .NET 10, ASP.NET Core minimal APIs, ASP.NET Identity, EF Core on PostgreSQL 16 (Npgsql), xUnit v3 with Testcontainers; YamlDotNet (the
@@ -40,15 +41,15 @@ Values copied from the spec, one line each; every task includes them.
 - **`POST /auth/signup` `{"email","company_name"}`:** off → `403 signup_disabled`; `email` must pass the address rule of invitations (a mailbox address, no look-alike, IP-literal, dotless, numeric or hexadecimal domain; at most 254 characters) and `company_name` the name rule of spec 0005 (1 to 100 characters, no control, format or noncharacters, no leading or trailing space), otherwise `400 invalid_request`; the mail limit of spec 0004 with its own kind `signup` (one request a minute and five an hour), over it the `429 too_many_attempts` with `retry_after_seconds`; otherwise the pending sign-up of the address is created or replaced (typed address and company name; expires 24 hours later), a mail request is queued and the answer is `202` with an empty body. The request never reads the accounts: an address with an account and one without get the same status, headers and body and run the same database statements; which mail goes out is decided when the mail is sent.
 - **Mails (when sent):** the account check comes first (the owner's ruling): an address with an account (any account) gets "you already have an account" (no link, no token; says someone, perhaps the reader, tried to sign up, that the account exists, and that the reader can sign in or use "forgot password" on the product's sign-in screen) **even when its pending sign-up is gone**, and any pending sign-up of the address is deleted; otherwise, if the pending sign-up still exists, a new link token is issued (the previous link stops working), valid 24 hours from the sending, and "complete your sign-up" goes out with `<CompleteSignup>?token=<43 characters>` and the company name; with no account and no live pending sign-up (expired, completed or replaced) nothing is sent. Both mails: the instance's locale (`pl` or `en`), HTML and text parts, the app name, the queue, its retries and its delivery rules; a failed sending leaves the previous link valid.
 - **`POST /auth/signup/preview` `{"token"}`:** `200 {"email","company_name"}` (the typed address and the company name of the request) for a usable token, otherwise `400 invalid_token`; it changes nothing.
-- **`POST /auth/signup/complete` `{"token","password","company_name"}`:** off → `403`; a missing or non-string member, a password with a NUL character or a company name that breaks the name rule → `400 invalid_request`; a token that is unknown, used, expired or replaced → `400 invalid_token`; a password that breaks the policy of spec 0004 → `400 weak_password` with the rules (the token stays usable); an account with the address by now → `409 {"error":"already_registered"}` and the pending sign-up is deleted; otherwise in one transaction the account (typed address, the password, email confirmed), the company (the name of this request, a copy of the default roles, as `create-org` does), the membership with the first admin's role, the pending sign-up deleted and the audit events; the answer is `204` and it does not sign in. The order of the checks is token, password, account. Of parallel requests with one token exactly one gets past the token; the address is locked with the lock that invitation acceptance uses.
+- **`POST /auth/signup/complete` `{"token","password","company_name"}`:** off → `403`; a missing or non-string member, a password with a NUL character or a company name that breaks the name rule → `400 invalid_request`; a token that is unknown, used, expired or replaced → `400 invalid_token`; a password that breaks the policy of spec 0004 → `400 weak_password` with the rules (the token stays usable); an account with the address by now → `409 {"error":"already_registered"}` and the pending sign-up is deleted; otherwise in one transaction the account (typed address, the password, email confirmed), the company (the name of this request, a copy of the default roles, as `create-org` does), the membership with the first admin's role, the pending sign-up deleted and the audit events; **the answer is that of a successful `POST /auth/login`** (`200 {"status":"authenticated","access_token"}` and the refresh cookie; the token carries the new company and the first admin's role), and the sign-in is part of the transaction with its `login.succeeded` row: if it cannot be written nothing of the completion stays (spec 0009, Amendment 2 of 2026-04-03: Tasks 14 and 15 change what Tasks 8, 11 and 12 built, which answered `204`). The order of the checks is token, password, account. Of parallel requests with one token exactly one gets past the token; the address is locked with the lock that invitation acceptance uses.
 - **The first admin's role:** the first default role of the manifest, in the manifest's order, whose permissions are `["*"]`; if no role holds `*`, the first one whose permissions include `members:manage`.
 - **Pending sign-ups:** one per normalised address; hold the typed address, the company name, the hash of the current link token (none until the first mail is sent), the time its link expires and the time the row expires (Amendment 2); not an account (login, `forgot password` and invitations do not see it); the hourly clean-up deletes those whose time has passed.
 - **Manifest:** a new optional top-level key `signup: invite-only` (the default when absent) or `signup: self-service`; any other value makes the manifest invalid by the rules of spec 0005 (the last valid manifest stays active, `/auth/health` reports `Degraded`); a manifest stored by an earlier version without the key is read as `invite-only`.
 - **Configuration:** `Auth:App:FrontendUrls:CompleteSignup`, environment variable `AUTH_FRONTEND_SIGNUP_URL` in `deploy/docker-compose.prod.yml` (optional, may be empty); when set and not empty, the rules of the other frontend addresses of spec 0004 (absolute; `https` outside Development; no fragment, user information or `token` parameter), a bad value stops the start naming the key; `self-service` without the address: sign-up is off, the start logs a warning and `/auth/health` reports `Degraded`.
 - **Limits (spec 0008):** `POST /auth/signup` counts against the mail policy (`Email`, 10 a minute by default); `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy (`Invite`, 20 a minute); `GET /auth/options` against the general one.
-- **Audit (24 kinds in all):** `signup.requested` when `POST /auth/signup` is accepted (`202`; field `subject_email`); `signup.completed` when the completion succeeds, in its transaction (`subject_user_id`, `subject_email`, `org_id`, `org_name`); `org.created` gains the value `signup` for `details.via`, written in the same transaction; no row holds a password or a token.
+- **Audit (24 kinds in all):** `signup.requested` when `POST /auth/signup` is accepted (`202`; field `subject_email`); `signup.completed` when the completion succeeds, in its transaction (`subject_user_id`, `subject_email`, `org_id`, `org_name`); `org.created` gains the value `signup` for `details.via`, written in the same transaction, and so is the `login.succeeded` row of the completion's sign-in (Amendment 2); no row holds a password or a token.
 - **OpenAPI:** the four operations are in the document with their answers.
-- **Sample (`samples/notes-web`):** `/signup` (email and company name; on success "Check your inbox" whatever the address; `429` shows the wait; `403 signup_disabled` says that sign-up is closed); `/complete-signup` (the token leaves the address bar; the preview shows the address read-only and the company name editable; the password twice, checked on the screen; success sends the person to `/login` with the address filled in and not in the URL; `invalid_token` offers to sign up again; `already_registered` says the account exists and links to sign-in; `weak_password` lists the rules); `/login` shows "Create an account" when `GET /auth/options` says `self-service`; the new routes are public; texts are English.
+- **Sample (`samples/notes-web`):** `/signup` (email and company name; on success "Check your inbox" whatever the address; `429` shows the wait; `403 signup_disabled` says that sign-up is closed); `/complete-signup` (the token leaves the address bar; the preview shows the address read-only and the company name editable; the password twice, checked on the screen; success signs the person in and opens the notes screen at once (Amendment 2; the address in no URL); `invalid_token` offers to sign up again; `already_registered` says the account exists and links to sign-in; `weak_password` lists the rules); `/login` shows "Create an account" when `GET /auth/options` says `self-service`; the new routes are public; texts are English.
 - **Off by default, nothing changes for an instance that does not turn it on** (Toviq runs `v0.1.0` in production): no new required setting, the `v0.1.0` manifest, settings and database keep working, and the earlier tests pass; the tests that enumerate the contract get lines added and nothing else: `OpenApiTests` (lines added, each replacing the previous task's line by itself and the new one, and one `foreach` array extended), `AuditTableTests` (one list extended and the one test method renamed from `...twenty_two...` to `...twenty_four...`) and `ManifestActivationTests` (one assertion); the per-IP classification has a new test class beside `RatePolicyTests`.
 - **Workflow** ([`docs/workflow.md`](../../workflow.md)): local only (no CI, no pull request), Conventional Commits in English, documentation in English. **The orchestrator makes the commits**: implementers leave their changes uncommitted in the working tree, and the orchestrator reads the diff, runs the gate and commits with the subject named in the task's last step ("Hand back"). Every task ends with that step; it lists files and a proposed subject, never a git command. One Sonnet implementer writes the code of one task, runs it and fixes what breaks; the code below is the plan's, written on paper, and the implementer's tests decide.
 - **The EF migration** (Task 3) is created with `dotnet ef migrations add AddPendingSignups`; its id is the orchestrator's business afterwards, and no test or document may name it.
@@ -95,6 +96,7 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Request | `Signup/SignupRequestEndpoint.cs`, `Email/MailRequestStore.cs`, `Audit/AuditKinds.cs` | `POST /auth/signup`: validation, the mail limit, the pending row, the audit row (Task 5) |
 | Dispatch | `Email/MailDispatcher.cs` | what the queue does with a sign-up row: drop, lock, issue a token or say "you already have an account" (Task 6) |
 | Preview and completion | `Signup/SignupService.cs`, `Signup/SignupPreviewEndpoint.cs`, `Signup/SignupCompleteEndpoint.cs` | the preview, the completion in one transaction (Tasks 7 and 8) |
+| The completion signs in (Amendment 2) | `Sessions/SessionPrincipal.cs`, `Signup/SignupCompletion.cs`, `Signup/SignupCompleteRequestHandler.cs`, `Login/AtomicSignInResult.cs`, `Login/LoginEndpoint.cs`, `Login/LoginResponseShaper.cs`, `Tokens/OpenIddictSetup.cs`, `Signup/SignupService.cs`, `Signup/SignupCompleteEndpoint.cs`; the sample's `auth/auth.service.ts` and `pages/complete-signup.ts`; `samples/notes-web/e2e/09-signup.spec.ts`, `scripts/e2e-signup.sh` | the principal both sign-ins share, the third token endpoint, the transaction handed to the sign-in, the screen that opens the notes (Tasks 14 and 15) |
 | Shipping | `Program.cs`, `appsettings.Development.json`, `deploy/auth.yaml`, `samples/notes-api/auth.yaml`, `deploy/docker-compose.prod.yml`, `deploy/.env.prod.example`, `samples/notes-web/compose.yml`, `scripts/e2e-prod.sh` | the registrations, the shipped manifests and the address in every stack (Tasks 1, 2, 7 and 9) |
 | Sample | `samples/notes-web/src/app/account-api.ts`, `texts.ts`, `auth/auth.service.ts`, `pages/signup.ts`, `pages/complete-signup.ts`, `pages/login.ts`, `app.routes.ts` and their specs, and the older `pages/login.too-many-requests.spec.ts` | the screens (Tasks 10 and 11) |
 | Live checks | `samples/notes-web/e2e/09-signup.spec.ts`, `e2e/support/mail.ts`, `scripts/e2e-signup.sh`, `scripts/e2e-web.sh` (the seeding of two addresses), the run sequences in the headers of `scripts/e2e-tenancy.sh` and `scripts/e2e-hardening.sh` | the browser and API end-to-end checks (Task 12) |
@@ -116,10 +118,12 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Thu 02.04 | 10 | The sample: API calls, texts, `/signup`, the link on `/login` |
 | Thu 02.04 | 11 | The sample: `/complete-signup`, the routes |
 | Fri 03.04 | 12 | The Playwright test and `scripts/e2e-signup.sh` |
-| Fri 03.04 | 13 | The guides, the threat model, the changelog, `check-docs.py` and the acceptance map |
-| Sat 04.04 | verifiers | The three verifiers, the "As built", the merge (outside this plan, owner-gated) |
+| Fri 03.04 | 14 | Amendment 2: the completion signs the person in: the server (the completion as a pass-through request of OpenIddict, one transaction with the sign-in) |
+| Fri 03.04 | 15 | Amendment 2: the sample opens the notes screen after a completion; the Playwright test and `scripts/e2e-signup.sh` follow |
+| Sat 04.04 | 13 | The guides, the threat model, the changelog, `check-docs.py` and the acceptance map |
+| after Task 13 | verifiers | The three verifiers, the "As built", the merge (outside this plan, owner-gated) |
 
-Tasks run in order inside a day and across days; each leaves `dotnet build -warnaserror` and the tests of the files it touches green, and each task's tests are
+Tasks run in order inside a day and across days (the order is 12, 14, 15, 13: Task 13 documents what Tasks 14 and 15 changed); each leaves `dotnet build -warnaserror` and the tests of the files it touches green, and each task's tests are
 written first and seen to fail.
 
 ---
@@ -6217,9 +6221,9 @@ In `src/app/auth/auth.interceptor.ts` change the comment text `(/reset, /verify,
 
 ---
 
-## Day 5 — Friday 03.04: the end-to-end checks, the documents, the acceptance map
+## Day 5 — Friday 03.04: the end-to-end checks, and the completion signs in
 
-When the day is done, the browser test and the API script exist for the verifiers to run on Saturday, the guides and the threat model describe the feature, the changelog has an `Unreleased` section, and the acceptance map names a guarding test for each of the 23 criteria. Two tasks.
+When the day is done, the browser test and the API script exist for the verifiers to run, and (the owner's Amendment 2 of 2026-04-03, below) a completed sign-up signs the person in: the server (Task 14), the sample and the two end-to-end checks (Task 15). Three tasks: Task 12 (written first), then the amendment's Tasks 14 and 15, which change what Tasks 8, 11 and 12 produced. The documents (Task 13) follow on Saturday.
 
 ### Task 12: The Playwright test and `scripts/e2e-signup.sh`
 
@@ -7047,6 +7051,1982 @@ echo "ALL PASS"
 
 - [ ] **Step 5: Hand back** — uncommitted. Files: everything listed under Files; `scripts/e2e-signup.sh` is a new shell script (LF): the orchestrator marks it executable. Proposed note for the verifiers: `scripts/e2e-web.sh` now waits for two mails while seeding, so its first start is a little slower. Proposed subject: `test(samples): Playwright and live checks of self-service sign-up`.
 
+---
+
+## Amendment (2026-04-03): the completion signs in
+
+The owner's **Amendment 2** of [spec 0009](../specs/0009-self-service-signup.md) (2026-04-03) replaces Decision 10: **completing a sign-up signs the person in.** `POST /auth/signup/complete` answers exactly as a successful `POST /auth/login` does (specs 0001 and 0002): `200 {"status":"authenticated","access_token"}` and the refresh cookie `auth_rt`, the token carrying the new company and the first admin's role. The `login.succeeded` audit row is written in the completion's own transaction, and **if the sign-in cannot be written nothing of the completion stays.** The sample opens the product (the notes screen) at once instead of `/login`. Accepting an invitation is unchanged (`204`, then the sign-in screen).
+
+Tasks 1 to 12 are implemented and committed (HEAD `9d87bb1`). The real files differ from this plan's text in places (review fixes): **the real files win**; the code below was written against them. This section adds **Task 14** (the server) and **Task 15** (the sample, the Playwright test and `scripts/e2e-signup.sh`) on **Friday 03.04**, and moves **Task 13** (the documents, which now also describe the sign-in) to **Saturday 04.04**. Where the text of Tasks 8, 11 and 12 (`204`, "it does not sign in", the sample going to `/login`) disagrees with this section, **this section wins**: those tasks are history, and Tasks 14 and 15 change the code and the tests they produced. Tasks run in this order: 12, 14, 15, 13.
+
+### How `/auth/login` issues a session today, and the design chosen
+
+**What was read.** `POST /auth/login` is not a plain endpoint. `OpenIddictSetup` registers the OpenIddict **token endpoint** at `auth/login` and `auth/refresh` in **pass-through** mode (`SetTokenEndpointUris`, `EnableTokenEndpointPassthrough`). A request goes through OpenIddict's pipeline first: `JsonLoginRequestHandler` takes the slot of the removed form extraction and turns the JSON body into a password-grant request; OpenIddict validates it; then the request is passed on to the routed minimal API `LoginEndpoint.HandleAsync`, which counts the attempt, checks the password, reads the membership and builds the principal (`sub`, `session_start`, `session_stamp`, `org_id`, `roles`, `permissions`, the audience, the destinations, the refresh-token lifetime) and returns an `AtomicSignInResult`. That result opens a transaction, runs `Results.SignIn(..., OpenIddict scheme)`, and OpenIddict's sign-in handlers do the rest: `RefreshTokenIssuanceHandler` asks for a refresh token (and so for an authorization, the token family), `AccessTokenClaimFilter` keeps the authorization id out of the access token and the tenancy claims out of the refresh token, `LoginResponseShaper` cuts the body to `{status, access_token}`, `SessionResponseHandler` moves the refresh token into the `auth_rt` cookie (its lifetime comes from `HttpContext.Items`). The result then stages `login.succeeded`, saves, commits, and only then lets the held body out.
+
+**What was run (a probe, in a scratch copy of `src` and `tests` outside the repository; none of its code is in this plan).**
+
+- A plain endpoint cannot sign in through OpenIddict: with the completion path left out of the token endpoint URIs, the same `Results.SignIn` fails with `InvalidOperationException: A sign-in response cannot be returned from this endpoint.` OpenIddict's server handler only signs in inside a request it recognised as one of its endpoints.
+- With `auth/signup/complete` added as a **third token endpoint URI** (pass-through) and a small extraction handler that claims the path, the endpoint — otherwise the Task 8 endpoint, its transaction handed to `AtomicSignInResult` — answered `200`, a body with exactly `access_token` and `status`, one `Set-Cookie: auth_rt` (`HttpOnly; Secure; SameSite=Strict; Path=/auth`, 14 days), an access token with `org_id` of the new company and `roles ["admin"]`; `POST /auth/refresh` with that cookie answered `200`; the audit log held one `login.succeeded`, one `signup.completed` and one `org.created`.
+- With a trigger that refuses every insert into `"OpenIddictTokens"`, and (second run) a trigger that refuses only the `login.succeeded` row of `audit_events`: the completion answered `500`, no cookie, and **no user, no company, no membership, no token, no authorization and no audit row stayed**; the pending sign-up was intact.
+- `GET /auth/signup/complete` still answered `405`; a weak password still answered its `400` with the rules and no cookie.
+- The existing test classes `Signup*`, `Login*`, `Refresh*`, `OpenApi*`, `Audit*`, `Rate*`, `JsonCharset*`, `Logout*`, `UnhandledTokenRequestGuard*`, `SessionResponseHandler*` and `UnverifiedLogin*` were run against it. The only failures that were not Npgsql connection time-outs (the machine was busy; those classes passed when run again alone, 104 tests) were the tests that expect `204` from the completion: `SignupCompleteTests`, `SignupCompleteRaceTests`, `SignupFirstAdminTests` and the `POST /auth/signup/complete` row of `OpenApiTests.Each_endpoint_describes_the_statuses_of_the_contract`. Step 3 of Task 14 updates exactly those. The plan's own code and tests below were written on paper afterwards and have **not** been run: the implementer's tests decide.
+
+**The design: the completion is an additional OpenIddict pass-through request.**
+
+1. `auth/signup/complete` becomes the **third token endpoint URI** (`OpenIddictSetup`). A new extraction handler, `SignupCompleteRequestHandler`, sits between `RefreshRequestHandler` and `UnhandledTokenRequestGuard`, claims the path and hands OpenIddict a **placeholder** password-grant request (`username` and `password` are fixed words: OpenIddict's own validation wants both non-empty). It **never reads the body**. The endpoint reads its JSON itself, exactly as Task 8 wrote it, so everything Task 8 pinned stays as it was: `403 signup_disabled` before the body is read, `415` for another charset, `400 invalid_request` for a body that is not what it takes, `405` for another method. Nothing a client sends reaches the OpenIddict request, so the path is no second way to log in (a test pins it).
+2. One shared builder, **`SessionPrincipal.Create`**, makes the principal for both `LoginEndpoint` and the completion: the subject, the session start, the security stamp, the company with the role and its permissions, the audience, the destinations, the refresh-token lifetime and the lifetime the cookie lives for. They cannot differ.
+3. `LoginResponseShaper` shapes the body for the completion path as for the login path; `SessionResponseHandler` already treats every path that is not the refresh as a sign-in. Cookie, authorization id (the family), security stamp and claim filter are therefore the same handlers' work, not copies.
+4. **Atomic with the completion's transaction.** `SignupService.CompleteAsync` no longer commits on success: it saves the account, the company with its roles, the membership and the two audit rows (`signup.completed`, `org.created`) inside its transaction and **hands the open transaction back** in a `SignupCompletion`. The endpoint reads the membership (inside that transaction: the same `AuthDbContext`), builds the principal and returns `AtomicSignInResult` **given that transaction**: it issues the session in it, stages `login.succeeded`, saves and commits once. A refusal by OpenIddict, an exception of the token store or of the audit table, or a request that goes away leaves the transaction uncommitted: everything is rolled back, the link is still usable, and the person gets the one `500 internal_error` of every failure.
+
+**Rejected.** *Sign in from a plain minimal API endpoint* — impossible (the probe above). *Two requests* (the completion answers `204` and the screen calls `/auth/login` with the password it still holds) — not atomic, the password sits in the page for a second request, and it goes through the lockout counter and the login limits. *Mint the tokens by hand* with the token and authorization managers — copies the claim handling, the reference-token format, the signing and the response shaping, and would drift from the login. *A "signup" mode inside `/auth/login`* — mixes two contracts and two sets of errors in the login pipeline. *An OpenIddict extension grant* — needs a custom grant type and its validation for no gain.
+
+**Resource rules for the implementers of Tasks 14 and 15** (this machine is shared; they apply to every step):
+
+- Build with `-maxcpucount:2`: `"C:/Program Files/dotnet/dotnet.exe" build tests/Auth.IntegrationTests -maxcpucount:2 -warnaserror`.
+- Run only the classes the task names, with `-maxThreads 2`, through the test executable, one `-class` per class: `tests/Auth.IntegrationTests/bin/Debug/net10.0/Auth.IntegrationTests.exe -maxThreads 2 -class Auth.IntegrationTests.SignupCompleteSignInTests -class Auth.IntegrationTests.SignupCompleteTests` (the form was run for the probe; unit tests of the sample run with `npx ng test --watch=false --include "<spec file>"`, one `--include` per file).
+- **No full suite** (neither `dotnet test tests/Auth.IntegrationTests` without a filter nor `npx ng test` without `--include`), and **no live runs**: no `scripts/e2e-*.sh`, no Playwright, no `docker compose`. The verifiers run those at the end. The scripts and the Playwright test are checked by reading and by `bash -n` and `npx tsc -p e2e/tsconfig.json --noEmit`.
+- A test that fails with an Npgsql "operation has timed out" while connecting is the machine being busy, not the code: run that class again, alone, before reading it as a failure.
+- The implementers leave their changes uncommitted (see Global Constraints); the code below is the plan's, written on paper, and the implementer's tests decide.
+
+**Review Focus of the amendment** (inputs the spec implies and a person is likely to meet; each has its test in the task named):
+
+1. **A sign-in that cannot be written halfway** (the token store refuses, the audit log refuses the `login.succeeded` row): nothing of the completion stays, no cookie is set, and the same link still works afterwards (`SignupCompleteSignInTests.A_token_store_that_refuses_...`, `...An_audit_log_that_refuses_the_sign_in_...`, `...A_sign_in_that_OpenIddict_refuses_...`; Task 14).
+2. **The link used twice, or the button pressed twice:** the second post is `invalid_token` with no cookie and no second session; the screen sends one request (`SignupCompleteSignInTests.The_same_body_posted_again_is_invalid_token_with_no_cookie_and_no_second_session`, `...Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token`; `complete-signup.spec.ts` "sends one request for a double submit"; Tasks 14 and 15).
+3. **Someone is already signed in, in that browser, as another person, and opens the link:** the old session is dropped before the new one (`auth.service.signup.spec.ts`; Task 15).
+4. **The Back button and a reload after completing:** Back must not land on a "link used up" page of the screen that was left (`replaceUrl`), and a reload keeps the person signed in through the cookie (`complete-signup.spec.ts` "200: ..."; `09-signup.spec.ts` reload step; Task 15).
+5. **A client that posts a login-shaped or form-encoded body at the completion path:** `400 invalid_request`, no token, no cookie (`SignupCompleteSignInTests.The_path_is_no_second_way_to_log_in`; Task 14).
+
+---
+
+### Task 14: The completion signs in: the server
+
+**Files:**
+- Create: `src/Auth.Server/Sessions/SessionPrincipal.cs`, `src/Auth.Server/Signup/SignupCompletion.cs`, `src/Auth.Server/Signup/SignupCompleteRequestHandler.cs`
+- Modify: `src/Auth.Server/Login/LoginEndpoint.cs` (the principal comes from `SessionPrincipal`), `src/Auth.Server/Login/AtomicSignInResult.cs` (replaced as a whole), `src/Auth.Server/Login/LoginResponseShaper.cs`, `src/Auth.Server/Tokens/OpenIddictSetup.cs`, `src/Auth.Server/Signup/SignupService.cs` (`CompleteAsync`), `src/Auth.Server/Signup/SignupCompleteEndpoint.cs` (replaced as a whole), `src/Auth.Server/Api/SignupRoutes.cs` (the completion route), `src/Auth.Server/Api/AccountEndpoints.cs` (one word)
+- Create (tests): `tests/Auth.IntegrationTests/SignupCompleteSignInTests.cs`
+- Modify (tests): `tests/Auth.IntegrationTests/Infrastructure/SessionApi.cs` (one word), `SignupCompleteTests.cs`, `SignupCompleteRaceTests.cs`, `SignupFirstAdminTests.cs`, `OpenApiTests.cs`, `LoginScopeTests.cs`
+
+**Interfaces:**
+- Consumes: Task 8's `SignupService`, `SignupCompleteEndpoint`, `PendingSignups`; `LoginEndpoint`, `AtomicSignInResult`, `LoginResponseShaper`, `OpenIddictSetup`, `RefreshCookie`, `SessionPolicy`, `TenantClaims`, `MembershipReader`; the test bases and helpers (`SignupTestBase`, `SessionApi`, `AccountApi`, `SignupApi`, `AccessTokens`, `PendingSignupSeed`, `RateLimitApi`).
+- Produces: `SessionPrincipal.Create(HttpContext http, ApplicationUser user, TenantContext tenant, string audience, TimeProvider clock) : ClaimsPrincipal` (also records the refresh-token lifetime for the cookie); `AtomicSignInResult(ClaimsPrincipal principal, AuditEntry entry, IDbContextTransaction? opened = null)`; `SignupService.CompleteAsync(string token, string password, string companyName, CancellationToken cancellationToken) : Task<SignupCompletion>`; `SignupCompletion(string? Error, IReadOnlyList<string>? BrokenRules, ApplicationUser? Account, Guid CompanyId, IDbContextTransaction? Transaction)` with `Succeeded`; `SignupCompleteRequestHandler.Descriptor` and `IsCompletePath(PathString)`; `SessionApi.ReadSessionAsync` public; the completion answer `200 {"status":"authenticated","access_token"}` plus the cookie (Task 15 and the documents rely on it).
+
+- [ ] **Step 1: The test helper.** In `tests/Auth.IntegrationTests/Infrastructure/SessionApi.cs` change `private static async Task<Session> ReadSessionAsync(HttpResponseMessage response)` to `public static async Task<Session> ReadSessionAsync(HttpResponseMessage response)` (it asserts the `200` and reads the access token and the cookie; the completion tests use it).
+
+- [ ] **Step 2: Write the new tests.** Create `tests/Auth.IntegrationTests/SignupCompleteSignInTests.cs`:
+
+```csharp
+using System.Net;
+using System.Text.Json;
+using Auth.Infrastructure.Identity;
+using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Audit;
+using Auth.Server.Email;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.JsonWebTokens;
+using OpenIddict.Abstractions;
+using OpenIddict.Server;
+
+namespace Auth.IntegrationTests;
+
+/// <summary>
+/// Spec 0009, Amendment 2: completing a sign-up signs the person in, and answers as a successful <c>POST /auth/login</c> does. The sign-in is part of the
+/// completion: if it cannot be written, nothing of the completion stays.
+/// </summary>
+public sealed class SignupCompleteSignInTests : SignupTestBase
+{
+    // While true, a handler of the test refuses every sign-in that OpenIddict is asked for: the completion must then fail as a whole.
+    private bool refusing;
+
+    private const string Mixed = "Anna@Firma.test";
+    private const string WeakRules = """{"error":"weak_password","rules":["too_short","requires_upper","requires_digit"]}""";
+
+    // Triggers that make the database refuse one write, to fail the sign-in after the completion has done its own work.
+    private const string RefuseEverything =
+        "CREATE FUNCTION refuse_row() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$ LANGUAGE plpgsql";
+    private const string RefuseLoginSucceeded =
+        "CREATE FUNCTION refuse_row() RETURNS trigger AS $$ BEGIN IF NEW.kind = 'login.succeeded' THEN RAISE EXCEPTION 'refused'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql";
+    private const string RefuseTokens =
+        """CREATE TRIGGER refuse_row BEFORE INSERT ON "OpenIddictTokens" FOR EACH ROW EXECUTE FUNCTION refuse_row()""";
+    private const string RefuseAudit =
+        "CREATE TRIGGER refuse_row BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION refuse_row()";
+    private const string AllowTokens = """DROP TRIGGER refuse_row ON "OpenIddictTokens" """;
+    private const string AllowAudit = "DROP TRIGGER refuse_row ON audit_events";
+
+    // The claims of an access token as LoginTests pins them: the contract, OpenIddict's own metadata, and the three of spec 0005.
+    private static readonly string[] AccessTokenClaims = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"];
+
+    public SignupCompleteSignInTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        Factory.WithServices(services => services.Configure<OpenIddictServerOptions>(options => options.Handlers.Add(
+            OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddictServerEvents.ProcessSignInContext>()
+                .UseInlineHandler(context =>
+                {
+                    if (refusing)
+                    {
+                        context.Reject(OpenIddictConstants.Errors.ServerError, "Refused by the test.");
+                    }
+
+                    return ValueTask.CompletedTask;
+                })
+                .SetOrder(OpenIddictServerHandlers.EvaluateGeneratedTokens.Descriptor.Order + 600)   // after the handlers that decide the tokens, before any is made
+                .SetType(OpenIddictServerHandlerType.Custom)
+                .Build())));
+    }
+
+    private Task<long> TokenRowsAsync() =>
+        InDbAsync(db => db.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM "OpenIddictTokens" """).SingleAsync(TestContext.Current.CancellationToken));
+
+    private Task<long> AuthorizationRowsAsync() =>
+        InDbAsync(db => db.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM "OpenIddictAuthorizations" """).SingleAsync(TestContext.Current.CancellationToken));
+
+    private Task<Guid> CompanyIdAsync() =>
+        InDbAsync(db => db.Companies.Where(c => c.Name == CompanyName).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));
+
+    /// <summary>The completion failed halfway: <c>500</c>, no cookie, nothing of it stays, and the link is as it was.</summary>
+    private async Task AssertNothingStaysAsync(HttpResponseMessage failed, string token)
+    {
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.False(failed.Headers.Contains("Set-Cookie"), "A completion that failed must not write the cookie.");
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));   // only the development company
+        Assert.Equal(0L, await TokenRowsAsync());
+        Assert.Equal(0L, await AuthorizationRowsAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.SignupCompleted));
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+        Assert.DoesNotContain(await AuditAsync(AuditKinds.OrgCreated), row => row.OrgName == CompanyName);
+        var pending = Assert.Single(await PendingAsync());
+        Assert.Equal(EmailTokens.HashOf(token), pending.TokenHash);   // the use of the link was rolled back with the rest
+    }
+
+    [Fact]
+    public async Task The_completion_answers_as_a_login_does_with_the_status_and_the_access_token_only()   // criterion 9
+    {
+        var token = await MailedAsync(Mixed);
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+
+        var raw = await done.Content.ReadAsStringAsync();
+        Assert.True(done.StatusCode == HttpStatusCode.OK, $"Expected 200, got {(int)done.StatusCode}: {raw}");
+        Assert.Equal("application/json", done.Content.Headers.ContentType?.MediaType);
+        Assert.True(done.Headers.CacheControl?.NoStore, "Cache-Control: no-store expected");
+        Assert.Contains(done.Headers.Pragma, p => p.Name == "no-cache");
+        using var body = JsonDocument.Parse(raw);
+        Assert.Equal(["access_token", "status"], body.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("authenticated", body.RootElement.GetProperty("status").GetString());
+        var cookie = SessionApi.RefreshCookieOf(done);
+        Assert.DoesNotContain(cookie.Value.Value!, raw, StringComparison.Ordinal);   // the refresh token never reaches a body
+    }
+
+    [Fact]
+    public async Task The_cookie_and_the_headers_are_those_of_a_login()   // criterion 9
+    {
+        var token = await MailedAsync(Mixed);
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        using var login = await LoginApi.Login(Client, Mixed, Password);
+
+        Assert.Single(done.Headers.GetValues("Set-Cookie"));
+        var cookie = SessionApi.RefreshCookieOf(done);
+        Assert.True(cookie.HttpOnly);
+        Assert.True(cookie.Secure);
+        Assert.Equal(Microsoft.Net.Http.Headers.SameSiteMode.Strict, cookie.SameSite);
+        Assert.Equal("/auth", cookie.Path.Value);
+        Assert.Equal(TimeSpan.FromDays(14), cookie.MaxAge);
+        Assert.False(cookie.Domain.HasValue);
+        Assert.Null(cookie.Expires);
+
+        var reference = SessionApi.RefreshCookieOf(login);
+        Assert.Equal(reference.HttpOnly, cookie.HttpOnly);
+        Assert.Equal(reference.Secure, cookie.Secure);
+        Assert.Equal(reference.SameSite, cookie.SameSite);
+        Assert.Equal(reference.Path, cookie.Path);
+        Assert.Equal(reference.MaxAge, cookie.MaxAge);
+        Assert.NotEqual(reference.Value.Value, cookie.Value.Value);   // a session of its own
+        Assert.Equal(LoginApi.HeaderNames(login), LoginApi.HeaderNames(done));
+    }
+
+    [Fact]
+    public async Task The_token_carries_the_new_company_and_the_first_admins_role_and_the_claims_of_a_login()   // criterion 9
+    {
+        var token = await MailedAsync(Mixed);
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        var user = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken));
+        var company = await CompanyIdAsync();
+        var jwt = new JsonWebToken(session.AccessToken);
+        Assert.Equal(AccessTokenClaims, jwt.Claims.Select(c => c.Type).Distinct().Order(StringComparer.Ordinal));
+        Assert.Equal("at+jwt", jwt.Typ);
+        Assert.Equal(user.Id.ToString(), jwt.Subject);
+        Assert.Equal(company.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
+        Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
+        Assert.Equal(
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            AccessTokens.Array(session.AccessToken, "permissions"));
+
+        // A login a moment later says the same.
+        var later = await SessionApi.LoginAsync(Client, Mixed, Password);
+        var laterJwt = new JsonWebToken(later.AccessToken);
+        Assert.Equal(jwt.Subject, laterJwt.Subject);
+        Assert.Equal(jwt.Audiences, laterJwt.Audiences);
+        Assert.Equal(jwt.Issuer, laterJwt.Issuer);
+        Assert.Equal(AccessTokens.Text(session.AccessToken, "org_id"), AccessTokens.Text(later.AccessToken, "org_id"));
+        Assert.Equal(AccessTokens.Array(session.AccessToken, "roles"), AccessTokens.Array(later.AccessToken, "roles"));
+        Assert.Equal(AccessTokens.Array(session.AccessToken, "permissions"), AccessTokens.Array(later.AccessToken, "permissions"));
+    }
+
+    [Fact]
+    public async Task The_cookie_refreshes_like_a_logins_and_belongs_to_a_family()   // criterion 9
+    {
+        var token = await MailedAsync();
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
+            var entry = await tokens.FindByReferenceIdAsync(session.RefreshToken);
+            Assert.NotNull(entry);
+            Assert.Equal(OpenIddictConstants.TokenTypeIdentifiers.RefreshToken, await tokens.GetTypeAsync(entry));
+            Assert.False(string.IsNullOrEmpty(await tokens.GetAuthorizationIdAsync(entry)), "The refresh token has no authorization (family).");
+        }
+
+        var refreshed = await SessionApi.RefreshOk(Client, session.RefreshToken);
+        Assert.Equal(AccessTokens.Text(session.AccessToken, "org_id"), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+        Assert.Equal(["admin"], AccessTokens.Array(refreshed.AccessToken, "roles"));
+        Assert.NotEqual(session.RefreshToken, refreshed.RefreshToken);   // rotated
+
+        using var loggedOut = await SessionApi.Logout(Client, refreshed.RefreshToken);
+        Assert.Equal(HttpStatusCode.NoContent, loggedOut.StatusCode);
+        using var after = await SessionApi.Refresh(Client, refreshed.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(after);   // the family ended with the logout
+    }
+
+    [Fact]
+    public async Task The_session_starts_at_the_completion_and_ends_at_the_cap_of_a_login()   // spec 0002: the absolute cap counts from the start of the session
+    {
+        var token = await MailedAsync();
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        Clock.Advance(TimeSpan.FromDays(13));
+        var day13 = await SessionApi.RefreshOk(Client, session.RefreshToken);
+        Clock.Advance(TimeSpan.FromDays(13));
+        var day26 = await SessionApi.RefreshOk(Client, day13.RefreshToken);
+        Assert.InRange(day26.Cookie.MaxAge!.Value, TimeSpan.FromDays(4) - TimeSpan.FromSeconds(1), TimeSpan.FromDays(4));   // 4 days to the cap
+
+        Clock.Advance(TimeSpan.FromDays(4) + TimeSpan.FromMinutes(1));
+        using var response = await SessionApi.Refresh(Client, day26.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(response);
+    }
+
+    [Fact]
+    public async Task The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it()   // spec 0004 -> Effects of a reset
+    {
+        var token = await MailedAsync();
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var account = await users.FindByEmailAsync(Address);
+            Assert.NotNull(account);
+            Assert.True((await users.UpdateSecurityStampAsync(account)).Succeeded);
+        }
+
+        using var refreshed = await SessionApi.Refresh(Client, session.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(refreshed);
+    }
+
+    [Fact]
+    public async Task The_completion_writes_login_succeeded_beside_signup_completed_and_org_created()   // criterion 19, Amendment 2
+    {
+        var token = await MailedAsync(Mixed);
+
+        using var done = await RateLimitApi.SendAsync(
+            Client, HttpMethod.Post, SignupApi.CompletePath, CallerAddress, null,
+            $$"""{"token":"{{token}}","password":"{{Password}}","company_name":"{{CompanyName}}"}""");
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        var user = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken));
+        var company = await CompanyIdAsync();
+        var signedIn = await SingleAsync(AuditKinds.LoginSucceeded);
+        Assert.Equal(user.Id, signedIn.ActorUserId);
+        Assert.Equal(user.Id, signedIn.SubjectUserId);
+        Assert.Equal(Mixed, signedIn.SubjectEmail);
+        Assert.Equal(company, signedIn.OrgId);
+        Assert.Equal(CompanyName, signedIn.OrgName);
+        Assert.Equal(CallerAddress, signedIn.ClientIp);
+        Assert.Null(signedIn.TargetId);
+
+        var completed = await SingleAsync(AuditKinds.SignupCompleted);
+        var created = Assert.Single(await AuditAsync(AuditKinds.OrgCreated), row => row.OrgId == company);
+        Assert.Equal("signup", AuditApi.Text(created, "via"));
+        Assert.Equal(completed.OrgId, signedIn.OrgId);
+        Assert.Empty(await AuditAsync(AuditKinds.LoginFailed));
+        await AssertNoSecretsAsync(Password, token, session.AccessToken, session.RefreshToken);
+    }
+
+    [Fact]
+    public async Task A_token_store_that_refuses_leaves_nothing_of_the_completion_and_the_link_still_works()   // Amendment 2: the sign-in is part of the completion
+    {
+        var token = await MailedAsync();
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseEverything, TestContext.Current.CancellationToken));
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseTokens, TestContext.Current.CancellationToken));
+
+        using (var failed = await SignupApi.Complete(Client, token, Password, CompanyName))
+        {
+            await AssertNothingStaysAsync(failed, token);
+        }
+
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(AllowTokens, TestContext.Current.CancellationToken));
+        using var again = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(again);
+        Assert.NotEmpty(session.AccessToken);
+    }
+
+    [Fact]
+    public async Task An_audit_log_that_refuses_the_sign_in_leaves_nothing_of_the_completion_and_the_link_still_works()   // Amendment 2: the sign-in is part of the completion
+    {
+        var token = await MailedAsync();
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseLoginSucceeded, TestContext.Current.CancellationToken));
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseAudit, TestContext.Current.CancellationToken));
+
+        using (var failed = await SignupApi.Complete(Client, token, Password, CompanyName))
+        {
+            await AssertNothingStaysAsync(failed, token);   // the tokens were issued first and went with the rollback
+        }
+
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(AllowAudit, TestContext.Current.CancellationToken));
+        using var again = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(again);
+        Assert.NotEmpty(session.AccessToken);
+        Assert.Single(await AuditAsync(AuditKinds.LoginSucceeded));
+    }
+
+    [Fact]
+    public async Task A_sign_in_that_OpenIddict_refuses_leaves_nothing_of_the_completion_and_the_link_still_works()   // Amendment 2: an error of OpenIddict is not an answer that may leave the account behind
+    {
+        var token = await MailedAsync();
+        refusing = true;
+
+        using (var failed = await SignupApi.Complete(Client, token, Password, CompanyName))
+        {
+            await AssertNothingStaysAsync(failed, token);   // 500, no cookie, and nothing of the completion
+        }
+
+        refusing = false;
+        using var again = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(again);
+        Assert.NotEmpty(session.AccessToken);
+    }
+
+    [Fact]
+    public async Task The_same_body_posted_again_is_invalid_token_with_no_cookie_and_no_second_session()   // criterion 12
+    {
+        var token = await MailedAsync();
+        using (var first = await SignupApi.Complete(Client, token, Password, CompanyName))
+        {
+            _ = await SessionApi.ReadSessionAsync(first);
+        }
+
+        var tokens = await TokenRowsAsync();
+        var authorizations = await AuthorizationRowsAsync();
+        Assert.Equal(1L, authorizations);   // the one session of the first post
+
+        using (var second = await SignupApi.Complete(Client, token, Password, CompanyName))
+        {
+            await AccountApi.AssertErrorAsync(second, AccountApi.InvalidToken);   // never stored, and no cookie
+        }
+
+        Assert.Equal(tokens, await TokenRowsAsync());
+        Assert.Equal(authorizations, await AuthorizationRowsAsync());
+        Assert.Single(await AuditAsync(AuditKinds.LoginSucceeded));
+    }
+
+    [Fact]
+    public async Task Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token()   // criteria 11, 12, 14
+    {
+        const string Taken = "taken@firma.test";
+        var token = await MailedAsync();
+        await CreateUserAsync(Taken, confirmed: true, member: false);
+        var takenToken = await PendingSignupSeed.IssueAsync(Factory.Services, Taken, CompanyName);
+
+        using (var weak = await SignupApi.Complete(Client, token, "short", CompanyName))
+        {
+            await AccountApi.AssertErrorAsync(weak, WeakRules);   // 400 with the rules, never stored, no cookie
+        }
+
+        using (var unknown = await SignupApi.Complete(Client, EmailTokens.NewToken(), Password, CompanyName))
+        {
+            await AccountApi.AssertErrorAsync(unknown, AccountApi.InvalidToken);
+        }
+
+        using (var malformed = await AccountApi.PostRaw(Client, SignupApi.CompletePath, """{"token":"x"}"""))
+        {
+            await AccountApi.AssertErrorAsync(malformed, AccountApi.InvalidRequest);
+        }
+
+        using (var registered = await SignupApi.Complete(Client, takenToken, Password, CompanyName))
+        {
+            await SignupApi.AssertAlreadyRegisteredAsync(registered);
+        }
+
+        Assert.Equal(0L, await TokenRowsAsync());
+        Assert.Equal(0L, await AuthorizationRowsAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+    }
+
+    [Fact]
+    public async Task The_path_is_no_second_way_to_log_in()   // the pass-through request is a placeholder: what the client sends is read by the endpoint alone
+    {
+        using var form = await Client.PostAsync(
+            SignupApi.CompletePath,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "password",
+                ["username"] = Factory.SeedEmail,
+                ["password"] = Factory.SeedPassword,
+            }));
+        await AccountApi.AssertErrorAsync(form, AccountApi.InvalidRequest);
+
+        using var credentials = await AccountApi.PostRaw(
+            Client, SignupApi.CompletePath, JsonSerializer.Serialize(new { email = Factory.SeedEmail, password = Factory.SeedPassword }));
+        await AccountApi.AssertErrorAsync(credentials, AccountApi.InvalidRequest);
+
+        Assert.Equal(0L, await TokenRowsAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+    }
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("PUT")]
+    [InlineData("DELETE")]
+    public async Task Other_methods_are_still_405(string method)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(method), SignupApi.CompletePath);
+
+        using var response = await Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+}
+```
+
+- [ ] **Step 3: Update the tests that expect `204`.** The completion answers `200` now; the invitation acceptance stays `204`.
+
+(a) `tests/Auth.IntegrationTests/SignupCompleteTests.cs`. Replace the whole first test (`A_visitor_signs_up_finishes_and_logs_in_as_the_admin_of_a_company_of_their_own`) by
+
+```csharp
+    [Fact]
+    public async Task A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own()   // criteria 1, 3, 8, 9
+    {
+        using (var options = await SignupApi.Options(Client))
+        {
+            Assert.Equal("""{"signup":"self-service"}""", await options.Content.ReadAsStringAsync());
+        }
+
+        var token = await MailedAsync("Anna@Firma.test");
+        using (var preview = await SignupApi.Preview(Client, token))
+        {
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        }
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);   // 200, the access token and the refresh cookie, as a login answers
+
+        var company = await InDbAsync(db => db.Companies.Where(c => c.Name == CompanyName).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(company.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
+        Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
+        Assert.Equal(
+            ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
+            AccessTokens.Array(session.AccessToken, "permissions"));
+
+        // A login with the chosen password says the same.
+        var login = await SessionApi.LoginAsync(Client, "Anna@Firma.test", Password);
+        Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        Assert.Equal(AccessTokens.Array(session.AccessToken, "permissions"), AccessTokens.Array(login.AccessToken, "permissions"));
+    }
+```
+
+In the same file every other `HttpStatusCode.NoContent` about the completion becomes `HttpStatusCode.OK`: in `The_account_company_roles_and_membership_are_what_the_contract_says` (`done`), `The_company_name_of_the_request_is_only_a_suggestion` (`done`), `A_weak_password_names_the_rules_creates_nothing_and_leaves_the_token_usable` (`good`), `Malformed_bodies_are_400_invalid_request_and_leave_the_token_usable` (`good`), `A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (`first` and `current`), `Failed_logins_before_the_sign_up_do_not_lock_the_new_account` (`done`). **Not** the one in `An_account_made_in_the_meantime_is_409_already_registered_and_the_pending_sign_up_is_gone`: `accepted` is the invitation (`TenancyApi.Accept`) and stays `NoContent`.
+
+In `A_completion_is_recorded_with_the_account_the_company_and_the_address_and_nothing_secret` replace the line `await AccountApi.AssertEmptyAsync(done, HttpStatusCode.NoContent);` by `var session = await SessionApi.ReadSessionAsync(done);` and the last line `await AssertNoSecretsAsync(Password, token);` by `await AssertNoSecretsAsync(Password, token, session.AccessToken, session.RefreshToken);`.
+
+In `No_token_password_or_address_reaches_the_log` replace the block
+
+```csharp
+        using (await SignupApi.Complete(Client, token, Password, CompanyName))   // success
+        {
+        }
+```
+
+by
+
+```csharp
+        SessionApi.Session session;
+        using (var signedIn = await SignupApi.Complete(Client, token, Password, CompanyName))   // success: it signs in
+        {
+            session = await SessionApi.ReadSessionAsync(signedIn);
+        }
+```
+
+and the list `new[] { token, boomToken, takenToken, Password, Address, Taken, Boom }` by `new[] { token, boomToken, takenToken, Password, Address, Taken, Boom, session.AccessToken, session.RefreshToken }`. (If the log of a library does hold one of the two tokens, that is a finding for the owner, not a weaker assertion.)
+
+(b) `SignupCompleteRaceTests.cs`: rename `Of_parallel_completions_with_one_token_exactly_one_is_204` to `Of_parallel_completions_with_one_token_exactly_one_is_200`; in it and in the other tests change `HttpStatusCode.NoContent` to `HttpStatusCode.OK` for `r.StatusCode` (both lines of the count and the `refused` list), `completed` (in `A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account`, the `completionFirst` branch), `second` (in `A_mail_that_replaces_the_link_while_a_completion_waits_for_it_makes_the_completion_invalid_token`) and `done` (in `A_mail_that_waits_for_a_completion_never_leaves_a_working_link_to_a_used_sign_up`). **Not** `accepted` (the invitation: `NoContent`). In `Of_parallel_completions_with_one_token_exactly_one_is_200` add, after its last assertion (`Assert.Empty(await PendingAsync());`), that the one winner made the one session:
+
+```csharp
+        Assert.Equal(1L, await InDbAsync(db => db.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM "OpenIddictAuthorizations" """).SingleAsync(TestContext.Current.CancellationToken)));
+```
+
+(c) `SignupFirstAdminTests.cs`: `Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);` becomes `Assert.Equal(HttpStatusCode.OK, done.StatusCode);`.
+
+(d) `OpenApiTests.cs`: in `Each_endpoint_describes_the_statuses_of_the_contract` change the line `[InlineData("POST /auth/signup/complete", "204,400,403,409,415,429")]` to `[InlineData("POST /auth/signup/complete", "200,400,403,409,415,429")]`; in `The_answers_that_set_or_clear_the_refresh_cookie_say_so` add `[InlineData("POST /auth/signup/complete", "200")]` after the login line; in `No_other_answer_says_it_sets_a_cookie` change the array to `string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204"];`; and add this test after `The_answers_that_set_or_clear_the_refresh_cookie_say_so`:
+
+```csharp
+    [Fact]
+    public async Task The_completion_answers_with_the_body_of_the_login()   // criterion 20, Amendment 2
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var operations = Operations(await DescriptionAsync(factory));
+
+        string Schema(string endpoint) =>
+            operations[endpoint]["responses"]!["200"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>();
+
+        Assert.Equal(Schema("POST /auth/login"), Schema("POST /auth/signup/complete"));
+    }
+```
+
+(e) `LoginScopeTests.cs` (the rows that need nothing new): in `ShouldShape_requires_a_password_grant_on_the_login_path` add
+
+```csharp
+    [InlineData("password", "/auth/signup/complete", true)]
+    [InlineData("password", "/auth/SIGNUP/complete/", true)]
+    [InlineData("password", "/auth/signup/complete//", false)]
+    [InlineData("refresh_token", "/auth/signup/complete", false)]
+```
+
+and in `IsLoginRequest_matches_the_login_path_only` add `[InlineData("/auth/signup/complete", false)]` (the login handler must not claim the completion's path). The theory for `SignupCompleteRequestHandler.IsCompletePath` itself is written in Step 9, because it names a type that does not exist yet.
+
+- [ ] **Step 4: Build, and see the new tests fail.** `"C:/Program Files/dotnet/dotnet.exe" build tests/Auth.IntegrationTests -maxcpucount:2 -warnaserror` builds (the tests only use the helper of Step 1). Then run the classes of this step (the resource rules above): `-class Auth.IntegrationTests.SignupCompleteSignInTests -class Auth.IntegrationTests.SignupCompleteTests -class Auth.IntegrationTests.SignupCompleteRaceTests -class Auth.IntegrationTests.SignupFirstAdminTests -class Auth.IntegrationTests.LoginScopeTests`. Expected: the tests of the completion fail with `Expected: OK, Actual: NoContent` (the sign-in refusals, `The_same_body_posted_again_...` and the `ShouldShape` rows of `LoginScopeTests` fail as well; the `OpenApiTests` rows are not run yet). Three of the new tests **pass already**, because they pin behaviour that holds before the change and must go on holding: `Other_methods_are_still_405`, `The_path_is_no_second_way_to_log_in` and `Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token` (the second is the one that would turn red if the pass-through ever let a client's body reach OpenIddict). That is intended; do not make them fail to "see them red".
+
+- [ ] **Step 5: `SessionPrincipal`, and the login uses it.** Create `src/Auth.Server/Sessions/SessionPrincipal.cs`:
+
+```csharp
+using System.Globalization;
+using System.Security.Claims;
+using Auth.Infrastructure.Identity;
+using Auth.Server.Tenancy;
+using Microsoft.IdentityModel.Tokens;
+using OpenIddict.Abstractions;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+
+namespace Auth.Server.Sessions;
+
+/// <summary>
+/// The principal of a new session, which <c>POST /auth/login</c> and <c>POST /auth/signup/complete</c> hand to OpenIddict to sign in. One place
+/// builds it, so that the two sign-ins cannot differ: the subject, the start of the session, the security stamp, the company with the role and
+/// what it grants, the audience, the destinations, and the lifetime of the refresh token (which the cookie lives for as well).
+/// </summary>
+public static class SessionPrincipal
+{
+    public static ClaimsPrincipal Create(HttpContext http, ApplicationUser user, TenantContext tenant, string audience, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(audience);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        var identity = new ClaimsIdentity(
+            authenticationType: TokenValidationParameters.DefaultAuthenticationType,
+            nameType: Claims.Name,
+            roleType: Claims.Role);
+
+        // The access token carries `sub` and the tenancy claims below (`org_id`, `roles`, `permissions`), and nothing else:
+        // no email, name or scope.
+        identity.SetClaim(Claims.Subject, user.Id.ToString());
+        identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+
+        // The stamp of the account as this sign-in read it. A session that began before a password change, even one
+        // whose sign-in was still in flight when the change was committed, carries the old stamp and cannot refresh.
+        identity.SetClaim(SessionPolicy.StampClaim, user.SecurityStamp);
+
+        // The company, the role and what it grants, read from the database now.
+        TenantClaims.Apply(identity, tenant);
+
+        var principal = new ClaimsPrincipal(identity);
+        principal.SetResources(audience);
+        // `sub` and the tenancy claims make the access token; the session start stays in the refresh token only.
+        principal.SetDestinations(TenantClaims.DestinationsOf);
+        principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
+        http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
+        return principal;
+    }
+}
+```
+
+In `src/Auth.Server/Login/LoginEndpoint.cs` replace everything from the line `var identity = new ClaimsIdentity(` up to and including the line `http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;` (the comments between them go with it) by
+
+```csharp
+        var principal = SessionPrincipal.Create(http, user, tenant, tokens.Value.Audience, clock);
+```
+
+and remove from the top of the file the five `using` lines that nothing in it uses any more: `using System.Globalization;`, `using System.Security.Claims;`, `using Microsoft.IdentityModel.Tokens;`, `using OpenIddict.Abstractions;` and `using static OpenIddict.Abstractions.OpenIddictConstants;` (checked: the file builds without them). Build, then run `-class Auth.IntegrationTests.LoginTests -class Auth.IntegrationTests.LoginCookieTests -class Auth.IntegrationTests.RefreshTests -class Auth.IntegrationTests.SessionLifetimeTests`: unchanged, green.
+
+- [ ] **Step 6: `AtomicSignInResult` can take the transaction of a completion.** Replace `src/Auth.Server/Login/AtomicSignInResult.cs` by
+
+```csharp
+using System.Security.Claims;
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Audit;
+using Microsoft.EntityFrameworkCore.Storage;
+using OpenIddict.Server.AspNetCore;
+
+namespace Auth.Server.Login;
+
+/// <summary>
+/// Issues the session of a sign-in and writes the <c>login.succeeded</c> row in one transaction (spec 0008: a change and its row are
+/// written together, or neither is). OpenIddict makes the authorization and the token entries, in several saves, on the request's own
+/// <see cref="AuthDbContext"/>; the transaction holds all of them and the row. The body of the answer is held in memory
+/// until the transaction has committed, so that no token leaves the server for a session that was rolled back; on any failure the
+/// response is cleared (no cookie either) and the exception goes to the outermost error handler (<c>500 internal_error</c>).
+/// An answer that is not a <c>200</c> (OpenIddict refused the sign-in) is passed on as it is and nothing is committed.
+/// A login has the result open the transaction. A completed sign-up (spec 0009, Amendment 2) passes the one that still holds the account, the
+/// company and the membership it has just made (<paramref name="opened"/>): the sign-in is then part of the completion, a sign-in that
+/// cannot be written rolls the whole completion back, and so does an answer of OpenIddict that is not a <c>200</c> (it is a <c>500</c> then, not
+/// an error that leaves the account behind). The result owns that transaction from the first line of <see cref="ExecuteAsync"/> and disposes it.
+/// </summary>
+public sealed class AtomicSignInResult(ClaimsPrincipal principal, AuditEntry entry, IDbContextTransaction? opened = null) : IResult
+{
+    /// <inheritdoc />
+    public async Task ExecuteAsync(HttpContext httpContext)
+    {
+        // Ownership first: from this line on, whatever happens below, the transaction that was handed over is disposed (rolled back unless committed).
+        var transaction = opened;
+        try
+        {
+            ArgumentNullException.ThrowIfNull(httpContext);
+
+            var db = httpContext.RequestServices.GetRequiredService<AuthDbContext>();
+            var audit = httpContext.RequestServices.GetRequiredService<AuditLog>();
+            var realBody = httpContext.Response.Body;
+            await using var held = new MemoryStream();
+            httpContext.Response.Body = held;
+            try
+            {
+                transaction ??= await db.Database.BeginTransactionAsync(httpContext.RequestAborted);
+                await Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme)
+                    .ExecuteAsync(httpContext);
+                if (httpContext.Response.StatusCode == StatusCodes.Status200OK)
+                {
+                    // Staged only now that OpenIddict has not refused: a refused sign-in leaves no row tracked on the request's context.
+                    audit.Stage(entry);
+                    await db.SaveChangesAsync(httpContext.RequestAborted);
+                    await transaction.CommitAsync(httpContext.RequestAborted);
+                }
+                else if (opened is not null)
+                {
+                    // An error of OpenIddict must not be the answer to a completion whose account would stay: roll it back, and say 500.
+                    throw new InvalidOperationException("OpenIddict refused the sign-in of a completed sign-up; the completion is rolled back.");
+                }
+            }
+            catch
+            {
+                httpContext.Response.Body = realBody;
+                httpContext.Response.Clear();
+                throw;
+            }
+
+            httpContext.Response.Body = realBody;
+            held.Position = 0;
+            await held.CopyToAsync(realBody, httpContext.RequestAborted);
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 7: `SignupService.CompleteAsync` hands the transaction over.** Create `src/Auth.Server/Signup/SignupCompletion.cs`:
+
+```csharp
+using Auth.Infrastructure.Identity;
+using Microsoft.EntityFrameworkCore.Storage;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// How <see cref="SignupService.CompleteAsync"/> ended. A refusal has an <see cref="Error"/> (and, for a weak password, the rules it breaks in
+/// <see cref="BrokenRules"/>). Success has the new <see cref="Account"/>, the id of the company it is the first admin of, and the
+/// <see cref="Transaction"/> that still holds them, <b>not committed</b>: whoever receives it signs the person in inside it and commits (spec 0009,
+/// Amendment 2); letting it go rolls everything back.
+/// </summary>
+public sealed record SignupCompletion(
+    string? Error = null,
+    IReadOnlyList<string>? BrokenRules = null,
+    ApplicationUser? Account = null,
+    Guid CompanyId = default,
+    IDbContextTransaction? Transaction = null)
+{
+    public bool Succeeded => Error is null;
+}
+```
+
+In `src/Auth.Server/Signup/SignupService.cs` replace the whole method `CompleteAsync` (its `<summary>` included) and the private `Refused` helper by:
+
+```csharp
+    /// <summary>
+    /// Completes the sign-up as far as the database goes. Refused with <c>invalid_token</c>, with <c>weak_password</c> (the broken rules are
+    /// <see cref="SignupCompletion.BrokenRules"/>; the token stays usable) or with <c>already_registered</c> (an account has the address by now:
+    /// the pending sign-up is deleted). The checks are made in that order. The caller has checked <paramref name="companyName"/> against the
+    /// name rule and <paramref name="password"/> for NUL.
+    /// On success nothing is committed: the account, the company with its roles, the membership and the audit rows are saved inside a transaction
+    /// that is handed to the caller in <see cref="SignupCompletion.Transaction"/>, because the completion signs the person in (spec 0009,
+    /// Amendment 2) and the sign-in is part of it: if it cannot be written, nothing of the completion stays. Every refusal and every exception
+    /// leaves the transaction rolled back (except that an account found under the address deletes the pending sign-up).
+    /// </summary>
+    public async Task<SignupCompletion> CompleteAsync(string token, string password, string companyName, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(password);
+        ArgumentNullException.ThrowIfNull(companyName);
+
+        var hash = EmailTokens.HashOf(token);
+        var now = StorableTime.Now(clock);
+
+        // Leaving this method without handing the transaction over rolls everything back, the use of the token included.
+        var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var handedOver = false;
+        try
+        {
+            // Which address is this link for? Read first, because the address is what is locked.
+            var address = await db.PendingSignups.AsNoTracking()
+                .Where(p => p.TokenHash == hash && p.TokenExpiresAt > now)
+                .Select(p => p.NormalizedEmail)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (address is null)
+            {
+                return Refused(TenancyErrors.InvalidToken);
+            }
+
+            // One address, one account-maker at a time: the lock that invitation acceptance takes, so that whichever of a completion and an
+            // acceptance comes second sees the account the first one made and answers `409`, instead of failing on the unique user name.
+            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({address}, 0))", cancellationToken);
+
+            // The token is used up by one statement: of parallel completions with one token one gets the row, and the others, which waited
+            // for the lock, find nothing.
+            var pending = await PendingSignups.ConsumeAsync(db, hash, now, cancellationToken);
+            if (pending is null)
+            {
+                return Refused(TenancyErrors.InvalidToken);
+            }
+
+            var account = new ApplicationUser { UserName = pending.Email, Email = pending.Email, EmailConfirmed = true };
+            var broken = await PasswordRules.BrokenAsync(users, account, password);
+            if (broken.Count > 0)
+            {
+                return new SignupCompletion(TenancyErrors.WeakPassword, broken);
+            }
+
+            // Any account under the address, whatever its spelling or state: the lookup is by the normalised address (any account whose address normalises to it).
+            if (await db.Users.AsNoTracking().AnyAsync(u => u.NormalizedEmail == pending.NormalizedEmail, cancellationToken))
+            {
+                // Committed, not rolled back: the pending sign-up is gone, as the contract says.
+                await transaction.CommitAsync(CancellationToken.None);
+                return Refused(TenancyErrors.AlreadyRegistered);
+            }
+
+            // The link came through the mailbox of the address: that proves it, and it is why the email is confirmed and a password is set here.
+            AccountSessions.Ensure(await users.CreateAsync(account, password), "Could not set up the account");
+            // A new account has no sessions or links yet, but its address may have a login streak: streaks do not need an account.
+            await AccountSessions.EndAllAsync(db, tokens, authorizations, account, cancellationToken);
+
+            var created = await companies.CreateAsync(companyName, cancellationToken, via: "signup");
+            if (!created.Succeeded)
+            {
+                throw new InvalidOperationException($"Could not create the company: {created.Error}.");
+            }
+
+            // The role is the company's own copy of the first admin's default role, found by its normalised name.
+            var roleKey = NameInput.Normalize(manifest.Current.FirstAdminRole.Name);
+            var roleId = await db.CompanyRoles.AsNoTracking()
+                .Where(r => r.CompanyId == created.Value && r.NormalizedName == roleKey)
+                .Select(r => r.Id)
+                .SingleAsync(cancellationToken);
+            db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = created.Value, RoleId = roleId, JoinedAt = now });
+
+            // The person who holds the link is anonymous: no actor. Who, where and what company; never the link or the password.
+            audit.Stage(new AuditEntry
+            {
+                Kind = AuditKinds.SignupCompleted,
+                SubjectUserId = account.Id,
+                SubjectEmail = account.Email,
+                OrgId = created.Value,
+                OrgName = companyName,
+            });
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            // Not committed: the sign-in is written next, inside this transaction, by whoever receives it, and it commits.
+            handedOver = true;
+            return new SignupCompletion(Account: account, CompanyId: created.Value, Transaction: transaction);
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    private static SignupCompletion Refused(string error) => new(error);
+```
+
+In the class `<summary>` of `SignupService` change "makes the account (email confirmed), the company with a copy of the default roles and the membership with the first admin's role, and writes the audit rows" to end with "...and writes the audit rows, and leaves the transaction open for the sign-in (spec 0009, Amendment 2)".
+
+- [ ] **Step 8: The extraction handler, the third token endpoint, the shaper.** Create `src/Auth.Server/Signup/SignupCompleteRequestHandler.cs`:
+
+```csharp
+using Auth.Server.Login;
+using Microsoft.AspNetCore;
+using OpenIddict.Abstractions;
+using OpenIddict.Server;
+using OpenIddict.Server.AspNetCore;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// Makes <c>POST /auth/signup/complete</c> a token-endpoint request of OpenIddict, in pass-through mode like the login, so that its endpoint can sign the
+/// person in (spec 0009, Amendment 2): OpenIddict signs in only inside a request it recognised as one of its endpoints. The handler claims the path
+/// and gives OpenIddict a <b>placeholder</b> password-grant request (its validation wants a user name and a password that are not empty). It never reads
+/// the body: the endpoint does, exactly as it did before, so the order of its answers (<c>403</c> before the body is read, <c>400</c> for a body that is not
+/// what it takes) is its own, and nothing a client sends can reach the OpenIddict request. Any method is claimed; the route answers <c>405</c> to all but POST.
+/// </summary>
+public sealed class SignupCompleteRequestHandler : IOpenIddictServerHandler<OpenIddictServerEvents.ExtractTokenRequestContext>
+{
+    private const string Placeholder = "signup-complete";
+
+    /// <summary>
+    /// <see langword="true"/> for <c>/auth/signup/complete</c> and <c>/auth/signup/complete/</c>, case-insensitive: OpenIddict matches a token endpoint with an
+    /// optional trailing slash, so this check must agree with it.
+    /// </summary>
+    internal static bool IsCompletePath(PathString path) =>
+        path.Equals(SignupCompleteEndpoint.Path, StringComparison.OrdinalIgnoreCase)
+        || path.Equals(SignupCompleteEndpoint.Path + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// After <see cref="JsonLoginRequestHandler"/> (which holds the slot of OpenIddict's removed form extraction) and before
+    /// <see cref="UnhandledTokenRequestGuard"/> (+500), beside the refresh handler (+250): the three claim different paths.
+    /// </summary>
+    public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
+        OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddictServerEvents.ExtractTokenRequestContext>()
+            .AddFilter<OpenIddictServerAspNetCoreHandlerFilters.RequireHttpRequest>()
+            .UseSingletonHandler<SignupCompleteRequestHandler>()
+            .SetOrder(JsonLoginRequestHandler.Descriptor.Order + 300)
+            .SetType(OpenIddictServerHandlerType.Custom)
+            .Build();
+
+    /// <inheritdoc />
+    public ValueTask HandleAsync(OpenIddictServerEvents.ExtractTokenRequestContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var request = context.Transaction.GetHttpRequest()
+            ?? throw new InvalidOperationException("The token endpoint was reached without an ASP.NET Core request.");
+
+        if (IsCompletePath(request.Path))
+        {
+            context.Request = new OpenIddictRequest { GrantType = GrantTypes.Password, Username = Placeholder, Password = Placeholder };
+        }
+
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+In `src/Auth.Server/Tokens/OpenIddictSetup.cs`: add `using Auth.Server.Signup;`; in `SetTokenEndpointUris(...)` add a third argument, so that it reads
+
+```csharp
+                    .SetTokenEndpointUris(
+                        JsonLoginRequestHandler.LoginPath.TrimStart('/'),
+                        RefreshRequestHandler.RefreshPath.TrimStart('/'),
+                        SignupCompleteEndpoint.Path.TrimStart('/'))
+```
+
+add the handler after the refresh one:
+
+```csharp
+                options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
+                    .AddEventHandler(JsonLoginRequestHandler.Descriptor)
+                    .AddEventHandler(RefreshRequestHandler.Descriptor)
+                    .AddEventHandler(SignupCompleteRequestHandler.Descriptor)
+                    .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
+```
+
+and in the `<summary>` of `AddAuthOpenIddict` write "the token endpoint at `auth/login`, `auth/refresh` and `auth/signup/complete` in pass-through mode".
+
+In `src/Auth.Server/Login/LoginResponseShaper.cs` change `ShouldShape` and the comment above it to
+
+```csharp
+    /// <summary>
+    /// The response is shaped only for a password grant on the login path or on the sign-up completion, which signs the person in as a login does
+    /// (spec 0009, Amendment 2); any other token-endpoint response (the refresh, which <see cref="Auth.Server.Sessions.SessionResponseHandler"/>
+    /// shapes itself) passes through untouched.
+    /// </summary>
+    internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
+        request is not null
+        && request.IsPasswordGrantType()
+        && (JsonLoginRequestHandler.IsLoginPath(path) || SignupCompleteRequestHandler.IsCompletePath(path));
+```
+
+with `using Auth.Server.Signup;` added; the class summary stays as it is.
+
+- [ ] **Step 9: The scope of the completion's handler.** In `LoginScopeTests.cs` add `using Auth.Server.Signup;` and the test
+
+```csharp
+    [Theory]
+    [InlineData("/auth/signup/complete", true)]
+    [InlineData("/auth/SIGNUP/COMPLETE", true)]
+    [InlineData("/auth/signup/complete/", true)]
+    [InlineData("/auth/signup/complete//", false)]
+    [InlineData("/auth/signup/complete/extra", false)]
+    [InlineData("/auth/signup", false)]
+    [InlineData("/auth/login", false)]
+    [InlineData("/", false)]
+    public void IsCompletePath_matches_the_completion_path_only(string path, bool expected) =>
+        Assert.Equal(expected, SignupCompleteRequestHandler.IsCompletePath(new PathString(path)));
+```
+
+Run `-class Auth.IntegrationTests.LoginScopeTests`: green (the `ShouldShape` rows of Step 3 turned green with Step 8).
+
+- [ ] **Step 10: The endpoint signs in.** Replace `src/Auth.Server/Signup/SignupCompleteEndpoint.cs` by
+
+```csharp
+using Auth.Server.Account;
+using Auth.Server.Api;
+using Auth.Server.Audit;
+using Auth.Server.Login;
+using Auth.Server.Requests;
+using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
+using Microsoft.AspNetCore;
+using Microsoft.Extensions.Options;
+using TokenOptions = Auth.Server.Tokens.TokenOptions;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// <c>POST /auth/signup/complete</c> (spec 0009): finishes a sign-up and signs the person in (Amendment 2). No access token: the link token is the
+/// credential. While sign-up is off it answers <c>403 signup_disabled</c> before it reads the body — also for a request that was made while it
+/// was on. The answer is that of a successful login (<c>200 {"status":"authenticated","access_token"}</c> and the refresh cookie): the endpoint is a
+/// pass-through request of OpenIddict (<see cref="SignupCompleteRequestHandler"/>), builds the principal the way the login does
+/// (<see cref="SessionPrincipal"/>) and returns an <see cref="AtomicSignInResult"/> that issues the session, writes <c>login.succeeded</c> and
+/// commits the transaction of the completion. If any of that fails, nothing of the completion stays.
+/// </summary>
+public static class SignupCompleteEndpoint
+{
+    public const string Path = "/auth/signup/complete";
+
+    private static readonly string[] Fields = ["token", "password", "company_name"];
+
+    public static async Task<IResult> HandleAsync(
+        HttpContext http, SignupGate gate, SignupService signup, MembershipReader memberships, IOptions<TokenOptions> tokens, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(signup);
+        ArgumentNullException.ThrowIfNull(memberships);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // Without it OpenIddict cannot sign in here (it would say so only after the account was made, and roll that back): fail at once.
+        if (http.GetOpenIddictServerRequest() is null)
+        {
+            throw new InvalidOperationException("The sign-up completion was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
+        }
+
+        if (!gate.IsOn)
+        {
+            return ApiResults.Error(TenancyErrors.SignupDisabled);
+        }
+
+        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Fields, http.RequestAborted);
+        if (fields is null || fields[1].Contains('\0') || !NameInput.IsValid(fields[2]))
+        {
+            return AccountResults.InvalidRequest();
+        }
+
+        var done = await signup.CompleteAsync(fields[0], fields[1], fields[2], http.RequestAborted);
+        if (!done.Succeeded)
+        {
+            return done.Error == TenancyErrors.WeakPassword
+                ? AccountResults.WeakPassword(done.BrokenRules!)
+                : ApiResults.Error(done.Error!);
+        }
+
+        try
+        {
+            // Read inside the transaction of the completion (the same context): it sees the membership that is not committed yet.
+            var account = done.Account!;
+            var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
+                ?? throw new InvalidOperationException("The account that was just made has no company.");
+            var principal = SessionPrincipal.Create(http, account, tenant, tokens.Value.Audience, clock);
+            return new AtomicSignInResult(
+                principal,
+                new AuditEntry
+                {
+                    Kind = AuditKinds.LoginSucceeded,
+                    ActorUserId = account.Id,
+                    SubjectUserId = account.Id,
+                    SubjectEmail = account.Email,
+                    OrgId = tenant.CompanyId,
+                    OrgName = tenant.CompanyName,
+                },
+                done.Transaction);
+        }
+        catch
+        {
+            // The result would have owned the transaction; it does not exist, so this is the end of the completion: roll it back.
+            await done.Transaction!.DisposeAsync();
+            throw;
+        }
+    }
+}
+```
+
+In `src/Auth.Server/Api/AccountEndpoints.cs` change `private static readonly string RefreshCookieSet =` to `internal static readonly string RefreshCookieSet =` (the completion's route documents the same cookie). In `src/Auth.Server/Api/SignupRoutes.cs` replace the whole `app.MapPost(SignupCompleteEndpoint.Path, ...)` statement by
+
+```csharp
+        app.MapPost(SignupCompleteEndpoint.Path, SignupCompleteEndpoint.HandleAsync)
+            .WithTags("Sign-up")
+            .WithDescription(
+                "Finishes a sign-up and signs the person in: in one transaction the account (its email confirmed), the company (named as given here, "
+                + "with a copy of the default roles) and the membership with the first admin's role are made, the pending sign-up is used up, and the "
+                + "session is issued; if the session cannot be written nothing of this stays. The answer is that of a successful login: the access token "
+                + "(carrying the new company and the first admin's role) and the refresh cookie. The checks are made in this order: the token, the "
+                + "password (a weak one leaves the token usable), the account (`409 already_registered` when one has the address by now).")
+            .ReadsJson<SignupCompleteRequest>()
+            .Produces<LoginResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet + " The person is signed in, as after a login.")
+            .ProducesPasswordError(AccountResults.InvalidRequestError, AccountResults.InvalidTokenError, AccountResults.WeakPasswordError)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
+```
+
+- [ ] **Step 11: Run the classes of the task.** Build with `-warnaserror`, then run (resource rules): `-class Auth.IntegrationTests.SignupCompleteSignInTests -class Auth.IntegrationTests.SignupCompleteTests -class Auth.IntegrationTests.SignupCompleteRaceTests -class Auth.IntegrationTests.SignupFirstAdminTests -class Auth.IntegrationTests.SignupCompleteDisabledTests -class Auth.IntegrationTests.OpenApiTests -class Auth.IntegrationTests.LoginTests -class Auth.IntegrationTests.LoginCookieTests -class Auth.IntegrationTests.LoginRequestTests -class Auth.IntegrationTests.RefreshTests -class Auth.IntegrationTests.SessionResponseHandlerTests -class Auth.IntegrationTests.UnhandledTokenRequestGuardTests -class Auth.IntegrationTests.AuditAccountFlowsTests -class Auth.IntegrationTests.AuditAtomicityTests -class Auth.IntegrationTests.RatePolicySignupTests -class Auth.IntegrationTests.JsonCharsetTests -class Auth.IntegrationTests.LoginScopeTests -class Auth.IntegrationTests.SessionLifetimeTests -class Auth.IntegrationTests.InviteAcceptTests`. All pass (`SessionLifetimeTests` and `InviteAcceptTests` guard what the shared principal and the unchanged invitation `204` must keep). If a trigger test fails because the 500 is not what is asserted, look at what the host wrote to the log before changing the test.
+
+- [ ] **Step 12: Hand back** — uncommitted. Files: everything listed under Files. Proposed subject: `feat(server): completing a sign-up signs the person in`.
+
+---
+
+### Task 15: The completion signs in: the sample, the Playwright test and `scripts/e2e-signup.sh`
+
+**Files:**
+- Modify: `samples/notes-web/src/app/auth/auth.service.ts`, `samples/notes-web/src/app/account-api.ts`, `samples/notes-web/src/app/pages/complete-signup.ts`, `samples/notes-web/src/app/pages/login.ts` (one comment), `samples/notes-web/e2e/09-signup.spec.ts`, `scripts/e2e-signup.sh`, `scripts/e2e-web.sh` (one comment)
+- Create (tests): `samples/notes-web/src/app/auth/auth.service.signup.spec.ts`
+- Modify (tests): `samples/notes-web/src/app/pages/complete-signup.spec.ts` (replaced as a whole), `samples/notes-web/src/app/account-api.signup.spec.ts`, `samples/notes-web/src/app/pages/too-many-requests.spec.ts` (one line)
+
+**Interfaces:**
+- Consumes: Task 14's answer (`200 {"status":"authenticated","access_token"}` and the cookie); `AuthService.login` and its `LoginResult`, `loadMe`, `dropSession`; `failureOf`, `errorCode`, `Failure` (`auth.service.ts`); `DEFAULT_RETURN_URL` (`auth/auth.guard.ts`, `'/notes'`); `AccountApi.previewSignup` and `postForm` (Tasks 10 and 11); `testing/helpers.ts` (`adminMe`, `viewerMe`, `signedInAs`, `settle`, and the rest).
+- Produces: `AuthService.completeSignup(token: string, password: string, companyName: string): Promise<LoginResult>` (a `LoginResult` is `{ ok: true } | { ok: false; failure: Failure }`; on `{ ok: true }` the token is held and `/auth/me` has been asked, as after `login`); the exported `formFailureOf(error: unknown): Failure` (`failureOf`, but a `400 invalid_request` is `{ kind: 'invalid_request' }`); `AccountApi.completeSignup` is **removed** (the sign-up forms keep `postForm` for `signUp`); the completion screen goes to `/notes` and no longer to `/login`.
+
+- [ ] **Step 1: Write the unit tests first.**
+
+(a) Create `samples/notes-web/src/app/auth/auth.service.signup.spec.ts`:
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
+import { adminMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
+import { AuthService } from './auth.service';
+
+const status = (code: number) => ({ status: code, statusText: String(code) });
+const signedIn = { status: 'authenticated', access_token: 'tok-c' };
+
+describe('AuthService.completeSignup', () => {
+  let auth: AuthService;
+  let ctrl: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    auth = TestBed.inject(AuthService);
+    ctrl = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it('posts the token, the password and the company name, keeps the token in memory and loads /auth/me', async () => {
+    const done = auth.completeSignup('tok', 'Pw-1 x', 'Firma');
+    const request = ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok', password: 'Pw-1 x', company_name: 'Firma' });
+    request.flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush(adminMe);
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toEqual(adminMe);
+    ctrl.verify();
+  });
+
+  it('never writes the token to localStorage, sessionStorage or a cookie', async () => {
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    const completion = ctrl.expectOne('/auth/signup/complete');
+    completion.flush({ status: 'authenticated', access_token: 'secret-token-value' });
+    await settle();
+    const me = ctrl.expectOne('/auth/me');
+    me.flush(adminMe);
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('secret-token-value');
+    expect(window.location.href).not.toContain('secret-token-value');
+    expect(completion.request.urlWithParams).not.toContain('secret-token-value');
+    expect(me.request.urlWithParams).not.toContain('secret-token-value');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('secret-token-value');
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain('secret-token-value');
+    expect(document.cookie).not.toContain('secret-token-value');
+    expect(localStorage.length + sessionStorage.length).toBe(0);
+  });
+
+  it.each([
+    [400, { error: 'invalid_token' }, { kind: 'invalid_token' }],
+    [400, { error: 'weak_password', rules: ['too_short'] }, { kind: 'weak_password', rules: ['too_short'] }],
+    [409, { error: 'already_registered' }, { kind: 'already_registered' }],
+    [403, { error: 'signup_disabled' }, { kind: 'signup_disabled' }],
+    [400, { error: 'invalid_request' }, { kind: 'invalid_request' }],
+    [429, { error: 'too_many_requests', retry_after_seconds: 17 }, { kind: 'too_many_requests', retryAfterSeconds: 17 }],
+    [500, '<html>oops</html>', { kind: 'other' }],
+  ])('answer %s %j is the failure %j and leaves the person anonymous', async (code, body, failure) => {
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush(body, status(code));
+    expect(await done).toEqual({ ok: false, failure });
+    expect(auth.token()).toBeNull();
+    ctrl.verify();
+  });
+
+  it('a 200 that is not "authenticated" is not a session', async () => {
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush({ status: 'mfa_required' });
+    expect(await done).toEqual({ ok: false, failure: { kind: 'other' } });
+    expect(auth.token()).toBeNull();
+  });
+
+  it('is signed in even when /auth/me cannot be read: the notes screen asks for the person again', async () => {
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush('oops', status(500));
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toBeNull();
+  });
+
+  it('opening the link while another person is signed in: the old person is gone, and the new one is shown', async () => {
+    await signedInAs(auth, ctrl, adminMe, 'tok-a');
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush(viewerMe);
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toEqual(viewerMe);
+    ctrl.verify();
+  });
+
+  it('a completion that fails leaves the session that exists alone', async () => {
+    await signedInAs(auth, ctrl, adminMe, 'tok-a');
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_token' }, status(400));
+    expect((await done).ok).toBe(false);
+    expect(auth.token()).toBe('tok-a');
+    expect(auth.me()).toEqual(adminMe);
+  });
+
+  it('clears an old notice when the person is signed in', async () => {
+    auth.showNotice('unreachable');
+    const done = auth.completeSignup('tok', 'pw', 'Firma');
+    ctrl.expectOne('/auth/signup/complete').flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush(adminMe);
+    await done;
+    expect(auth.notice()).toBeNull();
+  });
+});
+```
+
+(b) Replace `samples/notes-web/src/app/pages/complete-signup.spec.ts` as a whole by the file below (the screen now calls `AuthService.completeSignup`, so the answer to `/auth/signup/complete` is a login's, and `/auth/me` follows):
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
+import { vi } from 'vitest';
+import { adminMe, has, pageText, realLocation, settle, submitForm, typeInto, typeRaw, valueOf } from '../../testing/helpers';
+import { AuthService } from '../auth/auth.service';
+import { CompleteSignupPage } from './complete-signup';
+
+const status = (code: number) => ({ status: code, statusText: String(code) });
+const invalid = 'This link has expired or was already used.';
+const closed = 'Sign-up is closed. Ask the company you want to join for an invitation.';
+const preview = { email: 'anna@firma.example', company_name: 'Firma' };
+/** What Auth-Core answers a completion: a login's answer. */
+const signedIn = { status: 'authenticated', access_token: 'tok-c' };
+
+async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok') {
+  TestBed.configureTestingModule({
+    providers: [
+      provideRouter([{ path: 'complete-signup', component: CompleteSignupPage }]),
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      realLocation,
+    ],
+  });
+  history.replaceState(null, '', `/complete-signup${query}`);
+  const harness = await RouterTestingHarness.create();
+  await harness.navigateByUrl(`/complete-signup${query}`, CompleteSignupPage);
+  await settle(); // the navigation that takes the token out of the address bar lands first
+  const navigateByUrl = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+  const ctrl = TestBed.inject(HttpTestingController);
+  if (previewAnswer === 'ok') {
+    ctrl.expectOne('/auth/signup/preview').flush(preview);
+    await settle(harness.fixture);
+  }
+  return { fixture: harness.fixture, ctrl, navigateByUrl };
+}
+
+type Opened = Awaited<ReturnType<typeof open>>;
+
+function choose({ fixture }: Opened, password: string, repeat = password): void {
+  typeInto(fixture, '#password', password);
+  typeInto(fixture, '#repeat', repeat);
+  submitForm(fixture);
+}
+
+function button(opened: Opened): HTMLButtonElement | null {
+  return (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+}
+
+/** Answers the completion as Auth-Core does, then the /auth/me that signing in asks for. */
+async function signInBy(opened: Opened, completion: TestRequest): Promise<void> {
+  completion.flush(signedIn);
+  await settle();
+  opened.ctrl.expectOne('/auth/me').flush(adminMe);
+  await settle(opened.fixture);
+}
+
+describe('CompleteSignupPage', () => {
+  afterEach(() => history.replaceState(null, '', '/'));
+
+  it('asks for the preview with the token on opening, once, and takes the token out of the address bar and the router', async () => {
+    const { ctrl } = await open('?token=tok-s', 'wait');
+    const request = ctrl.expectOne('/auth/signup/preview');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok-s' });
+    expect(window.location.search).toBe('');
+    expect(window.location.href).not.toContain('tok-s');
+    expect(TestBed.inject(Router).url).toBe('/complete-signup');
+    request.flush(preview);
+    await settle();
+    ctrl.expectNone('/auth/signup/preview'); // the navigation that removed the token did not run the screen again
+  });
+
+  it('shows the address (not editable), the company name (editable) and who the password is for', async () => {
+    const { fixture } = await open();
+    expect(valueOf(fixture, '#email')).toBe('anna@firma.example');
+    expect((fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#email')?.readOnly).toBe(true);
+    expect(valueOf(fixture, '#company')).toBe('Firma');
+    expect((fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#company')?.readOnly).toBe(false);
+    expect((fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#company')?.maxLength).toBe(100);
+    expect(pageText(fixture)).toContain('This sets the password for anna@firma.example.');
+    expect(has(fixture, '#password')).toBe(true);
+    expect(has(fixture, '#repeat')).toBe(true);
+  });
+
+  it('200: signs the person in and opens the notes screen in place of this one; the address and the token are in no URL', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    const request = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok-s', password: 'Chosen-Passw0rd', company_name: 'Firma' });
+    await signInBy(opened, request);
+    const auth = TestBed.inject(AuthService);
+    expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toEqual(adminMe);
+    // `replaceUrl`: Back from the notes screen must not land on this screen again, whose link is used up.
+    expect(opened.navigateByUrl).toHaveBeenCalledTimes(1);
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+    expect(window.location.href).not.toContain('anna@firma.example');
+    expect(window.location.href).not.toContain('tok-c');
+  });
+
+  it('200 when /auth/me cannot be read: the person is signed in and the notes screen opens (it asks for the person again)', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush(signedIn);
+    await settle();
+    opened.ctrl.expectOne('/auth/me').flush('oops', status(500));
+    await settle(opened.fixture);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+  });
+
+  it('a 200 that is not a sign-in: "Something went wrong. Try again.", the form stays, and nothing opens', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ status: 'mfa_required' });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(TestBed.inject(AuthService).token()).toBeNull();
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('sends the company name the person typed, trimmed', async () => {
+    const opened = await open();
+    typeInto(opened.fixture, '#company', '  Firma Renamed  ');
+    choose(opened, 'Chosen-Passw0rd');
+    const request = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.body).toEqual({ token: 'tok-s', password: 'Chosen-Passw0rd', company_name: 'Firma Renamed' });
+    await signInBy(opened, request);
+  });
+
+  it('sends the password exactly as typed', async () => {
+    const opened = await open();
+    choose(opened, '  Chosen Passw0rd  ');
+    const request = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.body).toEqual({ token: 'tok-s', password: '  Chosen Passw0rd  ', company_name: 'Firma' });
+    await signInBy(opened, request);
+  });
+
+  it('weak_password: the rules not met, one line each, and the form stays', async () => {
+    const opened = await open();
+    choose(opened, 'short');
+    opened.ctrl
+      .expectOne('/auth/signup/complete')
+      .flush({ error: 'weak_password', rules: ['too_short', 'requires_digit'] }, status(400));
+    await settle(opened.fixture);
+    const lines = Array.from(
+      (opened.fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="rules"] li'),
+      (item) => item.textContent?.trim(),
+    );
+    expect(lines).toEqual(['The password is too short.', 'The password needs a digit.']);
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
+    expect(TestBed.inject(AuthService).token()).toBeNull();
+  });
+
+  it('409 already_registered: says the account exists and links to the sign-in; no form', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'already_registered' }, status(409));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('An account with this address already exists.');
+    expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it.each(['preview', 'complete'])('invalid_token on the %s: the link is used up, with a link to sign up again; no form', async (where) => {
+    const opened = await open('?token=tok-s', where === 'preview' ? 'wait' : 'ok');
+    if (where === 'preview') {
+      opened.ctrl.expectOne('/auth/signup/preview').flush({ error: 'invalid_token' }, status(400));
+    } else {
+      choose(opened, 'Chosen-Passw0rd');
+      opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_token' }, status(400));
+    }
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(invalid);
+    expect(has(opened.fixture, 'a[href="/signup"][data-testid="signup-again"]')).toBe(true);
+    expect(pageText(opened.fixture)).toContain('Sign up again');
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it.each(['preview', 'complete'])('403 signup_disabled on the %s: says that sign-up is closed; no form', async (where) => {
+    const opened = await open('?token=tok-s', where === 'preview' ? 'wait' : 'ok');
+    if (where === 'preview') {
+      opened.ctrl.expectOne('/auth/signup/preview').flush({ error: 'signup_disabled' }, status(403));
+    } else {
+      choose(opened, 'Chosen-Passw0rd');
+      opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'signup_disabled' }, status(403));
+    }
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(closed);
+    expect(pageText(opened.fixture)).toContain('Back to sign in');
+    expect(has(opened.fixture, 'form')).toBe(false);
+    expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
+  });
+
+  it.each([
+    [400, { error: 'invalid_request' }],
+    [500, '<html>oops</html>'],
+  ])('%s on the preview: "Something went wrong. Try again."', async (code, body) => {
+    const { fixture, ctrl } = await open('?token=tok-s', 'wait');
+    ctrl.expectOne('/auth/signup/preview').flush(body, status(code));
+    await settle(fixture);
+    expect(pageText(fixture)).toContain('Something went wrong. Try again.');
+  });
+
+  it('"Try again" after a server error on the preview asks again with the token still held, and the form follows', async () => {
+    const { fixture, ctrl } = await open('?token=tok-s', 'wait');
+    ctrl.expectOne('/auth/signup/preview').flush('oops', status(500));
+    await settle(fixture);
+    expect(window.location.search).toBe('');
+    const again = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="try-again"]');
+    expect(again?.textContent?.trim()).toBe('Try again');
+    again?.click();
+    fixture.detectChanges();
+    expect(pageText(fixture)).toContain('Opening your sign-up...');
+    const retry = ctrl.expectOne('/auth/signup/preview');
+    expect(retry.request.body).toEqual({ token: 'tok-s' });
+    retry.flush(preview);
+    await settle(fixture);
+    expect(has(fixture, 'form')).toBe(true);
+    expect(has(fixture, '[data-testid="try-again"]')).toBe(false);
+  });
+
+  it('500 on complete: "Something went wrong. Try again.", and the form stays', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush('oops', status(500));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+  });
+
+  it('two different passwords: a message, and no request', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd', 'Chosen-Passw0rd2');
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('The two passwords are not the same.');
+    opened.ctrl.expectNone('/auth/signup/complete');
+  });
+
+  it('a blank company name: a message, and no request', async () => {
+    const opened = await open();
+    typeRaw(opened.fixture, '#company', '   ');
+    choose(opened, 'Chosen-Passw0rd');
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Enter the name of your company.');
+    opened.ctrl.expectNone('/auth/signup/complete');
+  });
+
+  it('400 invalid_request on complete: says what to check, and the form stays', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_request' }, status(400));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Check the company name.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+  });
+
+  it.each(['', '?token=', '?other=1'])('a link with the query %j is an invalid link, with no request', async (query) => {
+    const { fixture, ctrl } = await open(query, 'wait');
+    expect(pageText(fixture)).toContain(invalid);
+    expect(has(fixture, 'a[href="/signup"]')).toBe(true);
+    ctrl.expectNone('/auth/signup/preview');
+  });
+
+  it('sends one request for a double submit', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    submitForm(opened.fixture);
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
+  });
+
+  it.each([
+    ['rejects', () => Promise.reject(new Error('navigation failed'))],
+    ['answers false', () => Promise.resolve(false)],
+  ])('the button is on again when the router %s (the person stays here, signed in)', async (_name, answer) => {
+    const opened = await open();
+    opened.navigateByUrl.mockImplementation(answer);
+    choose(opened, 'Chosen-Passw0rd');
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
+    expect(button(opened)?.disabled).toBe(false);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+  });
+
+  it('after 200 the button stays off until the notes screen is open: a second Enter does not post the used token again', async () => {
+    const opened = await open();
+    let arrive: (opened: boolean) => void = () => undefined;
+    opened.navigateByUrl.mockReturnValue(new Promise<boolean>((resolve) => (arrive = resolve)));
+    choose(opened, 'Chosen-Passw0rd');
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
+    expect(button(opened)?.disabled).toBe(true);
+    submitForm(opened.fixture);
+    await settle(opened.fixture);
+    opened.ctrl.expectNone('/auth/signup/complete');
+    arrive(true);
+    await settle(opened.fixture);
+    expect(button(opened)?.disabled).toBe(false);
+  });
+});
+```
+
+(c) In `samples/notes-web/src/app/account-api.signup.spec.ts`: delete the test `completeSignup posts the token, the password and the company name` (the call moved to `AuthService`; `auth.service.signup.spec.ts` has it), and in the last table test (`it.each([...])('answer %s %j is the failure %j', ...)`) change its body to use the sign-up request, which shares `postForm` and so the mapping:
+
+```ts
+    const done = api.signUp('anna@firma.example', 'Firma');
+    ctrl.expectOne('/auth/signup').flush(body, status(code));
+    expect(await done).toEqual({ ok: false, failure });
+```
+
+(d) In `samples/notes-web/src/app/pages/too-many-requests.spec.ts`, in the test `CompleteSignupPage: keeps the form, leaves the words to the notice bar`, add `const navigateByUrl = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');` just before its `submitForm(opened.fixture);`, and replace its last line `expect(TestBed.inject(Router).navigate).not.toHaveBeenCalledWith(['/login'], expect.anything());` by
+
+```ts
+    expect(opened.auth.token()).toBeNull(); // a refused completion signs nobody in
+    expect(navigateByUrl).not.toHaveBeenCalled();
+    expect(TestBed.inject(Router).url).toBe('/complete-signup'); // and the screen stays where it is
+```
+
+(`vi` and `Router` are imported in that file already: `open()` uses both.)
+
+- [ ] **Step 2: Run them, and see them fail.** In `samples/notes-web` (resource rules above): `npx ng test --watch=false --include "src/app/auth/auth.service.signup.spec.ts" --include "src/app/pages/complete-signup.spec.ts" --include "src/app/account-api.signup.spec.ts" --include "src/app/pages/too-many-requests.spec.ts"`. Expected: the build fails or the tests fail (`completeSignup` is not a method of `AuthService`; the screen still goes to `/login`).
+
+- [ ] **Step 3: `AuthService` signs in on a completion.** In `samples/notes-web/src/app/auth/auth.service.ts`:
+
+(a) After `failureOf`, add
+
+```ts
+/**
+ * Like `failureOf`, for the sign-up forms: a `400 invalid_request` is a failure of its own there, because each of those screens has a text
+ * for it (the sign-in and the other mail-link screens read it as "other").
+ */
+export function formFailureOf(error: unknown): Failure {
+  return error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request'
+    ? { kind: 'invalid_request' }
+    : failureOf(error);
+}
+```
+
+(b) Replace the method `login` by these three methods (the tail of `login` moves into the private `startSession`, which both sign-ins use):
+
+```ts
+  async login(email: string, password: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    try {
+      body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/login', { email, password }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /**
+   * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
+   * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
+   * the session that exists alone, as a failed login does.
+   */
+  async completeSignup(token: string, password: string, companyName: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    try {
+      body = await firstValueFrom(
+        this.http.post<LoginBody | null>('/auth/signup/complete', { token, password, company_name: companyName }),
+      );
+    } catch (error) {
+      return { ok: false, failure: formFailureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /** What a sign-in that Auth-Core answered with `200` does: a session of its own, and who it is for. */
+  private async startSession(body: LoginBody | null): Promise<LoginResult> {
+    const token = body?.access_token;
+    if (body?.status !== 'authenticated' || typeof token !== 'string' || token === '') {
+      return { ok: false, failure: { kind: 'other' } };
+    }
+    // A session that exists ends first (/login has no guard, so a signed-in person can sign in as someone else): what the old
+    // person asked for and is still on its way, an /auth/me or a request that gets a 401, is never used for the new one.
+    this.dropSession();
+    this.accessToken.set(token);
+    this.noticeState.set(null);
+    // Signed in once there is a token, even when this answer cannot be read: the notes screen asks for the person again.
+    // Ten seconds, like the start: a sign-in must not hang behind an /auth/me that never answers.
+    await this.loadMe(REFRESH_TIMEOUT_MS);
+    return { ok: true };
+  }
+```
+
+(c) In `samples/notes-web/src/app/account-api.ts`: delete the method `completeSignup`; make `postForm` read
+
+```ts
+  /** Like `post`, but a `400 invalid_request` is a failure of its own: the sign-up form has a text for it. */
+  private async postForm<T = void>(url: string, body: unknown): Promise<Outcome<T>> {
+    try {
+      return { ok: true, value: await firstValueFrom(this.http.post<T>(url, body)) };
+    } catch (error) {
+      return { ok: false, failure: formFailureOf(error) };
+    }
+  }
+```
+
+and fix the imports: `import { HttpClient } from '@angular/common/http';` and `import { Failure, failureOf, formFailureOf, isRecord } from './auth/auth.service';` (`HttpErrorResponse` and `errorCode` are not used here any more).
+
+- [ ] **Step 4: The screen opens the product.** In `samples/notes-web/src/app/pages/complete-signup.ts`: add the imports `import { DEFAULT_RETURN_URL } from '../auth/auth.guard';` and `import { AuthService } from '../auth/auth.service';`; add the field `private readonly auth = inject(AuthService);` after `account`; and replace the method `submit` by
+
+```ts
+  protected async submit(): Promise<void> {
+    const signup = this.pending();
+    if (this.busy() || this.token === null || signup === null) {
+      return;
+    }
+    const { company, password, repeat } = this.form.getRawValue();
+    this.rules.set([]);
+    this.error.set(null);
+    if (company.trim() === '') {
+      this.error.set(this.t.companyRequired);
+      return;
+    }
+    if (this.form.invalid) {
+      return;
+    }
+    if (password !== repeat) {
+      this.error.set(this.common.passwordsDiffer);
+      return;
+    }
+    this.busy.set(true);
+    // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
+    // Auth-Core refuses white space at either end.
+    const result = await this.auth.completeSignup(this.token, password, company.trim());
+    if (result.ok) {
+      // Signed in (Auth-Core answered as it answers a login): the product opens at once, in place of this screen, so that Back does
+      // not land on a link that is used up. The address is in no URL. The button stays off until the notes screen is open: the token
+      // is used up, and a second Enter would only post it again. When the router cannot open it (it answers false or fails) the person
+      // stays here, signed in, and the button is on again.
+      try {
+        await this.router.navigateByUrl(DEFAULT_RETURN_URL, { replaceUrl: true });
+      } catch {
+        // nothing to show: the company was made and the person is signed in
+      }
+    } else if (result.failure.kind === 'weak_password') {
+      this.rules.set(result.failure.rules);
+    } else if (result.failure.kind === 'invalid_token') {
+      this.phase.set('invalid');
+    } else if (result.failure.kind === 'already_registered') {
+      this.phase.set('registered');
+    } else if (result.failure.kind === 'signup_disabled') {
+      this.phase.set('closed');
+    } else if (result.failure.kind === 'invalid_request') {
+      this.error.set(this.t.invalidRequest);
+    } else if (result.failure.kind === 'too_many_requests') {
+      // The notice bar above the screen says when to try again: the interceptor put it there.
+    } else {
+      this.error.set(this.common.somethingWrong);
+    }
+    this.busy.set(false);
+  }
+```
+
+In `samples/notes-web/src/app/pages/login.ts` change the comment above `startEmail` to `/** The email an invitation screen passed on in the navigation state (it is never in the URL). */` (a completed sign-up signs the person in and no longer passes through the sign-in screen).
+
+- [ ] **Step 5: Run the unit tests of this task.** `npx ng test --watch=false --include "src/app/auth/auth.service.spec.ts" --include "src/app/auth/auth.service.signup.spec.ts" --include "src/app/pages/complete-signup.spec.ts" --include "src/app/account-api.signup.spec.ts" --include "src/app/account-api.spec.ts" --include "src/app/pages/too-many-requests.spec.ts" --include "src/app/pages/login.spec.ts" --include "src/app/pages/signup.spec.ts"` passes, and `npx ng build` builds (the production build type-checks the templates). If `--include` is not accepted by this CLI, run the `src/app/auth` and `src/app/pages` folders by the same flag with a folder glob; do not run the whole suite.
+
+- [ ] **Step 6: The Playwright test.** In `samples/notes-web/e2e/09-signup.spec.ts` (read by `tsc`, not run here):
+
+(a) Remove the line `import { submitLogin } from './support/session';` (the first test no longer signs in by hand; nothing else in the file uses it).
+
+(b) Rename the first test to `'a visitor signs up, opens the mail link, finishes, is signed in at once and is the admin of a company of their own'`.
+
+(c) After `page.on('request', (request) => requested.push(request.url()));` add
+
+```ts
+  // The address of the page after every navigation, the router's included: the person must not pass through the sign-in screen
+  // after finishing (Amendment 2 of spec 0009).
+  const urls: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      urls.push(frame.url());
+    }
+  });
+```
+
+(d) Replace the block from the comment `// The name of the request was a suggestion: ...` to the assertion `await expect(page.getByTestId('me-email')).toHaveText(email);` that follows `await submitLogin(page, email, password);` — that is, these lines —
+
+```ts
+  // The name of the request was a suggestion: the person changes it, chooses the password and finishes.
+  await page.getByLabel('Company name').fill(company);
+  await page.getByLabel('New password').fill(password);
+  await page.getByLabel('Repeat the password').fill(password);
+  await page.getByRole('button', { name: 'Create company' }).click();
+
+  // No sign-in follows: the sign-in screen opens with the address filled in, and the address is not in the URL.
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByLabel('Email')).toHaveValue(email);
+  expectNoEmailInAddressBar(page);
+
+  await submitLogin(page, email, password);
+  await expect(page).toHaveURL(/\/notes$/);
+  await expect(page.getByTestId('me-email')).toHaveText(email);
+```
+
+by
+
+```ts
+  // The name of the request was a suggestion: the person changes it, chooses the password and finishes.
+  await page.getByLabel('Company name').fill(company);
+  await page.getByLabel('New password').fill(password);
+  await page.getByLabel('Repeat the password').fill(password);
+  const beforeFinishing = urls.length;
+  await page.getByRole('button', { name: 'Create company' }).click();
+
+  // The completion signed the person in: the notes screen opens at once, with no sign-in screen on the way and the address in no URL.
+  await expect(page).toHaveURL(/\/notes$/);
+  expect(
+    urls.slice(beforeFinishing).some((url) => /\/login(\?|$)/.test(url)),
+    'the person went through the sign-in screen',
+  ).toBe(false);
+  // ...and the test did see the navigations, so that the line above says something.
+  expect(
+    urls.slice(beforeFinishing).some((url) => /\/notes$/.test(url)),
+    'the notes screen was never reached by a navigation the test saw',
+  ).toBe(true);
+  expectNoEmailInAddressBar(page);
+  await expect(page.getByTestId('me-email')).toHaveText(email);
+```
+
+(e) After the line `await expect(page.getByText('No notes yet.')).toBeVisible();` add
+
+```ts
+
+  // The refresh cookie came with the answer of the completion: a reload keeps the person signed in.
+  await page.reload();
+  await expect(page).toHaveURL(/\/notes$/);
+  await expect(page.getByTestId('me-email')).toHaveText(email);
+  await expect(page.getByTestId('me-company')).toHaveText(company);
+```
+
+(f) In the fourth test (`'a link that expired says so and offers to sign up again'`) the mail was sent while `scripts/e2e-web.sh` seeded, so the wait is short: change `waitForLink(setting('E2E_EXPIRED_EMAIL'), 'complete-signup', MAIL_WAIT_MS)` to `waitForLink(setting('E2E_EXPIRED_EMAIL'), 'complete-signup', 10_000)` (a mail that is not there fails in 10 seconds with its own message, not at the 30-second limit of the test with none). In the fourth and the fifth test (`'a link that never worked says so and offers to sign up again'`) add `await expect(page).toHaveURL(/\/complete-signup$/);` before each `expectCleanAddressBar(page);`: the token leaves the address bar a moment after the screen opens, and the check must wait for it. The other tests are unchanged. Check the types: `npx tsc -p e2e/tsconfig.json --noEmit` in `samples/notes-web`.
+
+- [ ] **Step 7: The API script.** In `scripts/e2e-signup.sh` (checked by `bash -n scripts/e2e-signup.sh` only; the verifiers run it). Besides the sign-in, this step repairs the findings of the review of Task 12 (`33c13f7`) in the same file. Line numbers are those of the file at `33c13f7`, before this step.
+
+(a) **The header comment.** Replace the items 6 and 7 by
+
+```bash
+#   6. complete with a weak password -> 400 weak_password naming the rules, no cookie, and the token still works; then with a good password
+#      and another company name -> 200 {"status":"authenticated","access_token"} and the auth_rt cookie (HttpOnly, Secure, SameSite=Strict,
+#      Path=/auth), as a login answers (spec 0009, Amendment 2): the token has roles ["admin"] and the new company, GET /auth/me with it names
+#      the company as given at the completion, the cookie refreshes (and rotates), and the audit log holds one login.succeeded row for NEW;
+#      again -> 400 invalid_token and no cookie - criteria 11, 12 (part of: parallel completions), 9.
+#   7. NEW logs in again (the email is confirmed): the token has the org_id of the completion's company, which is not the development
+#      company's; GET /auth/org/roles lists the company's own copy of the two default roles (admin "*", user) with NEW the only member of
+#      admin; the audit log holds signup.requested, signup.completed (this account by id, this company, this address) and org.created with
+#      via signup, none of its rows holds the password, the token of the link, or the access token or the refresh cookie of the completion,
+#      and the pending sign-up is gone - criteria 9, 10 (part of: the other manifests), 19 (part of: atomicity).
+```
+
+In item 4 add, before its `- criteria 3, 21 (part of: Polish).`, the words `exactly one signup.requested row for NEW has been written since the run began;`. At the end of item 8 (line 30) replace `- criterion 4.` by `- part of criterion 4 (that the second request runs the same statements as the first is guarded by the tests, not here).` In item 9 (line 31) after `its login is the 401 of an unknown address` add `, recorded as a failed login of an unknown address, and no account exists`.
+
+(b) **Helpers**, after the function `psql_value` (they are used from Step 1 on): the three that read the cookie (the text of `scripts/e2e-refresh.sh`), a poll, and the secret search of `scripts/e2e-hardening.sh` (lines 290 to 294 there, the same text):
+
+```bash
+set_cookie_line() { # the auth_rt Set-Cookie line of the last response, CR stripped (empty when there is none)
+  { grep -i '^set-cookie: auth_rt=' "$tmp/hdr" || true; } | head -n1 | tr -d '\r'
+}
+
+cookie_value() { # value of the auth_rt cookie in the last response
+  local line
+  line="$(set_cookie_line)"
+  line="${line#*: }"
+  line="${line#auth_rt=}"
+  printf '%s' "${line%%;*}"
+}
+
+has_attr() { # has_attr <set-cookie-line> <attribute>: exact, case-insensitive match of one "; "-separated attribute
+  printf '%s' "$1" | tr ';' '\n' | sed 's/^ *//' | grep -qixF -- "$2"
+}
+
+# wait_psql_value <sql> <value> <seconds>: polls the query once a second until it returns the value; false if it never does
+wait_psql_value() {
+  local i
+  for i in $(seq 1 "$3"); do
+    [[ "$(psql_value "$1")" == "$2" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# secret_in_audit <secret>: how many rows of the audit log hold the text in any column; the secret goes on stdin only
+secret_in_audit() {
+  [[ "$1" != *"'"* ]] || fail "a secret with a quote cannot be looked for"
+  printf "SELECT count(*) FROM audit_events WHERE position('%s' in (kind || ' ' || coalesce(subject_email, '') || ' ' || coalesce(org_name, '') || ' ' || coalesce(client_ip, '') || ' ' || coalesce(details::text, ''))) > 0;\n" "$1" \
+    | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'
+}
+```
+
+(c) **Step 2 and Step 4.** Just before the line `json_body "$tmp/signup.json" ...` of Step 2 add
+
+```bash
+START_TS="$(psql_value "SELECT now()")"   # `occurred_at` is a timestamp with a time zone, as is this
+```
+
+and in Step 4, after the `expect_eq "step 4: no pending sign-up for the address of the refused names" ...` line, add
+
+```bash
+expect_eq "step 4: one signup.requested row for NEW, written since this run began" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.requested' AND subject_email = '$NEW_EMAIL' AND occurred_at >= '$START_TS'")" "1"
+```
+
+(d) **`token_body`** (lines 221 to 224 of the script): the HTML part must hold the whole link and not only the token. Replace
+
+```python
+if match.group(1) not in mail["HTML"]:
+    sys.exit("the HTML part does not hold the link of the text part")
+```
+
+by
+
+```python
+if sys.argv[1] + "?token=" + match.group(1) not in mail["HTML"]:
+    sys.exit("the HTML part does not hold the link of the text part")
+```
+
+(If the HTML part writes the link in another form, look at the mail before weakening the check.)
+
+(e) **Step 6**: replace the whole of Step 6 (from the line `# --- Step 6: the completion (criteria 9, 11, 12) ...` to its `pass "step 6: ..."` line) by
+
+```bash
+# --- Step 6: the completion, which signs in (criteria 9, 11, 12) ------------------------------------------------------
+call POST /auth/signup/complete "$tmp/complete-weak.json"
+expect_status "step 6: complete with a weak password" 400 '{"error":"weak_password","rules":["too_short","requires_upper","requires_digit"]}'
+expect_no_cookie "step 6: the weak password"
+call POST /auth/signup/complete "$tmp/complete-good.json"
+expect_status "step 6: complete with a good password and another company name" 200
+expect_no_store "step 6: the 200"
+expect_eq "step 6: the body is a login's" "$(val 'sorted(d.keys())')" "['access_token', 'status']"
+expect_eq "step 6: the status" "$(val 'd["status"]')" "authenticated"
+LINE="$(set_cookie_line)"
+[[ -n "$LINE" ]] || fail "step 6: the completion set no auth_rt cookie"
+for attr in HttpOnly Secure SameSite=Strict Path=/auth; do
+  has_attr "$LINE" "$attr" || fail "step 6: the auth_rt cookie lacks the $attr attribute"
+done
+RT0="$(cookie_value)"
+[[ -n "$RT0" ]] || fail "step 6: the auth_rt cookie is empty"
+COMPLETION_ACCESS="$(val 'd["access_token"]')"
+printf 'Authorization: Bearer %s\n' "$COMPLETION_ACCESS" > "$tmp/completion.auth"
+printf 'Cookie: auth_rt=%s\n' "$RT0" > "$tmp/completion.cookie"
+BODY="$(jwt_payload "$tmp/completion.auth")"
+expect_eq "step 6: roles of the completion's token" "$(val 'd["roles"]')" "['admin']"
+COMPLETION_ORG="$(val 'd["org_id"]')"
+call GET /auth/me "" "$tmp/completion.auth"
+expect_status "step 6: GET /auth/me with the token of the completion" 200
+expect_eq "step 6: the company is the one named at the completion" "$(val 'd["org_name"]')" "$RENAMED"
+expect_eq "step 6: the address" "$(val 'd["email"]')" "$NEW_EMAIL"
+expect_eq "step 6: org_id of /auth/me and of the token" "$(val 'd["org_id"]')" "$COMPLETION_ORG"
+call POST /auth/refresh "" "$tmp/completion.cookie"
+expect_status "step 6: refresh with the cookie of the completion" 200
+[[ -n "$(cookie_value)" && "$(cookie_value)" != "$RT0" ]] || fail "step 6: the refresh did not rotate the cookie"
+printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/refreshed.auth"
+BODY="$(jwt_payload "$tmp/refreshed.auth")"
+expect_eq "step 6: the refreshed token names the same company" "$(val 'd["org_id"]')" "$COMPLETION_ORG"
+expect_eq "step 6: one login.succeeded row, written by the completion, for NEW and its company" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'login.succeeded' AND subject_email = '$NEW_EMAIL' AND org_name = '$RENAMED'")" "1"
+call POST /auth/signup/complete "$tmp/complete-good.json"
+expect_error "step 6: the same completion again" 400 invalid_token
+expect_no_cookie "step 6: the same completion again"
+call POST /auth/signup/preview "$tmp/preview.json"
+expect_error "step 6: preview of the used token" 400 invalid_token
+pass "step 6: a weak password -> 400 weak_password naming the rules (no cookie; the token still works); a good one -> 200 with a login's body and the auth_rt cookie (the attributes of ADR 0004), a token with roles [admin] and the new company, /auth/me names it, the cookie refreshes and rotates, one login.succeeded row; again -> 400 invalid_token, no cookie"
+```
+
+(f) **Step 7.** In Step 7, right after the line `NEW_ORG="$(val 'd["org_id"]')"` add
+
+```bash
+NEW_SUB="$(val 'd["sub"]')"
+expect_eq "step 7: a login names the company of the completion's token" "$NEW_ORG" "$COMPLETION_ORG"
+```
+
+after the line `expect_eq "step 7: org_id of /auth/me and of the token" ...` add
+
+```bash
+call GET /auth/org/roles "" "$tmp/new.auth"
+expect_status "step 7: GET /auth/org/roles" 200
+expect_eq "step 7: the company's own copy of the default roles, and NEW the only member of admin" \
+  "$(val 'sorted((r["name"], sorted(r["permissions"]), r["members"]) for r in d["roles"])')" \
+  "[('admin', ['*'], 1), ('user', ['documents:read', 'documents:write'], 0)]"
+```
+
+(the value is what the manifest `deploy/auth.yaml` and the sole member say; as in `scripts/e2e-tenancy.sh`, lines 324 to 326 and 334 to 337, the first run shows the exact form), in the line `expect_eq "step 7: one signup.completed row, ..."` replace `subject_user_id IS NOT NULL` by `subject_user_id = '$NEW_SUB'` (the id comes from the payload of the token, which names the account), and replace the line `expect_eq "step 7: no audit row holds the password" ...` by
+
+```bash
+SIGNUP_TOKEN="$("$PY" -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$tmp/preview.json" | tr -d '\r')"   # never printed
+expect_eq "step 7: no audit row holds the password" "$(secret_in_audit "$E2E_PASSWORD")" "0"
+expect_eq "step 7: no audit row holds the token of the link" "$(secret_in_audit "$SIGNUP_TOKEN")" "0"
+expect_eq "step 7: no audit row holds the access token of the completion" "$(secret_in_audit "$COMPLETION_ACCESS")" "0"
+expect_eq "step 7: no audit row holds the refresh cookie of the completion" "$(secret_in_audit "$RT0")" "0"
+```
+
+and in its `pass` line replace "NEW logs in" by "NEW logs in again" and "no password" by "no password and no token".
+
+(g) **Step 8.** Replace the lines
+
+```bash
+# The pending sign-up goes in the transaction of the send, which commits just after the relay has the mail.
+sleep 3
+expect_eq "step 8: the pending sign-up is gone" ...
+```
+
+by (the `expect_eq` line stays as it is, after the poll)
+
+```bash
+# The pending sign-up goes in the transaction of the send, which commits just after the relay has the mail: wait for it, do not guess.
+wait_psql_value "SELECT count(*) FROM \"PendingSignups\" WHERE \"NormalizedEmail\" = upper('$NEW_EMAIL')" 0 20 || fail "step 8: the pending sign-up of NEW is still there after 20s"
+expect_eq "step 8: the pending sign-up is gone" ...
+```
+
+and replace the line `grep -qF "$NEW_ORG"$'\t'"$RENAMED"$'\t'"1" <<< "$CLI_OUT" || fail ...` by the whole-line form and add the count of the company, so that
+
+```bash
+grep -qxF "$NEW_ORG"$'\t'"$RENAMED"$'\t'"1" <<< "$CLI_OUT" || fail "step 8: list-orgs does not show the company of the completion with exactly one member"
+expect_eq "step 8: one company named as at the completion" "$(grep -cF $'\t'"$RENAMED"$'\t' <<< "$CLI_OUT" || true)" "1"
+```
+
+stand in its place (the line with `no company was made for the second request` stays).
+
+(h) **Step 9.** After the line `expect_error "step 9: login of an address with only a pending sign-up" 401 invalid_credentials` add
+
+```bash
+expect_eq "step 9: that login is recorded as a failed login of an unknown address" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$PENDING_EMAIL' AND details->>'reason' = 'unknown_address'")" "1"
+expect_eq "step 9: PENDING has no account" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$PENDING_EMAIL')")" "0"
+```
+
+(`unknown_address` is the reason `LoginEndpoint` writes for an address with no account) and replace the comment and the line `sleep 8` before `expect_eq "step 9: PENDING got no mail but the sign-up mail" ...` by
+
+```bash
+# The dispatcher removes the request of an address without an account within seconds: wait until none of PENDING's is left, or the count below would only mean that nothing was sent yet.
+wait_psql_value "SELECT count(*) FROM \"MailRequests\" WHERE \"NormalizedEmail\" = upper('$PENDING_EMAIL')" 0 30 || fail "step 9: the mail requests of PENDING were not handled within 30s"
+```
+
+(the `expect_eq "step 9: PENDING got no mail but the sign-up mail" ... "1"` stays after it).
+
+- [ ] **Step 8: `scripts/e2e-web.sh`, one comment.** In `scripts/e2e-web.sh` (line 163 at the base) change the comment `# Two invitations through the operator CLI. The server sends the mails at its next poll.` to `# Three invitations through the operator CLI (BOTH is for the sign-up test of spec 0009). The server sends the mails at its next poll.` (it has said "Two" since the third `cli invite` was added by Task 12).
+
+- [ ] **Step 9: Check and hand back.** `bash -n scripts/e2e-signup.sh scripts/e2e-web.sh`; `npx tsc -p e2e/tsconfig.json --noEmit` and `npx ng build` in `samples/notes-web`; `grep -rInP '\\u[0-9a-fA-F]{4}' samples/notes-web/src samples/notes-web/e2e scripts --include=*.ts --include=*.sh` finds nothing that is not meant. **Hand back** — uncommitted. Files: everything listed under Files. Proposed note for the verifiers: `scripts/e2e-web.sh` (Chromium and WebKit) and `scripts/e2e-signup.sh` have to be run against the new server; the cookie is `Secure` and the sample is served from `http://localhost`, as for the sign-in. Proposed subject: `feat(samples): completing a sign-up opens the notes screen`.
+
+---
+
+## Day 6 — Saturday 04.04: the guides, the acceptance map
+
+When the day is done, the guides and the threat model describe the feature (the sign-in on completion included), the changelog has an `Unreleased` section, and the acceptance map names a guarding test for each of the 23 criteria. One task: Task 13, which comes last because it documents what Tasks 14 and 15 changed.
+
 ### Task 13: The guides, the threat model, the audit runbook, the changelog, `check-docs.py` and the acceptance map
 
 **Files:**
@@ -7091,16 +9071,17 @@ and add two rows to the table of that step (after the `/invite?token=` row):
 
 ```markdown
 | `/signup` | email and company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` |
-| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in | `POST /auth/signup/preview`, `POST /auth/signup/complete` |
+| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 ```
 
-(c) In the list of three rules of step 4, after the bullet **Do not put an email in the URL.** add a sentence to it: `The same holds after a sign-up is completed: the sign-in screen opens with the address in the navigation state, and the password was chosen at the link, never on the sign-up form.`
-
+(c) In the list of three rules of step 4, after the bullet **Do not put an email in the URL.** add a sentence to it: `The same holds after a sign-up is completed: the completion signs the person in (Auth-Core answers as it answers a login) and the screen opens the notes in place of itself, so the address is in no URL and no sign-in screen is shown; the password was chosen at the link, never on the sign-up form.`
 (d) In "Mind the logs", the list "for `/reset`, `/verify` and `/invite`" becomes "for `/reset`, `/verify`, `/invite` and `/complete-signup`".
 
 (e) In step 3, in the sentence that says what the interceptor never adds the token to, change the end of the parenthesis from ``the mail-link endpoints)`` to ``the mail-link endpoints, `/auth/options`, `/auth/signup`)``.
 
 (f) Three more sentences that name the mail screens: in the first rule of step 4, "the verify and invite screens offer "Try again"" becomes "the verify, invite and complete-signup screens offer "Try again""; in the second rule, "The reset and invite screens share one list of lines" becomes "The reset, invite and complete-signup screens share one list of lines"; in step 7, "Open a link from a reset mail (and an invitation, and a verification mail)" becomes "Open a link from a reset mail (and an invitation, a verification mail and a sign-up mail)".
+
+(g) **The sign-in is two calls now** (`samples/notes-web/src/app/auth/auth.service.ts`, Task 15). In step 2, the sentence that lists what `auth.service.ts` holds, ``(the token, the session, `login`, `logout`, `refresh`)``, becomes ``(the token, the session, `login`, `completeSignup`, `logout`, `refresh`)``; and at the end of the **Sign-in** bullet of the list that follows it (the one that starts ``**Sign-in** is `await auth.login(email, password)` ``) add the sentences: ``A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it).``
 
 Then `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/integration/angular.md` and, in `samples/notes-web`, `npm run check:docs` both pass.
 
@@ -7128,7 +9109,8 @@ Off unless you turn it on, and then it needs **two** things: `signup: self-servi
 the screen of your frontend that finishes a sign-up (`https://app.example.com/complete-signup`; the sample's is `/complete-signup`). After changing `.env` run `$C up -d`
 (a restart does not read it again); after changing the manifest run `$C restart auth`. A visitor then gives an email address and a company name; the mail holds a link to your screen, where the person chooses a password and
 confirms the company's name; the company is made and the person is its first admin, with the first default role of your manifest that holds `"*"` (else the
-first that holds `members:manage`). An address that already has an account gets a mail that says so, with no link; every address gets the same answer.
+first that holds `members:manage`), and is signed in at once: `POST /auth/signup/complete` answers as a login does (the access token and the refresh cookie), so your screen
+opens the product and not the sign-in screen. An address that already has an account gets a mail that says so, with no link; every address gets the same answer.
 `GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
 at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
 typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
@@ -7168,7 +9150,8 @@ query holds a token.
 | T | Hostile input in sign-up | The address passes the invitation rule (a mailbox, no look-alike of an ASCII address, no IP literal, dotless, numeric or hexadecimal domain: it cannot make the relay deliver to an internal host) and the company name the name rule (`SignupRequestTests`); a body of at most 8 KiB | |
 | I | The company name a visitor typed goes into a mail to a stranger | It is in the body only, never in the subject, encoded in the HTML part and not a format string (`SignupMailComposerTests`) | See residual risk 46: the text is the visitor's, up to 100 characters, in a mail from the product's own address |
 | D | Sign-up used to mail strangers or fill the queue | One mail a minute and five an hour per address (own kind `signup`), the per-IP limit of the mail policy (sign-up is counted with the other mail requests of a client address, 10 a minute by default), a pending sign-up per address that expires in 24 hours and is removed hourly (`SignupRateLimitTests`, `PendingSignupPruningTests`); a request that needs no mail is dropped by the bulk delete | See residual risk 46 |
-| E | Two ways to make one account | The completion takes the advisory lock that invitation acceptance takes, and uses its token with one `DELETE ... RETURNING`: of parallel completions with one token one is `204`, and a completion and an acceptance for one address never both create the account (`SignupCompleteRaceTests`) | A request for a sign-up whose mail is being sent waits for the send (at most 20 seconds): the dispatcher locks the pending sign-up |
+| E | Two ways to make one account | The completion takes the advisory lock that invitation acceptance takes, and uses its token with one `DELETE ... RETURNING`: of parallel completions with one token one is `200`, and a completion and an acceptance for one address never both create the account (`SignupCompleteRaceTests`) | A request for a sign-up whose mail is being sent waits for the send (at most 20 seconds): the dispatcher locks the pending sign-up |
+| S | A mail link that opens a session (spec 0009, Amendment 2) | The link is single-use (one `DELETE ... RETURNING`), valid 24 hours and replaced by a newer mail, and the person chooses the password in the same step; the session it opens is a login's in every respect (one builder for the principal: the same lifetime, cap, family and security stamp, so a logout or a password change ends it) and is written in the completion's transaction (`SignupCompleteSignInTests.The_cookie_refreshes_like_a_logins_and_belongs_to_a_family`, `SignupCompleteSignInTests.The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it`, `SignupCompleteSignInTests.The_path_is_no_second_way_to_log_in`) | Whoever can read the mailbox can already reset the password (spec 0004), so the link adds no capability |
 ```
 
 (c) In the same table, in the row that starts `| R | Actions that leave no trace |`, change `The audit log: 22 kinds` to `The audit log: 24 kinds`.
@@ -7221,8 +9204,16 @@ Or let visitors start on their own: set `signup: self-service` in the manifest a
 new company. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
 ```
 
+and fix the manifest example of "1. Declare your product's permissions" (the yaml block that stands for `deploy/auth.yaml`; `README.md` lines 44 to 50 at the base of this plan), which lacks the key that the file it stands for now has: add the line `signup: self-service` after the `permissions:` line of the block, and after the closing fence of the block add the paragraph
+
+```markdown
+`signup: self-service` is optional (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`): it lets a visitor start a company of their own, and it
+needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
+that address sign-up stays off and `/auth/health` says `Degraded`, so leave the line out of a copy of this file until you have the address.
+```
+
 and in the list of scripts under "Develop it", after the line that starts `scripts/e2e-tenancy.sh`, add `scripts/e2e-signup.sh          # sign-up → link → company → first admin; an account that exists; an invitation first (~4 min)`.
-In `samples/notes-web/README.md`: write the code span `` `src/index.html` `` of the "Work on the screens" paragraph as `` `samples/notes-web/src/index.html` `` (it fails `scripts/check-docs.py` today), change "Mails (reset, verification, invitation)" to "Mails (reset, verification, invitation, sign-up)", in the tree under "What is here" change the line of `src/app/pages/` to list `login, forgot, reset, verify, invite, signup, complete-signup, notes`, change "the three `FrontendUrls` in `compose.yml`" (broken over two lines there) to "the four `FrontendUrls` in `compose.yml`", and in the opening paragraph add "start a company of their own," after "join a company from an invitation,". Run `C:/p6v/Scripts/python.exe scripts/check-docs.py README.md`.
+In `samples/notes-web/README.md`: write the code span `` `src/index.html` `` of the "Work on the screens" paragraph as `` `samples/notes-web/src/index.html` `` (it fails `scripts/check-docs.py` today), change "Mails (reset, verification, invitation)" to "Mails (reset, verification, invitation, sign-up)", in the tree under "What is here" change the line of `src/app/pages/` to list `login, forgot, reset, verify, invite, signup, complete-signup, notes`, change "the three `FrontendUrls` in `compose.yml`" (broken over two lines there) to "the four `FrontendUrls` in `compose.yml`", and in the opening paragraph add "start a company of their own," after "join a company from an invitation,". In the same file the last bullet of the list of known limits (`samples/notes-web/README.md` line 105 at the base of this plan) says `There is no PWA, no sign-up and no screen for company admins; see the deferred list of the spec.`, which is false since this slice: write it as `There is no PWA and no screen for company admins; see the deferred list of the spec. Sign-up (/signup and /complete-signup) works only while Auth-Core has it on: the manifest says signup: self-service and the completion address is set; finishing a sign-up signs the person in and opens the notes.` (a plain line of text, no code spans, so that nothing in it is checked as a path). Run `C:/p6v/Scripts/python.exe scripts/check-docs.py README.md samples/notes-web/README.md`.
 
 - [ ] **Step 8: The changelog.** In `CHANGELOG.md`, between the introductory paragraph and `## 0.1.0 - 2026-02-24` insert
 
@@ -7235,7 +9226,8 @@ instance that does not turn it on behaves as `0.1.0`.
 ### Added
 
 - **Sign-up.** `POST /auth/signup` (an email address and a company name; the same `202` for every address), `POST /auth/signup/preview` and
-  `POST /auth/signup/complete` (the person chooses a password at the link of the mail and becomes the first admin of a new company, in one transaction),
+  `POST /auth/signup/complete` (the person chooses a password at the link of the mail, becomes the first admin of a new company, in one transaction, and is signed in:
+  the answer is a login's, the access token and the refresh cookie, and the `login.succeeded` audit row is written in that transaction),
   and `GET /auth/options` (what a product's screens may offer). The first admin gets the first default role of the manifest that holds `*`, else the first that
   holds `members:manage`. An address that already has an account gets a mail that says so, with no link.
 - **The manifest key `signup`** (`invite-only`, the default, or `self-service`) and the optional setting `Auth:App:FrontendUrls:CompleteSignup`
@@ -7284,20 +9276,20 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 | 6 | A second request for one address within 60 seconds and a sixth within the hour are the `429` of spec 0004; the `signup` limit and those of `forgot` and `verify/request` do not affect each other | `SignupRequestTests.A_second_request_within_a_minute_is_refused_and_asking_again_does_not_add_to_the_wait`, `SignupRequestTests.The_sixth_request_within_the_hour_is_refused_until_the_hour_is_over`, `SignupRequestTests.The_sign_up_limit_and_the_limits_of_forgot_and_verify_do_not_affect_each_other`; `scripts/e2e-signup.sh` steps 2 and 9 (part of) |
 | 7 | A second accepted request replaces the first: the newer mail's link works, the older one is `invalid_token`, the company name shown is the newer one | `SignupRequestTests.A_second_accepted_request_replaces_the_first`, `SignupDispatchTests.A_second_mail_replaces_the_link_of_the_first`, `SignupPreviewTests.The_older_link_of_an_address_is_invalid_and_the_newer_shows_the_newer_company`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` |
 | 8 | `POST /auth/signup/preview` answers the typed address and the company name and changes nothing; an unknown, used or expired token is `400 invalid_token` | `SignupPreviewTests.Preview_answers_the_typed_address_and_the_company_and_changes_nothing`, `SignupPreviewTests.Unknown_and_expired_tokens_are_one_400_invalid_token`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (the used token); `scripts/e2e-signup.sh` steps 5, 6 and 11 |
-| 9 | `POST /auth/signup/complete` answers `204`; the account (email confirmed), the company (given name, a copy of the default roles) and the sole membership with the first admin's role exist; a login returns `org_id`, `roles` and `permissions` of that role | `SignupCompleteTests.A_visitor_signs_up_finishes_and_logs_in_as_the_admin_of_a_company_of_their_own`, `SignupCompleteTests.The_account_company_roles_and_membership_are_what_the_contract_says`, `SignupCompleteTests.The_company_name_of_the_request_is_only_a_suggestion`; `scripts/e2e-signup.sh` steps 6, 7 and 8 |
+| 9 | `POST /auth/signup/complete` answers `200` with an access token and the refresh cookie, as a login does (Amendment 2); the account (email confirmed), the company (given name, a copy of the default roles) and the sole membership with the first admin's role exist; the token of the completion and a later login carry `org_id`, `roles` and `permissions` of that role, and the cookie refreshes like a login's | `SignupCompleteTests.A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own`, `SignupCompleteTests.The_account_company_roles_and_membership_are_what_the_contract_says`, `SignupCompleteTests.The_company_name_of_the_request_is_only_a_suggestion`, `SignupCompleteSignInTests.The_completion_answers_as_a_login_does_with_the_status_and_the_access_token_only`, `SignupCompleteSignInTests.The_cookie_and_the_headers_are_those_of_a_login`, `SignupCompleteSignInTests.The_token_carries_the_new_company_and_the_first_admins_role_and_the_claims_of_a_login`, `SignupCompleteSignInTests.The_cookie_refreshes_like_a_logins_and_belongs_to_a_family`, `SignupCompleteSignInTests.The_session_starts_at_the_completion_and_ends_at_the_cap_of_a_login`, `SignupCompleteSignInTests.The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it`; `scripts/e2e-signup.sh` steps 6, 7 and 8 |
 | 10 | The first admin's role is the first default role holding `*`; with no such role, the first holding `members:manage` | `SignupFirstAdminTests.The_first_admin_gets_the_first_default_role_that_holds_the_star`, `SignupFirstAdminTests.Without_a_star_the_first_admin_gets_the_first_role_that_holds_members_manage`, `SignupFirstAdminTests.A_star_role_after_a_members_manage_role_still_wins`, `ManifestSignupTests.The_first_admin_role_is_the_first_default_role_that_holds_the_star`, `ManifestSignupTests.Without_a_star_the_first_admin_role_is_the_first_that_holds_members_manage`; `scripts/e2e-signup.sh` step 7 |
 | 11 | A completion with a weak password is `400 weak_password` with the rules, creates nothing, and the token still works | `SignupCompleteTests.A_weak_password_names_the_rules_creates_nothing_and_leaves_the_token_usable`, `SignupCompleteTests.The_order_of_the_checks_is_token_then_password_then_account`; `scripts/e2e-signup.sh` step 6 |
-| 12 | A token works once; of parallel completions with one token exactly one is `204`, and one account and one company exist | `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token`, `SignupCompleteRaceTests.Of_parallel_completions_with_one_token_exactly_one_is_204`, `PendingSignupsTests.Consume_uses_the_link_up_once_and_removes_the_row`; `scripts/e2e-signup.sh` step 6 |
+| 12 | A token works once; of parallel completions with one token exactly one is `200`, and one account and one company exist | `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token`, `SignupCompleteRaceTests.Of_parallel_completions_with_one_token_exactly_one_is_200`, `SignupCompleteSignInTests.Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token`, `SignupCompleteSignInTests.The_same_body_posted_again_is_invalid_token_with_no_cookie_and_no_second_session`, `PendingSignupsTests.Consume_uses_the_link_up_once_and_removes_the_row`; `scripts/e2e-signup.sh` step 6 |
 | 13 | A link older than 24 hours is `400 invalid_token`, and the hourly clean-up removes pending sign-ups whose time has passed | `SignupPreviewTests.A_link_works_until_24_hours_after_the_mail_and_not_a_second_longer`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (expired), `PendingSignupsTests.A_link_works_until_exactly_24_hours_after_it_was_issued`, `PendingSignupPruningTests.Pruning_removes_pending_sign_ups_whose_time_has_passed_and_keeps_the_others`, `PendingSignupPruningServiceTests.The_hourly_pass_of_the_service_removes_expired_pending_sign_ups`; `scripts/e2e-signup.sh` step 11 (an expired link, live) |
 | 14 | An invitation accepted between the request and the completion makes the completion `409 already_registered` with no company and the pending sign-up gone; a completion and an acceptance at once never both create an account | `SignupCompleteTests.An_account_made_in_the_meantime_is_409_already_registered_and_the_pending_sign_up_is_gone`, `SignupCompleteTests.An_account_under_another_spelling_of_the_address_is_409_too`, `SignupCompleteRaceTests.A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account`; `scripts/e2e-signup.sh` step 10 |
 | 15 | Pending sign-ups are invisible elsewhere: login is the `401` of an unknown address, `forgot password` sends nothing | `SignupDispatchTests.Pending_sign_ups_are_invisible_to_login_and_forgot_password`; `scripts/e2e-signup.sh` step 9 |
 | 16 | The manifest accepts `signup: self-service` and `invite-only`; any other value is refused by the rules of spec 0005 (the last valid manifest kept, `Degraded`); a stored manifest without the key reads as `invite-only` | `ManifestSignupTests.The_key_accepts_invite_only_and_self_service`, `ManifestSignupTests.Any_other_scalar_makes_the_manifest_invalid_and_names_the_key`, `ManifestSignupTests.A_list_or_a_map_makes_the_manifest_invalid`, `ManifestSignupTests.A_manifest_stored_by_v0_1_0_reads_as_invite_only`, `ManifestSignupActivationTests.A_refused_value_keeps_the_last_valid_manifest_and_health_says_degraded`, `ManifestSignupActivationTests.A_manifest_stored_by_v0_1_0_stays_invite_only_when_the_file_is_missing` |
 | 17 | With `self-service` and no address the start logs a warning, health is `Degraded` and sign-up answers `403`; a bad address stops the start naming the key | `SignupGateTests.Self_service_without_the_address_warns_at_the_start_and_health_says_degraded`, `SignupGateTests.A_bad_address_stops_the_start_naming_the_key_and_not_the_value`, `CompleteSignupSettingsTests.A_bad_address_is_refused_naming_the_key_and_never_echoing_the_value`, `CompleteSignupSettingsTests.Outside_Development_the_address_must_be_https`, `SignupDisabledRequestTests.Sign_up_off_answers_403_before_the_body_is_read_and_creates_nothing` (the variant without the address) |
 | 18 | The per-IP limits classify the four paths as written | `RatePolicySignupTests.The_four_paths_count_against_the_policies_of_the_contract`, `RatePolicySignupTests.The_paths_are_compared_without_regard_to_case_or_a_trailing_slash`, `SignupRateLimitTests.The_request_counts_against_the_mail_policy_of_the_per_ip_limit` |
-| 19 | The audit log holds `signup.requested`, and for a completion `signup.completed` and `org.created` with `details.via` `signup`, in its transaction; no row holds a password or a token | `SignupRequestTests.An_accepted_request_is_recorded_with_the_address_and_nothing_secret`, `SignupRequestTests.A_refused_request_is_not_recorded`, `SignupCompleteTests.A_completion_is_recorded_with_the_account_the_company_and_the_address_and_nothing_secret`, `SignupCompleteTests.Nothing_is_left_when_the_audit_row_cannot_be_written`, `AuditTableTests.The_kinds_are_the_twenty_four_of_the_contract`; `scripts/e2e-signup.sh` step 7 (the rows in a live database) |
-| 20 | The OpenAPI document lists the four operations with their answers | `OpenApiTests.The_description_names_every_endpoint_of_the_service_and_nothing_else`, `OpenApiTests.Each_endpoint_describes_the_statuses_of_the_contract`, `OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`, `OpenApiTests.The_error_codes_of_the_contract_are_in_the_descriptions`, `OpenApiTests.The_responses_are_described_in_snake_case`, `OpenApiTests.Every_route_of_the_service_is_in_the_description`; `scripts/e2e-signup.sh` step 1 (the four paths) |
+| 19 | The audit log holds `signup.requested`, and for a completion `signup.completed` and `org.created` with `details.via` `signup`, and `login.succeeded` for its sign-in (Amendment 2), in its transaction; no row holds a password or a token | `SignupRequestTests.An_accepted_request_is_recorded_with_the_address_and_nothing_secret`, `SignupRequestTests.A_refused_request_is_not_recorded`, `SignupCompleteTests.A_completion_is_recorded_with_the_account_the_company_and_the_address_and_nothing_secret`, `SignupCompleteTests.Nothing_is_left_when_the_audit_row_cannot_be_written`, `SignupCompleteSignInTests.The_completion_writes_login_succeeded_beside_signup_completed_and_org_created`, `SignupCompleteSignInTests.A_token_store_that_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.An_audit_log_that_refuses_the_sign_in_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.A_sign_in_that_OpenIddict_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `AuditTableTests.The_kinds_are_the_twenty_four_of_the_contract`; `scripts/e2e-signup.sh` step 7 (the rows in a live database) |
+| 20 | The OpenAPI document lists the four operations with their answers | `OpenApiTests.The_description_names_every_endpoint_of_the_service_and_nothing_else`, `OpenApiTests.Each_endpoint_describes_the_statuses_of_the_contract` (the completion is `200`, `400`, `403`, `409`, `415`, `429`), `OpenApiTests.The_completion_answers_with_the_body_of_the_login`, `OpenApiTests.The_answers_that_set_or_clear_the_refresh_cookie_say_so`, `OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`, `OpenApiTests.The_error_codes_of_the_contract_are_in_the_descriptions`, `OpenApiTests.The_responses_are_described_in_snake_case`, `OpenApiTests.Every_route_of_the_service_is_in_the_description`; `scripts/e2e-signup.sh` step 1 (the four paths) |
 | 21 | Both mails exist in Polish and English, in HTML and text; the "complete" mail's HTML and text hold the same link | `SignupMailComposerTests.The_complete_mail_in_polish_keeps_its_letters`, `SignupMailComposerTests.The_html_and_the_text_hold_the_same_link`, `SignupMailComposerTests.Every_language_has_every_text_of_both_mails`, `SignupMailComposerTests.The_account_exists_mail_in_polish_has_no_link_and_no_token`, `SignupDispatchPolishTests.The_mails_are_in_the_configured_language`; `scripts/e2e-signup.sh` step 4 |
-| 22 | The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup`, signs in and sees the company and the admin role — in Chromium and in WebKit; the token leaves the address bar; the address is in no URL; "already have an account" (the mail, and the completion screen when the account appeared meanwhile), a used link, an expired link and a link that never worked show their texts | `e2e/09-signup.spec.ts` (all five tests, both projects, by `scripts/e2e-web.sh`, which seeds the invited address and the expired link; the first test collects every URL the page requests and asserts the address is in none); the unit tests `signup.spec.ts`, `complete-signup.spec.ts` (the token leaves the address bar and the router; the address goes in the navigation state), `login.signup.spec.ts`, `account-api.signup.spec.ts`, `app.routes.spec.ts` (the routes are public) |
+| 22 | The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup`, is signed in at once (no sign-in screen on the way) and sees the company and the admin role, and a reload keeps them signed in — in Chromium and in WebKit; the token leaves the address bar; the address is in no URL; "already have an account" (the mail, and the completion screen when the account appeared meanwhile), a used link, an expired link and a link that never worked show their texts | `e2e/09-signup.spec.ts` (all five tests, both projects, by `scripts/e2e-web.sh`, which seeds the invited address and the expired link; the first test collects every URL the page requests and asserts the address is in none); the unit tests `signup.spec.ts`, `complete-signup.spec.ts` (the token leaves the address bar and the router; the person is signed in and the notes screen opens in place of the screen), `auth.service.signup.spec.ts` (the token in memory, `/auth/me`, an old session dropped), `login.signup.spec.ts`, `account-api.signup.spec.ts`, `app.routes.spec.ts` (the routes are public) |
 | 23 | `scripts/e2e-signup.sh` passes against a fresh stack, and every earlier e2e script and test still passes | `scripts/e2e-signup.sh` (all steps); the five older scripts and `scripts/e2e-hardening.sh`, `scripts/e2e-notes.sh`, `scripts/e2e-web.sh` and `scripts/e2e-prod.sh` (the last two with the address set: `ShippedConfigurationTests.The_sample_overlay_and_the_production_test_set_the_address_so_that_their_stacks_stay_healthy`); `dotnet build -warnaserror && dotnet test tests/Auth.IntegrationTests`; the Python and Angular suites |
 
 ## Contract sentences that are not acceptance criteria
@@ -7305,7 +9297,7 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 | Sentence of the contract | Guard |
 | --- | --- |
 | The password is chosen at the link, never on the sign-up form (Decision 3) | `signup.spec.ts` ("asks for an email and a company name..." asserts there is no password field); `SignupRequest` has no password member (`OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`) |
-| The completion does not sign in (Decision 10) | `SignupCompleteTests.A_visitor_signs_up_finishes_and_logs_in_as_the_admin_of_a_company_of_their_own` (a `204` with no cookie); `scripts/e2e-signup.sh` step 6 |
+| The completion signs the person in, and the sign-in is part of it (Amendment 2, replacing Decision 10) | `SignupCompleteSignInTests` (all of it), `SignupCompleteTests.A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own`; `scripts/e2e-signup.sh` step 6; `e2e/09-signup.spec.ts` first test; an invitation is unchanged (`InviteAcceptTests`: `204`, no cookie) |
 | The address of the completion is locked with the lock invitation acceptance uses | `SignupCompleteRaceTests.A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account` |
 | An existing account never signs up again, even without a company (Decision 9) | `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone` (all four combinations) |
 | A failed sending leaves the previous link valid | `SignupDispatchTests.A_failed_send_leaves_the_previous_link_valid_and_the_retry_sends_a_new_one`, `PendingSignupsTests.Upsert_for_the_same_address_replaces_the_names_and_the_time_and_keeps_the_link` |
@@ -7318,7 +9310,7 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 
 Run `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md`: every class, method and file named in it must resolve.
 
-- [ ] **Step 10: Check them all.** From the repository root: `C:/p6v/Scripts/python.exe scripts/check-docs.py` (the default list, now with the guide), `C:/p6v/Scripts/python.exe scripts/check-docs.py --self-test`, `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md docs/operations/backup.md docs/integration/python-fastapi.md samples/notes-web/README.md docs/deployment/vps.md docs/security/threat-model.md CHANGELOG.md`; in `samples/notes-web`: `npm run check:docs`. Then `grep -rInP '\\u[0-9a-fA-F]{4}' src tests scripts docs samples/notes-web/src samples/notes-web/e2e --include=*.cs --include=*.sh --include=*.md --include=*.ts` finds nothing that is not meant, and `git status --porcelain` shows only the files of the 13 tasks (nothing else in the working tree).
+- [ ] **Step 10: Check them all.** From the repository root: `C:/p6v/Scripts/python.exe scripts/check-docs.py` (the default list, now with the guide), `C:/p6v/Scripts/python.exe scripts/check-docs.py --self-test`, `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md docs/operations/backup.md docs/integration/python-fastapi.md samples/notes-web/README.md docs/deployment/vps.md docs/security/threat-model.md CHANGELOG.md`; in `samples/notes-web`: `npm run check:docs`. Then `grep -rInP '\\u[0-9a-fA-F]{4}' src tests scripts docs samples/notes-web/src samples/notes-web/e2e --include=*.cs --include=*.sh --include=*.md --include=*.ts` finds nothing that is not meant, and `git status --porcelain` shows only the files of the 15 tasks (nothing else in the working tree).
 
 - [ ] **Step 11: Hand back** — uncommitted. Files: everything listed under Files. Proposed subject: `docs: self-service sign-up in the guides, the threat model, the changelog and the acceptance map`.
 
@@ -7332,7 +9324,7 @@ Run against the spec, section by section, after the tasks above were written.
 
 | Spec section | Task |
 | --- | --- |
-| Goal, the sequence of curl calls | 5, 7, 8 (the whole way: `SignupCompleteTests.A_visitor_signs_up_finishes_and_logs_in_as_the_admin_of_a_company_of_their_own`), 12 (`scripts/e2e-signup.sh`) |
+| Goal, the sequence of curl calls | 5, 7, 8 and 14 (the whole way: `SignupCompleteTests.A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own`), 12 and 15 (`scripts/e2e-signup.sh`) |
 | In scope: `GET /auth/options`, the three endpoints | 2, 5, 7, 8 |
 | Pending sign-ups (stored apart, one per address, 24 hours, hourly clean-up) | 3 |
 | Two mails, Polish and English, HTML and text | 4, 6 |
@@ -7345,7 +9337,8 @@ Run against the spec, section by section, after the tasks above were written.
 | Contract: general rules, on/off, `403` before the body | 1, 5, 7, 8 (`Signup*DisabledTests`) |
 | Mails (the bullets with the account check first, locale, failed sending) | 4, 6 |
 | Manifest, Configuration, Limits, Audit events, OpenAPI | 1, 9, 2, 5/8, 2/5/7/8 |
-| Sample frontend | 10, 11, 12 |
+| Sample frontend | 10, 11, 12, and 15 (the completion opens the notes screen) |
+| Amendment 2: the completion signs in (the answer of a login, the cookie, the token's company and role, `login.succeeded` in the completion's transaction, nothing stays if the sign-in cannot be written, the sample opens the product, an invitation unchanged) | 14 (server), 15 (sample, Playwright, `scripts/e2e-signup.sh`), 13 (guides, threat model, changelog, map) |
 | Acceptance criteria 1 to 23 | the map of Task 13 names a test or a step for each |
 | Decisions 1 to 13 | 1 (8, 12, 13), 3 and 5 (7), 5 and 6 (6, 9), 8 (3, 4, 5, 10), 5 and 13 (11) |
 | To verify during implementation (four points) | the mail queue and composer: Tasks 4 and 6; the stored manifest: Task 1; the migration: Task 3; the order of checks and the lock: Task 8 |
@@ -7369,6 +9362,7 @@ The spec is not changed by this plan (the owner amends it where a line below say
 7. **`scripts/e2e-prod.sh` sets `AUTH_FRONTEND_SIGNUP_URL`,** because `deploy/auth.yaml` now says `signup: self-service` and its step 2 expects `Healthy`; an operator who copies that manifest without the address gets `Degraded`, which the deployment guide says.
 8. **`signup:` with no value counts as absent,** like `permissions:` with no value; `signup: ''` is invalid (probed).
 9. **Smaller choices:** the subjects of the two mails start `Complete your sign-up` / `Dokończ rejestrację` and `You already have an account` / `Masz już konto` and never hold the company name; a completion address of only white space counts as not set; the account-exists mail goes to the address as the account stores it, the complete mail to the address as typed; a completion also clears the login streak of the address, as an invitation does; the sample trims the email and the company name before sending; `Sign-up` is the OpenAPI tag of the four operations; `400 invalid_request` has its own text on each sign-up screen ("Check the email address and the company name." and "Check the company name.").
+10. **The completion signs in through OpenIddict, not around it (Amendment 2, Tasks 14 and 15):** `/auth/signup/complete` is a third pass-through token endpoint beside `/auth/login` and `/auth/refresh`, claimed by an extraction handler that hands OpenIddict a placeholder request and never reads the body; the principal of both sign-ins is built by `SessionPrincipal`; `SignupService.CompleteAsync` hands its open transaction to `AtomicSignInResult`, which commits it after the session and `login.succeeded` are written. The choice was probed (a plain endpoint cannot sign in through OpenIddict; the pass-through variant answered, rolled back on a refusing token store and on a refusing audit table, and kept `405` for the other methods). The sample drops the session that exists before it holds the new one, and opens the notes screen with `replaceUrl`.
 
 ## Open questions for the owner
 
