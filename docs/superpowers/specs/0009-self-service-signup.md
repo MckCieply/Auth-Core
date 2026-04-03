@@ -27,8 +27,7 @@ curl -i .../auth/options                                                        
 curl -i -X POST .../auth/signup -d '{"email":"anna@firma.test","company_name":"Firma"}'   # -> 202
 # the mail holds  <complete_signup url>?token=<t>
 curl -i -X POST .../auth/signup/preview  -d '{"token":"<t>"}'                   # -> 200 {"email":"anna@firma.test","company_name":"Firma"}
-curl -i -X POST .../auth/signup/complete -d '{"token":"<t>","password":"<p>","company_name":"Firma"}'  # -> 204
-curl -i -X POST .../auth/login -d '{"email":"anna@firma.test","password":"<p>"}'  # -> 200, token: org_id of Firma, roles ["admin"]
+curl -i -X POST .../auth/signup/complete -d '{"token":"<t>","password":"<p>","company_name":"Firma"}'  # -> 200, signed in: token with org_id of Firma, roles ["admin"], and the refresh cookie
 
 # the same address again: the same 202, and a mail that says the account exists
 curl -i -X POST .../auth/signup -d '{"email":"anna@firma.test","company_name":"Other"}'  # -> 202
@@ -131,7 +130,10 @@ Otherwise `400 invalid_token`. It changes nothing.
    - the pending sign-up is deleted;
    - the audit events below are written.
 
-   The answer is `204`. It does not sign in: the product's screen sends the person to its sign-in screen.
+   The answer is that of a successful `POST /auth/login` (specs 0001 and 0002): `200 {"status":"authenticated",
+   "access_token"}` and the refresh cookie, the token carrying the new company and the first admin's role; the
+   person is signed in (Amendment 2). The sign-in is part of the completion: if it cannot be written, nothing of
+   the completion stays.
 
 Of parallel requests with one token, exactly one gets past step 2. The account's address is locked for the
 transaction with the lock that invitation acceptance uses, so a sign-up and an invitation for one address never
@@ -194,8 +196,8 @@ The four operations are in the OpenAPI document with their answers.
   the wait; `403 signup_disabled` says that sign-up is closed.
 - **`/complete-signup`** (the mail link): the token leaves the address bar as on the other link screens (spec 0007);
   a preview shows the address (read-only) and the company name (editable); the person types the password twice
-  (the two must be equal, checked on the screen); success sends them to `/login` with the address filled in and not
-  in the URL. `invalid_token` offers to sign up again; `already_registered` says the account exists and links to
+  (the two must be equal, checked on the screen); success signs them in and opens the product (the notes screen),
+  with the address in no URL. `invalid_token` offers to sign up again; `already_registered` says the account exists and links to
   sign-in; `weak_password` lists the rules.
 - **`/login`** shows "Create an account" when `GET /auth/options` says `self-service`.
 - The new routes are public. Texts are English, as in spec 0007.
@@ -219,16 +221,16 @@ The four operations are in the OpenAPI document with their answers.
    `invalid_token`, and the company name shown is the newer one.
 8. `POST /auth/signup/preview` with the mail's token answers `200` with the typed address and the company name and
    changes nothing; an unknown, used or expired token is `400 invalid_token`.
-9. `POST /auth/signup/complete` with the token, an acceptable password and a company name answers `204`; then the
-   account exists with its email confirmed, the company exists with the given name and a copy of the default
-   roles, and the account is its only member with the first admin's role; a login returns a token whose `org_id`
-   is the new company and whose `roles` and `permissions` are those of that role.
+9. `POST /auth/signup/complete` with the token, an acceptable password and a company name answers `200` with an access token and
+   the refresh cookie, as a login does; then the account exists with its email confirmed, the company exists with the given name and a copy of the default
+   roles, and the account is its only member with the first admin's role; the token of the completion and a later login carry the new
+   company as `org_id` and the `roles` and `permissions` of that role, and the cookie refreshes like a login's.
 10. The first admin's role is the first default role holding `*`; with a manifest where no role holds `*`, it is
     the first role holding `members:manage`.
 11. A completion with a weak password is `400 weak_password` with the rules, creates nothing, and the token still
     works afterwards.
 12. A token works once: a second completion is `400 invalid_token`; of parallel completions with one token exactly
-    one is `204`, and exactly one account and one company exist.
+    one succeeds, and exactly one account and one company exist.
 13. A link older than 24 hours is `400 invalid_token`, and the hourly clean-up removes pending sign-ups whose time
     has passed.
 14. When an invitation for the address is accepted between the request and the completion, the completion is
@@ -247,8 +249,8 @@ The four operations are in the OpenAPI document with their answers.
 20. The OpenAPI document lists the four operations with their answers.
 21. Both mails exist in Polish and English, in HTML and text, and the "complete" mail's HTML and text hold the same
     link.
-22. The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup` and signs in,
-    and sees the new company and the admin role on the notes screen — in Chromium and in WebKit; the token leaves
+22. The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup`, is signed in at
+    once, and sees the new company and the admin role on the notes screen — in Chromium and in WebKit; the token leaves
     the address bar; the address never appears in a URL; the "already have an account" case and an expired link
     show their texts.
 23. `scripts/e2e-signup.sh` passes against a fresh stack, and every earlier e2e script and test still passes.
@@ -277,7 +279,8 @@ The four operations are in the OpenAPI document with their answers.
 9. **An existing account never signs up again**, even without a company: it gets the "you already have an account"
    mail. Letting it attach a new company would need a sign-in-or-reset path inside the sign-up; an invitation
    covers the case.
-10. **No sign-in on completion**: the person signs in on the next screen, as after an invitation.
+10. **No sign-in on completion**: the person signs in on the next screen, as after an invitation. *(Replaced by
+    Amendment 2: the completion signs in.)*
 11. **No CAPTCHA.** Sign-up mails any well-formed address, so it is limited three ways: one mail a minute and five an
     hour per address, ten sign-up requests a minute per IP, and the invitation address rule, which refuses
     addresses that could make the mail relay deliver to an internal host. The remaining risk — a spread-out sender
@@ -303,6 +306,17 @@ Settled while planning; the contract above already reads this way.
 5. **The tests that pin the contract of earlier specs are extended**, not left untouched: the OpenAPI operations,
    the list of audit kinds (now 24) and the manifest activation test.
 6. **A `signup:` key with no value counts as absent**; an empty string is invalid.
+
+### Amendment 2 (owner, 2026-04-03)
+
+1. **Completing a sign-up signs the person in** (replaces Decision 10). The completion answers as a successful login
+   does — the access token and the refresh cookie — and the sample opens the product at once instead of its sign-in
+   screen. Typing the password again a minute after choosing it adds nothing: the link has already proved the
+   mailbox. The audit log gets `login.succeeded` for this sign-in as for any other, in the completion's transaction.
+   Accepting an invitation is unchanged (`204`, then the sign-in screen).
+2. **Private persons get a sign-up of their own in the next slice** (spec 0010): the sign-up screen will ask
+   "organization or private person", and a private person gets an account without a company, where the product
+   allows it. This spec stays the organization path.
 
 ## Verification notes (for the local verifiers)
 
