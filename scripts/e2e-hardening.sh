@@ -29,7 +29,7 @@
 #   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, for the whole sequence: never "auth-core", the development stack
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
 #   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh
+#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh && scripts/e2e-signup.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d            # recreates auth with the defaults (AUTH_RATE_LIMIT_ENABLED unset)
 #   scripts/e2e-hardening.sh              # this script (does NOT bring the stack up or down; it stops and starts PostgreSQL)
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down

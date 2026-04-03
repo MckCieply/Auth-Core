@@ -49,6 +49,7 @@
 #   scripts/e2e-lockout.sh                # spec 0003 regression
 #   scripts/e2e-email.sh                  # spec 0004 regression
 #   scripts/e2e-tenancy.sh                # this script (does NOT bring the stack up or down)
+#   scripts/e2e-signup.sh                 # spec 0009 (self-service sign-up), which runs after this one
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The operator
