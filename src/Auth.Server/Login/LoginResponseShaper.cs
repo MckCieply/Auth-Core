@@ -1,3 +1,4 @@
+using Auth.Server.Signup;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Http;
 using OpenIddict.Abstractions;
@@ -29,14 +30,14 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
             .Build();
 
     /// <summary>
-    /// The response is shaped only for a password grant on the login path; any other token-endpoint response
-    /// (the refresh, which <see cref="Auth.Server.Sessions.SessionResponseHandler"/> shapes itself) passes through
-    /// untouched.
+    /// The response is shaped only for a password grant on the login path or on the sign-up completion, which signs the person in as a login does
+    /// (spec 0009, Amendment 2); any other token-endpoint response (the refresh, which <see cref="Auth.Server.Sessions.SessionResponseHandler"/>
+    /// shapes itself) passes through untouched.
     /// </summary>
     internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
         request is not null
         && request.IsPasswordGrantType()
-        && JsonLoginRequestHandler.IsLoginPath(path);
+        && (JsonLoginRequestHandler.IsLoginPath(path) || SignupCompleteRequestHandler.IsCompletePath(path));
 
     /// <inheritdoc />
     public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)

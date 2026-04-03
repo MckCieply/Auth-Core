@@ -43,7 +43,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
     private Task<int> CompaniesAsync() => CountAsync(db => db.Companies);
 
     [Fact]
-    public async Task A_visitor_signs_up_finishes_and_logs_in_as_the_admin_of_a_company_of_their_own()   // criteria 1, 3, 8, 9
+    public async Task A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own()   // criteria 1, 3, 8, 9
     {
         using (var options = await SignupApi.Options(Client))
         {
@@ -56,18 +56,20 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
         }
 
-        using (var done = await SignupApi.Complete(Client, token, Password, CompanyName))
-        {
-            await AccountApi.AssertEmptyAsync(done, HttpStatusCode.NoContent);   // 204, never stored, and no cookie: it does not sign in
-        }
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+        var session = await SessionApi.ReadSessionAsync(done);   // 200, the access token and the refresh cookie, as a login answers
 
-        var session = await SessionApi.LoginAsync(Client, "Anna@Firma.test", Password);
         var company = await InDbAsync(db => db.Companies.Where(c => c.Name == CompanyName).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));
         Assert.Equal(company.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
         Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
         Assert.Equal(
             ["members:manage", "org:delete", "org:manage", "reports:approve", "reports:read", "roles:manage", "templates:manage"],
             AccessTokens.Array(session.AccessToken, "permissions"));
+
+        // A login with the chosen password says the same.
+        var login = await SessionApi.LoginAsync(Client, "Anna@Firma.test", Password);
+        Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        Assert.Equal(AccessTokens.Array(session.AccessToken, "permissions"), AccessTokens.Array(login.AccessToken, "permissions"));
     }
 
     [Fact]
@@ -76,7 +78,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         var token = await MailedAsync("Anna@Firma.test");
 
         using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
-        Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
 
         var user = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken));
         Assert.True(user.EmailConfirmed);
@@ -104,7 +106,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         var token = await MailedAsync(company: CompanyName);
 
         using var done = await SignupApi.Complete(Client, token, Password, "Żółw & Spółka <Ltd>");
-        Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
 
         Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == CompanyName, TestContext.Current.CancellationToken)));
         var company = await InDbAsync(db => db.Companies.AsNoTracking().SingleAsync(c => c.Name == "Żółw & Spółka <Ltd>", TestContext.Current.CancellationToken));
@@ -130,7 +132,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         using var preview = await SignupApi.Preview(Client, token);
         Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
         using var good = await SignupApi.Complete(Client, token, Password, CompanyName);
-        Assert.Equal(HttpStatusCode.NoContent, good.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
     }
 
     [Fact]
@@ -168,7 +170,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(0, await UsersWithAsync(Address));
         Assert.Equal(1, await CompaniesAsync());
         using var good = await SignupApi.Complete(Client, token, Password, CompanyName);
-        Assert.Equal(HttpStatusCode.NoContent, good.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
     }
 
     [Fact]
@@ -178,7 +180,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         var used = await MailedAsync("used@firma.test");
         using (var first = await SignupApi.Complete(Client, used, Password, CompanyName))
         {
-            Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         }
 
         using (var second = await SignupApi.Complete(Client, used, Password, CompanyName))
@@ -211,7 +213,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(0, await UsersWithAsync("replaced@firma.test"));
         using (var current = await SignupApi.Complete(Client, newer, Password, "Second"))
         {
-            Assert.Equal(HttpStatusCode.NoContent, current.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, current.StatusCode);
         }
 
         // Expired: 24 hours after the mail.
@@ -270,7 +272,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         await LockoutApi.FailAsync(Client, Clock, Address, 5);
 
         using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
-        Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
 
         _ = await SessionApi.LoginAsync(Client, Address, Password);
     }
@@ -306,8 +308,10 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         {
         }
 
-        using (await SignupApi.Complete(Client, token, Password, CompanyName))   // success
+        SessionApi.Session session;
+        using (var signedIn = await SignupApi.Complete(Client, token, Password, CompanyName))   // success: it signs in
         {
+            session = await SessionApi.ReadSessionAsync(signedIn);
         }
 
         using (await SignupApi.Complete(Client, token, Password, CompanyName))   // reuse: invalid_token
@@ -324,7 +328,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
             Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
         }
 
-        foreach (var secret in new[] { token, boomToken, takenToken, Password, Address, Taken, Boom })
+        foreach (var secret in new[] { token, boomToken, takenToken, Password, Address, Taken, Boom, session.AccessToken, session.RefreshToken })
         {
             Assert.DoesNotContain(secret, Logs.Text, StringComparison.OrdinalIgnoreCase);
         }
@@ -338,7 +342,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         using var done = await RateLimitApi.SendAsync(
             Client, HttpMethod.Post, SignupApi.CompletePath, CallerAddress, null,
             $$"""{"token":"{{token}}","password":"{{Password}}","company_name":"{{CompanyName}}"}""");
-        await AccountApi.AssertEmptyAsync(done, HttpStatusCode.NoContent);
+        var session = await SessionApi.ReadSessionAsync(done);
 
         var user = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken));
         var company = await InDbAsync(db => db.Companies.AsNoTracking().SingleAsync(c => c.Name == CompanyName, TestContext.Current.CancellationToken));
@@ -356,6 +360,6 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(CompanyName, created.OrgName);
         Assert.Equal("signup", AuditApi.Text(created, "via"));
         Assert.Equal(["via"], AuditApi.DetailNames(created));
-        await AssertNoSecretsAsync(Password, token);
+        await AssertNoSecretsAsync(Password, token, session.AccessToken, session.RefreshToken);
     }
 }

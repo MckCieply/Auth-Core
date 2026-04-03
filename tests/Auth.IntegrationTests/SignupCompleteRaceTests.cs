@@ -69,7 +69,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task Of_parallel_completions_with_one_token_exactly_one_is_204()   // criterion 12, Review Focus 3
+    public async Task Of_parallel_completions_with_one_token_exactly_one_is_200()   // criterion 12, Review Focus 3
     {
         var token = await MailedAsync();
 
@@ -85,8 +85,8 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         var responses = await Task.WhenAll(requests);
         try
         {
-            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.NoContent));
-            var refused = responses.Where(r => r.StatusCode != HttpStatusCode.NoContent).ToList();
+            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+            var refused = responses.Where(r => r.StatusCode != HttpStatusCode.OK).ToList();
             Assert.Equal(7, refused.Count);
             foreach (var response in refused)
             {
@@ -106,6 +106,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(
             m => db.Companies.Any(c => c.Id == m.CompanyId && c.Name == CompanyName), TestContext.Current.CancellationToken)));
         Assert.Empty(await PendingAsync());
+        Assert.Equal(1L, await InDbAsync(db => db.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM "OpenIddictAuthorizations" """).SingleAsync(TestContext.Current.CancellationToken)));   // the one winner made the one session
     }
 
     [Theory]
@@ -150,7 +151,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
 
         if (completionFirst)
         {
-            Assert.Equal(HttpStatusCode.NoContent, completed.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, completed.StatusCode);
             Assert.Equal(HttpStatusCode.Conflict, accepted.StatusCode);
             Assert.Equal("""{"error":"already_member"}""", await accepted.Content.ReadAsStringAsync());
             Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
@@ -208,7 +209,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
         Assert.Equal(2, Mail.Sent.Count);
         using var second = await SignupApi.Complete(Client, TokenIn(Mail.Sent[1]), Password, CompanyName);
-        Assert.Equal(HttpStatusCode.NoContent, second.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
     }
 
@@ -238,7 +239,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         }
 
         using var done = await complete;
-        Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
         Assert.Equal(1, await dispatch);
 
         // The sign-up is used: the queued mail found the account and said so, with no link.

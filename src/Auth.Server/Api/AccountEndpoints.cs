@@ -12,7 +12,7 @@ public static class AccountEndpoints
 {
     public const string HealthPath = "/auth/health";
 
-    private static readonly string RefreshCookieSet =
+    internal static readonly string RefreshCookieSet =
         $"`{RefreshCookie.Name}`: the refresh token of the session, `HttpOnly`, `Secure`, `SameSite=Strict`, path `{RefreshCookie.Path}`, "
         + "living as long as the session may still be renewed.";
 

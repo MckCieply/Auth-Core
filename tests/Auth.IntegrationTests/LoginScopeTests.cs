@@ -1,4 +1,5 @@
 using Auth.Server.Login;
+using Auth.Server.Signup;
 using Microsoft.AspNetCore.Http;
 using OpenIddict.Abstractions;
 
@@ -18,6 +19,7 @@ public sealed class LoginScopeTests
     [InlineData("/auth/LOGIN/", true)]
     [InlineData("/auth/login//", false)]
     [InlineData("/auth/login/extra", false)]
+    [InlineData("/auth/signup/complete", false)]
     [InlineData("/", false)]
     public void IsLoginRequest_matches_the_login_path_only(string path, bool expected)
     {
@@ -38,7 +40,11 @@ public sealed class LoginScopeTests
     [InlineData("refresh_token", "/auth/login", false)]
     [InlineData("password", "/auth/refresh", false)]
     [InlineData("refresh_token", "/auth/refresh", false)]
-    public void ShouldShape_requires_a_password_grant_on_the_login_path(string grantType, string path, bool expected)
+    [InlineData("password", "/auth/signup/complete", true)]
+    [InlineData("password", "/auth/SIGNUP/complete/", true)]
+    [InlineData("password", "/auth/signup/complete//", false)]
+    [InlineData("refresh_token", "/auth/signup/complete", false)]
+    public void ShouldShape_requires_a_password_grant_on_the_login_or_completion_path(string grantType, string path, bool expected)
     {
         var request = new OpenIddictRequest { GrantType = grantType };
 
@@ -48,4 +54,16 @@ public sealed class LoginScopeTests
     [Fact]
     public void ShouldShape_is_false_without_a_request() =>
         Assert.False(LoginResponseShaper.ShouldShape(null, new PathString("/auth/login")));
+
+    [Theory]
+    [InlineData("/auth/signup/complete", true)]
+    [InlineData("/auth/SIGNUP/COMPLETE", true)]
+    [InlineData("/auth/signup/complete/", true)]
+    [InlineData("/auth/signup/complete//", false)]
+    [InlineData("/auth/signup/complete/extra", false)]
+    [InlineData("/auth/signup", false)]
+    [InlineData("/auth/login", false)]
+    [InlineData("/", false)]
+    public void IsCompletePath_matches_the_completion_path_only(string path, bool expected) =>
+        Assert.Equal(expected, SignupCompleteRequestHandler.IsCompletePath(new PathString(path)));
 }

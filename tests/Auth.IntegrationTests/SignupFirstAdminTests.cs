@@ -15,7 +15,7 @@ public sealed class SignupFirstAdminTests(PostgresFixture postgres, KeyMaterialF
         var token = await PendingSignupSeed.IssueAsync(factory.Services, "boss@firma.test", "Firma");
 
         using var done = await SignupApi.Complete(client, token, Password, "Firma");
-        Assert.Equal(HttpStatusCode.NoContent, done.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
 
         var session = await SessionApi.LoginAsync(client, "boss@firma.test", Password);
         return (AccessTokens.Array(session.AccessToken, "roles"), AccessTokens.Array(session.AccessToken, "permissions"));

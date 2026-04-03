@@ -163,7 +163,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
     [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
-    [InlineData("POST /auth/signup/complete", "204,400,403,409,415,429")]
+    [InlineData("POST /auth/signup/complete", "200,400,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -327,6 +327,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
     [Theory]
     [InlineData("POST /auth/login", "200")]
+    [InlineData("POST /auth/signup/complete", "200")]
     [InlineData("POST /auth/refresh", "200")]
     [InlineData("POST /auth/logout", "204")]
     public async Task The_answers_that_set_or_clear_the_refresh_cookie_say_so(string endpoint, string status)   // criterion 24
@@ -339,10 +340,22 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task The_completion_answers_with_the_body_of_the_login()   // criterion 20, Amendment 2
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var operations = Operations(await DescriptionAsync(factory));
+
+        string Schema(string endpoint) =>
+            operations[endpoint]["responses"]!["200"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>();
+
+        Assert.Equal(Schema("POST /auth/login"), Schema("POST /auth/signup/complete"));
+    }
+
+    [Fact]
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/refresh 200", "POST /auth/logout 204"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

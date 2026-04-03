@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Security.Claims;
 using Auth.Infrastructure.Identity;
 using Auth.Server.Account;
 using Auth.Server.Audit;
@@ -12,9 +10,6 @@ using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
-using Microsoft.IdentityModel.Tokens;
-using OpenIddict.Abstractions;
-using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Server.Login;
 
@@ -100,29 +95,7 @@ public static class LoginEndpoint
             return AccountResults.NoMembership();
         }
 
-        var identity = new ClaimsIdentity(
-            authenticationType: TokenValidationParameters.DefaultAuthenticationType,
-            nameType: Claims.Name,
-            roleType: Claims.Role);
-
-        // The access token carries `sub` and the tenancy claims below (`org_id`, `roles`, `permissions`), and nothing else:
-        // no email, name or scope.
-        identity.SetClaim(Claims.Subject, user.Id.ToString());
-        identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
-
-        // The stamp of the account as this login read it. A session that began before a password change, even one
-        // whose login was still in flight when the change was committed, carries the old stamp and cannot refresh.
-        identity.SetClaim(SessionPolicy.StampClaim, user.SecurityStamp);
-
-        // The company, the role and what it grants, read from the database now.
-        TenantClaims.Apply(identity, tenant);
-
-        var principal = new ClaimsPrincipal(identity);
-        principal.SetResources(tokens.Value.Audience);
-        // `sub` and the tenancy claims make the access token; the session start stays in the refresh token only.
-        principal.SetDestinations(TenantClaims.DestinationsOf);
-        principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
-        http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
+        var principal = SessionPrincipal.Create(http, user, tenant, tokens.Value.Audience, clock);
 
         // The session and its row are one change: AtomicSignInResult issues the one inside a transaction that also holds the other.
         return new AtomicSignInResult(principal, new AuditEntry

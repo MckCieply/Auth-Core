@@ -46,12 +46,14 @@ public static class SignupRoutes
         app.MapPost(SignupCompleteEndpoint.Path, SignupCompleteEndpoint.HandleAsync)
             .WithTags("Sign-up")
             .WithDescription(
-                "Finishes a sign-up: in one transaction the account (its email confirmed), the company (named as given here, with a copy of "
-                + "the default roles) and the membership with the first admin's role are made, and the pending sign-up is used up. The person "
-                + "is not signed in. The checks are made in this order: the token, the password (a weak one leaves the token usable), the "
-                + "account (`409 already_registered` when one has the address by now).")
+                "Finishes a sign-up and signs the person in: in one transaction the account (its email confirmed), the company (named as given here, "
+                + "with a copy of the default roles) and the membership with the first admin's role are made, the pending sign-up is used up, and the "
+                + "session is issued; if the session cannot be written nothing of this stays. The answer is that of a successful login: the access token "
+                + "(carrying the new company and the first admin's role) and the refresh cookie. The checks are made in this order: the token, the "
+                + "password (a weak one leaves the token usable), the account (`409 already_registered` when one has the address by now).")
             .ReadsJson<SignupCompleteRequest>()
-            .Produces(StatusCodes.Status204NoContent)
+            .Produces<LoginResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet + " The person is signed in, as after a login.")
             .ProducesPasswordError(AccountResults.InvalidRequestError, AccountResults.InvalidTokenError, AccountResults.WeakPasswordError)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
