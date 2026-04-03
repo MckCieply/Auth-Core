@@ -160,7 +160,7 @@ seed_stack() {
     -H 'Content-Type: application/json' -H "@$tmp/admin.auth" --data-binary "@$tmp/note.json")"
   [[ "$code" == "201" ]] || fail "seeding: adding the first note answered $code, not 201"
 
-  # Two invitations through the operator CLI. The server sends the mails at its next poll.
+  # Three invitations through the operator CLI (BOTH is for the sign-up test of spec 0009). The server sends the mails at its next poll.
   cli invite --org "$org" --email "$VIEWER_EMAIL" --role viewer
   cli invite --org "$org" --email "$RESETTER_EMAIL" --role user
   cli invite --org "$org" --email "$BOTH_EMAIL" --role user

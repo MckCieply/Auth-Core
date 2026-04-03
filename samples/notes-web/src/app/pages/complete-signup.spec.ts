@@ -1,16 +1,19 @@
 import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
-import { has, pageText, realLocation, settle, submitForm, typeInto, typeRaw, valueOf } from '../../testing/helpers';
+import { adminMe, has, pageText, realLocation, settle, submitForm, typeInto, typeRaw, valueOf } from '../../testing/helpers';
+import { AuthService } from '../auth/auth.service';
 import { CompleteSignupPage } from './complete-signup';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const invalid = 'This link has expired or was already used.';
 const closed = 'Sign-up is closed. Ask the company you want to join for an invitation.';
 const preview = { email: 'anna@firma.example', company_name: 'Firma' };
+/** What Auth-Core answers a completion: a login's answer. */
+const signedIn = { status: 'authenticated', access_token: 'tok-c' };
 
 async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok') {
   TestBed.configureTestingModule({
@@ -25,13 +28,13 @@ async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok')
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl(`/complete-signup${query}`, CompleteSignupPage);
   await settle(); // the navigation that takes the token out of the address bar lands first
-  const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+  const navigateByUrl = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
   const ctrl = TestBed.inject(HttpTestingController);
   if (previewAnswer === 'ok') {
     ctrl.expectOne('/auth/signup/preview').flush(preview);
     await settle(harness.fixture);
   }
-  return { fixture: harness.fixture, ctrl, navigate };
+  return { fixture: harness.fixture, ctrl, navigateByUrl };
 }
 
 type Opened = Awaited<ReturnType<typeof open>>;
@@ -44,6 +47,14 @@ function choose({ fixture }: Opened, password: string, repeat = password): void 
 
 function button(opened: Opened): HTMLButtonElement | null {
   return (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type="submit"]');
+}
+
+/** Answers the completion as Auth-Core does, then the /auth/me that signing in asks for. */
+async function signInBy(opened: Opened, completion: TestRequest): Promise<void> {
+  completion.flush(signedIn);
+  await settle();
+  opened.ctrl.expectOne('/auth/me').flush(adminMe);
+  await settle(opened.fixture);
 }
 
 describe('CompleteSignupPage', () => {
@@ -74,16 +85,43 @@ describe('CompleteSignupPage', () => {
     expect(has(fixture, '#repeat')).toBe(true);
   });
 
-  it('204: goes to /login with the address in the navigation state, not in the URL', async () => {
+  it('200: signs the person in and opens the notes screen in place of this one; the address and the token are in no URL', async () => {
     const opened = await open();
     choose(opened, 'Chosen-Passw0rd');
     const request = opened.ctrl.expectOne('/auth/signup/complete');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ token: 'tok-s', password: 'Chosen-Passw0rd', company_name: 'Firma' });
-    request.flush(null, status(204));
+    await signInBy(opened, request);
+    const auth = TestBed.inject(AuthService);
+    expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toEqual(adminMe);
+    // `replaceUrl`: Back from the notes screen must not land on this screen again, whose link is used up.
+    expect(opened.navigateByUrl).toHaveBeenCalledTimes(1);
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+    expect(window.location.href).not.toContain('anna@firma.example');
+    expect(window.location.href).not.toContain('tok-c');
+  });
+
+  it('200 when /auth/me cannot be read: the person is signed in and the notes screen opens (it asks for the person again)', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush(signedIn);
+    await settle();
+    opened.ctrl.expectOne('/auth/me').flush('oops', status(500));
     await settle(opened.fixture);
-    expect(opened.navigate).toHaveBeenCalledTimes(1);
-    expect(opened.navigate).toHaveBeenCalledWith(['/login'], { state: { email: 'anna@firma.example' } });
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+  });
+
+  it('a 200 that is not a sign-in: "Something went wrong. Try again.", the form stays, and nothing opens', async () => {
+    const opened = await open();
+    choose(opened, 'Chosen-Passw0rd');
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ status: 'mfa_required' });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(TestBed.inject(AuthService).token()).toBeNull();
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
   });
 
   it('sends the company name the person typed, trimmed', async () => {
@@ -92,7 +130,7 @@ describe('CompleteSignupPage', () => {
     choose(opened, 'Chosen-Passw0rd');
     const request = opened.ctrl.expectOne('/auth/signup/complete');
     expect(request.request.body).toEqual({ token: 'tok-s', password: 'Chosen-Passw0rd', company_name: 'Firma Renamed' });
-    request.flush(null, status(204));
+    await signInBy(opened, request);
   });
 
   it('sends the password exactly as typed', async () => {
@@ -100,7 +138,7 @@ describe('CompleteSignupPage', () => {
     choose(opened, '  Chosen Passw0rd  ');
     const request = opened.ctrl.expectOne('/auth/signup/complete');
     expect(request.request.body).toEqual({ token: 'tok-s', password: '  Chosen Passw0rd  ', company_name: 'Firma' });
-    request.flush(null, status(204));
+    await signInBy(opened, request);
   });
 
   it('weak_password: the rules not met, one line each, and the form stays', async () => {
@@ -116,7 +154,8 @@ describe('CompleteSignupPage', () => {
     );
     expect(lines).toEqual(['The password is too short.', 'The password needs a digit.']);
     expect(has(opened.fixture, 'form')).toBe(true);
-    expect(opened.navigate).not.toHaveBeenCalled();
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
+    expect(TestBed.inject(AuthService).token()).toBeNull();
   });
 
   it('409 already_registered: says the account exists and links to the sign-in; no form', async () => {
@@ -233,28 +272,27 @@ describe('CompleteSignupPage', () => {
     const opened = await open();
     choose(opened, 'Chosen-Passw0rd');
     submitForm(opened.fixture);
-    opened.ctrl.expectOne('/auth/signup/complete').flush(null, status(204));
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
   });
 
   it.each([
     ['rejects', () => Promise.reject(new Error('navigation failed'))],
     ['answers false', () => Promise.resolve(false)],
-  ])('the button is on again when the router %s', async (_name, answer) => {
+  ])('the button is on again when the router %s (the person stays here, signed in)', async (_name, answer) => {
     const opened = await open();
-    opened.navigate.mockImplementation(answer);
+    opened.navigateByUrl.mockImplementation(answer);
     choose(opened, 'Chosen-Passw0rd');
-    opened.ctrl.expectOne('/auth/signup/complete').flush(null, status(204));
-    await settle(opened.fixture);
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
     expect(button(opened)?.disabled).toBe(false);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
   });
 
-  it('after 204 the button stays off until the login screen is open: a second Enter does not post the used token again', async () => {
+  it('after 200 the button stays off until the notes screen is open: a second Enter does not post the used token again', async () => {
     const opened = await open();
     let arrive: (opened: boolean) => void = () => undefined;
-    opened.navigate.mockReturnValue(new Promise<boolean>((resolve) => (arrive = resolve)));
+    opened.navigateByUrl.mockReturnValue(new Promise<boolean>((resolve) => (arrive = resolve)));
     choose(opened, 'Chosen-Passw0rd');
-    opened.ctrl.expectOne('/auth/signup/complete').flush(null, status(204));
-    await settle(opened.fixture);
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
     expect(button(opened)?.disabled).toBe(true);
     submitForm(opened.fixture);
     await settle(opened.fixture);

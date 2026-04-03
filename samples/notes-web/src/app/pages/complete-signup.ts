@@ -2,6 +2,8 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AccountApi, SignupPreview } from '../account-api';
+import { DEFAULT_RETURN_URL } from '../auth/auth.guard';
+import { AuthService } from '../auth/auth.service';
 import { texts } from '../texts';
 import { PasswordRules } from './password-rules';
 import { requiredText } from './required-text';
@@ -63,6 +65,7 @@ export class CompleteSignupPage implements OnInit {
   protected readonly shared = texts.signup;
   protected readonly common = texts.common;
   private readonly account = inject(AccountApi);
+  private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   // Read once, here, and gone from the address bar from now on.
   private readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
@@ -116,15 +119,16 @@ export class CompleteSignupPage implements OnInit {
     this.busy.set(true);
     // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
     // Auth-Core refuses white space at either end.
-    const result = await this.account.completeSignup(this.token, password, company.trim());
+    const result = await this.auth.completeSignup(this.token, password, company.trim());
     if (result.ok) {
-      // The address goes in the navigation state: it is never in the URL. The button stays off until the login is open: the token is
-      // used up, and a second Enter would only post it again. When the router cannot open it (it answers false or fails) the person
-      // stays here and the button is on again.
+      // Signed in (Auth-Core answered as it answers a login): the product opens at once, in place of this screen, so that Back does
+      // not land on a link that is used up. The address is in no URL. The button stays off until the notes screen is open: the token
+      // is used up, and a second Enter would only post it again. When the router cannot open it (it answers false or fails) the person
+      // stays here, signed in, and the button is on again.
       try {
-        await this.router.navigate(['/login'], { state: { email: signup.email } });
+        await this.router.navigateByUrl(DEFAULT_RETURN_URL, { replaceUrl: true });
       } catch {
-        // nothing to show: the company was made
+        // nothing to show: the company was made and the person is signed in
       }
     } else if (result.failure.kind === 'weak_password') {
       this.rules.set(result.failure.rules);

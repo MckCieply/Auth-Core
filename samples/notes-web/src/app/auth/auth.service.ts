@@ -97,6 +97,16 @@ export function failureOf(error: unknown): Failure {
   return { kind: 'other' };
 }
 
+/**
+ * Like `failureOf`, for the sign-up forms: a `400 invalid_request` is a failure of its own there, because each of those screens has a text
+ * for it (the sign-in and the other mail-link screens read it as "other").
+ */
+export function formFailureOf(error: unknown): Failure {
+  return error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request'
+    ? { kind: 'invalid_request' }
+    : failureOf(error);
+}
+
 interface LoginBody {
   status?: unknown;
   access_token?: unknown;
@@ -175,6 +185,28 @@ export class AuthService {
     } catch (error) {
       return { ok: false, failure: failureOf(error) };
     }
+    return this.startSession(body);
+  }
+
+  /**
+   * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
+   * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
+   * the session that exists alone, as a failed login does.
+   */
+  async completeSignup(token: string, password: string, companyName: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    try {
+      body = await firstValueFrom(
+        this.http.post<LoginBody | null>('/auth/signup/complete', { token, password, company_name: companyName }),
+      );
+    } catch (error) {
+      return { ok: false, failure: formFailureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /** What a sign-in that Auth-Core answered with `200` does: a session of its own, and who it is for. */
+  private async startSession(body: LoginBody | null): Promise<LoginResult> {
     const token = body?.access_token;
     if (body?.status !== 'authenticated' || typeof token !== 'string' || token === '') {
       return { ok: false, failure: { kind: 'other' } };

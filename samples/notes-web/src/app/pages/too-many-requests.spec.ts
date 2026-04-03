@@ -96,10 +96,13 @@ describe('the mail and link screens when the address has made too many requests'
     await settle(opened.fixture);
     typeInto(opened.fixture, '#password', 'Chosen-Passw0rd');
     typeInto(opened.fixture, '#repeat', 'Chosen-Passw0rd');
+    const navigateByUrl = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
     submitForm(opened.fixture);
     await expectNoticeOnly(opened, '/auth/signup/complete');
     expect(has(opened.fixture, '#password')).toBe(true);
-    expect(TestBed.inject(Router).navigate).not.toHaveBeenCalledWith(['/login'], expect.anything());
+    expect(opened.auth.token()).toBeNull(); // a refused completion signs nobody in
+    expect(navigateByUrl).not.toHaveBeenCalled();
+    expect(TestBed.inject(Router).url).toBe('/complete-signup'); // and the screen stays where it is
   });
 
   it('InvitePage: keeps the form, leaves the words to the notice bar', async () => {

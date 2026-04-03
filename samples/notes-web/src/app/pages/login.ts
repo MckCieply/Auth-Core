@@ -7,7 +7,7 @@ import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
 import { requiredText } from './required-text';
 
-/** The email a mail-link screen (the invitation or the sign-up) passed on in the navigation state (it is never in the URL). */
+/** The email an invitation screen passed on in the navigation state (it is never in the URL). */
 function startEmail(router: Router): string {
   const email: unknown = router.currentNavigation()?.extras.state?.['email'];
   return typeof email === 'string' ? email : '';

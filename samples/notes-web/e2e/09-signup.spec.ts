@@ -3,7 +3,6 @@ import { acceptInviteByApi } from './support/api';
 import { setting } from './support/env';
 import { openMailLink, waitForAccountExistsMail, waitForLink } from './support/mail';
 import { expectCleanAddressBar, expectNoEmailInAddressBar } from './support/page';
-import { submitLogin } from './support/session';
 
 // The request wakes the server's dispatcher, so a mail comes within seconds; an invitation queued by the operator CLI waits for the poll
 // (a minute or two). Each wait is below the test's timeout.
@@ -15,7 +14,7 @@ function unique(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
 }
 
-test('a visitor signs up, opens the mail link, finishes, signs in and is the admin of a company of their own', async ({ page }) => {
+test('a visitor signs up, opens the mail link, finishes, is signed in at once and is the admin of a company of their own', async ({ page }) => {
   test.setTimeout(240_000);
   const email = `${unique('signup')}@e2e.test`;
   const typedCompany = `Typed ${unique('co')}`;
@@ -24,6 +23,14 @@ test('a visitor signs up, opens the mail link, finishes, signs in and is the adm
   // The address of every request the page makes: the person's address is in a body only, never in an address (criterion 22).
   const requested: string[] = [];
   page.on('request', (request) => requested.push(request.url()));
+  // The address of the page after every navigation, the router's included: the person must not pass through the sign-in screen
+  // after finishing (Amendment 2 of spec 0009).
+  const urls: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      urls.push(frame.url());
+    }
+  });
 
   // The sign-in screen offers the way in because Auth-Core says that sign-up is on.
   await page.goto('/login');
@@ -58,21 +65,33 @@ test('a visitor signs up, opens the mail link, finishes, signs in and is the adm
   await page.getByLabel('Company name').fill(company);
   await page.getByLabel('New password').fill(password);
   await page.getByLabel('Repeat the password').fill(password);
+  const beforeFinishing = urls.length;
   await page.getByRole('button', { name: 'Create company' }).click();
 
-  // No sign-in follows: the sign-in screen opens with the address filled in, and the address is not in the URL.
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByLabel('Email')).toHaveValue(email);
-  expectNoEmailInAddressBar(page);
-
-  await submitLogin(page, email, password);
+  // The completion signed the person in: the notes screen opens at once, with no sign-in screen on the way and the address in no URL.
   await expect(page).toHaveURL(/\/notes$/);
+  expect(
+    urls.slice(beforeFinishing).some((url) => /\/login(\?|$)/.test(url)),
+    'the person went through the sign-in screen',
+  ).toBe(false);
+  // ...and the test did see the navigations, so that the line above says something.
+  expect(
+    urls.slice(beforeFinishing).some((url) => /\/notes$/.test(url)),
+    'the notes screen was never reached by a navigation the test saw',
+  ).toBe(true);
+  expectNoEmailInAddressBar(page);
   await expect(page.getByTestId('me-email')).toHaveText(email);
   await expect(page.getByTestId('me-company')).toHaveText(company);
   await expect(page.getByTestId('me-role')).toHaveText('admin');
   // A company of their own: not the notes of the seeded company.
   await expect(page.getByText(setting('E2E_SEEDED_NOTE'))).toHaveCount(0);
   await expect(page.getByText('No notes yet.')).toBeVisible();
+
+  // The refresh cookie came with the answer of the completion: a reload keeps the person signed in.
+  await page.reload();
+  await expect(page).toHaveURL(/\/notes$/);
+  await expect(page.getByTestId('me-email')).toHaveText(email);
+  await expect(page.getByTestId('me-company')).toHaveText(company);
 
   // The link is used up.
   await openMailLink(page, link);
@@ -135,10 +154,11 @@ test('an account made between the request and the link: the completion screen sa
 
 test('a link that expired says so and offers to sign up again', async ({ page }) => {
   // The script asked for this sign-up and made the end of its link lie in the past (the database, not the clock of the test).
-  const link = await waitForLink(setting('E2E_EXPIRED_EMAIL'), 'complete-signup', MAIL_WAIT_MS);
+  const link = await waitForLink(setting('E2E_EXPIRED_EMAIL'), 'complete-signup', 10_000);
 
   await openMailLink(page, link);
   await expect(page.getByText(LINK_USED_UP)).toBeVisible();
+  await expect(page).toHaveURL(/\/complete-signup$/);
   expectCleanAddressBar(page);
 
   await page.getByRole('link', { name: 'Sign up again' }).click();
@@ -148,6 +168,7 @@ test('a link that expired says so and offers to sign up again', async ({ page })
 test('a link that never worked says so and offers to sign up again', async ({ page }) => {
   await page.goto(`/complete-signup?token=${'x'.repeat(43)}`);
   await expect(page.getByText(LINK_USED_UP)).toBeVisible();
+  await expect(page).toHaveURL(/\/complete-signup$/);
   expectCleanAddressBar(page);
 
   await page.getByRole('link', { name: 'Sign up again' }).click();

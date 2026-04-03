@@ -63,15 +63,6 @@ describe('AccountApi: sign-up', () => {
     expect((await done).ok).toBe(true);
   });
 
-  it('completeSignup posts the token, the password and the company name', async () => {
-    const done = api.completeSignup('tok', 'Pw-1 x', 'Firma');
-    const request = ctrl.expectOne('/auth/signup/complete');
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ token: 'tok', password: 'Pw-1 x', company_name: 'Firma' });
-    request.flush(null, status(204));
-    expect((await done).ok).toBe(true);
-  });
-
   it('reads the answer to a preview: the address and the company name', async () => {
     const done = api.previewSignup('tok');
     const request = ctrl.expectOne('/auth/signup/preview');
@@ -103,8 +94,8 @@ describe('AccountApi: sign-up', () => {
     [400, { error: 'invalid_request' }, { kind: 'invalid_request' }],
     [500, '<html>oops</html>', { kind: 'other' }],
   ])('answer %s %j is the failure %j', async (code, body, failure) => {
-    const done = api.completeSignup('tok', 'pw', 'Firma');
-    ctrl.expectOne('/auth/signup/complete').flush(body, status(code));
+    const done = api.signUp('anna@firma.example', 'Firma');
+    ctrl.expectOne('/auth/signup').flush(body, status(code));
     expect(await done).toEqual({ ok: false, failure });
   });
 });

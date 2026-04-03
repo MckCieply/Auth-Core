@@ -1,7 +1,7 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { Failure, errorCode, failureOf, isRecord } from './auth/auth.service';
+import { Failure, failureOf, formFailureOf, isRecord } from './auth/auth.service';
 
 export type Outcome<T = void> = { ok: true; value: T } | { ok: false; failure: Failure };
 
@@ -94,19 +94,12 @@ export class AccountApi {
     return { ok: false, failure: { kind: 'other' } };
   }
 
-  completeSignup(token: string, password: string, companyName: string): Promise<Outcome> {
-    return this.postForm('/auth/signup/complete', { token, password, company_name: companyName });
-  }
-
-  /** Like `post`, but a `400 invalid_request` is a failure of its own: each sign-up form has a text for it. */
+  /** Like `post`, but a `400 invalid_request` is a failure of its own: the sign-up form has a text for it. */
   private async postForm<T = void>(url: string, body: unknown): Promise<Outcome<T>> {
     try {
       return { ok: true, value: await firstValueFrom(this.http.post<T>(url, body)) };
     } catch (error) {
-      if (error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request') {
-        return { ok: false, failure: { kind: 'invalid_request' } };
-      }
-      return { ok: false, failure: failureOf(error) };
+      return { ok: false, failure: formFailureOf(error) };
     }
   }
 
