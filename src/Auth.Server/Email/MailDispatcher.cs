@@ -18,9 +18,11 @@ namespace Auth.Server.Email;
 /// A sign-up request (spec 0009) names a pending sign-up, not an account, and is decided here: an address whose account belongs to a company gets
 /// the mail that says so (no link) even when its pending sign-up is gone; otherwise a live pending sign-up gets a new link — also when the address
 /// has an account without a company (Amendment 3), unless that account only looks like the typed address; with neither there is nothing to send.
+/// While sign-up is off (<see cref="SignupGate.IsOn"/>) no sign-up mail is sent, the notice included: a request queued before the manifest or the
+/// settings turned sign-up off is dropped when it comes up, so that an instance that has it off never mails about it.
 /// </summary>
 public sealed partial class MailDispatcher(
-    IServiceScopeFactory scopes, TimeProvider clock, MailComposer composer, IMailTransport transport, ILogger<MailDispatcher> logger)
+    IServiceScopeFactory scopes, TimeProvider clock, MailComposer composer, IMailTransport transport, SignupGate gate, ILogger<MailDispatcher> logger)
 {
     /// <summary>Handles every row that is due now. Returns how many rows it handled.</summary>
     public async Task<int> DispatchDueAsync(CancellationToken cancellationToken)
@@ -44,7 +46,7 @@ public sealed partial class MailDispatcher(
 
     /// <summary>
     /// Removes the due rows whose address has no account, or (for a verification) whose account is confirmed
-    /// already; a sign-up row is removed only when its address has neither an account that belongs to a company nor a live
+    /// already; a sign-up row is removed when sign-up is off, or when its address has neither an account that belongs to a company nor a live
     /// (unexpired) pending sign-up. Those requests were answered with 202 like any other, and end here.
     /// </summary>
     private async Task<int> DropUnmailableAsync(CancellationToken cancellationToken)
@@ -53,6 +55,7 @@ public sealed partial class MailDispatcher(
         var passwordReset = (short)MailKind.PasswordReset;
         var invitation = (short)MailKind.Invitation;
         var signup = (short)MailKind.Signup;
+        var signupOn = gate.IsOn;
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -63,13 +66,14 @@ public sealed partial class MailDispatcher(
                 WHERE r."NextAttemptAt" <= {now}
                   AND r."Kind" <> {invitation}
                   AND ((r."Kind" = {signup}
-                        AND NOT EXISTS (
-                            SELECT 1 FROM "PendingSignups" p
-                            WHERE p."NormalizedEmail" = r."NormalizedEmail" AND p."ExpiresAt" > {now})
-                        AND NOT EXISTS (
-                            SELECT 1 FROM "AspNetUsers" a
-                            WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL
-                              AND EXISTS (SELECT 1 FROM "Memberships" m WHERE m."UserId" = a."Id")))
+                        AND (NOT {signupOn}
+                             OR (NOT EXISTS (
+                                     SELECT 1 FROM "PendingSignups" p
+                                     WHERE p."NormalizedEmail" = r."NormalizedEmail" AND p."ExpiresAt" > {now})
+                                 AND NOT EXISTS (
+                                     SELECT 1 FROM "AspNetUsers" a
+                                     WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL
+                                       AND EXISTS (SELECT 1 FROM "Memberships" m WHERE m."UserId" = a."Id")))))
                        OR (r."Kind" <> {signup}
                            AND NOT EXISTS (
                                SELECT 1 FROM "AspNetUsers" u
@@ -149,7 +153,7 @@ public sealed partial class MailDispatcher(
         if (makeMail is null)
         {
             // The account went away, or was confirmed, or the invitation was cancelled, or the pending sign-up expired or
-            // was completed, with no account that belongs to a company under the address, after the pass began.
+            // was completed, with no account that belongs to a company under the address, after the pass began, or sign-up is off.
             await RemoveAsync(db, request, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return true;
@@ -211,11 +215,16 @@ public sealed partial class MailDispatcher(
     /// completion waits for the mail, the account is read again once the lock is held, and the row gets a new link token (the earlier link stops
     /// working); the mail goes to the address as typed. An account that merely looks like the typed address
     /// (<see cref="SignupAccount.MayStartCompany"/>) is not one a link may start a company for: it gets the notice. With no live pending sign-up
-    /// and no account that belongs to a company there is nothing to send.
+    /// and no account that belongs to a company there is nothing to send; and nothing at all is sent while sign-up is off.
     /// </summary>
     private async Task<Func<Task<ComposedMail>>?> PrepareSignupMailAsync(
         AuthDbContext db, MailRequest request, DateTimeOffset now, CancellationToken cancellationToken)
     {
+        if (!gate.IsOn)
+        {
+            return null;   // sign-up was turned off after the request: no mail of it, the notice included
+        }
+
         var account = await SignupAccounts.FindAsync(db, request.NormalizedEmail, cancellationToken);
         if (account is { BelongsToCompany: true })
         {

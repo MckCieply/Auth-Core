@@ -3,15 +3,25 @@ using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Lockout;
+using Auth.Server.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
-public sealed class SignupRequestTests(PostgresFixture postgres, KeyMaterialFixture keys) : SignupTestBase(postgres, keys)
+public sealed class SignupRequestTests : SignupTestBase
 {
     // Spelled out, so that the escapes written into a request body are not read as escapes of this file.
     private const string Backslash = "\\";
+
+    public SignupRequestTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        // No background pass of the host (the base class has left out the mail pruning and the audit pruning) may log statements of its own
+        // while a test compares what two requests ran: the statements are compared whole, deletes included.
+        Factory.WithoutHostedService<TokenPruningService>().WithoutHostedService<LockoutPruningService>();
+    }
 
     public static TheoryData<string> MalformedBodies => new()
     {
@@ -126,16 +136,11 @@ public sealed class SignupRequestTests(PostgresFixture postgres, KeyMaterialFixt
         using var unknown = await SignupApi.Request(Client, "nobody@firma.test", CompanyName);
         var forUnknown = StatementsSince(mark);
 
-        // A pass of the host may log a DELETE of its own in between; what the request runs is not one.
-        static List<string> OfTheRequest(List<string> statements) =>
-            [.. statements.Where(sql => !sql.StartsWith("DELETE", StringComparison.Ordinal)
-                && (sql.Contains("PendingSignups", StringComparison.Ordinal)
-                    || sql.Contains("MailRequest", StringComparison.Ordinal)
-                    || sql.Contains("audit_events", StringComparison.Ordinal)))];
-
-        Assert.NotEmpty(OfTheRequest(forKnown));
+        // Whole lists, every table and every kind of statement: a request that read one more table for one address would differ.
+        Assert.NotEmpty(forKnown);
         Assert.Contains(forKnown, sql => sql.Contains("PendingSignups", StringComparison.Ordinal));
-        Assert.Equal(OfTheRequest(forKnown), OfTheRequest(forUnknown));
+        Assert.Contains(forKnown, sql => sql.Contains("MailRequest", StringComparison.Ordinal));
+        Assert.Equal(forKnown, forUnknown);
         Assert.DoesNotContain(forKnown.Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
     }
 
@@ -156,21 +161,15 @@ public sealed class SignupRequestTests(PostgresFixture postgres, KeyMaterialFixt
         using var unknown = await SignupApi.Request(Client, "nobody@firma.test", CompanyName);
         var forUnknown = StatementsSince(mark);
 
-        static List<string> OfTheRequest(List<string> statements) =>
-            [.. statements.Where(sql => !sql.StartsWith("DELETE", StringComparison.Ordinal)
-                && (sql.Contains("PendingSignups", StringComparison.Ordinal)
-                    || sql.Contains("MailRequest", StringComparison.Ordinal)
-                    || sql.Contains("audit_events", StringComparison.Ordinal)))];
-
         foreach (var response in new[] { withCompany, withoutCompany, unknown })
         {
             await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
             Assert.Equal(LoginApi.HeaderNames(withCompany), LoginApi.HeaderNames(response));
         }
 
-        Assert.NotEmpty(OfTheRequest(forNone));
-        Assert.Equal(OfTheRequest(forCompany), OfTheRequest(forNone));
-        Assert.Equal(OfTheRequest(forUnknown), OfTheRequest(forNone));
+        Assert.NotEmpty(forNone);
+        Assert.Equal(forCompany, forNone);
+        Assert.Equal(forUnknown, forNone);
         Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
         Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("Memberships", StringComparison.Ordinal));
     }

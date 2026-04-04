@@ -25,7 +25,8 @@ public static class SignupRoutes
             .WithTags("Sign-up")
             .WithDescription(
                 "Asks to start a company. The answer is the same `202` for every address; a mail follows: a notice without a link when the address "
-                + "has an account that belongs to a company, otherwise a link to finish (also when the account belongs to no company). Off unless the "
+                + "has an account that belongs to a company or only resembles the typed address, otherwise a link to finish (also when the account "
+                + "belongs to no company). Off unless the "
                 + "manifest says `signup: self-service` and the completion address is configured (`403 signup_disabled`). One request a minute and "
                 + "five an hour per address.")
             .ReadsJson<SignupRequest>()
@@ -52,8 +53,9 @@ public static class SignupRoutes
                 + "with a copy of the default roles) and the membership with the first admin's role are made, the pending sign-up is used up, and the "
                 + "session is issued; if the session cannot be written nothing of this stays. The answer is that of a successful login: the access token "
                 + "(carrying the new company and the first admin's role) and the refresh cookie. The checks are made in this order: the token, the "
-                + "password (a weak one leaves the token usable; an account that has no company keeps the password it has, so for it the member may be "
-                + "left out and is not used if sent), the account (`409 already_registered` when an account that belongs to a company has the address by now).")
+                + "account (`409 already_registered`, whatever the password, when an account that belongs to a company, or one that only resembles the "
+                + "typed address, has the address by now), the password (only where no account exists: a weak one is `400 weak_password` and leaves "
+                + "the token usable; an account that has no company keeps the password it has, so for it the member may be left out and is not used if sent).")
             .ReadsJson<SignupCompleteRequest>()
             .Produces<LoginResponse>()
             .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet + " The person is signed in, as after a login.")

@@ -74,7 +74,7 @@ public static class MailTexts
         ("en", MailKind.Signup) => new MailText(
             Subject: "Complete your sign-up for {0}",
             Greeting: "Hello,",
-            Intro: "Someone asked to create the company {1} on {0} with this email address. If it was you, use the link below to choose a password and finish signing up.",
+            Intro: "Someone asked to create the company {1} on {0} with this email address. If it was you, use the link below to finish signing up.",
             Button: "Finish signing up",
             Validity: "The link is valid for 24 hours and works once.",
             LinkHint: "If the button does not work, copy this address into your browser:",
@@ -82,7 +82,7 @@ public static class MailTexts
         ("pl", MailKind.Signup) => new MailText(
             Subject: "Dokończ rejestrację w {0}",
             Greeting: "Dzień dobry,",
-            Intro: "Ktoś, podając ten adres e-mail, poprosił o utworzenie firmy {1} w {0}. Jeśli to Ty, użyj poniższego linku, aby ustawić hasło i dokończyć rejestrację.",
+            Intro: "Ktoś, podając ten adres e-mail, poprosił o utworzenie firmy {1} w {0}. Jeśli to Ty, użyj poniższego linku, aby dokończyć rejestrację.",
             Button: "Dokończ rejestrację",
             Validity: "Link jest ważny przez 24 godziny i działa jeden raz.",
             LinkHint: "Jeśli przycisk nie działa, skopiuj ten adres do przeglądarki:",

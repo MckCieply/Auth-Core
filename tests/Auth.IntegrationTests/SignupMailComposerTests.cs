@@ -36,6 +36,9 @@ public sealed class SignupMailComposerTests
         Assert.Contains(Link, mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("valid for 24 hours", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("ignore this message", mail.TextBody, StringComparison.Ordinal);
+        // The link also serves an account that keeps its password (Amendment 3): the text does not promise a password to choose.
+        Assert.Contains("use the link below to finish signing up.", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", mail.TextBody + mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"href=\"{Link}\"", mail.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("Firma", mail.HtmlBody, StringComparison.Ordinal);
         Assert.Contains("valid for 24 hours", mail.HtmlBody, StringComparison.Ordinal);
@@ -54,6 +57,8 @@ public sealed class SignupMailComposerTests
         Assert.Contains("Żółw i Spółka", mail.HtmlBody, StringComparison.Ordinal);   // letters stay letters, not entities
         Assert.Contains(Link, mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("ważny przez 24 godziny", mail.TextBody, StringComparison.Ordinal);
+        Assert.Contains("użyj poniższego linku, aby dokończyć rejestrację.", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("hasł", mail.TextBody + mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("zignoruj tę wiadomość", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("<html lang=\"pl\">", mail.HtmlBody, StringComparison.Ordinal);
         AssertHtmlHoldsTheText(mail);

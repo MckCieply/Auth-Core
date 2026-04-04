@@ -16,7 +16,8 @@ namespace Auth.Server.Login;
 /// A login has the result open the transaction. A completed sign-up (spec 0009, Amendment 2) passes the one that still holds the account, the
 /// company and the membership it has just made (<paramref name="opened"/>): the sign-in is then part of the completion, a sign-in that
 /// cannot be written rolls the whole completion back, and so does an answer of OpenIddict that is not a <c>200</c> (it is a <c>500</c> then, not
-/// an error that leaves the account behind). The result owns that transaction from the first line of <see cref="ExecuteAsync"/> and disposes it.
+/// an error that leaves the account behind). The result owns that transaction from the first line of <see cref="ExecuteAsync"/> and disposes it as soon as it is committed or
+/// refused, before the held answer is written to the client.
 /// </summary>
 public sealed class AtomicSignInResult(ClaimsPrincipal principal, AuditEntry entry, IDbContextTransaction? opened = null) : IResult
 {
@@ -58,6 +59,11 @@ public sealed class AtomicSignInResult(ClaimsPrincipal principal, AuditEntry ent
                 httpContext.Response.Clear();
                 throw;
             }
+
+            // The transaction is finished here (committed, or to be rolled back by the disposal): the held answer is handed to the client
+            // without it, so that a slow client holds no connection and no row lock of the database. The finally below is for the exceptions.
+            await transaction.DisposeAsync();
+            transaction = null;
 
             httpContext.Response.Body = realBody;
             held.Position = 0;

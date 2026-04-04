@@ -136,9 +136,8 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Fact]
-    public async Task The_order_of_the_checks_is_token_then_password_then_account()   // spec 0009 → To verify
+    public async Task The_order_of_the_checks_is_token_then_account_then_password()   // spec 0009 → Complete, steps 2 to 4
     {
-        await CreateUserAsync(Address, confirmed: true);
         var token = await PendingSignupSeed.IssueAsync(Factory.Services, Address, CompanyName);
 
         using (var unknown = await SignupApi.Complete(Client, EmailTokens.NewToken(), "short", CompanyName))
@@ -148,14 +147,39 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
 
         using (var weak = await SignupApi.Complete(Client, token, "short", CompanyName))
         {
-            await AccountApi.AssertErrorAsync(weak, WeakRules);   // then the password, whether or not an account exists
+            await AccountApi.AssertErrorAsync(weak, WeakRules);   // no account: the password is judged
         }
 
         Assert.Single(await PendingAsync());   // a weak password consumed nothing
 
-        using var good = await SignupApi.Complete(Client, token, Password, CompanyName);
-        await SignupApi.AssertAlreadyRegisteredAsync(good);   // then the account
+        await CreateUserAsync(Address, confirmed: true);   // an account that belongs to a company has the address by now
+        using (var weakAgain = await SignupApi.Complete(Client, token, "short", CompanyName))
+        {
+            await SignupApi.AssertAlreadyRegisteredAsync(weakAgain);   // then the account, before the password
+        }
+
         Assert.Empty(await PendingAsync());
+        using var gone = await SignupApi.Complete(Client, token, Password, CompanyName);
+        await AccountApi.AssertErrorAsync(gone, AccountApi.InvalidToken);
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("alllowercase1")]
+    [InlineData(Password)]
+    public async Task An_account_that_belongs_to_a_company_is_409_whatever_the_password(string sent)   // spec 0009 → Complete, steps 3 and 4: weak_password only when there is no account
+    {
+        await CreateUserAsync(Address, confirmed: true);
+        var token = await PendingSignupSeed.IssueAsync(Factory.Services, Address, CompanyName);
+        var companies = await CompaniesAsync();
+
+        using var done = await SignupApi.Complete(Client, token, sent, CompanyName);
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        Assert.Equal(1, await UsersWithAsync(Address));
+        Assert.Equal(companies, await CompaniesAsync());
+        Assert.Empty(await PendingAsync());   // the pending sign-up is deleted
+        Assert.Empty(await AuditAsync(AuditKinds.SignupCompleted));
     }
 
     [Theory]

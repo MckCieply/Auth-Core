@@ -50,7 +50,7 @@ public sealed class SignupService(
     /// Completes the sign-up as far as the database goes. Refused with <c>invalid_token</c>, with <c>weak_password</c> (the broken rules are
     /// <see cref="SignupCompletion.BrokenRules"/>; the token stays usable), with <c>already_registered</c> (an account that the link may not
     /// use has the address by now: the pending sign-up is deleted) or with <c>invalid_request</c> (no password, and no account under the
-    /// address either; the token stays usable). The checks are made in the order: the token, the password, the account; a missing password
+    /// address either; the token stays usable). The checks are made in the order: the token, the account, the password; a weak or a missing password
     /// counts only for an address with no account.
     /// The caller has checked <paramref name="companyName"/> against the name rule and <paramref name="password"/>, when there is one, for NUL.
     /// An account under the address that belongs to no company, and whose address is the typed one (<see cref="SignupAccount.MayStartCompany"/>),
@@ -106,7 +106,17 @@ public sealed class SignupService(
             {
                 account = new ApplicationUser { UserName = pending.Email, Email = pending.Email, EmailConfirmed = true };
 
-                // A password that is there is checked first (the order is the token, the password, the account).
+                if (found is not null)
+                {
+                    // An account the link may not use: one that belongs to a company (it joined one since the mail), or one that only looks like
+                    // the typed address. The answer does not depend on the password (a screen that was told "has_account" sent none, and a weak
+                    // password is only reported where an account is to be made: spec step 3 and 4). Committed, not rolled back: the pending
+                    // sign-up is gone, as the contract says.
+                    await transaction.CommitAsync(CancellationToken.None);
+                    return Refused(TenancyErrors.AlreadyRegistered);
+                }
+
+                // A password that is there is checked before a missing one is refused (the order is the token, the account, the password).
                 if (password is not null)
                 {
                     var broken = await PasswordRules.BrokenAsync(users, account, password);
@@ -114,15 +124,6 @@ public sealed class SignupService(
                     {
                         return new SignupCompletion(TenancyErrors.WeakPassword, broken);
                     }
-                }
-
-                if (found is not null)
-                {
-                    // An account the link may not use, a company it joined since the mail included. The answer does not depend on whether a
-                    // password came: a screen that was told "has_account" sent none. Committed, not rolled back: the pending sign-up is gone,
-                    // as the contract says.
-                    await transaction.CommitAsync(CancellationToken.None);
-                    return Refused(TenancyErrors.AlreadyRegistered);
                 }
 
                 if (password is null)

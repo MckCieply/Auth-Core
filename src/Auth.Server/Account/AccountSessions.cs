@@ -8,8 +8,8 @@ using OpenIddict.Abstractions;
 namespace Auth.Server.Account;
 
 /// <summary>
-/// What a new password link does to an account, in one place: a reset (spec 0004) and the acceptance of an invitation
-/// (spec 0005) both end every session of the account the same way, and two copies could drift apart.
+/// What a new password link does to an account, in one place: a reset (spec 0004), the acceptance of an invitation
+/// (spec 0005) and the completion of a sign-up (spec 0009) all end every session of the account the same way, and two copies could drift apart.
 /// </summary>
 internal static class AccountSessions
 {

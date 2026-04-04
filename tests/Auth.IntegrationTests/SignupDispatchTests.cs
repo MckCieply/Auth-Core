@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Email;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,6 +11,10 @@ namespace Auth.IntegrationTests;
 
 public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFixture keys) : SignupTestBase(postgres, keys)
 {
+    // Two different addresses that the account lookup folds into one key.
+    private static readonly string Micro = char.ConvertFromUtf32(0xB5);
+    private static readonly string Mu = char.ConvertFromUtf32(0x3BC);
+
     private Task<string> DumpAsync() =>
         InDbAsync(async db => string.Join(' ', await db.Database.SqlQuery<string>(
             $"""
@@ -299,6 +304,68 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
         Assert.NotEqual(first, second);
         Assert.Equal(EmailTokens.HashOf(second), Assert.Single(await PendingAsync()).TokenHash);
         Assert.Equal(0, await QueueCountAsync());
+    }
+
+    [Fact]
+    public async Task A_request_for_a_look_alike_spelling_drops_the_earlier_link_even_when_its_mail_fails()   // a link proves the mailbox it went to; the key folds the micro sign into mu
+    {
+        string micro = Micro + "@firma.test", mu = Mu + "@firma.test";
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var normalizer = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>();
+            Assert.NotEqual(micro, mu);
+            Assert.Equal(normalizer.NormalizeEmail(micro), normalizer.NormalizeEmail(mu));   // the premise: one key, two mailboxes
+        }
+
+        var first = await MailedAsync(micro);   // link 1 went to the first mailbox
+        Clock.Advance(PastTheLimit);
+        using var again = await SignupApi.Request(Client, mu, CompanyName);
+        Assert.Equal(HttpStatusCode.Accepted, again.StatusCode);
+
+        Mail.Failing = true;   // the mail to the second mailbox does not go out
+        Assert.Equal(1, await DispatchAsync());
+
+        var row = Assert.Single(await PendingAsync());
+        Assert.Equal(mu, row.Email);
+        Assert.Null(row.TokenHash);   // the earlier link no longer stands for this sign-up
+        Assert.Null(row.TokenExpiresAt);
+        Assert.Equal(StorableTime.Now(Clock) + TimeSpan.FromHours(24), row.ExpiresAt);   // the row lives from this request alone
+        using (var stale = await SignupApi.Complete(Client, first, Password, CompanyName))
+        {
+            await AccountApi.AssertErrorAsync(stale, AccountApi.InvalidToken);
+        }
+
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.NormalizedEmail == row.NormalizedEmail, TestContext.Current.CancellationToken)));
+        Assert.Single(await PendingAsync());   // the refused completion left the sign-up in place
+
+        Mail.Failing = false;   // the retry reaches the second mailbox, with a link of its own
+        Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, await DispatchAsync());
+        var second = TokenIn(Mail.Sent[^1]);
+        Assert.Equal(mu, Mail.Sent[^1].To);
+        Assert.NotEqual(first, second);
+        using var done = await SignupApi.Complete(Client, second, Password, CompanyName);
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_request_that_differs_only_in_ascii_case_keeps_the_earlier_link_while_its_mail_fails()   // the same mailbox: the rule of the previous test must not touch it
+    {
+        var first = await MailedAsync("Anna@Firma.test");
+        Clock.Advance(PastTheLimit);
+        using var again = await SignupApi.Request(Client, "ANNA@firma.TEST", "Second");
+        Assert.Equal(HttpStatusCode.Accepted, again.StatusCode);
+
+        Mail.Failing = true;
+        Assert.Equal(1, await DispatchAsync());
+
+        var row = Assert.Single(await PendingAsync());
+        Assert.Equal("ANNA@firma.TEST", row.Email);   // the newest spelling and company name
+        Assert.Equal("Second", row.CompanyName);
+        Assert.Equal(EmailTokens.HashOf(first), row.TokenHash);   // link 1 still works
+        Assert.NotNull(row.TokenExpiresAt);
+        using var done = await SignupApi.Complete(Client, first, Password, "Second");
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
     }
 
     [Fact]

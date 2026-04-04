@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +27,7 @@ public sealed class SignupCompleteDisabledTests(PostgresFixture postgres, KeyMat
     {
         await using var factory = SignupVariants.Apply(new AuthAppFactory(postgres, keys), variant);
         using var client = factory.CreateClient();
+        var (usersBefore, tokensBefore) = await CountsAsync(factory);
 
         foreach (var body in Bodies)
         {
@@ -47,6 +49,22 @@ public sealed class SignupCompleteDisabledTests(PostgresFixture postgres, KeyMat
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         Assert.Equal(1, await db.Companies.CountAsync(TestContext.Current.CancellationToken));   // the development company only
         Assert.Equal(0, await db.PendingSignups.CountAsync(TestContext.Current.CancellationToken));
+
+        // No account, no session and no audit row of a sign-up or of a sign-in came out of any of the refused calls.
+        Assert.Equal((usersBefore, tokensBefore), await CountsAsync(factory));
+        Assert.Equal(0, await db.AuditEvents.CountAsync(
+            a => a.Kind.StartsWith("signup.") || a.Kind == AuditKinds.LoginSucceeded, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>The accounts and the OpenIddict token entries of the host's database.</summary>
+    private static async Task<(int Users, long Tokens)> CountsAsync(AuthAppFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var users = await db.Users.CountAsync(TestContext.Current.CancellationToken);
+        var tokens = await db.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM "OpenIddictTokens" """)
+            .SingleAsync(TestContext.Current.CancellationToken);
+        return (users, tokens);
     }
 
     [Fact]

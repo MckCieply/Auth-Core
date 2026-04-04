@@ -17,7 +17,9 @@ public static class PendingSignups
     /// <summary>
     /// Makes the pending sign-up of the address, or replaces the one that is there (its typed address, its company name and its time); one
     /// statement, so two requests at once leave one row. The current link and its time are left as they are: until the new mail has been
-    /// sent, the earlier link is still the one that works.
+    /// sent, the earlier link is still the one that works — unless the typed address differs from the stored one by more than ASCII case (the
+    /// normalised key folds the micro sign into Greek mu, for one): a link that went to another mailbox must not complete a sign-up that
+    /// now names this one, so then the link is dropped and the row lives its 24 hours from this request alone.
     /// </summary>
     public static async Task UpsertAsync(
         AuthDbContext db, string normalizedEmail, string email, string companyName, DateTimeOffset now, CancellationToken cancellationToken)
@@ -33,10 +35,16 @@ public static class PendingSignups
             INSERT INTO "PendingSignups" ("NormalizedEmail", "Email", "CompanyName", "RequestedAt", "TokenHash", "TokenExpiresAt", "ExpiresAt")
             VALUES ({normalizedEmail}, {email}, {companyName}, {now}, NULL, NULL, {expiresAt})
             ON CONFLICT ("NormalizedEmail") DO UPDATE SET
+                "TokenHash" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                   THEN "PendingSignups"."TokenHash" END,
+                "TokenExpiresAt" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                        THEN "PendingSignups"."TokenExpiresAt" END,
+                "ExpiresAt" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                   THEN GREATEST(EXCLUDED."ExpiresAt", "PendingSignups"."TokenExpiresAt")
+                                   ELSE EXCLUDED."ExpiresAt" END,
                 "Email" = EXCLUDED."Email",
                 "CompanyName" = EXCLUDED."CompanyName",
-                "RequestedAt" = EXCLUDED."RequestedAt",
-                "ExpiresAt" = GREATEST(EXCLUDED."ExpiresAt", "PendingSignups"."TokenExpiresAt")
+                "RequestedAt" = EXCLUDED."RequestedAt"
             """,
             cancellationToken);
     }

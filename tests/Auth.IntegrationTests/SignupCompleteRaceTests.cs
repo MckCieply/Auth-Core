@@ -2,6 +2,7 @@ using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -309,6 +310,67 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         using var second = await SignupApi.Complete(Client, TokenIn(Mail.Sent[1]), Password, CompanyName);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_request_for_an_address_whose_mail_is_being_sent_waits_for_the_sending_and_keeps_the_new_link()   // Amendment 1.4, the request side
+    {
+        using (var first = await SignupApi.Request(Client, Address, CompanyName))
+        {
+            Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);   // the mail of this request is the one that will be parked
+        }
+
+        var sendingAt = StorableTime.Now(Clock);   // the time the dispatcher issues its link at
+
+        // The dispatcher has locked the pending sign-up and issued the link, and is sending the mail: its transaction is open.
+        // Once that send has gone, every further send of the pass fails: whether the pass also takes the second request's mail (which is
+        // already due) depends on timing, and a failed send is undone to its savepoint, so the row ends the same way either way.
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sends = 0;
+        Mail.DuringSend = async () =>
+        {
+            if (Interlocked.Increment(ref sends) > 1)
+            {
+                Mail.Failing = true;   // the check for it comes after this step
+                return;
+            }
+
+            reached.TrySetResult();
+            await proceed.Task.WaitAsync(Patience);   // a failing step of the test cannot park the dispatcher for good
+        };
+        var dispatch = DispatchAsync();
+        Task<HttpResponseMessage> request;
+        var requestedAt = sendingAt + PastTheLimit;
+        try
+        {
+            await reached.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            // The address may be asked for again by now; the request writes the pending sign-up and waits for the row that the mail has locked.
+            Clock.Advance(PastTheLimit);
+            request = SignupApi.Request(Client, Address, "Second");
+            await WaitForWaitersAsync(1);
+            Assert.False(request.IsCompleted);
+        }
+        finally
+        {
+            proceed.TrySetResult();
+        }
+
+        var taken = await dispatch;
+        Assert.InRange(taken, 1, 2);   // the second request's mail, if the pass takes it, fails and is undone
+        using var response = await request.WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Equal(taken, Mail.Attempts);
+        var row = Assert.Single(await PendingAsync());
+        Assert.Equal("Second", row.CompanyName);   // the request came second and wrote last
+        Assert.Equal(requestedAt, row.RequestedAt);
+        Assert.Equal(EmailTokens.HashOf(TokenIn(mail)), row.TokenHash);   // the link of the mail that was being sent is the one that works
+        Assert.Equal(sendingAt + TimeSpan.FromHours(24), row.TokenExpiresAt);
+        Assert.Equal(requestedAt + TimeSpan.FromHours(24), row.ExpiresAt);   // the row lives from the request, the link from its mail
+        Assert.Equal(1, await QueueCountAsync());   // the second mail is queued
     }
 
     [Fact]

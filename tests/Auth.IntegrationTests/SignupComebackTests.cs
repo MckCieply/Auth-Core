@@ -302,6 +302,20 @@ public sealed class SignupComebackTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Empty(await PendingAsync());
     }
 
+    [Theory]
+    [MemberData(nameof(FoldedPairs))]
+    public async Task A_weak_password_does_not_hide_that_the_account_only_looks_like_the_typed_address(string account, string typed)   // weak_password only when there is no account
+    {
+        await RemovedMemberAsync(account, confirmed: false);
+        var token = await PendingSignupSeed.IssueAsync(Factory.Services, typed, CompanyName);
+
+        using var done = await SignupApi.Complete(Client, token, "short", NewCompany);
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        Assert.Equal(0, await CompaniesNamedAsync(NewCompany));
+        Assert.Empty(await PendingAsync());
+    }
+
     [Fact]
     public async Task A_sign_in_that_cannot_be_written_leaves_the_account_as_it_was()   // Amendment 2 for a comeback: the sign-in is part of the completion
     {

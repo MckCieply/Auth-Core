@@ -36,6 +36,14 @@ public sealed class SignupPreviewDisabledTests(PostgresFixture postgres, KeyMate
         using var unsupported = await client.SendAsync(utf16);
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, unsupported.StatusCode);
         Assert.Equal("""{"error":"unsupported_media_type"}""", await unsupported.Content.ReadAsStringAsync());
+
+        // Nothing was stored, queued, counted or written down: the 403 comes before the body is read, and no sign-up is made of it.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        Assert.Equal(0, await db.PendingSignups.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.MailRequests.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.MailRequestLimits.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.AuditEvents.CountAsync(a => a.Kind.StartsWith("signup."), TestContext.Current.CancellationToken));
     }
 
     [Fact]
