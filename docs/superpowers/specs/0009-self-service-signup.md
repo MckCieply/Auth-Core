@@ -82,7 +82,10 @@ Slice 0010 adds a `providers` member; a client ignores members it does not know.
 3. The mail limit of spec 0004 applies to the address with its own kind, `signup` (one request a minute and five
    an hour): over it, the `429 too_many_attempts` with `retry_after_seconds` of spec 0004.
 4. Otherwise the pending sign-up of the address is created or replaced (its typed address and company name; it
-   expires 24 hours later), a mail request is queued, and the answer is `202` with an empty body.
+   expires 24 hours later), a mail request is queued, and the answer is `202` with an empty body. When the typed
+   address differs from the one already stored beyond ASCII case (a look-alike spelling that the normaliser folds
+   into the same key), the link already mailed is void at once: the earlier link answers `400 invalid_token`
+   (Amendment 4).
 
 The request never reads the accounts: an address with an account and one without get the same status, headers and
 body and run the same database statements. Which mail goes out is decided when the mail is sent.
@@ -107,7 +110,8 @@ The account is checked first (Amendment 1): an address that has an account by th
 "you already have an account" mail, whether or not its pending sign-up still exists.
 
 Both mails follow spec 0004: the instance's locale (`pl` or `en`), HTML and text parts, the app name, the queue,
-its retries and its delivery rules. A failed sending leaves the previous link valid.
+its retries and its delivery rules. A failed sending leaves the previous link valid. When sign-up is turned off,
+the sign-up mails still queued are dropped, not sent (Amendment 4).
 
 ### `POST /auth/signup/preview` — `{"token"}`
 
@@ -125,7 +129,9 @@ Otherwise `400 invalid_token`. It changes nothing.
    the broken rules, and the token stays usable. **An account without a company:** the password is not used (it may
    be absent) and the account keeps the password it has (Amendment 3).
 4. An account with the address that belongs to a company by now (an invitation was accepted in the meantime, for
-   example): `409 {"error":"already_registered"}`. The pending sign-up is deleted.
+   example), or an account that only resembles the typed address (the normaliser folds the two together): `409
+   {"error":"already_registered"}`, whatever the password; a weak password does not hide it (Amendment 4). The
+   pending sign-up is deleted.
 5. Otherwise, in one transaction:
    - the account is created with the typed address, the password, and its email confirmed — or, for an account
      without a company, that account is used as it is and its email is confirmed;
@@ -232,8 +238,8 @@ The four operations are in the OpenAPI document with their answers.
    company as `org_id` and the `roles` and `permissions` of that role, and the cookie refreshes like a login's.
 10. The first admin's role is the first default role holding `*`; with a manifest where no role holds `*`, it is
     the first role holding `members:manage`.
-11. A completion with a weak password is `400 weak_password` with the rules, creates nothing, and the token still
-    works afterwards.
+11. A completion with a weak password, for an address without an account, is `400 weak_password` with the rules,
+    creates nothing, and the token still works afterwards.
 12. A token works once: a second completion is `400 invalid_token`; of parallel completions with one token exactly
     one succeeds, and exactly one account and one company exist.
 13. A link older than 24 hours is `400 invalid_token`, and the hourly clean-up removes pending sign-ups whose time
@@ -343,6 +349,20 @@ Settled while planning; the contract above already reads this way.
 3. **The audit row `signup.completed` says which path was taken**: `details.existing_account` is `true` for an
    account that existed.
 
+### Amendment 4 (final review of the slice)
+
+Settled while fixing the findings of the final review; the contract above already reads this way.
+
+1. **A look-alike spelling voids the earlier link.** A link proves the mailbox it went to. A request that types the
+   address in a spelling that differs from the stored one beyond ASCII case (for example the micro sign and the Greek
+   mu, which the normaliser folds into one key) therefore voids the link already mailed: it answers `400
+   invalid_token`. A request that differs only in ASCII case keeps the link until the new mail is sent.
+2. **At the completion the account decides before the password.** An account that belongs to a company, or that only
+   resembles the typed address, answers `409 already_registered` whatever the password; `400 weak_password` applies
+   only when there is no account with the address.
+3. **Turning sign-up off drops the queued sign-up mails.** A sign-up mail that was queued while sign-up was on is not
+   sent once it is off (nor when the completion address is no longer set); the request is dropped.
+
 ## Verification notes (for the local verifiers)
 
 - Criteria 4 and 7 need the dispatcher run by hand (the `MailTestBase` pattern); criterion 13 a controlled clock;
@@ -357,5 +377,5 @@ Settled while planning; the contract above already reads this way.
   plays for invitation mails.
 - A stored manifest of `v0.1.0` (JSON without `signup`) must read as `invite-only`.
 - The EF migration that adds the table.
-- The order of checks in the completion (token, then password, then account) and the lock that invitation
+- The order of checks in the completion (token, then account, then password; Amendment 4) and the lock that invitation
   acceptance uses.
