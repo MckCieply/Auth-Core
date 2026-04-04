@@ -315,8 +315,10 @@ a provider to it.
 
 - **Sign-up.** The product's sign-up screen asks for an email address and a company name and always answers "check
   your inbox". A new address gets a link; the link opens the product's screen where the person chooses a password
-  (twice) and confirms the company's name; the company is then created and the person is its first admin. An address
-  that already has an account gets a mail that says so instead. An unused link expires and leaves nothing behind.
+  (twice) and confirms the company's name; the company is then created, the person is its first admin and is
+  signed in. An address whose account belongs to a company gets a mail that says so instead; a person whose company
+  was deleted, or who was removed from it, gets the link and only names the new company (their password stays). An
+  unused link expires and leaves nothing behind.
 - **"Continue with Google / Microsoft / GitHub".** The person signs in at the provider and comes back to the
   product. A provider already linked signs them in. A provider account whose email matches an existing account
   asks for that account's password once, then links. A new person names their company (when sign-up is on) and is

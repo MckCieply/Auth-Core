@@ -10,7 +10,7 @@ copied into a product: see [`docs/integration/angular.md`](../../docs/integratio
 ```
 src/app/auth/       auth.service.ts, auth.interceptor.ts, auth.guard.ts   (the pieces a product copies)
 src/app/pages/      login, forgot, reset, verify, invite, signup, complete-signup, notes   (the screens)
-src/app/account-api.ts   the calls of the mail-link screens
+src/app/account-api.ts   the calls of the mail-link screens, of the sign-up form and of `GET /auth/options`
 src/app/texts.ts    every text the person sees, in one file (English)
 e2e/                Playwright tests (Chromium and WebKit)
 proxy.conf.json     ng serve: /auth and /api go to the stack on :8088
@@ -102,4 +102,4 @@ the sign-in pieces should install a fixed release of its own.
 - `scripts/e2e-web.sh` removes `test-results/` (screenshots of failed tests show the page) when it ends; `E2E_KEEP_RESULTS=1` keeps it.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.
-- There is no PWA and no screen for company admins; see the deferred list of the spec. Sign-up (/signup and /complete-signup) works only while Auth-Core has it on: the manifest says signup: self-service and the completion address is set; finishing a sign-up signs the person in and opens the notes.
+- There is no PWA and no screen for company admins; see the deferred list of the spec. Sign-up (`/signup` and `/complete-signup`) works only while Auth-Core has it on: the manifest says `signup: self-service` and the completion address is set; finishing a sign-up signs the person in and opens the notes.

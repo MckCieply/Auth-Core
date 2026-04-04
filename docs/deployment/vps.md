@@ -75,7 +75,6 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 | `AUTH_KEYS_DIR`, `AUTH_MANIFEST` | the two paths above |
 | `AUTH_APP_NAME`, `AUTH_APP_LOCALE` | the product's name in the mails, and `pl` or `en` |
 | `AUTH_FRONTEND_RESET_URL`, `AUTH_FRONTEND_VERIFY_URL`, `AUTH_FRONTEND_INVITE_URL` | the three screens of **your frontend** that the mails link to, https |
-| `AUTH_FRONTEND_SIGNUP_URL` | **optional**, https: the screen of your frontend that finishes a self-service sign-up. Leave it blank and sign-up stays off (the default; nothing changes for you). See "Self-service sign-up" below |
 | `AUTH_EMAIL_FROM`, `AUTH_SMTP_HOST`, `AUTH_SMTP_PORT`, `AUTH_SMTP_SECURITY`, `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | the relay |
 
 **Two database roles.** Auth-Core connects to PostgreSQL as a role of its own that is not a superuser and owns only its database; the superuser stays for you. Both are
@@ -85,6 +84,9 @@ created when the volume is first made, from `.env`. They are **not** created lat
 
 The two SMTP credentials must both be **present** in `.env`: compose refuses to start when either line is missing. Leave both blank for a relay without
 authentication.
+
+**Optional.** `AUTH_FRONTEND_SIGNUP_URL` is the https address of the screen of your frontend that finishes a self-service sign-up. Leave it blank and sign-up
+stays off (the default; nothing changes for you). See "Self-service sign-up" in step 7.
 
 ### Who may tell Auth-Core the client address
 
@@ -241,7 +243,7 @@ opens the product and not the sign-in screen. An address whose account belongs t
 `GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
 at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
 typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
-risk that remains is in [`threat-model.md`](../security/threat-model.md). Keep the logs of `/complete-signup` as private as those of `/reset`: its
+risk that remains is in [`threat-model.md`](../security/threat-model.md). Keep the access logs of `/reset`, `/verify`, `/invite` and `/complete-signup` off, or scrub `token=` from them: their
 query holds a token.
 
 ## 8. Check it
@@ -266,7 +268,7 @@ something is wrong". Then sign in through your frontend and call one product end
 
 ## Running it
 
-- **Limits.** 30 logins, 60 refreshes, 10 mail requests, 20 invitation requests and 300 other requests a minute per client address, answered `429 too_many_requests`
+- **Limits.** 30 logins, 60 refreshes, 10 mail requests, 20 invitation and sign-up link requests and 300 other requests a minute per client address, answered `429 too_many_requests`
   with `Retry-After`. An office behind one NAT shares them: raise `AUTH_RATE_LIMIT_LOGIN` for it. A person who fails ten times is locked for a minute or more
   (`429 too_many_attempts`).
 - **Backups.** A nightly dump and a restore that you have tried: [`docs/operations/backup.md`](../operations/backup.md).

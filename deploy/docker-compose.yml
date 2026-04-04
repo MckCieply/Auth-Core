@@ -65,7 +65,7 @@ services:
       Auth__Keys__SigningKeyPath: /run/secrets/auth/signing.key
       Auth__Keys__EncryptionCertificatePath: /run/secrets/auth/encryption.crt
       Auth__Keys__EncryptionKeyPath: /run/secrets/auth/encryption.key
-      # The per-IP limits of spec 0008 (30 logins, 60 refreshes, 10 mail requests, 20 invitation requests and 300 other requests per
+      # The per-IP limits of spec 0008 (30 logins, 60 refreshes, 10 mail requests, 20 invitation and sign-up link requests and 300 other requests per
       # minute and address) and how long the audit log keeps a row (90 days). A blank value is the default. Some of the older e2e
       # scripts exceed the limits on purpose: run them with AUTH_RATE_LIMIT_ENABLED=false (see the header of each script).
       Auth__RateLimit__Enabled: ${AUTH_RATE_LIMIT_ENABLED:-true}

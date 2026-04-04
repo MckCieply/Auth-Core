@@ -46,7 +46,6 @@ example):
 
 ```yaml
 permissions: [documents:read, documents:write, documents:approve]
-signup: self-service
 default_roles:
   admin: ["*"]
   user: [documents:read, documents:write]
@@ -54,7 +53,7 @@ default_roles:
 
 `signup: self-service` is optional (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`): it lets a visitor start a company of their own, and it
 needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
-that address sign-up stays off and `/auth/health` says `Degraded`, so leave the line out of a copy of this file until you have the address.
+that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
 
 ### 2. Run it on your server
 
@@ -199,7 +198,7 @@ docs/                         design brief, ADRs, integration guides, deployment
 - [`docs/design.md`](docs/design.md): the MVP brief: goals, decisions, scope, architecture, contracts, timeline, risks.
 - [`docs/adr/`](docs/adr/): architecture decision records.
 - [`docs/workflow.md`](docs/workflow.md): how the work is done: the spec-driven flow, verification, branches.
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`plans/`](docs/superpowers/plans/): the specs (0001 to 0008) and the plans and acceptance maps built from them.
+- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`plans/`](docs/superpowers/plans/): the specs (0001 to 0009) and the plans and acceptance maps built from them.
 
 ## License
 

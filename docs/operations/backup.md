@@ -27,7 +27,7 @@ does, and an object that stays with the superuser stops the next migration of Au
 | --- | --- | --- |
 | The database | the `postgres-data` volume | Accounts, companies, members, sessions, the audit log |
 | The key files | the directory named by `AUTH_KEYS_DIR` | Without the signing key every issued token is void; without the encryption key no session can be read. A restore needs the **same** keys |
-| The manifest | the file named by `AUTH_MANIFEST` | The product's permissions and default roles |
+| The manifest | the file named by `AUTH_MANIFEST` | The product's permissions, default roles and sign-up mode |
 | `.env` | next to your compose command | The passwords, the issuer and audience, the URLs |
 
 Nothing else of Auth-Core is state: the rate-limit counters are in memory and the Data Protection keys are in memory too.
@@ -161,7 +161,7 @@ auth_psql() { docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml
 and run a query by giving it on the standard input, `auth_psql <<'SQL'` followed by the query and a line `SQL`, or with `auth_psql -c "..."`.
 
 The columns: `occurred_at`, `kind`, `actor_user_id` (the account that acted; empty for the operator CLI, an anonymous request or a failed
-login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account), `org_id`, `org_name` (its name at that
+login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account; always as typed on `password.reset_requested` and `signup.requested`), `org_id`, `org_name` (its name at that
 moment), `target_id` (the role or invitation), `client_ip` (the whole address; empty for the operator CLI, `unknown` for a request that had none), `details` (a small JSON
 object). A row outlives the account, company, role or invitation it names. It never holds a password, a token, a link, a cookie or a mail
 body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted every hour; a row exactly that old is still there.

@@ -110,7 +110,7 @@ is `{"signup":"self-service"}`, so a product does not repeat its manifest in its
 | `/verify?token=` | confirms on opening; a form to ask for a new link when it is used up | `POST /auth/email/verify`, `POST /auth/email/verify/request` |
 | `/invite?token=` | "Join {company} as {role}" and the email; the password, twice | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
 | `/signup` | email and company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` |
-| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice (not for a person whose account exists and has no company, which the preview says with `has_account`: the sentence that the password stays as it is takes the place of the fields); the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
+| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice (not for a person whose account exists and has no company, which the preview says with `has_account`: the sentence that the password stays as it is takes the place of the fields, and the `password` member of the call may be left out; if it is sent it must be a non-empty string, and it is not used); the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 | `/forgot` | email; always the same answer | `POST /auth/password/forgot` |
 
 The screens are in [`samples/notes-web/src/app/pages/`](../../samples/notes-web/src/app/pages/); the calls are in
@@ -209,7 +209,7 @@ because tabs are not synchronised; and a token in memory can be read by script r
 
 ## The limits and an outage (spec 0008)
 
-Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for an invitation and 300 others a minute) and
+Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for invitation and sign-up link requests and 300 others a minute) and
 answers `429 {"error":"too_many_requests","retry_after_seconds":n}` with `Retry-After` when a limit is reached. The sample's interceptor
 shows "Try again in N s." for such an answer from any endpoint of your origin and **does not sign the person out**: only a `401 invalid_grant`
 from the refresh ends the session. During a database outage a refresh answers `503 temporarily_unavailable` with `Retry-After: 5` instead of
