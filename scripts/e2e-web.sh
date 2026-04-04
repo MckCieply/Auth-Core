@@ -16,6 +16,9 @@
 # For the sign-up tests (spec 0009) it also invites BOTH (the test signs it up, and accepts the invitation before it uses the link, so that
 # the completion finds an account) and prepares EXPIRED: it asks for a sign-up through the API, waits for the mail, and moves the end of the
 # link into the past with one UPDATE of "PendingSignups"."TokenExpiresAt" (the database, because the test cannot move the server's clock).
+# It also prepares COMEBACK (Amendment 3 of spec 0009): invited to the development company, the invitation accepted by the API once the mail has
+# come, and the member then removed through the operator CLI (`remove-member`): an account with a password and no company. The test asks for the
+# sign-up and finishes it with a company name only.
 #
 # Full sequence, from the repo root:
 #   cp .env.example .env                  # then set real local values (git-ignored); NOTES_DB_PASSWORD and the unverified user too
@@ -134,12 +137,29 @@ wait_mails() { # wait_mails <address> <count> <seconds>: waits until the catcher
   return 1
 }
 
+mail_token() { # mail_token <address> <subject start> <path>: the token in the link <path>?token= of the newest such mail to the address (printed; the callers keep it in a variable and never show it)
+  MAIL_TO="$1" MAIL_SUBJECT="$2" MAIL_PATH="$3" MAILPIT="$MAILPIT_URL" node -e '
+const base = process.env.MAILPIT;
+const to = process.env.MAIL_TO.toLowerCase();
+(async () => {
+  const found = await (await fetch(`${base}/api/v1/search?query=${encodeURIComponent("to:" + to)}`)).json();
+  const hit = found.messages.find((m) => m.Subject.startsWith(process.env.MAIL_SUBJECT) && (m.To ?? []).some((r) => r.Address.toLowerCase() === to));
+  if (!hit) process.exit(1);
+  const mail = await (await fetch(`${base}/api/v1/message/${hit.ID}`)).json();
+  const match = new RegExp(`/${process.env.MAIL_PATH}\\?token=([A-Za-z0-9_-]{43})`).exec(mail.Text);
+  if (!match) process.exit(1);
+  process.stdout.write(match[1]);
+})().catch(() => process.exit(1));
+'
+}
+
 seed_stack() {
   local run="$RANDOM$RANDOM" code org token updated
   VIEWER_EMAIL="viewer-$run@e2e.test"
   RESETTER_EMAIL="resetter-$run@e2e.test"
   BOTH_EMAIL="both-$run@e2e.test"
   EXPIRED_EMAIL="expired-$run@e2e.test"
+  COMEBACK_EMAIL="comeback-$run@e2e.test"
   SEEDED_NOTE="Seeded by the e2e script, run $run"
   USER_PASSWORD="E2e-Passw0rd-$run"
   NEW_PASSWORD="E2e-N3w-Passw0rd-$run"
@@ -160,10 +180,11 @@ seed_stack() {
     -H 'Content-Type: application/json' -H "@$tmp/admin.auth" --data-binary "@$tmp/note.json")"
   [[ "$code" == "201" ]] || fail "seeding: adding the first note answered $code, not 201"
 
-  # Three invitations through the operator CLI (BOTH is for the sign-up test of spec 0009). The server sends the mails at its next poll.
+  # Four invitations through the operator CLI (BOTH and COMEBACK are for the sign-up tests of spec 0009). The server sends the mails at its next poll.
   cli invite --org "$org" --email "$VIEWER_EMAIL" --role viewer
   cli invite --org "$org" --email "$RESETTER_EMAIL" --role user
   cli invite --org "$org" --email "$BOTH_EMAIL" --role user
+  cli invite --org "$org" --email "$COMEBACK_EMAIL" --role user
   # An expired sign-up link: ask through the API, wait for the mail, then move the end of the link into the past.
   E2E_X_EMAIL="$EXPIRED_EMAIL" node -e 'console.log(JSON.stringify({email: process.env.E2E_X_EMAIL, company_name: "Expired Company"}))' > "$tmp/expired.json"
   code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$HTTP_URL/auth/signup" \
@@ -174,6 +195,16 @@ seed_stack() {
     | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r')" || fail "seeding: psql could not move the end of the link"
   [[ "$updated" == "UPDATE 1" ]] || fail "seeding: the sign-up link was not made to expire"
   rm -f "$tmp/expired.json"
+  # A person whose company is gone: accept the invitation by the API (the password is USER_PASSWORD), then remove the member through the CLI.
+  wait_mails "$COMEBACK_EMAIL" 1 150 || fail "seeding: no invitation mail for the returning person within 150s"
+  token="$(mail_token "$COMEBACK_EMAIL" "You are invited" invite)" || fail "seeding: the invitation mail of the returning person holds no link"
+  E2E_X_TOKEN="$token" E2E_X_PASSWORD="$USER_PASSWORD" node -e 'console.log(JSON.stringify({token: process.env.E2E_X_TOKEN, password: process.env.E2E_X_PASSWORD}))' > "$tmp/accept.json"
+  token=""
+  code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$HTTP_URL/auth/invites/accept" \
+    -H 'Content-Type: application/json' --data-binary "@$tmp/accept.json")" || fail "seeding: accepting the invitation of the returning person failed"
+  rm -f "$tmp/accept.json"
+  [[ "$code" == "204" ]] || fail "seeding: accepting the invitation of the returning person answered $code, not 204"
+  cli remove-member --org "$org" --email "$COMEBACK_EMAIL"
   rm -f "$tmp/login.json" "$tmp/login.out" "$tmp/admin.auth" "$tmp/me.json" "$tmp/note.json"
 }
 
@@ -191,7 +222,7 @@ for project in $PROJECTS; do
   export E2E_SEED_EMAIL="$SEED_EMAIL" E2E_SEED_PASSWORD="$SEED_PASSWORD"
   export E2E_UNVERIFIED_EMAIL="$UNVERIFIED_EMAIL" E2E_UNVERIFIED_PASSWORD="$UNVERIFIED_PASSWORD"
   export E2E_VIEWER_EMAIL="$VIEWER_EMAIL" E2E_RESETTER_EMAIL="$RESETTER_EMAIL"
-  export E2E_BOTH_EMAIL="$BOTH_EMAIL" E2E_EXPIRED_EMAIL="$EXPIRED_EMAIL"
+  export E2E_BOTH_EMAIL="$BOTH_EMAIL" E2E_EXPIRED_EMAIL="$EXPIRED_EMAIL" E2E_COMEBACK_EMAIL="$COMEBACK_EMAIL"
   export E2E_USER_PASSWORD="$USER_PASSWORD" E2E_NEW_PASSWORD="$NEW_PASSWORD" E2E_SEEDED_NOTE="$SEEDED_NOTE"
   # Without this, a failed test leaves test-results/<test>/error-context.md: an ARIA snapshot of the page that holds the value
   # of every input, a typed password included (Playwright 1.58.2 writes it unless this variable is set; workers inherit it).

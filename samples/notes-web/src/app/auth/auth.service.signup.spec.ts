@@ -38,6 +38,20 @@ describe('AuthService.completeSignup', () => {
     ctrl.verify();
   });
 
+  it('leaves the password out of the body when there is none to send (an account that exists, without a company)', async () => {
+    const done = auth.completeSignup('tok', null, 'Firma');
+    const request = ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok', company_name: 'Firma' });
+    expect('password' in (request.request.body as object)).toBe(false);
+    request.flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush(adminMe);
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('tok-c');
+    ctrl.verify();
+  });
+
   it('never writes the token to localStorage, sessionStorage or a cookie', async () => {
     const done = auth.completeSignup('tok', 'pw', 'Firma');
     const completion = ctrl.expectOne('/auth/signup/complete');

@@ -63,13 +63,28 @@ describe('AccountApi: sign-up', () => {
     expect((await done).ok).toBe(true);
   });
 
-  it('reads the answer to a preview: the address and the company name', async () => {
+  it('reads the answer to a preview: the address, the company name and whether the account exists', async () => {
     const done = api.previewSignup('tok');
     const request = ctrl.expectOne('/auth/signup/preview');
     expect(request.request.body).toEqual({ token: 'tok' });
-    request.flush({ email: 'anna@firma.example', company_name: 'Firma' });
-    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma' } });
+    request.flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: false });
+    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
   });
+
+  it('reads has_account true: the person has an account and no company', async () => {
+    const done = api.previewSignup('tok');
+    ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: true });
+    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: true } });
+  });
+
+  it.each([[{}], [{ has_account: 'true' }], [{ has_account: 1 }], [{ has_account: null }]])(
+    'an answer %j means has_account false: a password is asked for, which is the safe side',
+    async (extra) => {
+      const done = api.previewSignup('tok');
+      ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', ...extra });
+      expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
+    },
+  );
 
   it('a 400 invalid_request on a preview stays "other": that screen has the common text', async () => {
     const done = api.previewSignup('tok');

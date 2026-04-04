@@ -26,11 +26,15 @@ import { takeTokenFromUrl } from './token-from-url';
               <input id="email" type="email" [value]="signup.email" readonly autocomplete="username" />
               <label for="company">{{ shared.companyName }}</label>
               <input id="company" type="text" formControlName="company" maxlength="100" autocomplete="organization" />
-              <p class="status">{{ t.setsPassword(signup.email) }}</p>
-              <label for="password">{{ common.newPassword }}</label>
-              <input id="password" type="password" formControlName="password" autocomplete="new-password" />
-              <label for="repeat">{{ common.repeatPassword }}</label>
-              <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              @if (signup.has_account) {
+                <p class="status" data-testid="keeps-password">{{ t.keepsPassword(signup.email) }}</p>
+              } @else {
+                <p class="status">{{ t.setsPassword(signup.email) }}</p>
+                <label for="password">{{ common.newPassword }}</label>
+                <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+                <label for="repeat">{{ common.repeatPassword }}</label>
+                <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              }
               <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
             </form>
           }
@@ -112,14 +116,14 @@ export class CompleteSignupPage implements OnInit {
     if (this.form.invalid) {
       return;
     }
-    if (password !== repeat) {
+    if (!signup.has_account && password !== repeat) {
       this.error.set(this.common.passwordsDiffer);
       return;
     }
     this.busy.set(true);
     // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
-    // Auth-Core refuses white space at either end.
-    const result = await this.auth.completeSignup(this.token, password, company.trim());
+    // Auth-Core refuses white space at either end. An account that exists without a company has no password to choose: none is sent.
+    const result = await this.auth.completeSignup(this.token, signup.has_account ? null : password, company.trim());
     if (result.ok) {
       // Signed in (Auth-Core answered as it answers a login): the product opens at once, in place of this screen, so that Back does
       // not land on a link that is used up. The address is in no URL. The button stays off until the notes screen is open: the token
@@ -153,6 +157,11 @@ export class CompleteSignupPage implements OnInit {
     if (result.ok) {
       this.pending.set(result.value);
       this.form.controls.company.setValue(result.value.company_name);
+      if (result.value.has_account) {
+        // No password is chosen here: the two controls must not hold the form invalid.
+        this.form.controls.password.disable();
+        this.form.controls.repeat.disable();
+      }
       this.phase.set('form');
     } else if (result.failure.kind === 'invalid_token') {
       this.phase.set('invalid');

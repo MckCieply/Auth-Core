@@ -102,6 +102,8 @@ export const texts = {
     title: 'Finish creating your account',
     loading: 'Opening your sign-up...',
     setsPassword: (email: string): string => `This sets the password for ${email}.`,
+    // The account exists and belongs to no company (its company was deleted, or the person was removed from it): only the company is new.
+    keepsPassword: (email: string): string => `You already have an account as ${email}. Its password stays as it is; only the company is new.`,
     submit: 'Create company',
     signUpAgain: 'Sign up again',
     alreadyRegistered: 'An account with this address already exists.',

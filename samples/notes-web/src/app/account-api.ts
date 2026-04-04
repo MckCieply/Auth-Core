@@ -17,10 +17,14 @@ export interface SiteOptions {
   signup: 'self-service' | 'invite-only';
 }
 
-/** What POST /auth/signup/preview answers: the address as it was typed and the company name of the request. */
+/**
+ * What POST /auth/signup/preview answers: the address as it was typed, the company name of the request, and whether an account without a
+ * company has the address (spec 0009, Amendment 3): then the completion asks for no password.
+ */
 export interface SignupPreview {
   email: string;
   company_name: string;
+  has_account: boolean;
 }
 
 /** Auth-Core's endpoints for the mail links and the account, which need no access token. */
@@ -89,7 +93,8 @@ export class AccountApi {
     }
     const body = outcome.value;
     if (isRecord(body) && typeof body['email'] === 'string' && typeof body['company_name'] === 'string') {
-      return { ok: true, value: { email: body['email'], company_name: body['company_name'] } };
+      // Anything but a true boolean means "no account": the screen then asks for a password, which is the safe side.
+      return { ok: true, value: { email: body['email'], company_name: body['company_name'], has_account: body['has_account'] === true } };
     }
     return { ok: false, failure: { kind: 'other' } };
   }

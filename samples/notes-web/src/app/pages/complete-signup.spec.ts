@@ -11,11 +11,13 @@ import { CompleteSignupPage } from './complete-signup';
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const invalid = 'This link has expired or was already used.';
 const closed = 'Sign-up is closed. Ask the company you want to join for an invitation.';
-const preview = { email: 'anna@firma.example', company_name: 'Firma' };
+const preview = { email: 'anna@firma.example', company_name: 'Firma', has_account: false };
+/** What the preview says of a person whose company is gone: the account exists and belongs to none (spec 0009, Amendment 3). */
+const returning = { ...preview, has_account: true };
 /** What Auth-Core answers a completion: a login's answer. */
 const signedIn = { status: 'authenticated', access_token: 'tok-c' };
 
-async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok') {
+async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok', answer: typeof preview = preview) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([{ path: 'complete-signup', component: CompleteSignupPage }]),
@@ -31,7 +33,7 @@ async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok')
   const navigateByUrl = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
   const ctrl = TestBed.inject(HttpTestingController);
   if (previewAnswer === 'ok') {
-    ctrl.expectOne('/auth/signup/preview').flush(preview);
+    ctrl.expectOne('/auth/signup/preview').flush(answer);
     await settle(harness.fixture);
   }
   return { fixture: harness.fixture, ctrl, navigateByUrl };
@@ -300,5 +302,142 @@ describe('CompleteSignupPage', () => {
     arrive(true);
     await settle(opened.fixture);
     expect(button(opened)?.disabled).toBe(false);
+  });
+});
+
+describe('CompleteSignupPage for an account that exists without a company (has_account)', () => {
+  afterEach(() => history.replaceState(null, '', '/'));
+
+  it('shows the address, the company name and the sentence that the password stays; no password fields', async () => {
+    const { fixture } = await open('?token=tok-s', 'ok', returning);
+    expect(valueOf(fixture, '#email')).toBe('anna@firma.example');
+    expect((fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#email')?.readOnly).toBe(true);
+    expect(valueOf(fixture, '#company')).toBe('Firma');
+    expect(has(fixture, '[data-testid="keeps-password"]')).toBe(true);
+    expect(pageText(fixture)).toContain('You already have an account as anna@firma.example. Its password stays as it is');
+    expect(pageText(fixture)).not.toContain('This sets the password');
+    expect(has(fixture, '#password')).toBe(false);
+    expect(has(fixture, '#repeat')).toBe(false);
+  });
+
+  it('a person with no account still sees the password fields and not the sentence that it stays', async () => {
+    const { fixture } = await open();
+    expect(has(fixture, '#password')).toBe(true);
+    expect(has(fixture, '[data-testid="keeps-password"]')).toBe(false);
+  });
+
+  it('200: posts only the token and the company name (trimmed), signs the person in and opens the notes screen in place of this one', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    typeInto(opened.fixture, '#company', '  Firma Again  ');
+    submitForm(opened.fixture);
+    const request = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok-s', company_name: 'Firma Again' });
+    expect('password' in (request.request.body as object)).toBe(false);
+    await signInBy(opened, request);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+    expect(opened.navigateByUrl).toHaveBeenCalledTimes(1);
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+    expect(window.location.href).not.toContain('anna@firma.example');
+  });
+
+  it('a blank company name: a message, and no request', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    typeRaw(opened.fixture, '#company', '   ');
+    submitForm(opened.fixture);
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Enter the name of your company.');
+    opened.ctrl.expectNone('/auth/signup/complete');
+  });
+
+  it('409 already_registered (it joined a company meanwhile): says the account exists and links to the sign-in; no form', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'already_registered' }, status(409));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('An account with this address already exists.');
+    expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it('invalid_token on complete: the link is used up, with a link to sign up again; no form', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_token' }, status(400));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(invalid);
+    expect(has(opened.fixture, 'a[href="/signup"][data-testid="signup-again"]')).toBe(true);
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it('403 signup_disabled on complete: says that sign-up is closed; no form', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'signup_disabled' }, status(403));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(closed);
+    expect(has(opened.fixture, 'form')).toBe(false);
+    expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
+  });
+
+  it('400 invalid_request on complete: says what to check, and the form stays without password fields', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_request' }, status(400));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Check the company name.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(has(opened.fixture, '#password')).toBe(false);
+    expect(has(opened.fixture, '[data-testid="keeps-password"]')).toBe(true);
+    expect(button(opened)?.disabled).toBe(false);
+  });
+
+  it('429 too_many_attempts on complete: the screen has no text of its own for it, so it says that something went wrong; the form stays and the button is on', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl
+      .expectOne('/auth/signup/complete')
+      .flush({ error: 'too_many_attempts', retry_after_seconds: 42 }, status(429));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(has(opened.fixture, '#password')).toBe(false);
+    expect(button(opened)?.disabled).toBe(false);
+  });
+
+  it('429 too_many_requests on complete: the notice bar says when to try again, the screen adds nothing; the form stays and the button is on', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl
+      .expectOne('/auth/signup/complete')
+      .flush({ error: 'too_many_requests', retry_after_seconds: 42 }, status(429));
+    await settle(opened.fixture);
+    expect(has(opened.fixture, 'form')).toBe(true);
+    expect(has(opened.fixture, '#password')).toBe(false);
+    expect(has(opened.fixture, '[role="alert"]')).toBe(false);
+    expect(button(opened)?.disabled).toBe(false);
+  });
+
+  it('a 500, then the person submits again: the second request is again the token and the company name only', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush('oops', status(500));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(button(opened)?.disabled).toBe(false);
+
+    submitForm(opened.fixture);
+    const again = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(again.request.body).toEqual({ token: 'tok-s', company_name: 'Firma' });
+    expect('password' in (again.request.body as object)).toBe(false);
+    await signInBy(opened, again);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+  });
+
+  it('sends one request for a double submit', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    submitForm(opened.fixture);
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
   });
 });
