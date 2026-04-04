@@ -44,6 +44,9 @@ import { takeTokenFromUrl } from './token-from-url';
         @case ('invalid') {
           <p class="error" role="alert" data-testid="invite-invalid">{{ t.invalid }}</p>
         }
+        @case ('limited') {
+          <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
+        }
         @case ('error') {
           <p class="error" role="alert">{{ common.somethingWrong }}</p>
           <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
@@ -64,7 +67,7 @@ export class InvitePage implements OnInit {
     password: ['', Validators.required],
     repeat: ['', Validators.required],
   });
-  protected readonly phase = signal<'loading' | 'form' | 'member' | 'invalid' | 'error'>(
+  protected readonly phase = signal<'loading' | 'form' | 'member' | 'invalid' | 'limited' | 'error'>(
     this.token === null ? 'invalid' : 'loading',
   );
   protected readonly invite = signal<InvitePreview | null>(null);
@@ -132,6 +135,9 @@ export class InvitePage implements OnInit {
       this.phase.set('invalid');
     } else if (result.failure.kind === 'already_member') {
       this.phase.set('member');
+    } else if (result.failure.kind === 'too_many_requests') {
+      // The notice bar above the screen says when to try again: the interceptor put it there. Only the button is shown.
+      this.phase.set('limited');
     } else {
       this.phase.set('error');
     }

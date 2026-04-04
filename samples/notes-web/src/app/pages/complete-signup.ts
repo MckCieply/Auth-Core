@@ -55,6 +55,9 @@ import { takeTokenFromUrl } from './token-from-url';
           <p class="error" role="alert" data-testid="signup-closed">{{ shared.closed }}</p>
           <p><a routerLink="/login">{{ common.backToSignIn }}</a></p>
         }
+        @case ('limited') {
+          <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
+        }
         @case ('error') {
           <p class="error" role="alert">{{ common.somethingWrong }}</p>
           <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
@@ -79,7 +82,7 @@ export class CompleteSignupPage implements OnInit {
     password: ['', Validators.required],
     repeat: ['', Validators.required],
   });
-  protected readonly phase = signal<'loading' | 'form' | 'invalid' | 'registered' | 'closed' | 'error'>(
+  protected readonly phase = signal<'loading' | 'form' | 'invalid' | 'registered' | 'closed' | 'limited' | 'error'>(
     this.token === null ? 'invalid' : 'loading',
   );
   protected readonly pending = signal<SignupPreview | null>(null);
@@ -143,7 +146,17 @@ export class CompleteSignupPage implements OnInit {
     } else if (result.failure.kind === 'signup_disabled') {
       this.phase.set('closed');
     } else if (result.failure.kind === 'invalid_request') {
-      this.error.set(this.t.invalidRequest);
+      if (signup.has_account) {
+        // The server may refuse because the account is gone (spec 0009, Amendment 3): ask again what this link is for. When the
+        // answer is now "no account", the screen switches to the form with the password fields; when it is still "an account
+        // without a company", the refusal is about the company name and the text says so. The name the person typed is kept.
+        await this.preview(this.token, true);
+        if (this.pending()?.has_account === true && this.phase() === 'form') {
+          this.error.set(this.t.invalidRequest);
+        }
+      } else {
+        this.error.set(this.t.invalidRequest);
+      }
     } else if (result.failure.kind === 'too_many_requests') {
       // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {
@@ -152,21 +165,31 @@ export class CompleteSignupPage implements OnInit {
     this.busy.set(false);
   }
 
-  private async preview(token: string): Promise<void> {
+  /** `keepCompany`: the company name the person typed stays (a second look at the same link, after a refusal). */
+  private async preview(token: string, keepCompany = false): Promise<void> {
     const result = await this.account.previewSignup(token);
     if (result.ok) {
       this.pending.set(result.value);
-      this.form.controls.company.setValue(result.value.company_name);
+      if (!keepCompany) {
+        this.form.controls.company.setValue(result.value.company_name);
+      }
       if (result.value.has_account) {
         // No password is chosen here: the two controls must not hold the form invalid.
         this.form.controls.password.disable();
         this.form.controls.repeat.disable();
+      } else {
+        // The account may be gone since an earlier preview: the person now chooses a password.
+        this.form.controls.password.enable();
+        this.form.controls.repeat.enable();
       }
       this.phase.set('form');
     } else if (result.failure.kind === 'invalid_token') {
       this.phase.set('invalid');
     } else if (result.failure.kind === 'signup_disabled') {
       this.phase.set('closed');
+    } else if (result.failure.kind === 'too_many_requests') {
+      // The notice bar above the screen says when to try again: the interceptor put it there. Only the button is shown.
+      this.phase.set('limited');
     } else {
       this.phase.set('error');
     }

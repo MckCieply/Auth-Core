@@ -52,6 +52,28 @@ async function expectNoticeOnly(opened: Opened, request: string, ...absent: stri
   opened.ctrl.verify();
 }
 
+/** A 429 on the PREVIEW: the notice bar has the words, the screen has only the button, and it works. */
+async function expectPreviewLimited(opened: Opened, request: string, goodAnswer: object): Promise<void> {
+  opened.ctrl.expectOne(request).flush(answer, limited);
+  await settle(opened.fixture);
+  expect(opened.auth.notice()).toBe('wait');
+  expect(opened.auth.noticeSeconds()).toBe(17);
+  expect(pageText(opened.fixture)).not.toContain('Something went wrong');
+  expect(has(opened.fixture, '[role="alert"]')).toBe(false);
+  expect(has(opened.fixture, 'form')).toBe(false);
+  const again = (opened.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="try-again"]');
+  expect(again?.textContent?.trim()).toBe('Try again');
+  again?.click();
+  opened.fixture.detectChanges();
+  const retry = opened.ctrl.expectOne(request);
+  expect(retry.request.body).toHaveProperty('token');
+  retry.flush(goodAnswer);
+  await settle(opened.fixture);
+  expect(has(opened.fixture, 'form')).toBe(true);
+  expect(has(opened.fixture, '[data-testid="try-again"]')).toBe(false);
+  opened.ctrl.verify();
+}
+
 describe('the mail and link screens when the address has made too many requests', () => {
   afterEach(() => history.replaceState(null, '', '/'));
 
@@ -115,5 +137,19 @@ describe('the mail and link screens when the address has made too many requests'
     await expectNoticeOnly(opened, '/auth/invites/accept');
     expect(has(opened.fixture, '#password')).toBe(true);
     expect(TestBed.inject(Router).navigate).not.toHaveBeenCalledWith(['/login'], expect.anything());
+  });
+
+  it('CompleteSignupPage: a limited preview shows only "Try again" (no error text), and it asks again with the token', async () => {
+    const opened = await open(CompleteSignupPage, '/complete-signup?token=tok-s');
+    await expectPreviewLimited(opened, '/auth/signup/preview', { email: 'anna@firma.example', company_name: 'Firma' });
+  });
+
+  it('InvitePage: a limited preview shows only "Try again" (no error text), and it asks again with the token', async () => {
+    const opened = await open(InvitePage, '/invite?token=tok-i');
+    await expectPreviewLimited(opened, '/auth/invites/preview', {
+      org_name: 'Acme',
+      email: 'new@acme.example',
+      role: 'viewer',
+    });
   });
 });

@@ -307,11 +307,16 @@ wait_psql_value() {
   return 1
 }
 
-# secret_in_audit <secret>: how many rows of the audit log hold the text in any column; the secret goes on stdin only
+# secret_in_audit <secret>: how many rows of the audit log hold the text in any column; the secret goes on stdin only.
+# psql echoes a failed query to its standard error, and the query holds the secret: that stream goes to a file that is never printed,
+# and a result that is not a number fails the run with a fixed message.
 secret_in_audit() {
+  local count
   [[ "$1" != *"'"* ]] || fail "a secret with a quote cannot be looked for"
-  printf "SELECT count(*) FROM audit_events WHERE position('%s' in (kind || ' ' || coalesce(subject_email, '') || ' ' || coalesce(org_name, '') || ' ' || coalesce(client_ip, '') || ' ' || coalesce(details::text, ''))) > 0;\n" "$1" \
-    | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'
+  count="$(printf "SELECT count(*) FROM audit_events WHERE position('%s' in (kind || ' ' || coalesce(subject_email, '') || ' ' || coalesce(org_name, '') || ' ' || coalesce(client_ip, '') || ' ' || coalesce(details::text, ''))) > 0;\n" "$1" \
+    | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA 2> "$tmp/psql.err" | tr -d '\r' || true)"
+  [[ "$count" =~ ^[0-9]+$ ]] || fail "the audit log could not be searched for a secret (the database answer is not a number)"
+  printf '%s\n' "$count"
 }
 
 # --- Step 1: health, the mail catcher, the options, the description (criteria 1, 20) ----------------------------------

@@ -380,16 +380,44 @@ describe('CompleteSignupPage for an account that exists without a company (has_a
     expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
   });
 
-  it('400 invalid_request on complete: says what to check, and the form stays without password fields', async () => {
+  it('400 invalid_request on complete while the account is still there: asks the preview again, says what to check, and the form stays without password fields', async () => {
     const opened = await open('?token=tok-s', 'ok', returning);
+    typeInto(opened.fixture, '#company', 'Typed Name');
     submitForm(opened.fixture);
     opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_request' }, status(400));
     await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/preview').flush(returning);
+    await settle(opened.fixture);
     expect(pageText(opened.fixture)).toContain('Check the company name.');
+    expect(valueOf(opened.fixture, '#company')).toBe('Typed Name');
     expect(has(opened.fixture, 'form')).toBe(true);
     expect(has(opened.fixture, '#password')).toBe(false);
     expect(has(opened.fixture, '[data-testid="keeps-password"]')).toBe(true);
     expect(button(opened)?.disabled).toBe(false);
+  });
+
+  it('400 invalid_request on complete because the account is gone: the preview is asked again and the screen switches to the form with password fields, which then completes with a password', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    typeInto(opened.fixture, '#company', 'Typed Name');
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_request' }, status(400));
+    await settle(opened.fixture);
+    const again = opened.ctrl.expectOne('/auth/signup/preview');
+    expect(again.request.body).toEqual({ token: 'tok-s' });
+    again.flush(preview);
+    await settle(opened.fixture);
+    expect(has(opened.fixture, '#password')).toBe(true);
+    expect(has(opened.fixture, '#repeat')).toBe(true);
+    expect(has(opened.fixture, '[data-testid="keeps-password"]')).toBe(false);
+    expect(pageText(opened.fixture)).not.toContain('Check the company name.');
+    expect(valueOf(opened.fixture, '#company')).toBe('Typed Name');
+    expect(button(opened)?.disabled).toBe(false);
+
+    choose(opened, 'Chosen-Passw0rd');
+    const completion = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(completion.request.body).toEqual({ token: 'tok-s', password: 'Chosen-Passw0rd', company_name: 'Typed Name' });
+    await signInBy(opened, completion);
+    expect(opened.navigateByUrl).toHaveBeenCalled();
   });
 
   it('429 too_many_attempts on complete: the screen has no text of its own for it, so it says that something went wrong; the form stays and the button is on', async () => {
