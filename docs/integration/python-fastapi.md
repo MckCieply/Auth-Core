@@ -36,6 +36,7 @@ sample's is [`samples/notes-api/auth.yaml`](../../samples/notes-api/auth.yaml):
 
 ```yaml
 permissions: [notes:read, notes:write]
+signup: self-service
 default_roles:
   admin:  ["*"]
   user:   [notes:read, notes:write]
@@ -47,6 +48,10 @@ default_roles:
   not list them, but a role may hold them. `"*"` stands for every permission of the catalog (so the admin holds `org:delete`,
   which lets them delete the whole company).
 - At least one default role must hold `members:manage` or `"*"`, so that the first admin of a company can manage it.
+- `signup` is optional. `self-service` lets a visitor start a company of their own: they become its first admin, with the first default role that holds `"*"`
+  (else the first that holds `members:manage`). It also needs the address of your frontend's completion screen
+  (`Auth:App:FrontendUrls:CompleteSignup`; [the Angular guide](angular.md), step 4, and [the deployment guide](../deployment/vps.md)). The default,
+  `invite-only`, means the operator makes the companies.
 - Auth-Core reads the file at startup (`Auth__Manifest__Path`; the overlay of step 6 mounts it). A broken file never stops
   the service: the last valid manifest stays active and `/auth/health` says `Degraded`.
 - The default roles are **copied** when a company is created. Changing the manifest later changes the catalog and the
@@ -54,7 +59,7 @@ default_roles:
 
 ## 3. Configure the package
 
-Three values, all from your environment ([`src/notes_api/settings.py`](../../samples/notes-api/src/notes_api/settings.py)):
+Three values, all from your environment ([`samples/notes-api/src/notes_api/settings.py`](../../samples/notes-api/src/notes_api/settings.py)):
 
 | Value | Meaning |
 | --- | --- |
@@ -63,7 +68,7 @@ Three values, all from your environment ([`src/notes_api/settings.py`](../../sam
 | `jwks_url` | Optional. Where the signing keys are fetched. Defaults to `issuer` + `/.well-known/jwks.json`. A backend that reaches Auth-Core over an internal network sets it, for example `http://auth:8080/auth/.well-known/jwks.json` |
 
 Create one object when the application starts, and let it answer for the dependencies
-([`src/notes_api/app.py`](../../samples/notes-api/src/notes_api/app.py)):
+([`samples/notes-api/src/notes_api/app.py`](../../samples/notes-api/src/notes_api/app.py)):
 
 ```python
 from auth_core_fastapi import AuthCore
@@ -129,7 +134,7 @@ The package never logs a token or a claim value. A rejected token is logged at d
 ### Testing your endpoints
 
 Generate an RSA key in the test, sign tokens with it, and give the package a key cache that serves its public half, so
-that no network and no Auth-Core is needed ([`tests/conftest.py`](../../samples/notes-api/tests/conftest.py) of the sample):
+that no network and no Auth-Core is needed ([`samples/notes-api/tests/conftest.py`](../../samples/notes-api/tests/conftest.py) of the sample):
 
 ```python
 from auth_core_fastapi import AuthCore, JwksCache
@@ -145,8 +150,8 @@ Tokens must carry `typ: at+jwt` and a `kid` in their header, and `iss`, `aud`, `
 
 Add a non-null, indexed `org_id` (UUID) to each table that belongs to a company, in a migration
 ([`migrations/versions/0001_create_notes.py`](../../samples/notes-api/migrations/versions/0001_create_notes.py), applied at
-startup by [`src/notes_api/db.py`](../../samples/notes-api/src/notes_api/db.py)). Then follow three rules, as
-[`src/notes_api/app.py`](../../samples/notes-api/src/notes_api/app.py) does:
+startup by [`samples/notes-api/src/notes_api/db.py`](../../samples/notes-api/src/notes_api/db.py)). Then follow three rules, as
+[`samples/notes-api/src/notes_api/app.py`](../../samples/notes-api/src/notes_api/app.py) does:
 
 1. **The company is always the token's `org_id`.** Never read a company id from a path, a query string or a body: a
    request that cannot name a company cannot reach another company's rows.

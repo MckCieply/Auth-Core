@@ -30,6 +30,7 @@ import sys
 
 DOCUMENTS = [
     "README.md",
+    "docs/integration/angular.md",
     "CHANGELOG.md",
     "docs/deployment/vps.md",
     "docs/security/threat-model.md",

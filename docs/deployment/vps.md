@@ -53,8 +53,10 @@ write it in your calendar and rotate before it.
 
 Copy your product's `auth.yaml` to `/etc/auth-core/auth.yaml` and make it readable by the container's user (uid `1654`), for example `sudo chmod 0644 /etc/auth-core/auth.yaml`:
 a file that cannot be read does not stop the service, see "`Degraded`" in step 5. At least one default role must hold `members:manage` or `"*"`, so that the first admin of a
-company can manage it. (`deploy/auth.yaml` in the repository is a development example.) The built-in permissions are `members:manage`, `roles:manage`,
+company can manage it. (`deploy/auth.yaml` in the repository is a development example; it also says `signup: self-service`, which makes `/auth/health` say `Degraded` unless `AUTH_FRONTEND_SIGNUP_URL` is set, so do not copy that line without the address.) The built-in permissions are `members:manage`, `roles:manage`,
 `org:manage` and `org:delete`; a role with `"*"` holds all of them, **including the right to delete the company**.
+The optional key `signup: self-service` (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`) lets a visitor start a company of
+their own: see "Self-service sign-up" in step 7.
 
 The compose file mounts the key directory and the manifest from the paths in `.env` and never creates a missing one: a path that is not there stops the start
 with "bind source path does not exist", instead of leaving the service on a directory that Docker made empty.
@@ -73,6 +75,7 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 | `AUTH_KEYS_DIR`, `AUTH_MANIFEST` | the two paths above |
 | `AUTH_APP_NAME`, `AUTH_APP_LOCALE` | the product's name in the mails, and `pl` or `en` |
 | `AUTH_FRONTEND_RESET_URL`, `AUTH_FRONTEND_VERIFY_URL`, `AUTH_FRONTEND_INVITE_URL` | the three screens of **your frontend** that the mails link to, https |
+| `AUTH_FRONTEND_SIGNUP_URL` | **optional**, https: the screen of your frontend that finishes a self-service sign-up. Leave it blank and sign-up stays off (the default; nothing changes for you). See "Self-service sign-up" below |
 | `AUTH_EMAIL_FROM`, `AUTH_SMTP_HOST`, `AUTH_SMTP_PORT`, `AUTH_SMTP_SECURITY`, `AUTH_SMTP_USERNAME`, `AUTH_SMTP_PASSWORD` | the relay |
 
 **Two database roles.** Auth-Core connects to PostgreSQL as a role of its own that is not a superuser and owns only its database; the superuser stays for you. Both are
@@ -122,6 +125,8 @@ curl -s -w ' %{http_code}\n' http://127.0.0.1:8080/auth/health      # Healthy 20
 **`Healthy 200` is the answer you want; `Degraded 200` is not.** `Degraded` still has the status 200, and means the service could not use your manifest file (it does not exist,
 it cannot be read by uid `1654`, it is too large or it is not valid) and runs on the built-in roles or the last valid manifest it stored. Read why in the log, and fix the file
 before you create the first company: `$C logs auth | grep "was not used"` prints a line that names the path and the reason. Restart the service (`$C restart auth`) after the fix.
+
+`Degraded` also means that your manifest says `signup: self-service` while `AUTH_FRONTEND_SIGNUP_URL` is empty: `$C logs auth | grep "sign-up is off"` prints the line; set the address in `.env` and run `$C up -d`.
 
 The service migrates its database on its own at start (PostgreSQL creates it, owned by Auth-Core's role, at the first start). **`/auth/health` does not reach the database**, so a `200` there does not prove it is up. A login
 does: it writes the attempt, so it is `500` until the database answers and `401` after. Ask with an address nobody has, until it says `401`:
@@ -225,6 +230,20 @@ $C run --rm -T --no-deps auth admin list-orgs
 service runs. The admin follows the link to your frontend's invitation screen, chooses a password and signs in. Other members are invited from the company API
 (`POST /auth/org/invites`) by anyone who holds `members:manage`. The commands never migrate the database: run them after step 5 says `401`.
 
+### Self-service sign-up (optional)
+
+Off unless you turn it on, and then it needs **two** things: `signup: self-service` in your manifest, and `AUTH_FRONTEND_SIGNUP_URL` in `.env`, the https address of
+the screen of your frontend that finishes a sign-up (`https://app.example.com/complete-signup`; the sample's is `/complete-signup`). After changing `.env` run `$C up -d`
+(a restart does not read it again); after changing the manifest run `$C restart auth`. A visitor then gives an email address and a company name; the mail holds a link to your screen, where the person chooses a password and
+confirms the company's name; the company is made and the person is its first admin, with the first default role of your manifest that holds `"*"` (else the
+first that holds `members:manage`), and is signed in at once: `POST /auth/signup/complete` answers as a login does (the access token and the refresh cookie), so your screen
+opens the product and not the sign-in screen. An address whose account belongs to a company gets a mail that says so, with no link; a person whose account has no company (the company was deleted, or they were removed from it) gets the usual link, finishes with a company name only and keeps their password; every address gets the same answer.
+`GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
+at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
+typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
+risk that remains is in [`threat-model.md`](../security/threat-model.md). Keep the logs of `/complete-signup` as private as those of `/reset`: its
+query holds a token.
+
 ## 8. Check it
 
 ```bash
@@ -258,7 +277,7 @@ something is wrong". Then sign in through your frontend and call one product end
 ## Upgrading to a new version
 
 1. Read the [changelog](../../CHANGELOG.md) for the version, and compare the `deploy/.env.prod.example` and `deploy/docker-compose.prod.yml` of its tag with your own
-   files: a new required variable makes compose stop and name it.
+   files: a new required variable makes compose stop and name it. A version that adds a table or a manifest key does not need you to change anything unless you turn the feature on; the changelog says so.
 2. **Back up** ([`backup.md`](../operations/backup.md)): a new version may migrate the database, and there is no downgrade of a migration.
 3. Set `AUTH_CORE_VERSION` in `.env` to the new version and:
 
@@ -279,6 +298,7 @@ something is wrong". Then sign in through your frontend and call one product end
 | It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove it from the `environment:` of the `auth` service (in `deploy/docker-compose.prod.yml` or an override file you added) or from a `run -e`; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
 | `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
 | `/auth/health` says `Degraded` (still status 200), or a new company has the built-in roles instead of your product's | The manifest file was not used: `$C logs auth \| grep "was not used"` names the path and the reason (missing, not readable by uid `1654`, too large, not valid). Fix the file (`sudo chmod 0644 /etc/auth-core/auth.yaml` for the permission), then `$C restart auth` |
+| `/auth/health` says `Degraded` after you turned sign-up on | The manifest says `signup: self-service` but `AUTH_FRONTEND_SIGNUP_URL` is empty: `$C logs auth \| grep "sign-up is off"`. Set the address in `.env` and `$C up -d` |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
 | "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it), or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |

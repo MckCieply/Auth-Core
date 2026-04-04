@@ -46,10 +46,15 @@ example):
 
 ```yaml
 permissions: [documents:read, documents:write, documents:approve]
+signup: self-service
 default_roles:
   admin: ["*"]
   user: [documents:read, documents:write]
 ```
+
+`signup: self-service` is optional (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`): it lets a visitor start a company of their own, and it
+needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
+that address sign-up stays off and `/auth/health` says `Degraded`, so leave the line out of a copy of this file until you have the address.
 
 ### 2. Run it on your server
 
@@ -69,6 +74,10 @@ $C run --rm -T --no-deps auth admin invite --org <id> --email boss@acme.example 
 
 The invited admin gets a mail, sets a password on your frontend's invitation screen and signs in. Anyone who holds `members:manage`
 invites the rest of the company through the company API (`POST /auth/org/invites`).
+
+Or let visitors start on their own: set `signup: self-service` in the manifest and give Auth-Core the address of your frontend's completion screen
+(`AUTH_FRONTEND_SIGNUP_URL`). A visitor gives an email address and a company name, opens the link in the mail, chooses a password and is the first admin of a
+new company; a person whose company was deleted, or who was removed from it, comes back the same way and keeps their password. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
 
 ### 4. Connect your backend
 
@@ -113,6 +122,7 @@ scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → l
 scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
+scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a member removed who comes back (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
