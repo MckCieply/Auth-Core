@@ -50,8 +50,6 @@ curl -i -X POST .../auth/signup -d '{"email":"anna@firma.test","company_name":"O
 ## Out of scope
 
 - Sign-up through Google, Microsoft or GitHub (slice 0010).
-- An account that exists but has no company (its company was deleted, or it was removed from it) cannot start a
-  new company by sign-up; an invitation still brings it back (Decision 9).
 - CAPTCHA or any other human check (Decision 11).
 - Unique company names: two companies may have the same name, as with `create-org` today.
 - Several companies per person.
@@ -93,10 +91,13 @@ body and run the same database statements. Which mail goes out is decided when t
 
 When the mail is sent:
 
-- **The address has an account** (any account, confirmed or not, with or without a company): the mail "you already
+- **The address has an account that belongs to a company** (confirmed or not): the mail "you already
   have an account" goes out. It has no link and no token; it says that someone, perhaps the reader, tried to sign up
   with this address, that the account exists, and that the reader can sign in or use "forgot password" on the
   product's sign-in screen. The pending sign-up is deleted.
+- **The address has an account without a company** (its company was deleted, or it was removed from it) and the
+  pending sign-up still exists: the "complete your sign-up" mail goes out as for a new address (Amendment 3); the
+  link starts a company for that account. If the pending sign-up is gone, nothing is sent.
 - **Otherwise**, if the pending sign-up still exists: a new link token is issued for it (the previous link of the
   address stops working), valid 24 hours from the sending, and the mail "complete your sign-up" goes out with the
   link `<CompleteSignup>?token=<43 characters>` and the company name.
@@ -110,7 +111,9 @@ its retries and its delivery rules. A failed sending leaves the previous link va
 
 ### `POST /auth/signup/preview` — `{"token"}`
 
-`200 {"email", "company_name"}` for a usable token: the typed address and the company name of the request.
+`200 {"email", "company_name", "has_account"}` for a usable token: the typed address, the company name of the
+request, and whether an account with the address exists now (Amendment 3; `true` only for an account without a
+company — any other account would not have got a link).
 Otherwise `400 invalid_token`. It changes nothing.
 
 ### `POST /auth/signup/complete` — `{"token", "password", "company_name"}`
@@ -118,12 +121,14 @@ Otherwise `400 invalid_token`. It changes nothing.
 1. Sign-up off: `403 signup_disabled`. A missing or non-string member, a password with a NUL character or a company
    name that breaks the name rule: `400 invalid_request`.
 2. A token that is unknown, already used, expired or replaced by a newer mail: `400 invalid_token`.
-3. A password that breaks the policy of spec 0004: `400 weak_password` with the broken rules. The token stays
-   usable.
-4. An account with the address exists by now (an invitation was accepted in the meantime, for example):
-   `409 {"error":"already_registered"}`. The pending sign-up is deleted.
+3. **No account with the address:** a password that breaks the policy of spec 0004 is `400 weak_password` with
+   the broken rules, and the token stays usable. **An account without a company:** the password is not used (it may
+   be absent) and the account keeps the password it has (Amendment 3).
+4. An account with the address that belongs to a company by now (an invitation was accepted in the meantime, for
+   example): `409 {"error":"already_registered"}`. The pending sign-up is deleted.
 5. Otherwise, in one transaction:
-   - the account is created with the typed address, the password, and its email confirmed;
+   - the account is created with the typed address, the password, and its email confirmed — or, for an account
+     without a company, that account is used as it is and its email is confirmed;
    - the company is created with the name given here (the name of the request is only a suggestion the person may
      change on the screen), with a copy of the manifest's default roles, as `create-org` does;
    - the account becomes the company's member with the first admin's role (below);
@@ -210,7 +215,7 @@ The four operations are in the OpenAPI document with their answers.
    the `v0.1.0` manifest and configuration starts and passes its earlier tests unchanged.
 3. `POST /auth/signup` for a new address answers `202` with an empty body; a mail "complete your sign-up" arrives
    whose link is the configured address with a `token` parameter, and whose text holds the company name.
-4. The same request for an address with an account gets a response with the same status, headers and body and runs
+4. The same request for an address with an account that belongs to a company gets a response with the same status, headers and body and runs
    the same database statements in the request (the accounts are never read); the mail that arrives says the
    account exists and holds no link and no token; the pending sign-up is gone afterwards.
 5. A request with a malformed address, an address the invitation rule refuses, or a bad company name is
@@ -254,6 +259,12 @@ The four operations are in the OpenAPI document with their answers.
     the address bar; the address never appears in a URL; the "already have an account" case and an expired link
     show their texts.
 23. `scripts/e2e-signup.sh` passes against a fresh stack, and every earlier e2e script and test still passes.
+24. (Amendment 3) For an account without a company, the sign-up mail carries a link; the preview says
+    `has_account: true`; a completion with only the token and a company name answers as a login, creates the
+    company with that account as its first admin, leaves its password working and unchanged, confirms its email and
+    writes `signup.completed` with `details.existing_account` `true`; the sample's completion screen asks only for
+    the company name. If the account joins a company before the completion, the completion is
+    `409 already_registered`.
 
 ## Decisions (owner, 2026-03-28)
 
@@ -278,7 +289,7 @@ The four operations are in the OpenAPI document with their answers.
 8. **The first admin's role** is the first default role holding `*`, else the first holding `members:manage`.
 9. **An existing account never signs up again**, even without a company: it gets the "you already have an account"
    mail. Letting it attach a new company would need a sign-in-or-reset path inside the sign-up; an invitation
-   covers the case.
+   covers the case. *(Replaced by Amendment 3: an account without a company may start a new one.)*
 10. **No sign-in on completion**: the person signs in on the next screen, as after an invitation. *(Replaced by
     Amendment 2: the completion signs in.)*
 11. **No CAPTCHA.** Sign-up mails any well-formed address, so it is limited three ways: one mail a minute and five an
@@ -317,6 +328,20 @@ Settled while planning; the contract above already reads this way.
 2. **Private persons get a sign-up of their own in the next slice** (spec 0010): the sign-up screen will ask
    "organization or private person", and a private person gets an account without a company, where the product
    allows it. This spec stays the organization path.
+
+### Amendment 3 (owner, 2026-04-04)
+
+1. **A person without a company comes back by sign-up** (replaces Decision 9). Someone whose company was deleted, or
+   who was removed from it, has no access (spec 0005) and may start a company of their own: the sign-up mail carries
+   the usual link, the completion screen asks only for the company name (the preview says `has_account`), the
+   account keeps its password and its linked sign-ins, and the completion signs in as in Amendment 2. An account that
+   belongs to a company still gets the "you already have an account" mail.
+2. **Nothing is reserved by it.** Companies are not tied to a mail domain and their names are not unique, so a person
+   coming back this way creates a separate company and can take nothing from another; the people of their former
+   company keep their own (one company each, spec 0005). The link proves the mailbox, which already allows a password
+   reset, so asking for the password would add nothing.
+3. **The audit row `signup.completed` says which path was taken**: `details.existing_account` is `true` for an
+   account that existed.
 
 ## Verification notes (for the local verifiers)
 
