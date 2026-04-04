@@ -7,7 +7,7 @@
 - **Author:** Alex
 - **Spec:** [`docs/superpowers/specs/0009-self-service-signup.md`](../specs/0009-self-service-signup.md)
   — the plan argues from the spec; where they disagree, **the spec wins** and the
-  disagreement is a finding (see [`docs/workflow.md`](../../workflow.md)). The spec is not changed by this plan (the owner amended it on 2026-04-03, Amendment 2: the completion signs the person in; the section "Amendment (2026-04-03)" below, Tasks 14 and 15, builds it); the points
+  disagreement is a finding (see [`docs/workflow.md`](../../workflow.md)). The spec is not changed by this plan (the owner amended it on 2026-04-03, Amendment 2: the completion signs the person in; the section "Amendment (2026-04-03)" below, Tasks 14 and 15, builds it; and on 2026-04-04, Amendment 3: a person without a company comes back by sign-up; the section "Amendment (2026-04-04)" below, Tasks 16 and 17, builds it); the points
   that cannot be built as written, or that the spec leaves open, are listed in "Open questions for the owner" at the end (there are none left: the choices the plan took are recorded in "Decisions taken in this plan").
 - **Based on:** `3feb9fd` (`main` at `85df18b` with the phase brief in `docs/design.md` and spec 0009 on top of it). Every anchor of an edit below was
   checked against this base.
@@ -39,17 +39,17 @@ Values copied from the spec, one line each; every task includes them.
 - **General rules:** JSON bodies of at most 8 KiB in UTF-8, unknown members ignored, `400 invalid_request` for a body that is not a JSON object or a required member that is missing, empty or not a string; `Cache-Control: no-store` on every answer; the security headers of spec 0008.
 - **`GET /auth/options`:** `200 {"signup":"self-service"}` or `200 {"signup":"invite-only"}`, following the rule above; no authentication; a client ignores members it does not know (slice 0010 adds `providers`).
 - **`POST /auth/signup` `{"email","company_name"}`:** off → `403 signup_disabled`; `email` must pass the address rule of invitations (a mailbox address, no look-alike, IP-literal, dotless, numeric or hexadecimal domain; at most 254 characters) and `company_name` the name rule of spec 0005 (1 to 100 characters, no control, format or noncharacters, no leading or trailing space), otherwise `400 invalid_request`; the mail limit of spec 0004 with its own kind `signup` (one request a minute and five an hour), over it the `429 too_many_attempts` with `retry_after_seconds`; otherwise the pending sign-up of the address is created or replaced (typed address and company name; expires 24 hours later), a mail request is queued and the answer is `202` with an empty body. The request never reads the accounts: an address with an account and one without get the same status, headers and body and run the same database statements; which mail goes out is decided when the mail is sent.
-- **Mails (when sent):** the account check comes first (the owner's ruling): an address with an account (any account) gets "you already have an account" (no link, no token; says someone, perhaps the reader, tried to sign up, that the account exists, and that the reader can sign in or use "forgot password" on the product's sign-in screen) **even when its pending sign-up is gone**, and any pending sign-up of the address is deleted; otherwise, if the pending sign-up still exists, a new link token is issued (the previous link stops working), valid 24 hours from the sending, and "complete your sign-up" goes out with `<CompleteSignup>?token=<43 characters>` and the company name; with no account and no live pending sign-up (expired, completed or replaced) nothing is sent. Both mails: the instance's locale (`pl` or `en`), HTML and text parts, the app name, the queue, its retries and its delivery rules; a failed sending leaves the previous link valid.
-- **`POST /auth/signup/preview` `{"token"}`:** `200 {"email","company_name"}` (the typed address and the company name of the request) for a usable token, otherwise `400 invalid_token`; it changes nothing.
-- **`POST /auth/signup/complete` `{"token","password","company_name"}`:** off → `403`; a missing or non-string member, a password with a NUL character or a company name that breaks the name rule → `400 invalid_request`; a token that is unknown, used, expired or replaced → `400 invalid_token`; a password that breaks the policy of spec 0004 → `400 weak_password` with the rules (the token stays usable); an account with the address by now → `409 {"error":"already_registered"}` and the pending sign-up is deleted; otherwise in one transaction the account (typed address, the password, email confirmed), the company (the name of this request, a copy of the default roles, as `create-org` does), the membership with the first admin's role, the pending sign-up deleted and the audit events; **the answer is that of a successful `POST /auth/login`** (`200 {"status":"authenticated","access_token"}` and the refresh cookie; the token carries the new company and the first admin's role), and the sign-in is part of the transaction with its `login.succeeded` row: if it cannot be written nothing of the completion stays (spec 0009, Amendment 2 of 2026-04-03: Tasks 14 and 15 change what Tasks 8, 11 and 12 built, which answered `204`). The order of the checks is token, password, account. Of parallel requests with one token exactly one gets past the token; the address is locked with the lock that invitation acceptance uses.
+- **Mails (when sent):** the account check comes first (the owner's ruling): an address with an account that belongs to a company gets "you already have an account" (no link, no token; says someone, perhaps the reader, tried to sign up, that the account exists, and that the reader can sign in or use "forgot password" on the product's sign-in screen) **even when its pending sign-up is gone**, and any pending sign-up of the address is deleted; otherwise (no account, or, spec 0009 Amendment 3 of 2026-04-04, an account that belongs to **no** company), if the pending sign-up still exists, a new link token is issued (the previous link stops working), valid 24 hours from the sending, and "complete your sign-up" goes out with `<CompleteSignup>?token=<43 characters>` and the company name; with no live pending sign-up (expired, completed or replaced) and no account that belongs to a company nothing is sent. Both mails: the instance's locale (`pl` or `en`), HTML and text parts, the app name, the queue, its retries and its delivery rules; a failed sending leaves the previous link valid.
+- **`POST /auth/signup/preview` `{"token"}`:** `200 {"email","company_name","has_account"}` (the typed address, the company name of the request, and whether an account without a company has the address: `true` only then, Amendment 3) for a usable token, otherwise `400 invalid_token`; it changes nothing.
+- **`POST /auth/signup/complete` `{"token","password","company_name"}`:** off → `403`; a missing or non-string member, a password with a NUL character or a company name that breaks the name rule → `400 invalid_request`; a token that is unknown, used, expired or replaced → `400 invalid_token`; a password that breaks the policy of spec 0004 → `400 weak_password` with the rules (the token stays usable; **Amendment 3:** for an account that belongs to no company the password may be absent, is not used, and the account keeps the one it has); an account with the address that belongs to a company by now → `409 {"error":"already_registered"}` and the pending sign-up is deleted; otherwise in one transaction the account (typed address, the password, email confirmed; for an account without a company, that account as it is, its email confirmed), the company (the name of this request, a copy of the default roles, as `create-org` does), the membership with the first admin's role, the pending sign-up deleted and the audit events; **the answer is that of a successful `POST /auth/login`** (`200 {"status":"authenticated","access_token"}` and the refresh cookie; the token carries the new company and the first admin's role), and the sign-in is part of the transaction with its `login.succeeded` row: if it cannot be written nothing of the completion stays (spec 0009, Amendment 2 of 2026-04-03: Tasks 14 and 15 change what Tasks 8, 11 and 12 built, which answered `204`). The order of the checks is token, password, account. Of parallel requests with one token exactly one gets past the token; the address is locked with the lock that invitation acceptance uses.
 - **The first admin's role:** the first default role of the manifest, in the manifest's order, whose permissions are `["*"]`; if no role holds `*`, the first one whose permissions include `members:manage`.
 - **Pending sign-ups:** one per normalised address; hold the typed address, the company name, the hash of the current link token (none until the first mail is sent), the time its link expires and the time the row expires (Amendment 2); not an account (login, `forgot password` and invitations do not see it); the hourly clean-up deletes those whose time has passed.
 - **Manifest:** a new optional top-level key `signup: invite-only` (the default when absent) or `signup: self-service`; any other value makes the manifest invalid by the rules of spec 0005 (the last valid manifest stays active, `/auth/health` reports `Degraded`); a manifest stored by an earlier version without the key is read as `invite-only`.
 - **Configuration:** `Auth:App:FrontendUrls:CompleteSignup`, environment variable `AUTH_FRONTEND_SIGNUP_URL` in `deploy/docker-compose.prod.yml` (optional, may be empty); when set and not empty, the rules of the other frontend addresses of spec 0004 (absolute; `https` outside Development; no fragment, user information or `token` parameter), a bad value stops the start naming the key; `self-service` without the address: sign-up is off, the start logs a warning and `/auth/health` reports `Degraded`.
 - **Limits (spec 0008):** `POST /auth/signup` counts against the mail policy (`Email`, 10 a minute by default); `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy (`Invite`, 20 a minute); `GET /auth/options` against the general one.
-- **Audit (24 kinds in all):** `signup.requested` when `POST /auth/signup` is accepted (`202`; field `subject_email`); `signup.completed` when the completion succeeds, in its transaction (`subject_user_id`, `subject_email`, `org_id`, `org_name`); `org.created` gains the value `signup` for `details.via`, written in the same transaction, and so is the `login.succeeded` row of the completion's sign-in (Amendment 2); no row holds a password or a token.
+- **Audit (24 kinds in all):** `signup.requested` when `POST /auth/signup` is accepted (`202`; field `subject_email`); `signup.completed` when the completion succeeds, in its transaction (`subject_user_id`, `subject_email`, `org_id`, `org_name`; `details.existing_account` `true` for an account that existed, Amendment 3); `org.created` gains the value `signup` for `details.via`, written in the same transaction, and so is the `login.succeeded` row of the completion's sign-in (Amendment 2); no row holds a password or a token.
 - **OpenAPI:** the four operations are in the document with their answers.
-- **Sample (`samples/notes-web`):** `/signup` (email and company name; on success "Check your inbox" whatever the address; `429` shows the wait; `403 signup_disabled` says that sign-up is closed); `/complete-signup` (the token leaves the address bar; the preview shows the address read-only and the company name editable; the password twice, checked on the screen; success signs the person in and opens the notes screen at once (Amendment 2; the address in no URL); `invalid_token` offers to sign up again; `already_registered` says the account exists and links to sign-in; `weak_password` lists the rules); `/login` shows "Create an account" when `GET /auth/options` says `self-service`; the new routes are public; texts are English.
+- **Sample (`samples/notes-web`):** `/signup` (email and company name; on success "Check your inbox" whatever the address; `429` shows the wait; `403 signup_disabled` says that sign-up is closed); `/complete-signup` (the token leaves the address bar; the preview shows the address read-only and the company name editable; the password twice, checked on the screen; success signs the person in and opens the notes screen at once (Amendment 2; the address in no URL); when the preview says `has_account` the password fields are not shown and only the company name is asked for (Amendment 3); `invalid_token` offers to sign up again; `already_registered` says the account exists and links to sign-in; `weak_password` lists the rules); `/login` shows "Create an account" when `GET /auth/options` says `self-service`; the new routes are public; texts are English.
 - **Off by default, nothing changes for an instance that does not turn it on** (Toviq runs `v0.1.0` in production): no new required setting, the `v0.1.0` manifest, settings and database keep working, and the earlier tests pass; the tests that enumerate the contract get lines added and nothing else: `OpenApiTests` (lines added, each replacing the previous task's line by itself and the new one, and one `foreach` array extended), `AuditTableTests` (one list extended and the one test method renamed from `...twenty_two...` to `...twenty_four...`) and `ManifestActivationTests` (one assertion); the per-IP classification has a new test class beside `RatePolicyTests`.
 - **Workflow** ([`docs/workflow.md`](../../workflow.md)): local only (no CI, no pull request), Conventional Commits in English, documentation in English. **The orchestrator makes the commits**: implementers leave their changes uncommitted in the working tree, and the orchestrator reads the diff, runs the gate and commits with the subject named in the task's last step ("Hand back"). Every task ends with that step; it lists files and a proposed subject, never a git command. One Sonnet implementer writes the code of one task, runs it and fixes what breaks; the code below is the plan's, written on paper, and the implementer's tests decide.
 - **The EF migration** (Task 3) is created with `dotnet ef migrations add AddPendingSignups`; its id is the orchestrator's business afterwards, and no test or document may name it.
@@ -78,7 +78,7 @@ Probes in a scratch directory outside the repository (a file-based `dotnet run`)
 The inputs and failure modes the spec implies that a person using this software is most likely to meet, most likely first; each has its test in the task named.
 
 1. **An instance that never turns sign-up on, upgraded from `v0.1.0`** (Toviq): a database made by the earlier migrations, a manifest stored without the key, no completion address, a production compose file that passes an empty variable. The person expects nothing to change and the host to start (`UpgradeFromV010Tests.A_database_of_v0_1_0_gets_the_table_keeps_its_rows_and_reads_its_manifest_as_invite_only`, `ManifestSignupActivationTests.A_manifest_stored_by_v0_1_0_stays_invite_only_when_the_file_is_missing`, `SignupGateTests.Sign_up_is_off_unless_the_manifest_says_self_service_and_the_address_is_set`, `ShippedConfigurationTests.A_production_host_with_the_manifest_key_and_an_empty_address_starts_with_sign_up_off`; Tasks 1, 3 and 9).
-2. **The same person under another spelling of the address** (capitals, trailing space in the form, a look-alike letter): `Anna@Firma.test` and `anna@firma.test` are one pending sign-up; an account spelled another way still means "you already have an account" and `409 already_registered`; the mail goes to the address as the account stores it (`SignupRequestTests.Spellings_of_one_address_share_one_pending_sign_up_and_one_limit`, `SignupDispatchTests.The_account_exists_mail_goes_to_the_stored_address_spelled_as_stored`, `SignupCompleteTests.An_account_under_another_spelling_of_the_address_is_409_too`; Tasks 5, 6 and 8).
+2. **The same person under another spelling of the address** (capitals, trailing space in the form, a look-alike letter): `Anna@Firma.test` and `anna@firma.test` are one pending sign-up; an account spelled another way still means "you already have an account" and `409 already_registered` (narrowed by Amendment 3: an account that belongs to a company; an account without a company spelled another way in ASCII case only is a comeback, and one that the normaliser merely folds together with the typed address gets the notice and the `409`); the mail goes to the address as the account stores it (`SignupRequestTests.Spellings_of_one_address_share_one_pending_sign_up_and_one_limit`, `SignupDispatchTests.The_account_exists_mail_goes_to_the_stored_address_spelled_as_stored`, `SignupCompleteTests.An_account_under_another_spelling_of_the_address_is_409_too`; Tasks 5, 6 and 8).
 3. **The person who asks twice, clicks an old link or presses the button twice:** the second request within a minute is the `429` with the wait, an older link after a newer mail is `invalid_token`, a used link is `invalid_token`, a double submit makes one account (`SignupRequestTests.A_second_request_within_a_minute_is_refused_and_asking_again_does_not_add_to_the_wait`, `SignupPreviewTests.The_older_link_of_an_address_is_invalid_and_the_newer_shows_the_newer_company`, `SignupCompleteRaceTests.Of_parallel_completions_with_one_token_exactly_one_is_204`, `complete-signup.spec.ts` "sends one request for a double submit"; Tasks 5, 7, 8 and 11).
 4. **Company names people type:** Polish letters, exactly 100 characters, an emoji (a surrogate pair), a name with `&` and `<` in the HTML part of the mail, spaces around the name in the form (the screen trims; the API refuses) (`SignupRequestTests.Names_at_the_limit_with_polish_letters_and_pairs_are_kept_whole`, `SignupDispatchTests.Names_at_the_limit_with_polish_letters_and_pairs_reach_the_mail_whole`, `SignupMailComposerTests.The_company_name_is_encoded_in_the_html_and_is_not_in_the_subject`, `SignupCompleteTests.The_company_name_of_the_request_is_only_a_suggestion`; Tasks 4, 5, 8 and 11).
 5. **The mail relay is down or slow when the person asks:** the request is still `202`, the mail is retried, the earlier link still works, and a failed send to an existing account keeps the pending sign-up until the mail has gone (`SignupDispatchTests.A_failed_send_leaves_the_previous_link_valid_and_the_retry_sends_a_new_one`, `SignupDispatchTests.A_failed_send_to_an_account_keeps_the_pending_sign_up_until_the_mail_is_sent`; Task 6).
@@ -97,6 +97,7 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Dispatch | `Email/MailDispatcher.cs` | what the queue does with a sign-up row: drop, lock, issue a token or say "you already have an account" (Task 6) |
 | Preview and completion | `Signup/SignupService.cs`, `Signup/SignupPreviewEndpoint.cs`, `Signup/SignupCompleteEndpoint.cs` | the preview, the completion in one transaction (Tasks 7 and 8) |
 | The completion signs in (Amendment 2) | `Sessions/SessionPrincipal.cs`, `Signup/SignupCompletion.cs`, `Signup/SignupCompleteRequestHandler.cs`, `Login/AtomicSignInResult.cs`, `Login/LoginEndpoint.cs`, `Login/LoginResponseShaper.cs`, `Tokens/OpenIddictSetup.cs`, `Signup/SignupService.cs`, `Signup/SignupCompleteEndpoint.cs`; the sample's `auth/auth.service.ts` and `pages/complete-signup.ts`; `samples/notes-web/e2e/09-signup.spec.ts`, `scripts/e2e-signup.sh` | the principal both sign-ins share, the third token endpoint, the transaction handed to the sign-in, the screen that opens the notes (Tasks 14 and 15) |
+| The comeback of a person without a company (Amendment 3) | `Signup/SignupAccounts.cs`, `Signup/SignupService.cs`, `Signup/SignupContracts.cs`, `Signup/SignupPreviewEndpoint.cs`, `Signup/SignupCompleteEndpoint.cs`, `Requests/JsonObjectBody.cs`, `Email/MailDispatcher.cs`, `Api/SignupRoutes.cs`; the sample's `account-api.ts`, `auth/auth.service.ts`, `texts.ts`, `pages/complete-signup.ts`; `samples/notes-web/e2e/09-signup.spec.ts`, `scripts/e2e-signup.sh`, `scripts/e2e-web.sh` | which account a link may use, the optional password, `has_account`, the screen with the company name only (Tasks 16 and 17) |
 | Shipping | `Program.cs`, `appsettings.Development.json`, `deploy/auth.yaml`, `samples/notes-api/auth.yaml`, `deploy/docker-compose.prod.yml`, `deploy/.env.prod.example`, `samples/notes-web/compose.yml`, `scripts/e2e-prod.sh` | the registrations, the shipped manifests and the address in every stack (Tasks 1, 2, 7 and 9) |
 | Sample | `samples/notes-web/src/app/account-api.ts`, `texts.ts`, `auth/auth.service.ts`, `pages/signup.ts`, `pages/complete-signup.ts`, `pages/login.ts`, `app.routes.ts` and their specs, and the older `pages/login.too-many-requests.spec.ts` | the screens (Tasks 10 and 11) |
 | Live checks | `samples/notes-web/e2e/09-signup.spec.ts`, `e2e/support/mail.ts`, `scripts/e2e-signup.sh`, `scripts/e2e-web.sh` (the seeding of two addresses), the run sequences in the headers of `scripts/e2e-tenancy.sh` and `scripts/e2e-hardening.sh` | the browser and API end-to-end checks (Task 12) |
@@ -120,10 +121,12 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Fri 03.04 | 12 | The Playwright test and `scripts/e2e-signup.sh` |
 | Fri 03.04 | 14 | Amendment 2: the completion signs the person in: the server (the completion as a pass-through request of OpenIddict, one transaction with the sign-in) |
 | Fri 03.04 | 15 | Amendment 2: the sample opens the notes screen after a completion; the Playwright test and `scripts/e2e-signup.sh` follow |
-| Sat 04.04 | 13 | The guides, the threat model, the changelog, `check-docs.py` and the acceptance map |
+| Sat 04.04 | 16 | Amendment 3: a person without a company comes back by sign-up: the server (the dispatcher sends the link to an account without a company, the preview says `has_account`, the completion uses that account as it is, the `409` race with an invitation) |
+| Sat 04.04 | 17 | Amendment 3: the completion screen asks only for the company name when the preview says `has_account`; unit tests, the Playwright test and Step 12 of `scripts/e2e-signup.sh` (the member removed through the operator CLI) |
+| Sat 04.04 | 13 | The guides, the threat model, the changelog, `check-docs.py` and the acceptance map (24 criteria; documents the comeback too) |
 | after Task 13 | verifiers | The three verifiers, the "As built", the merge (outside this plan, owner-gated) |
 
-Tasks run in order inside a day and across days (the order is 12, 14, 15, 13: Task 13 documents what Tasks 14 and 15 changed); each leaves `dotnet build -warnaserror` and the tests of the files it touches green, and each task's tests are
+Tasks run in order inside a day and across days (the order is 12, 14, 15, 16, 17, 13: Task 13 documents what Tasks 14 to 17 changed); each leaves `dotnet build -warnaserror` and the tests of the files it touches green, and each task's tests are
 written first and seen to fail.
 
 ---
@@ -7057,7 +7060,7 @@ echo "ALL PASS"
 
 The owner's **Amendment 2** of [spec 0009](../specs/0009-self-service-signup.md) (2026-04-03) replaces Decision 10: **completing a sign-up signs the person in.** `POST /auth/signup/complete` answers exactly as a successful `POST /auth/login` does (specs 0001 and 0002): `200 {"status":"authenticated","access_token"}` and the refresh cookie `auth_rt`, the token carrying the new company and the first admin's role. The `login.succeeded` audit row is written in the completion's own transaction, and **if the sign-in cannot be written nothing of the completion stays.** The sample opens the product (the notes screen) at once instead of `/login`. Accepting an invitation is unchanged (`204`, then the sign-in screen).
 
-Tasks 1 to 12 are implemented and committed (HEAD `9d87bb1`). The real files differ from this plan's text in places (review fixes): **the real files win**; the code below was written against them. This section adds **Task 14** (the server) and **Task 15** (the sample, the Playwright test and `scripts/e2e-signup.sh`) on **Friday 03.04**, and moves **Task 13** (the documents, which now also describe the sign-in) to **Saturday 04.04**. Where the text of Tasks 8, 11 and 12 (`204`, "it does not sign in", the sample going to `/login`) disagrees with this section, **this section wins**: those tasks are history, and Tasks 14 and 15 change the code and the tests they produced. Tasks run in this order: 12, 14, 15, 13.
+Tasks 1 to 12 are implemented and committed (HEAD `9d87bb1`). The real files differ from this plan's text in places (review fixes): **the real files win**; the code below was written against them. This section adds **Task 14** (the server) and **Task 15** (the sample, the Playwright test and `scripts/e2e-signup.sh`) on **Friday 03.04**, and moves **Task 13** (the documents, which now also describe the sign-in) to **Saturday 04.04**. Where the text of Tasks 8, 11 and 12 (`204`, "it does not sign in", the sample going to `/login`) disagrees with this section, **this section wins**: those tasks are history, and Tasks 14 and 15 change the code and the tests they produced. Tasks run in this order: 12, 14, 15, then 16 and 17 (the section "Amendment (2026-04-04)" below), then 13.
 
 ### How `/auth/login` issues a session today, and the design chosen
 
@@ -7094,7 +7097,7 @@ Tasks 1 to 12 are implemented and committed (HEAD `9d87bb1`). The real files dif
 2. **The link used twice, or the button pressed twice:** the second post is `invalid_token` with no cookie and no second session; the screen sends one request (`SignupCompleteSignInTests.The_same_body_posted_again_is_invalid_token_with_no_cookie_and_no_second_session`, `...Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token`; `complete-signup.spec.ts` "sends one request for a double submit"; Tasks 14 and 15).
 3. **Someone is already signed in, in that browser, as another person, and opens the link:** the old session is dropped before the new one (`auth.service.signup.spec.ts`; Task 15).
 4. **The Back button and a reload after completing:** Back must not land on a "link used up" page of the screen that was left (`replaceUrl`), and a reload keeps the person signed in through the cookie (`complete-signup.spec.ts` "200: ..."; `09-signup.spec.ts` reload step; Task 15).
-5. **A client that posts a login-shaped or form-encoded body at the completion path:** `400 invalid_request`, no token, no cookie (`SignupCompleteSignInTests.The_path_is_no_second_way_to_log_in`; Task 14).
+5. **A client that posts a login-shaped or form-encoded body at the completion path:** `400 invalid_request`, no token, no cookie (`SignupCompleteSignInTests.A_form_or_a_credentials_body_is_refused_with_400_and_issues_nothing`, `SignupCompleteSignInTests.What_a_client_adds_to_a_valid_completion_never_reaches_the_OpenIddict_request`; Task 14).
 
 ---
 
@@ -9023,9 +9026,2161 @@ wait_psql_value "SELECT count(*) FROM \"MailRequests\" WHERE \"NormalizedEmail\"
 
 ---
 
-## Day 6 — Saturday 04.04: the guides, the acceptance map
+## Amendment (2026-04-04): a person without a company comes back by sign-up
 
-When the day is done, the guides and the threat model describe the feature (the sign-in on completion included), the changelog has an `Unreleased` section, and the acceptance map names a guarding test for each of the 23 criteria. One task: Task 13, which comes last because it documents what Tasks 14 and 15 changed.
+The owner's **Amendment 3** of [spec 0009](../specs/0009-self-service-signup.md) (2026-04-04) replaces Decision 9: **someone whose company was deleted, or who was removed from it, has an account and no access (spec 0005), and may start a company of their own by signing up.** The contract the spec now states (Mails, `POST /auth/signup/preview`, `POST /auth/signup/complete` steps 3 to 5, criterion 24):
+
+- At **send time** an address whose account belongs to **no company**, with a **live pending sign-up**, gets the ordinary "complete your sign-up" mail with its link (an account that belongs to a company still gets the "you already have an account" notice; with no live pending sign-up and no company, nothing is sent). The request itself is untouched: it still never reads the accounts.
+- The **preview** answers `200 {"email","company_name","has_account"}`; `has_account` is `true` only for such an account.
+- The **completion** for such an account does not use the password (it may be absent) and does not change it; the account keeps its password and linked sign-ins, its email is confirmed, the company is created with the account as its first admin, the person is signed in (Amendment 2), and the audit row `signup.completed` carries `details.existing_account` `true`. If the account has joined a company meanwhile: `409 already_registered` (the pending sign-up is deleted).
+- The sample's completion screen asks only for the company name.
+
+Tasks 1 to 15 are implemented (the working tree holds Tasks 14 and 15, uncommitted, as the code stands). The real files win over the text of the earlier tasks; the code below was written against them (read on 2026-04-04). This section adds **Task 16** (the server and its tests) and **Task 17** (the sample, the Playwright test, the live scripts) on **Saturday 04.04**, before **Task 13**, which moves after them on the same day and documents the amendment. Order: 12, 14, 15, 16, 17, 13. Where the text of Tasks 5, 6, 7, 8, 11 and 12 disagrees with this section (an address with an account always gets the notice; the preview has two members; the password is always required; Decision 9), **this section wins**: those tasks are history, and Tasks 16 and 17 change the code and the tests they produced.
+
+### What the code does today, and the design chosen
+
+**Read, not run** (the machine is busy and Docker is off; the plan's code below is written on paper, and the implementer's tests decide).
+
+- `MailDispatcher.PrepareSignupMailAsync` looks the account up first (`StoredAddressOfAsync`: the first account by id under the normalised address) and, if there is any, sends the notice and deletes the pending sign-up; its two SQL statements (`DropUnmailableAsync`, the `due` select of `DispatchOneAsync`) also treat *any* account as a reason to keep or take a sign-up row. All three must learn that only an account **with a company** is a reason.
+- `SignupService.CompleteAsync` consumes the token, takes the advisory lock of the address (`pg_advisory_xact_lock(hashtextextended(address, 0))`, the one `InviteAcceptance` takes), checks the password (`PasswordRules.BrokenAsync`), then answers `409 already_registered` (committing the deletion of the pending row) for *any* account under the normalised address, else creates the account, ends its sessions, creates the company, the membership and `signup.completed`, and hands the open transaction to `AtomicSignInResult`.
+- `InviteAcceptance` has the same lock and, for an existing account, answers `already_member` when `db.Memberships.AnyAsync(m => m.UserId == user.Id)`; it also **replaces the password** of an existing account and ends its sessions. So a comeback and an acceptance for one company-less account cannot both win: whichever takes the lock second sees the membership of the first (the race test below pins both orders).
+- `JsonObjectBody.ReadStringsAsync` treats every named member as required and non-blank; a completion for an account that needs no password therefore needs an optional member. `SignupCompleteEndpoint` reads `[token, password, company_name]` through it.
+- `SignupPreviewResponse(Email, CompanyName)` and `SignupCompleteRequest(Token, Password, CompanyName)` are the OpenAPI shapes (`ReadsJson<T>()` documents the type; the endpoints read the bodies by hand).
+- The existing tests make an "account that exists" with `CreateUserAsync(address, confirmed, member: false)` — an account **without a company**. Under Amendment 3 those are now the comeback accounts; the tests that meant "an account with a company" must say so (`member: true`, the helper's default). Task 16, Step 2 lists every one.
+
+**The design.**
+
+1. **One definition of "the account this link may use".** A new `SignupAccounts.FindAsync` returns the first account under the normalised address (id, stored address, whether it has a membership); `SignupAccount.MayStartCompany(typedEmail)` is true when it has **no company** and its stored address is the typed address **up to ASCII case** (`EmailInput.IsSameAddress`, the rule invitation acceptance uses: the account lookup folds some different addresses together — micro sign and Greek mu, final sigma and sigma — and a link proves only the mailbox it was sent to, so an account that merely *looks like* the typed address is never used; it is treated as an account the link cannot start a company for: notice mail, `409`). The dispatcher, the preview and the completion all use it, so they cannot disagree.
+2. **Dispatcher.** An account that belongs to a company: notice (as today). Otherwise the live pending sign-up is locked as today, and **the account is read again once the lock is held** (the lock may have waited for a completion that has just committed, or for an invitation that has just been accepted): an account with a company now gets the notice, whether or not the pending sign-up survived; no pending sign-up: nothing; an account that is not usable by this link (the look-alike case): notice; otherwise the complete mail. The two SQL statements count only an account **with a membership** as a reason to keep a row: a company-less account with no live pending sign-up is dropped by the bulk delete like an address with no account, and a flood of such requests is never handled one by one.
+3. **Preview.** `HasAccount = account?.MayStartCompany(pending.Email) == true`. An account that has joined a company since the mail, or that only looks like the address, is `false` (the screen then asks for a password and the completion answers `409`, which is the contract's `409` case).
+4. **Completion.** After the token and the lock (unchanged): find the account. If it is usable (`MayStartCompany`): no password check, **a password in the body is ignored**, the tracked account gets `EmailConfirmed = true` through `UserManager.UpdateAsync`, any session or mail link it still has ends, as for a new account and as at an invitation (`AccountSessions.EndAllAsync`: refresh tokens, authorizations, other email links, login streak) — defence in depth: removing a member and deleting a company already revoke their sessions, and a login without a company is `403`, so normally there is nothing left to end, the company, the membership and the audit rows follow. If it is not usable: a password that is there is checked (`400 weak_password`, token usable); an account under the address (one that joined a company since the mail, or one that only looks like the address) is `409 already_registered` with the pending row gone, **whether or not a password came** (a screen that was told `has_account` sent none, and the contract says `409`); with no account the password is required (`400 invalid_request` when absent, the transaction rolled back so the token stays usable) and the account is made as before. The order stays token, password, account.
+5. **The body.** `password` becomes an optional member of the completion request (`JsonObjectBody.ReadStringsAsync` gets an overload with optional names): absent is fine; present it is held to the rule of every string member (a non-blank string without NUL), so `"password":123`, `""`, `null` and a NUL stay `400 invalid_request` whatever the account.
+6. **Audit.** `signup.completed` carries `details.existing_account = true` for the comeback and **no details** for a new account (the existing test asserts `Details` is null for a new account, and the spec says the member is `true` "for an account that existed").
+7. **OpenAPI.** `SignupPreviewResponse` gets `HasAccount` (`has_account`); `SignupCompleteRequest.Password` becomes `string? Password = null` (still a property; not required); the operation descriptions say so.
+
+**Rejected.** *Sending the notice to a person without a company and letting an invitation cover the case* — that was Decision 9, replaced. *Asking for a password and replacing it* — the owner ruled the link adds no capability (it already allows a reset) and the password stays. *`has_account` true for any account* — the contract says `true` only for an account without a company; an account that joined a company meanwhile would show a screen with no password fields and still answer `409`, which no sample test (`BOTH` in `09-signup.spec.ts`) expects. *Deciding in the request* — it would read the accounts and break criterion 4.
+
+**Resource rules for the implementers of Tasks 16 and 17** (this machine is shared and Docker may be off; they apply to every step):
+
+- Build with `-maxcpucount:2`: `"C:/Program Files/dotnet/dotnet.exe" build tests/Auth.IntegrationTests -maxcpucount:2 -warnaserror`.
+- Run **only the classes the task names**, with `-maxThreads 2`, through the test executable, one `-class` per class: `tests/Auth.IntegrationTests/bin/Debug/net10.0/Auth.IntegrationTests.exe -maxThreads 2 -class Auth.IntegrationTests.SignupComebackTests -class Auth.IntegrationTests.SignupComebackDispatchTests` (they need Docker for Testcontainers: if Docker is off, stop after the build and say so in the hand-back; the orchestrator runs them). Unit tests of the sample: `npx ng test --watch=false --include "<spec file>"`, one `--include` per file.
+- **No full suite** (neither `dotnet test tests/Auth.IntegrationTests` without a filter nor `npx ng test` without `--include`) and **no live runs**: no `scripts/e2e-*.sh`, no Playwright, no `docker compose`. The verifiers run those at the end. The scripts and the Playwright test are checked by reading, `bash -n` and `npx tsc -p e2e/tsconfig.json --noEmit`.
+- A test that fails with an Npgsql "operation has timed out" while connecting is the machine being busy, not the code: run that class again, alone, before reading it as a failure.
+- The implementers leave their changes uncommitted (see Global Constraints).
+
+**Review Focus of the amendment** (inputs a person is likely to meet; each has its test in the task named):
+
+1. **The person whose company is gone asks to sign up, opens the link and finishes with only a company name** — and signs in afterwards with the password they always had (`SignupComebackTests.A_person_without_a_company_comes_back_with_only_the_token_and_a_company_name`, `...A_password_in_the_body_is_not_used`; `complete-signup.spec.ts` "posts only the token and the company name"; `09-signup.spec.ts` "a person whose company is gone comes back by sign-up..."; Tasks 16 and 17).
+2. **A person who still has a company never gets a link** (narrowed by Amendment 3: an account that belongs to a company) — not at the request, not when the mail is sent, not if they join a company while the mail waits for its lock, and not if they join between the mail and the click (`SignupComebackDispatchTests.An_account_that_belongs_to_a_company_gets_the_notice_and_no_link`, `...An_account_that_joins_a_company_while_the_dispatcher_waits_for_the_pending_sign_up_gets_the_notice`, `...An_account_that_joins_a_company_while_the_dispatcher_waits_and_the_pending_sign_up_survives_gets_the_notice`, `SignupComebackTests.An_account_that_joined_a_company_meanwhile_is_409_and_the_pending_sign_up_is_gone`; Task 16).
+3. **An invitation to the same person arrives at the same moment** — one company, the other side `409`, in both orders (`SignupCompleteRaceTests.A_comeback_and_an_invitation_acceptance_for_one_account_never_both_give_it_a_company`; Task 16).
+4. **A stranger asks to sign up with an address that only looks like someone's** — the link goes to the stranger's mailbox and must never open the other account (`SignupComebackTests.An_account_under_a_spelling_the_normaliser_folds_is_409_and_is_left_alone`, `SignupComebackDispatchTests.An_account_that_only_looks_like_the_typed_address_gets_the_notice_and_no_link`; Task 16).
+5. **Nobody learns who has an account by asking to sign up** — an address with a company, one without, and an unknown one get the same answer and run the same statements (`SignupRequestTests.An_account_without_a_company_gets_the_same_status_headers_body_and_statements`; Task 16).
+6. **The sign-in cannot be written halfway** — for a comeback too, the account keeps its unconfirmed address and gets no company (`SignupComebackTests.A_sign_in_that_cannot_be_written_leaves_the_account_as_it_was`; Task 16).
+
+---
+
+### Task 16: A person without a company comes back by sign-up: the server
+
+**Files:**
+- Create: `src/Auth.Server/Signup/SignupAccounts.cs`
+- Modify: `src/Auth.Server/Requests/JsonObjectBody.cs` (an overload with optional members), `src/Auth.Server/Signup/SignupContracts.cs`, `src/Auth.Server/Signup/SignupService.cs` (replaced as a whole), `src/Auth.Server/Signup/SignupPreviewEndpoint.cs`, `src/Auth.Server/Signup/SignupCompleteEndpoint.cs` (replaced as a whole), `src/Auth.Server/Email/MailDispatcher.cs`, `src/Auth.Server/Api/SignupRoutes.cs` (three descriptions)
+- Create (tests): `tests/Auth.IntegrationTests/SignupComebackTests.cs`, `tests/Auth.IntegrationTests/SignupComebackDispatchTests.cs`
+- Modify (tests): `tests/Auth.IntegrationTests/Infrastructure/SignupApi.cs`, `Infrastructure/SignupTestBase.cs`, `SignupDispatchTests.cs`, `SignupCompleteTests.cs`, `SignupCompleteSignInTests.cs`, `SignupCompleteRaceTests.cs`, `SignupPreviewTests.cs`, `SignupRequestTests.cs`, `OpenApiTests.cs`
+- Modify: `scripts/e2e-signup.sh` (one expectation, in step 5 of the script)
+
+**Interfaces:**
+- Consumes: Task 8, 14's `SignupService`, `SignupCompletion`, `SignupCompleteEndpoint`, `AtomicSignInResult`, `SessionPrincipal`; Task 3's `PendingSignups` (`LockUsableAsync`, `IssueAsync`, `DeleteAsync`, `ConsumeAsync`, `FindUsableAsync`); `AccountSessions.EndAllAsync`/`Ensure`; `EmailInput.IsSameAddress`; `AuditEntry.Details`; the test bases and helpers (`SignupTestBase`, `SessionApi`, `TenancyApi`, `AccountApi`, `AuditApi`, `PendingSignupSeed`).
+- Produces: `SignupAccount(Guid Id, string Email, bool BelongsToCompany)` with `MayStartCompany(string typedEmail)`; `SignupAccounts.FindAsync(AuthDbContext, string normalizedEmail, CancellationToken) : Task<SignupAccount?>`; `JsonObjectBody.ReadStringsAsync(HttpRequest, string[] required, string[] optional, CancellationToken) : Task<string?[]?>`; `SignupPreview(string Email, string CompanyName, bool HasAccount)`; `SignupService.CompleteAsync(string token, string? password, string companyName, CancellationToken)`; the wire: preview `200 {"email","company_name","has_account"}`, completion body `{"token","company_name"}` plus an optional `"password"`; the audit detail `existing_account`; test helpers `SignupApi.CompleteWithoutPassword`, `SignupTestBase.RemovedMemberAsync`, `SignupTestBase.JoinACompanyAsync` (Task 17 and the documents rely on the wire and the audit detail).
+
+- [ ] **Step 1: The test helpers.** In `tests/Auth.IntegrationTests/Infrastructure/SignupApi.cs`, after `Complete(...)`, add:
+
+```csharp
+    /// <summary>A completion for an account that has no company: no password in the body (spec 0009, Amendment 3).</summary>
+    public static Task<HttpResponseMessage> CompleteWithoutPassword(HttpClient client, string token, string companyName) =>
+        client.PostAsJsonAsync(CompletePath, new { token, company_name = companyName });
+```
+
+In `tests/Auth.IntegrationTests/Infrastructure/SignupTestBase.cs`, before the closing brace of the class, add:
+
+```csharp
+    /// <summary>
+    /// An account that lost its company (spec 0009, Amendment 3): it was a member of a company, with a password (<see cref="MailTestBase.UserPassword"/>),
+    /// and the membership ended straight in the database, which ends no session. That is a state the product does not make (removing a member and
+    /// deleting a company revoke the sessions); it is what a completion must still cope with. Returns the id of the account.
+    /// </summary>
+    protected async Task<Guid> RemovedMemberAsync(string email = Address, bool confirmed = true)
+    {
+        var company = await CreateCompanyAsync("Former company");
+        var userId = await AddMemberAsync(company, email, "user", confirmed);
+        await RemoveMembershipAsync(userId);
+        return userId;
+    }
+
+    /// <summary>Gives the account a company again, straight in the database: the account that "joined a company meanwhile".</summary>
+    protected async Task JoinACompanyAsync(Guid userId)
+    {
+        var company = await CreateCompanyAsync("Newer company");
+        var roleId = await RoleIdAsync(company, "user");
+        await InDbAsync(async db =>
+        {
+            db.Memberships.Add(new Membership { UserId = userId, CompanyId = company, RoleId = roleId, JoinedAt = StorableTime.Now(Clock) });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+    }
+```
+
+- [ ] **Step 2: Correct the earlier tests that meant "an account with a company".** Under Amendment 3 an account made with `member: false` is a comeback account. Each edit below keeps what its test is about (an account that belongs to a company); `CreateUserAsync`'s default, `member: true`, puts the account into the development company with the role `user`.
+
+(a) `tests/Auth.IntegrationTests/SignupDispatchTests.cs`:
+
+- The theory `An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone` has four rows of `(confirmed, member)`; the two `member: false` rows now describe the comeback. Replace its attribute lines, signature and first line
+
+```csharp
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone(bool confirmed, bool member)   // criterion 4
+    {
+        await CreateUserAsync(Address, confirmed, member: member);
+```
+
+with
+
+```csharp
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone(bool confirmed)   // criterion 4: an account that belongs to a company
+    {
+        await CreateUserAsync(Address, confirmed);
+```
+
+- In `The_account_exists_mail_goes_to_the_stored_address_spelled_as_stored`, `An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone`, `An_address_with_an_account_and_an_expired_pending_sign_up_gets_the_notice_and_loses_the_row`, `A_failed_send_to_an_account_keeps_the_pending_sign_up_until_the_mail_is_sent` and `The_mails_are_in_the_configured_language` (the `ola@firma.test` line), delete the argument `, member: false` from the call of `CreateUserAsync` (five calls: `CreateUserAsync("Anna.Firma@Firma.Test", confirmed: true)` twice, `CreateUserAsync(Address, confirmed: true)` twice, `CreateUserAsync("ola@firma.test", confirmed: true)`).
+- In `An_account_made_while_the_dispatcher_waits_for_the_pending_sign_up_still_gets_the_notice`, change `await CreateUserAsync(Address, confirmed: true, member: false);   // the account the completion makes` to `await CreateUserAsync(Address, confirmed: true);   // the account the completion makes: it has a company`.
+
+(b) `tests/Auth.IntegrationTests/SignupCompleteTests.cs`: in `The_order_of_the_checks_is_token_then_password_then_account`, `An_account_under_another_spelling_of_the_address_is_409_too` and `No_token_password_or_address_reaches_the_log` (the `Taken` line) delete `, member: false` from `CreateUserAsync(...)` (`CreateUserAsync(Address, confirmed: true)`, `CreateUserAsync("ANNA@Firma.TEST", confirmed: true)`, `CreateUserAsync(Taken, confirmed: true)`). The first of the three then also pins that a weak password beats the `409` for an account that has a company.
+
+(c) `tests/Auth.IntegrationTests/SignupCompleteSignInTests.cs`: in `Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token` change `await CreateUserAsync(Taken, confirmed: true, member: false);` to `await CreateUserAsync(Taken, confirmed: true);`.
+
+(d) `tests/Auth.IntegrationTests/SignupPreviewTests.cs`, `Preview_answers_the_typed_address_and_the_company_and_changes_nothing`: replace
+
+```csharp
+            Assert.Equal(["company_name", "email"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+```
+
+with
+
+```csharp
+            Assert.Equal(["company_name", "email", "has_account"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.False(body.GetProperty("has_account").GetBoolean());   // a new address
+```
+
+(e) `tests/Auth.IntegrationTests/OpenApiTests.cs`, `The_responses_are_described_in_snake_case`: change `Assert.Equal(["company_name", "email"], Properties("SignupPreviewResponse"));` to `Assert.Equal(["company_name", "email", "has_account"], Properties("SignupPreviewResponse"));`.
+
+- [ ] **Step 3: Write the new tests.** Create `tests/Auth.IntegrationTests/SignupComebackDispatchTests.cs`:
+
+```csharp
+using System.Net;
+using Auth.Infrastructure.Persistence;
+using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Email;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Auth.IntegrationTests;
+
+/// <summary>
+/// Spec 0009, Amendment 3, mails: an address whose account belongs to no company gets the usual "complete your sign-up" mail when its pending
+/// sign-up is live; an account that belongs to a company still gets the notice; the request itself is the same for every address.
+/// </summary>
+public sealed class SignupComebackDispatchTests(PostgresFixture postgres, KeyMaterialFixture keys) : SignupTestBase(postgres, keys)
+{
+    private static readonly string Mu = char.ConvertFromUtf32(0x3BC);
+    private static readonly string Micro = char.ConvertFromUtf32(0xB5);
+    private static readonly string FinalSigma = char.ConvertFromUtf32(0x3C2);
+    private static readonly string Sigma = char.ConvertFromUtf32(0x3C3);
+
+    /// <summary>Two different addresses that the account lookup folds into one (the pairs of <c>InviteAcceptTests</c>): the account's, and the typed one.</summary>
+    public static TheoryData<string, string> FoldedPairs => new()
+    {
+        { Mu + "aria@firma.test", Micro + "aria@firma.test" },
+        { "kosta" + FinalSigma + "@firma.test", "kosta" + Sigma + "@firma.test" },
+    };
+
+    /// <summary>The SQL of every database command the host has logged since <paramref name="mark"/> log entries.</summary>
+    private List<string> StatementsSince(int mark) =>
+        [.. Logs.Entries.Skip(mark)
+            .Where(e => e.Category == "Microsoft.EntityFrameworkCore.Database.Command")
+            .Select(e => e.Message[(e.Message.IndexOf('\n', StringComparison.Ordinal) + 1)..].Trim())];
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_account_without_a_company_gets_the_complete_mail_with_the_link(bool confirmed)   // criterion 24
+    {
+        await RemovedMemberAsync(Address, confirmed);
+        using var response = await SignupApi.Request(Client, Address, CompanyName);
+        await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
+
+        Assert.Equal(1, await DispatchAsync());   // the bulk delete did not take the row
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Equal(Address, mail.To);
+        Assert.StartsWith("Complete your sign-up", mail.Subject, StringComparison.Ordinal);
+        var token = TokenIn(mail);
+        Assert.Contains(AuthAppFactory.DefaultCompleteSignupUrl + "?token=" + token, mail.TextBody, StringComparison.Ordinal);
+        Assert.Contains($"href=\"{AuthAppFactory.DefaultCompleteSignupUrl}?token={token}\"", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains(CompanyName, mail.TextBody, StringComparison.Ordinal);
+        var row = Assert.Single(await PendingAsync());
+        Assert.Equal(EmailTokens.HashOf(token), row.TokenHash);
+        Assert.Equal(StorableTime.Now(Clock) + TimeSpan.FromHours(24), row.TokenExpiresAt);
+        Assert.Equal(0, await QueueCountAsync());
+    }
+
+    [Fact]
+    public async Task The_complete_mail_goes_to_the_address_as_typed()   // Review Focus 2 of the plan: the link goes to the mailbox that asked
+    {
+        await RemovedMemberAsync("Anna.Back@Firma.Test");
+        using var response = await SignupApi.Request(Client, "anna.back@firma.test", CompanyName);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        await DispatchAsync();
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Equal("anna.back@firma.test", mail.To);
+        Assert.StartsWith("Complete your sign-up", mail.Subject, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_account_that_belongs_to_a_company_gets_the_notice_and_no_link()   // criterion 4 and 24
+    {
+        var userId = await RemovedMemberAsync();
+        await JoinACompanyAsync(userId);   // it lost one company and has another
+        using var response = await SignupApi.Request(Client, Address, CompanyName);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        Assert.Equal(1, await DispatchAsync());
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.StartsWith("You already have an account", mail.Subject, StringComparison.Ordinal);
+        foreach (var part in new[] { mail.Subject, mail.TextBody, mail.HtmlBody })
+        {
+            Assert.DoesNotContain("://", part, StringComparison.Ordinal);
+            Assert.DoesNotContain("token", part, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Empty(await PendingAsync());
+        Assert.Equal(0, await QueueCountAsync());
+    }
+
+    [Theory]
+    [InlineData("deleted")]
+    [InlineData("expired")]
+    public async Task A_sign_up_for_an_account_without_a_company_whose_pending_sign_up_is_gone_sends_nothing(string how)   // the mail bullets of spec 0009, Amendment 3
+    {
+        await RemovedMemberAsync();
+        if (how == "expired")
+        {
+            // A row that has expired but not yet been pruned, and a request queued just now: the queue must not take it for a live one.
+            await InDbAsync(async db =>
+            {
+                var now = StorableTime.Now(Clock);
+                db.PendingSignups.Add(new PendingSignup
+                {
+                    NormalizedEmail = "ANNA@FIRMA.TEST",
+                    Email = Address,
+                    CompanyName = CompanyName,
+                    RequestedAt = now - TimeSpan.FromHours(30),
+                    ExpiresAt = now - TimeSpan.FromHours(6),
+                });
+                db.MailRequests.Add(new MailRequest { Kind = MailKind.Signup, NormalizedEmail = "ANNA@FIRMA.TEST", RequestedAt = now, NextAttemptAt = now });
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+                return 0;
+            });
+        }
+        else
+        {
+            using var response = await SignupApi.Request(Client, Address, CompanyName);
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+            await InDbAsync(db => db.PendingSignups.ExecuteDeleteAsync(TestContext.Current.CancellationToken));
+        }
+
+        var mark = Logs.Entries.Count;
+        Assert.Equal(1, await DispatchAsync());   // dropped by the bulk delete: no company, nothing to complete
+
+        Assert.Empty(Mail.Sent);
+        Assert.Equal(0, await QueueCountAsync());
+        // The proof that it was the bulk delete and not the single-row path: that path locks the pending sign-up first (LockUsableAsync).
+        Assert.DoesNotContain(StatementsSince(mark), sql => sql.StartsWith("SELECT * FROM \"PendingSignups\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_failed_send_to_an_account_without_a_company_leaves_the_previous_link_valid()   // a failed sending leaves the previous link valid
+    {
+        await RemovedMemberAsync();
+        var first = await MailedAsync(company: "First");
+        Clock.Advance(PastTheLimit);
+        using var again = await SignupApi.Request(Client, Address, "Second");
+        Assert.Equal(HttpStatusCode.Accepted, again.StatusCode);
+
+        Mail.Failing = true;
+        Assert.Equal(1, await DispatchAsync());
+
+        Assert.Single(Mail.Sent);   // nothing new went out
+        Assert.Equal(EmailTokens.HashOf(first), Assert.Single(await PendingAsync()).TokenHash);
+        Assert.Equal(1, await QueueCountAsync());
+
+        Mail.Failing = false;
+        Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, await DispatchAsync());
+
+        var second = TokenIn(Mail.Sent[1]);
+        Assert.NotEqual(first, second);
+        Assert.Equal(EmailTokens.HashOf(second), Assert.Single(await PendingAsync()).TokenHash);
+    }
+
+    [Theory]
+    [MemberData(nameof(FoldedPairs))]
+    public async Task An_account_that_only_looks_like_the_typed_address_gets_the_notice_and_no_link(string account, string typed)   // the link proves the typed mailbox only
+    {
+        string normalized;
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var normalizer = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>();
+            normalized = normalizer.NormalizeEmail(account);
+            Assert.Equal(normalized, normalizer.NormalizeEmail(typed));   // the premise: the lookup folds the two together
+        }
+
+        await RemovedMemberAsync(account);
+        // The pending sign-up and its queued request, made straight in the database: what the request would have left (the address rule of the
+        // request is not what this test is about).
+        await InDbAsync(async db =>
+        {
+            var now = StorableTime.Now(Clock);
+            db.PendingSignups.Add(new PendingSignup
+            {
+                NormalizedEmail = normalized,
+                Email = typed,
+                CompanyName = CompanyName,
+                RequestedAt = now,
+                ExpiresAt = now + TimeSpan.FromHours(24),
+            });
+            db.MailRequests.Add(new MailRequest { Kind = MailKind.Signup, NormalizedEmail = normalized, RequestedAt = now, NextAttemptAt = now });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+
+        Assert.Equal(1, await DispatchAsync());
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Equal(account, mail.To);   // the notice goes to the account's own address
+        Assert.StartsWith("You already have an account", mail.Subject, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", mail.TextBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Fact]
+    public async Task An_account_that_joins_a_company_while_the_dispatcher_waits_for_the_pending_sign_up_gets_the_notice()   // the second look at the accounts
+    {
+        var userId = await RemovedMemberAsync();
+        using var response = await SignupApi.Request(Client, Address, CompanyName);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        // A completion that is under way: it has used the pending sign-up up and not yet committed.
+        Task<int> dispatch;
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            await using var completion = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            await db.PendingSignups.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+
+            dispatch = DispatchAsync();   // sees an account without a company, then waits for the row that the completion has locked
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (await InDbAsync(d => d.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'""").SingleAsync(TestContext.Current.CancellationToken)) != 1)
+            {
+                Assert.True(DateTime.UtcNow < deadline, "The dispatcher never waited for the lock of the pending sign-up.");
+                await Task.Delay(50, TestContext.Current.CancellationToken);
+            }
+
+            Assert.False(dispatch.IsCompleted);
+            await JoinACompanyAsync(userId);   // what the completion gives the account
+            await completion.CommitAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(1, await dispatch);
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.StartsWith("You already have an account", mail.Subject, StringComparison.Ordinal);
+        Assert.Equal(0, await QueueCountAsync());
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Fact]
+    public async Task An_account_that_joins_a_company_while_the_dispatcher_waits_and_the_pending_sign_up_survives_gets_the_notice()   // the account is read again after the lock
+    {
+        var userId = await RemovedMemberAsync();
+        using var response = await SignupApi.Request(Client, Address, CompanyName);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+        // Something else holds the row of the pending sign-up and changes nothing in it (a second dispatcher on another request of the
+        // address, say); the invitation of the account is accepted while the dispatcher waits for that lock.
+        Task<int> dispatch;
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            await using var holder = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+            await db.Database.ExecuteSqlAsync(
+                $"""SELECT 1 FROM "PendingSignups" WHERE "NormalizedEmail" = 'ANNA@FIRMA.TEST' FOR UPDATE""", TestContext.Current.CancellationToken);
+
+            dispatch = DispatchAsync();   // sees an account without a company, then waits for the row
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (await InDbAsync(d => d.Database.SqlQuery<long>($"""SELECT count(*) AS "Value" FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'""").SingleAsync(TestContext.Current.CancellationToken)) != 1)
+            {
+                Assert.True(DateTime.UtcNow < deadline, "The dispatcher never waited for the lock of the pending sign-up.");
+                await Task.Delay(50, TestContext.Current.CancellationToken);
+            }
+
+            Assert.False(dispatch.IsCompleted);
+            await JoinACompanyAsync(userId);
+            await holder.RollbackAsync(TestContext.Current.CancellationToken);   // nothing was changed in the row: it survives
+        }
+
+        Assert.Equal(1, await dispatch);
+
+        var mail = Assert.Single(Mail.Sent);
+        Assert.StartsWith("You already have an account", mail.Subject, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", mail.TextBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await QueueCountAsync());
+        Assert.Empty(await PendingAsync());   // the notice deletes it
+    }
+}
+```
+
+Create `tests/Auth.IntegrationTests/SignupComebackTests.cs`:
+
+```csharp
+using System.Net;
+using Auth.Infrastructure.Identity;
+using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Audit;
+using Auth.Server.Email;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.JsonWebTokens;
+
+namespace Auth.IntegrationTests;
+
+/// <summary>
+/// Spec 0009, Amendment 3, preview and completion: a person whose account has no company (the company was deleted, or they were removed from it)
+/// finishes a sign-up with only the token and a company name; the account keeps its password, its email is confirmed, and the person is signed in.
+/// </summary>
+public sealed class SignupComebackTests(PostgresFixture postgres, KeyMaterialFixture keys) : SignupTestBase(postgres, keys)
+{
+    private const string NewCompany = "Firma Again";
+    private const string Backslash = "\\";
+
+    // The triggers of SignupCompleteSignInTests: the database refuses the audit row of the sign-in, after the completion has done its own work.
+    private const string RefuseLoginSucceeded =
+        "CREATE FUNCTION refuse_row() RETURNS trigger AS $$ BEGIN IF NEW.kind = 'login.succeeded' THEN RAISE EXCEPTION 'refused'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql";
+    private const string RefuseAudit =
+        "CREATE TRIGGER refuse_row BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION refuse_row()";
+    private const string AllowAudit = "DROP TRIGGER refuse_row ON audit_events";
+
+    private static readonly string Mu = char.ConvertFromUtf32(0x3BC);
+    private static readonly string Micro = char.ConvertFromUtf32(0xB5);
+    private static readonly string FinalSigma = char.ConvertFromUtf32(0x3C2);
+    private static readonly string Sigma = char.ConvertFromUtf32(0x3C3);
+
+    public static TheoryData<string, string> FoldedPairs => new()
+    {
+        { Mu + "aria@firma.test", Micro + "aria@firma.test" },
+        { "kosta" + FinalSigma + "@firma.test", "kosta" + Sigma + "@firma.test" },
+    };
+
+    public static TheoryData<string> MalformedPasswords => new()
+    {
+        """{"token":"TOKEN","company_name":"Firma Again","password":123}""",
+        """{"token":"TOKEN","company_name":"Firma Again","password":""}""",
+        """{"token":"TOKEN","company_name":"Firma Again","password":"   "}""",
+        """{"token":"TOKEN","company_name":"Firma Again","password":null}""",
+        "{\"token\":\"TOKEN\",\"company_name\":\"Firma Again\",\"password\":\"Chosen" + Backslash + "u0000Passw0rd\"}",   // NUL in the password
+    };
+
+    private Task<ApplicationUser> UserAsync(Guid id) =>
+        InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == id, TestContext.Current.CancellationToken));
+
+    private Task<Guid> CompanyIdAsync(string name) =>
+        InDbAsync(db => db.Companies.Where(c => c.Name == name).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));
+
+    private Task<int> CompaniesNamedAsync(string name) =>
+        InDbAsync(db => db.Companies.CountAsync(c => c.Name == name, TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task Preview_says_has_account_for_an_account_without_a_company_and_only_for_it()   // criteria 8 and 24
+    {
+        // A new address.
+        var fresh = await MailedAsync("new@firma.test");
+        using (var preview = await SignupApi.Preview(Client, fresh))
+        {
+            var body = await TenancyApi.ReadOkAsync(preview);
+            Assert.Equal(["company_name", "email", "has_account"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.False(body.GetProperty("has_account").GetBoolean());
+        }
+
+        // An account without a company, asked for in another case.
+        await RemovedMemberAsync("Back@Firma.Test");
+        var returning = await MailedAsync("back@firma.test", "Asked for");
+        var before = Assert.Single(await PendingAsync(), p => p.NormalizedEmail == "BACK@FIRMA.TEST");
+        for (var i = 0; i < 2; i++)
+        {
+            using var preview = await SignupApi.Preview(Client, returning);
+            var body = await TenancyApi.ReadOkAsync(preview);
+            Assert.True(body.GetProperty("has_account").GetBoolean());
+            Assert.Equal("back@firma.test", body.GetProperty("email").GetString());   // the typed address
+            Assert.Equal("Asked for", body.GetProperty("company_name").GetString());
+        }
+
+        var after = Assert.Single(await PendingAsync(), p => p.NormalizedEmail == "BACK@FIRMA.TEST");
+        Assert.Equal(before.TokenHash, after.TokenHash);   // the preview changes nothing
+
+        // An account that has joined a company since the mail: no longer "has_account".
+        var userId = await RemovedMemberAsync("joined@firma.test");
+        var joined = await MailedAsync("joined@firma.test");
+        await JoinACompanyAsync(userId);
+        using var last = await SignupApi.Preview(Client, joined);
+        Assert.False((await TenancyApi.ReadOkAsync(last)).GetProperty("has_account").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_person_without_a_company_comes_back_with_only_the_token_and_a_company_name()   // criterion 24
+    {
+        var userId = await RemovedMemberAsync();
+        var before = await UserAsync(userId);
+        var token = await MailedAsync();
+
+        using var done = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        var session = await SessionApi.ReadSessionAsync(done);   // 200, the access token and the refresh cookie, as a login answers
+
+        var company = await CompanyIdAsync(NewCompany);
+        Assert.Equal(userId.ToString(), new JsonWebToken(session.AccessToken).Subject);
+        Assert.Equal(company.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
+        Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
+        var membership = Assert.Single(await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.CompanyId == company).ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(userId, membership.UserId);
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken)));
+        Assert.Empty(await PendingAsync());
+
+        // The same account: its id, its address as it spells it and its password are as they were.
+        var after = await UserAsync(userId);
+        Assert.Equal(before.Email, after.Email);
+        Assert.Equal(before.UserName, after.UserName);
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.True(after.EmailConfirmed);
+
+        // ...so the password it always had signs it in, to the new company.
+        var login = await SessionApi.LoginAsync(Client, Address, UserPassword);
+        Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        Assert.Equal(["admin"], AccessTokens.Array(login.AccessToken, "roles"));
+
+        // The link is used up.
+        using var again = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        await AccountApi.AssertErrorAsync(again, AccountApi.InvalidToken);
+    }
+
+    [Theory]
+    [InlineData("Brand-New-Passw0rd")]
+    [InlineData("x")]
+    public async Task A_password_in_the_body_is_not_used(string sent)   // criterion 24: it may be absent, and when present it is ignored
+    {
+        await RemovedMemberAsync();
+        var token = await MailedAsync();
+
+        using var done = await SignupApi.Complete(Client, token, sent, NewCompany);   // even a weak one: it is not checked
+
+        _ = await SessionApi.ReadSessionAsync(done);
+        _ = await SessionApi.LoginAsync(Client, Address, UserPassword);   // the password the account had still works
+        using var other = await LoginApi.Login(Client, Address, sent);
+        Assert.Equal(HttpStatusCode.Unauthorized, other.StatusCode);      // and the one that was sent was not set
+    }
+
+    [Fact]
+    public async Task An_unconfirmed_address_is_confirmed_by_the_link()   // criterion 24
+    {
+        var userId = await RemovedMemberAsync(confirmed: false);
+        Assert.False((await UserAsync(userId)).EmailConfirmed);
+        var token = await MailedAsync();
+
+        using var done = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        _ = await SessionApi.ReadSessionAsync(done);
+
+        Assert.True((await UserAsync(userId)).EmailConfirmed);
+        _ = await SessionApi.LoginAsync(Client, Address, UserPassword);   // an unconfirmed address could not log in
+    }
+
+    [Fact]
+    public async Task The_completion_is_recorded_with_existing_account_true_beside_login_succeeded_and_org_created()   // criterion 19 and 24
+    {
+        var userId = await RemovedMemberAsync("Anna@Firma.test");
+        var token = await MailedAsync("anna@firma.test");   // asked for in another case
+
+        using var done = await RateLimitApi.SendAsync(
+            Client, HttpMethod.Post, SignupApi.CompletePath, CallerAddress, null,
+            $$"""{"token":"{{token}}","company_name":"{{NewCompany}}"}""");
+        var session = await SessionApi.ReadSessionAsync(done);
+
+        var company = await CompanyIdAsync(NewCompany);
+        var completed = await SingleAsync(AuditKinds.SignupCompleted);
+        Assert.Equal(userId, completed.SubjectUserId);
+        Assert.Equal("Anna@Firma.test", completed.SubjectEmail);   // as the account stores it
+        Assert.Equal(company, completed.OrgId);
+        Assert.Equal(NewCompany, completed.OrgName);
+        Assert.Equal(CallerAddress, completed.ClientIp);
+        Assert.Null(completed.ActorUserId);
+        Assert.Equal(["existing_account"], AuditApi.DetailNames(completed));
+        Assert.Equal("true", AuditApi.Raw(completed, "existing_account"));
+
+        var created = Assert.Single(await AuditAsync(AuditKinds.OrgCreated), row => row.OrgId == company);
+        Assert.Equal("signup", AuditApi.Text(created, "via"));
+        var signedIn = await SingleAsync(AuditKinds.LoginSucceeded);
+        Assert.Equal(userId, signedIn.SubjectUserId);
+        Assert.Equal(company, signedIn.OrgId);
+        await AssertNoSecretsAsync(token, session.AccessToken, session.RefreshToken);
+    }
+
+    [Fact]
+    public async Task Sessions_from_before_the_company_was_lost_end_with_the_completion()   // defence in depth, as at an invitation: the product's removal revokes sessions itself; this pins that the completion does too
+    {
+        var company = await CreateCompanyAsync("Former company");
+        var userId = await AddMemberAsync(company, Address, "user");
+        var old = await SessionApi.LoginAsync(Client, Address, UserPassword);   // a session of the former membership
+        await RemoveMembershipAsync(userId);                                     // straight in the database: no session is ended (the product's removal would have ended it)
+        var token = await MailedAsync();
+
+        using var done = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        var fresh = await SessionApi.ReadSessionAsync(done);
+
+        using (var stale = await SessionApi.Refresh(Client, old.RefreshToken))
+        {
+            await SessionApi.AssertInvalidGrantAsync(stale);
+        }
+
+        var refreshed = await SessionApi.RefreshOk(Client, fresh.RefreshToken);   // the session of the completion is the one that works
+        Assert.Equal(AccessTokens.Text(fresh.AccessToken, "org_id"), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedPasswords))]
+    public async Task A_malformed_password_is_400_invalid_request_for_such_an_account_too_and_the_token_stays_usable(string template)   // criterion 24: a member that is present is held to the rule
+    {
+        await RemovedMemberAsync();
+        var token = await MailedAsync();
+
+        using (var response = await AccountApi.PostRaw(Client, SignupApi.CompletePath, template.Replace("TOKEN", token, StringComparison.Ordinal)))
+        {
+            await AccountApi.AssertErrorAsync(response, AccountApi.InvalidRequest);
+        }
+
+        Assert.Equal(0, await CompaniesNamedAsync(NewCompany));
+        using var good = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_new_address_without_a_password_is_400_invalid_request_and_the_token_stays_usable()   // the password is still required of everyone but an account without a company
+    {
+        var token = await MailedAsync();
+
+        using (var without = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany))
+        {
+            await AccountApi.AssertErrorAsync(without, AccountApi.InvalidRequest);
+        }
+
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CompaniesNamedAsync(NewCompany));
+        Assert.Equal(EmailTokens.HashOf(token), Assert.Single(await PendingAsync()).TokenHash);   // rolled back with the rest
+        using var good = await SignupApi.Complete(Client, token, Password, NewCompany);
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+    }
+
+    [Fact]
+    public async Task An_unknown_token_without_a_password_is_invalid_token()   // the order of the checks: the token first
+    {
+        using var unknown = await SignupApi.CompleteWithoutPassword(Client, EmailTokens.NewToken(), NewCompany);
+
+        await AccountApi.AssertErrorAsync(unknown, AccountApi.InvalidToken);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_account_that_joined_a_company_meanwhile_is_409_and_the_pending_sign_up_is_gone(bool withPassword)   // criterion 24
+    {
+        var userId = await RemovedMemberAsync();
+        var token = await MailedAsync();
+        await JoinACompanyAsync(userId);   // an invitation accepted since the mail, say
+        var companiesBefore = await InDbAsync(db => db.Companies.CountAsync(TestContext.Current.CancellationToken));
+
+        // The screen was told has_account and sent no password: the answer is the 409 all the same.
+        using var done = withPassword
+            ? await SignupApi.Complete(Client, token, Password, NewCompany)
+            : await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        Assert.Equal(companiesBefore, await InDbAsync(db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));   // creates no company
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.Empty(await PendingAsync());
+        using var again = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        await AccountApi.AssertErrorAsync(again, AccountApi.InvalidToken);
+    }
+
+    [Theory]
+    [MemberData(nameof(FoldedPairs))]
+    public async Task An_account_under_a_spelling_the_normaliser_folds_is_409_and_is_left_alone(string account, string typed)   // the link proves the typed mailbox only
+    {
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var normalizer = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>();
+            Assert.Equal(normalizer.NormalizeEmail(account), normalizer.NormalizeEmail(typed));   // the premise
+        }
+
+        var userId = await RemovedMemberAsync(account, confirmed: false);
+        var before = await UserAsync(userId);
+        var token = await PendingSignupSeed.IssueAsync(Factory.Services, typed, CompanyName);
+
+        using (var preview = await SignupApi.Preview(Client, token))
+        {
+            Assert.False((await TenancyApi.ReadOkAsync(preview)).GetProperty("has_account").GetBoolean());
+        }
+
+        using var done = await SignupApi.Complete(Client, token, Password, NewCompany);
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        var after = await UserAsync(userId);
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.False(after.EmailConfirmed);   // the link did not confirm an address it was not sent to
+        Assert.Equal(0, await CompaniesNamedAsync(NewCompany));
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Fact]
+    public async Task A_sign_in_that_cannot_be_written_leaves_the_account_as_it_was()   // Amendment 2 for a comeback: the sign-in is part of the completion
+    {
+        var userId = await RemovedMemberAsync(confirmed: false);
+        var token = await MailedAsync();
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseLoginSucceeded, TestContext.Current.CancellationToken));
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(RefuseAudit, TestContext.Current.CancellationToken));
+
+        using (var failed = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany))
+        {
+            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+            Assert.False(failed.Headers.Contains("Set-Cookie"), "A completion that failed must not write the cookie.");
+        }
+
+        var unchanged = await UserAsync(userId);
+        Assert.False(unchanged.EmailConfirmed);   // the confirmation went with the rollback
+        Assert.Equal(0, await CompaniesNamedAsync(NewCompany));
+        Assert.Equal(0, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.Empty(await AuditAsync(AuditKinds.SignupCompleted));
+        Assert.Equal(EmailTokens.HashOf(token), Assert.Single(await PendingAsync()).TokenHash);   // the link is as it was
+
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(AllowAudit, TestContext.Current.CancellationToken));
+        using var again = await SignupApi.CompleteWithoutPassword(Client, token, NewCompany);
+        _ = await SessionApi.ReadSessionAsync(again);
+        Assert.True((await UserAsync(userId)).EmailConfirmed);
+    }
+}
+```
+
+In `tests/Auth.IntegrationTests/SignupCompleteRaceTests.cs`, add after `A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account`:
+
+```csharp
+    [Fact]
+    public async Task Of_parallel_completions_for_an_account_without_a_company_exactly_one_is_200()   // criteria 12 and 24
+    {
+        var userId = await RemovedMemberAsync();
+        var token = await MailedAsync();
+
+        Task<HttpResponseMessage>[] requests;
+        await using (var held = await HoldAddressAsync("ANNA@FIRMA.TEST"))
+        {
+            requests = [.. Enumerable.Range(0, 6).Select(_ => SignupApi.CompleteWithoutPassword(Client, token, CompanyName))];
+            await WaitForWaitersAsync(6);
+            await held.ReleaseAsync();
+        }
+
+        var responses = await Task.WhenAll(requests);
+        try
+        {
+            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+            foreach (var refused in responses.Where(r => r.StatusCode != HttpStatusCode.OK))
+            {
+                await AccountApi.AssertErrorAsync(refused, AccountApi.InvalidToken);
+            }
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == CompanyName, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_comeback_and_an_invitation_acceptance_for_one_account_never_both_give_it_a_company(bool completionFirst)   // criterion 24: the 409 race
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var address = completionFirst ? "back-first@firma.test" : "invite-first@firma.test";
+        var normalized = address.ToUpperInvariant();
+        const string Name = "Firma Race";
+        var userId = await RemovedMemberAsync(address);
+        var signupToken = await MailedAsync(address, "Asked for");   // an account without a company gets the link
+        var invite = await AddInviteAsync(company, address, "user");
+        await EnqueueInvitationAsync(invite, address);
+        await DispatchAsync();
+        var inviteToken = TokenIn(Mail.Sent.Last(m => m.To == address));
+
+        // Both have done everything up to the lock of the address and wait for it, in the order the test names.
+        Task<HttpResponseMessage> complete;
+        Task<HttpResponseMessage> accept;
+        await using (var held = await HoldAddressAsync(normalized))
+        {
+            if (completionFirst)
+            {
+                complete = SignupApi.CompleteWithoutPassword(Client, signupToken, Name);
+                await WaitForWaitersAsync(1);
+                accept = TenancyApi.Accept(Client, inviteToken, "Invited-Passw0rd");
+            }
+            else
+            {
+                accept = TenancyApi.Accept(Client, inviteToken, "Invited-Passw0rd");
+                await WaitForWaitersAsync(1);
+                complete = SignupApi.CompleteWithoutPassword(Client, signupToken, Name);
+            }
+
+            await WaitForWaitersAsync(2);
+            await held.ReleaseAsync();
+        }
+
+        using var completed = await complete;
+        using var accepted = await accept;
+
+        if (completionFirst)
+        {
+            _ = await SessionApi.ReadSessionAsync(completed);
+            Assert.Equal(HttpStatusCode.Conflict, accepted.StatusCode);
+            Assert.Equal("""{"error":"already_member"}""", await accepted.Content.ReadAsStringAsync());
+            Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
+            _ = await SessionApi.LoginAsync(Client, address, UserPassword);   // the invitation did not touch the password
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+            await SignupApi.AssertAlreadyRegisteredAsync(completed);
+            Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
+            var login = await SessionApi.LoginAsync(Client, address, "Invited-Passw0rd");   // the acceptance set its password, as it does for any existing account
+            Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        }
+
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.DoesNotContain(await PendingAsync(), p => p.NormalizedEmail == normalized);
+    }
+```
+
+In `tests/Auth.IntegrationTests/SignupRequestTests.cs`, after `The_request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, add:
+
+```csharp
+    [Fact]
+    public async Task An_account_without_a_company_gets_the_same_status_headers_body_and_statements()   // criteria 4 and 24: the request still never reads the accounts
+    {
+        await RemovedMemberAsync("gone@firma.test");
+
+        var mark = Logs.Entries.Count;
+        using var withCompany = await SignupApi.Request(Client, Factory.SeedEmail, CompanyName);
+        var forCompany = StatementsSince(mark);
+
+        mark = Logs.Entries.Count;
+        using var withoutCompany = await SignupApi.Request(Client, "gone@firma.test", CompanyName);
+        var forNone = StatementsSince(mark);
+
+        mark = Logs.Entries.Count;
+        using var unknown = await SignupApi.Request(Client, "nobody@firma.test", CompanyName);
+        var forUnknown = StatementsSince(mark);
+
+        static List<string> OfTheRequest(List<string> statements) =>
+            [.. statements.Where(sql => !sql.StartsWith("DELETE", StringComparison.Ordinal)
+                && (sql.Contains("PendingSignups", StringComparison.Ordinal)
+                    || sql.Contains("MailRequest", StringComparison.Ordinal)
+                    || sql.Contains("audit_events", StringComparison.Ordinal)))];
+
+        foreach (var response in new[] { withCompany, withoutCompany, unknown })
+        {
+            await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
+            Assert.Equal(LoginApi.HeaderNames(withCompany), LoginApi.HeaderNames(response));
+        }
+
+        Assert.NotEmpty(OfTheRequest(forNone));
+        Assert.Equal(OfTheRequest(forCompany), OfTheRequest(forNone));
+        Assert.Equal(OfTheRequest(forUnknown), OfTheRequest(forNone));
+        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
+        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("Memberships", StringComparison.Ordinal));
+    }
+```
+
+In `tests/Auth.IntegrationTests/OpenApiTests.cs`, after `The_responses_are_described_in_snake_case`, add (the helper resolves a `$ref` the way `BodyProperties` does):
+
+```csharp
+    [Fact]
+    public async Task The_completion_asks_for_no_password_of_an_account_without_a_company()   // criterion 24
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operation = Operations(document)["POST /auth/signup/complete"];
+        var schema = operation["requestBody"]!["content"]!["application/json"]!["schema"]!.AsObject();
+        if (schema["$ref"] is { } reference)
+        {
+            schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
+        }
+
+        Assert.NotNull(schema["properties"]!["password"]);   // still described
+
+        // The sentence Step 11 adds to the description of the operation: it fails before the change whatever the generator does with `required`.
+        Assert.Contains("may be left out", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
+        if (schema["required"] is System.Text.Json.Nodes.JsonArray required)
+        {
+            Assert.DoesNotContain("password", required.Select(node => node!.GetValue<string>()));
+        }
+    }
+```
+
+First print the generated document once (a scratch `Console.WriteLine` or a debugger view, removed afterwards) and look at it: where the description of the operation sits (`operation["description"]`) and whether the request schema has a `required` array at all. If there is none, the `if` simply does not run and the sentence is what the test pins; if there is one, `password` must not be in it (before the change it is, so the test fails for that reason too). Adjust the two lookups to what the document really holds; do not weaken the sentence assertion.
+
+(If the generator marks no member as required at all, drop the last two assertions and keep the first two: the contract is only that `password` is not required.)
+
+- [ ] **Step 4: Build, and see the new tests fail.** `"C:/Program Files/dotnet/dotnet.exe" build tests/Auth.IntegrationTests -maxcpucount:2 -warnaserror` must succeed (the tests compile against what exists: `has_account` is read from JSON, `CompleteWithoutPassword` posts a body). Then run `tests/Auth.IntegrationTests/bin/Debug/net10.0/Auth.IntegrationTests.exe -maxThreads 2 -class Auth.IntegrationTests.SignupComebackTests -class Auth.IntegrationTests.SignupComebackDispatchTests`: the tests of the comeback fail (the dispatcher sends the notice, the completion answers `409` or `400`, the preview has no `has_account`). The edited earlier tests of Step 2 that name `has_account` fail too; the rest passes.
+
+- [ ] **Step 5: `JsonObjectBody` gets optional members.** In `src/Auth.Server/Requests/JsonObjectBody.cs` replace the method `ReadStringsAsync` (from its `<summary>` to its closing brace) with these two:
+
+```csharp
+    /// <summary>
+    /// The values of the properties <paramref name="names"/>, in that order, or <see langword="null"/> when the
+    /// request is not acceptable: wrong content type, too large, not a JSON object, or a named property that is
+    /// missing, not a string, or blank.
+    /// </summary>
+    public static async Task<string[]?> ReadStringsAsync(HttpRequest request, string[] names, CancellationToken cancellationToken)
+    {
+        var values = await ReadStringsAsync(request, names, [], cancellationToken);
+        return values is null ? null : Array.ConvertAll(values, value => value ?? string.Empty);   // none of the named ones is missing
+    }
+
+    /// <summary>
+    /// Like the overload above, with <paramref name="optional"/> members after the <paramref name="required"/> ones: an optional member may
+    /// be missing (its value is <see langword="null"/>); when it is there it is held to the rule of every other member (a non-blank
+    /// string), otherwise the request is not acceptable.
+    /// </summary>
+    public static async Task<string?[]?> ReadStringsAsync(
+        HttpRequest request, string[] required, string[] optional, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(required);
+        ArgumentNullException.ThrowIfNull(optional);
+
+        if (!IsJson(request.ContentType) || request.ContentLength > MaxBytes)
+        {
+            return null;
+        }
+
+        var body = await ReadBoundedAsync(request.Body, MaxBytes, cancellationToken);
+        if (body is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var values = new string?[required.Length + optional.Length];
+            for (var i = 0; i < required.Length; i++)
+            {
+                if (!TryGetRequiredString(root, required[i], out var value))
+                {
+                    return null;
+                }
+
+                values[i] = value;
+            }
+
+            for (var i = 0; i < optional.Length; i++)
+            {
+                if (!root.TryGetProperty(optional[i], out _))
+                {
+                    continue;
+                }
+
+                if (!TryGetRequiredString(root, optional[i], out var value))
+                {
+                    return null;
+                }
+
+                values[required.Length + i] = value;
+            }
+
+            return values;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            // InvalidOperationException: GetString() on a string holding an unpaired surrogate escape.
+            return null;
+        }
+    }
+```
+
+(Keep the comment the file already has in this place, whatever its exact words.)
+
+- [ ] **Step 6: The account of a sign-up.** Create `src/Auth.Server/Signup/SignupAccounts.cs`:
+
+```csharp
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Requests;
+using Microsoft.EntityFrameworkCore;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// The account under the address of a sign-up, as far as a sign-up cares (spec 0009, Amendment 3): its id, its address as it stores it, and
+/// whether it belongs to a company.
+/// </summary>
+public sealed record SignupAccount(Guid Id, string Email, bool BelongsToCompany)
+{
+    /// <summary>
+    /// Whether a sign-up link sent to <paramref name="typedEmail"/> may start a company for this account: it belongs to none, and its address is
+    /// the typed one up to ASCII case. The account lookup folds some different addresses into one (the micro sign and Greek mu, final sigma and
+    /// sigma…); a link proves only the mailbox it was sent to, so an account that merely looks like the typed address is never used
+    /// (<see cref="EmailInput.IsSameAddress"/>, the rule invitation acceptance applies).
+    /// </summary>
+    public bool MayStartCompany(string typedEmail)
+    {
+        ArgumentNullException.ThrowIfNull(typedEmail);
+
+        return !BelongsToCompany && EmailInput.IsSameAddress(Email, typedEmail);
+    }
+}
+
+public static class SignupAccounts
+{
+    /// <summary>The first account (by id) under the normalised address; <see langword="null"/> when there is none.</summary>
+    public static async Task<SignupAccount?> FindAsync(AuthDbContext db, string normalizedEmail, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(normalizedEmail);
+
+        var row = await db.Users.AsNoTracking()
+            .Where(u => u.NormalizedEmail == normalizedEmail)
+            .OrderBy(u => u.Id)
+            .Select(u => new { u.Id, u.Email, BelongsToCompany = db.Memberships.Any(m => m.UserId == u.Id) })
+            .FirstOrDefaultAsync(cancellationToken);
+        return row is { Email: { } email } ? new SignupAccount(row.Id, email, row.BelongsToCompany) : null;
+    }
+}
+```
+
+- [ ] **Step 7: The bodies of the contract.** In `src/Auth.Server/Signup/SignupContracts.cs` replace the two records
+
+```csharp
+/// <summary>Response of <c>POST /auth/signup/preview</c>: the address as typed and the company name of the request.</summary>
+public sealed record SignupPreviewResponse(string Email, string CompanyName);
+```
+
+with
+
+```csharp
+/// <summary>
+/// Response of <c>POST /auth/signup/preview</c>: the address as typed, the company name of the request, and whether an account without a
+/// company has the address (spec 0009, Amendment 3): then the completion needs no password.
+/// </summary>
+public sealed record SignupPreviewResponse(string Email, string CompanyName, bool HasAccount);
+```
+
+and
+
+```csharp
+/// <summary>Request of <c>POST /auth/signup/complete</c>. The company name is the person's last word; the one of the request is a suggestion.</summary>
+public sealed record SignupCompleteRequest(string Token, string Password, string CompanyName);
+```
+
+with
+
+```csharp
+/// <summary>
+/// Request of <c>POST /auth/signup/complete</c>. The company name is the person's last word; the one of the request is a suggestion. The
+/// password is chosen here, except by an account that has no company (the preview says <c>has_account</c>): it may be left out, and when it
+/// is sent it is not used.
+/// </summary>
+public sealed record SignupCompleteRequest(string Token, string CompanyName, string? Password = null);
+```
+
+(Check the exact text of the two summaries in the file and replace those lines, keeping the file's other records.)
+
+- [ ] **Step 8: The service.** Replace `src/Auth.Server/Signup/SignupService.cs` as a whole:
+
+```csharp
+using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Account;
+using Auth.Server.Audit;
+using Auth.Server.Email;
+using Auth.Server.Requests;
+using Auth.Server.Tenancy;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using OpenIddict.Abstractions;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// What the completion screen shows before it asks for anything: the address as it was typed, the company name of the request, and whether
+/// the address has an account without a company (<see cref="SignupAccount.MayStartCompany"/>), which the link will use as it is.
+/// </summary>
+public sealed record SignupPreview(string Email, string CompanyName, bool HasAccount);
+
+/// <summary>
+/// Previews and completes a sign-up by its link token (spec 0009). Completing is how a visitor becomes the first admin of a company of their
+/// own, and it is one transaction: it uses the pending sign-up up, makes the account (email confirmed) — or, for an account that has no company
+/// (Amendment 3), takes that account as it is and confirms its email — makes the company with a copy of the default roles and the membership with
+/// the first admin's role, and writes the audit rows, and leaves the transaction open for the sign-in (Amendment 2) — or, when anything is refused,
+/// changes nothing at all, the pending sign-up included (except that an account found under the address deletes it).
+/// </summary>
+public sealed class SignupService(
+    AuthDbContext db, UserManager<ApplicationUser> users, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations,
+    CompanyService companies, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
+{
+    /// <summary>
+    /// The address, the company name and <c>HasAccount</c> of a usable link; the token stays usable. Unknown, used, expired and replaced tokens
+    /// are all <see langword="null"/>. It changes nothing.
+    /// </summary>
+    public async Task<SignupPreview?> PreviewAsync(string token, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+
+        var pending = await PendingSignups.FindUsableAsync(db, EmailTokens.HashOf(token), StorableTime.Now(clock), cancellationToken);
+        if (pending is null)
+        {
+            return null;
+        }
+
+        var account = await SignupAccounts.FindAsync(db, pending.NormalizedEmail, cancellationToken);
+        return new SignupPreview(pending.Email, pending.CompanyName, account?.MayStartCompany(pending.Email) == true);
+    }
+
+    /// <summary>
+    /// Completes the sign-up as far as the database goes. Refused with <c>invalid_token</c>, with <c>invalid_request</c> (no password, and no
+    /// account under the address either; the token stays usable), with <c>weak_password</c> (the broken rules are
+    /// <see cref="SignupCompletion.BrokenRules"/>; the token stays usable) or with <c>already_registered</c> (an account that the link may not
+    /// use has the address by now: the pending sign-up is deleted). The checks are made in that order: the token, the password, the account.
+    /// The caller has checked <paramref name="companyName"/> against the name rule and <paramref name="password"/>, when there is one, for NUL.
+    /// An account under the address that belongs to no company, and whose address is the typed one (<see cref="SignupAccount.MayStartCompany"/>),
+    /// is used as it is: the password is neither required nor checked nor set, the email is confirmed, and whatever sessions it still has end as a new account's
+    /// do. Every other address chooses a password here.
+    /// On success nothing is committed: the account, the company with its roles, the membership and the audit rows are saved inside a transaction
+    /// that is handed to the caller in <see cref="SignupCompletion.Transaction"/>, because the completion signs the person in (spec 0009,
+    /// Amendment 2) and the sign-in is part of it: if it cannot be written, nothing of the completion stays. Every refusal and every exception
+    /// leaves the transaction rolled back (except that an account found under the address deletes the pending sign-up).
+    /// </summary>
+    public async Task<SignupCompletion> CompleteAsync(string token, string? password, string companyName, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(companyName);
+
+        var hash = EmailTokens.HashOf(token);
+        var now = StorableTime.Now(clock);
+
+        // Leaving this method without handing the transaction over rolls everything back, the use of the token included.
+        var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var handedOver = false;
+        try
+        {
+            // Which address is this link for? Read first, because the address is what is locked.
+            var address = await db.PendingSignups.AsNoTracking()
+                .Where(p => p.TokenHash == hash && p.TokenExpiresAt > now)
+                .Select(p => p.NormalizedEmail)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (address is null)
+            {
+                return Refused(TenancyErrors.InvalidToken);
+            }
+
+            // One address, one account-maker at a time: the lock that invitation acceptance takes, so that whichever of a completion and an
+            // acceptance comes second sees the membership or the account the first one made and answers `409`.
+            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({address}, 0))", cancellationToken);
+
+            // The token is used up by one statement: of parallel completions with one token one gets the row, and the others, which waited
+            // for the lock, find nothing.
+            var pending = await PendingSignups.ConsumeAsync(db, hash, now, cancellationToken);
+            if (pending is null)
+            {
+                return Refused(TenancyErrors.InvalidToken);
+            }
+
+            // Any account under the address, whatever its spelling or state (the lookup is by the normalised address), read under the lock: a
+            // membership an invitation gave it a moment ago is seen.
+            var found = await SignupAccounts.FindAsync(db, pending.NormalizedEmail, cancellationToken);
+            var usable = found is not null && found.MayStartCompany(pending.Email) ? found : null;
+
+            ApplicationUser account;
+            if (usable is null)
+            {
+                account = new ApplicationUser { UserName = pending.Email, Email = pending.Email, EmailConfirmed = true };
+
+                // A password that is there is checked first (the order is the token, the password, the account).
+                if (password is not null)
+                {
+                    var broken = await PasswordRules.BrokenAsync(users, account, password);
+                    if (broken.Count > 0)
+                    {
+                        return new SignupCompletion(TenancyErrors.WeakPassword, broken);
+                    }
+                }
+
+                if (found is not null)
+                {
+                    // An account the link may not use, a company it joined since the mail included. The answer does not depend on whether a
+                    // password came: a screen that was told "has_account" sent none. Committed, not rolled back: the pending sign-up is gone,
+                    // as the contract says.
+                    await transaction.CommitAsync(CancellationToken.None);
+                    return Refused(TenancyErrors.AlreadyRegistered);
+                }
+
+                if (password is null)
+                {
+                    return Refused(TenancyErrors.InvalidRequest);   // a new address chooses a password; nothing was changed for good
+                }
+
+                // The link came through the mailbox of the address: that proves it, and it is why the email is confirmed and a password is set here.
+                AccountSessions.Ensure(await users.CreateAsync(account, password), "Could not set up the account");
+            }
+            else
+            {
+                // An account without a company comes back (Amendment 3): it keeps its password and its linked sign-ins, whatever was sent.
+                account = await db.Users.SingleAsync(u => u.Id == usable.Id, cancellationToken);
+                account.EmailConfirmed = true;
+                AccountSessions.Ensure(await users.UpdateAsync(account), "Could not confirm the account");
+            }
+
+            // A new account has no sessions or links yet, but its address may have a login streak: streaks do not need an account. An account
+            // that comes back has normally no session left (removing a member and deleting a company revoke them), but whatever is left ends
+            // here, as it does at an invitation, so that nothing of the lost company refreshes into the new one: defence in depth.
+            await AccountSessions.EndAllAsync(db, tokens, authorizations, account, cancellationToken);
+
+            var created = await companies.CreateAsync(companyName, cancellationToken, via: "signup");
+            if (!created.Succeeded)
+            {
+                throw new InvalidOperationException($"Could not create the company: {created.Error}.");
+            }
+
+            // The role is the company's own copy of the first admin's default role, found by its normalised name.
+            var roleKey = NameInput.Normalize(manifest.Current.FirstAdminRole.Name);
+            var roleId = await db.CompanyRoles.AsNoTracking()
+                .Where(r => r.CompanyId == created.Value && r.NormalizedName == roleKey)
+                .Select(r => r.Id)
+                .SingleAsync(cancellationToken);
+            db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = created.Value, RoleId = roleId, JoinedAt = now });
+
+            // The person who holds the link is anonymous: no actor. Who, where and what company; never the link or the password. Which path was
+            // taken: `existing_account` is there, and true, only for an account that existed.
+            audit.Stage(new AuditEntry
+            {
+                Kind = AuditKinds.SignupCompleted,
+                SubjectUserId = account.Id,
+                SubjectEmail = account.Email,
+                OrgId = created.Value,
+                OrgName = companyName,
+                Details = usable is null ? null : new Dictionary<string, object?> { ["existing_account"] = true },
+            });
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            // Not committed: the sign-in is written next, inside this transaction, by whoever receives it, and it commits.
+            handedOver = true;
+            return new SignupCompletion(Account: account, CompanyId: created.Value, Transaction: transaction);
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    private static SignupCompletion Refused(string error) => new(error);
+}
+```
+
+- [ ] **Step 9: The preview endpoint and the completion endpoint.** In `src/Auth.Server/Signup/SignupPreviewEndpoint.cs` replace
+
+```csharp
+            : ApiResults.Ok(new SignupPreviewResponse(preview.Email, preview.CompanyName));
+```
+
+with
+
+```csharp
+            : ApiResults.Ok(new SignupPreviewResponse(preview.Email, preview.CompanyName, preview.HasAccount));
+```
+
+Replace `src/Auth.Server/Signup/SignupCompleteEndpoint.cs` as a whole:
+
+```csharp
+using Auth.Server.Account;
+using Auth.Server.Api;
+using Auth.Server.Audit;
+using Auth.Server.Login;
+using Auth.Server.Requests;
+using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
+using Microsoft.AspNetCore;
+using Microsoft.Extensions.Options;
+using TokenOptions = Auth.Server.Tokens.TokenOptions;
+
+namespace Auth.Server.Signup;
+
+/// <summary>
+/// <c>POST /auth/signup/complete</c> (spec 0009): finishes a sign-up and signs the person in (Amendment 2). No access token: the link token is the
+/// credential. While sign-up is off it answers <c>403 signup_disabled</c> before it reads the body — also for a request that was made while it
+/// was on. The answer is that of a successful login (<c>200 {"status":"authenticated","access_token"}</c> and the refresh cookie): the endpoint is a
+/// pass-through request of OpenIddict (<see cref="SignupCompleteRequestHandler"/>), builds the principal the way the login does
+/// (<see cref="SessionPrincipal"/>) and returns an <see cref="AtomicSignInResult"/> that issues the session, writes <c>login.succeeded</c> and
+/// commits the transaction of the completion. If any of that fails, nothing of the completion stays. The password is an optional member of the
+/// body (Amendment 3): an account without a company needs none, and a password that is sent for it is not used.
+/// </summary>
+public static class SignupCompleteEndpoint
+{
+    public const string Path = "/auth/signup/complete";
+
+    private static readonly string[] Required = ["token", "company_name"];
+    private static readonly string[] Optional = ["password"];
+
+    public static async Task<IResult> HandleAsync(
+        HttpContext http, SignupGate gate, SignupService signup, MembershipReader memberships, IOptions<TokenOptions> tokens, TimeProvider clock)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(signup);
+        ArgumentNullException.ThrowIfNull(memberships);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // Without it OpenIddict cannot sign in here (it would say so only after the account was made, and roll that back): fail at once.
+        if (http.GetOpenIddictServerRequest() is null)
+        {
+            throw new InvalidOperationException(
+                "The sign-up completion was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
+        }
+
+        if (!gate.IsOn)
+        {
+            return ApiResults.Error(TenancyErrors.SignupDisabled);
+        }
+
+        // [token, company_name, password]: the password is null when it is not in the body; when it is, it is a non-blank string like the others.
+        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Required, Optional, http.RequestAborted);
+        if (fields is not [{ } linkToken, { } name, var password] || password?.Contains('\0') == true || !NameInput.IsValid(name))
+        {
+            return AccountResults.InvalidRequest();
+        }
+
+        var done = await signup.CompleteAsync(linkToken, password, name, http.RequestAborted);
+        if (!done.Succeeded)
+        {
+            return done.Error switch
+            {
+                TenancyErrors.WeakPassword => AccountResults.WeakPassword(done.BrokenRules!),
+                TenancyErrors.InvalidRequest => AccountResults.InvalidRequest(),
+                _ => ApiResults.Error(done.Error!),
+            };
+        }
+
+        try
+        {
+            // Read inside the transaction of the completion (the same context): it sees the membership that is not committed yet.
+            var account = done.Account!;
+            var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
+                ?? throw new InvalidOperationException("The account that was just made has no company.");
+            if (tenant.CompanyId != done.CompanyId)
+            {
+                throw new InvalidOperationException("The membership read is not the company the completion made.");
+            }
+
+            var principal = SessionPrincipal.Create(http, account, tenant, tokens.Value.Audience, clock);
+            return new AtomicSignInResult(
+                principal,
+                new AuditEntry
+                {
+                    Kind = AuditKinds.LoginSucceeded,
+                    ActorUserId = account.Id,
+                    SubjectUserId = account.Id,
+                    SubjectEmail = account.Email,
+                    OrgId = tenant.CompanyId,
+                    OrgName = tenant.CompanyName,
+                },
+                done.Transaction);
+        }
+        catch
+        {
+            // The result would have owned the transaction; it does not exist, so this is the end of the completion: roll it back.
+            await done.Transaction!.DisposeAsync();
+            throw;
+        }
+    }
+}
+```
+
+(The body from `try` to the end is the file's own; copy anything in the file that differs from the above, such as a changed `using`, and change only the `Fields`, the reading, the call and the refusal switch.)
+
+- [ ] **Step 10: The dispatcher.** In `src/Auth.Server/Email/MailDispatcher.cs`:
+
+(a) In the class summary, replace the last two lines ("A sign-up request (spec 0009) names a pending sign-up, not an account, and is decided here: ... with neither there is nothing to send.") with
+
+```csharp
+/// A sign-up request (spec 0009) names a pending sign-up, not an account, and is decided here: an address whose account belongs to a company gets
+/// the mail that says so (no link) even when its pending sign-up is gone; otherwise a live pending sign-up gets a new link — also when the address
+/// has an account without a company (Amendment 3), unless that account only looks like the typed address; with neither there is nothing to send.
+```
+
+(b) In `DropUnmailableAsync` replace its summary's last sentence and the account sub-query of the sign-up branch. The summary becomes: "Removes the due rows whose address has no account, or (for a verification) whose account is confirmed already; a sign-up row is removed only when its address has neither an account that belongs to a company nor a live (unexpired) pending sign-up. Those requests were answered with 202 like any other, and end here." In the SQL replace
+
+```sql
+                        AND NOT EXISTS (
+                            SELECT 1 FROM "AspNetUsers" a
+                            WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL))
+```
+
+with
+
+```sql
+                        AND NOT EXISTS (
+                            SELECT 1 FROM "AspNetUsers" a
+                            WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL
+                              AND EXISTS (SELECT 1 FROM "Memberships" m WHERE m."UserId" = a."Id")))
+```
+
+(c) In `DispatchOneAsync`, in the `due` statement replace
+
+```sql
+                                     OR EXISTS (
+                                         SELECT 1 FROM "AspNetUsers" a
+                                         WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL)))
+```
+
+with
+
+```sql
+                                     OR EXISTS (
+                                         SELECT 1 FROM "AspNetUsers" a
+                                         WHERE a."NormalizedEmail" = r."NormalizedEmail" AND a."Email" IS NOT NULL
+                                           AND EXISTS (SELECT 1 FROM "Memberships" m WHERE m."UserId" = a."Id"))))
+```
+
+and in the comment above it change "for a sign-up, an account or a live pending sign-up" to "for a sign-up, an account that belongs to a company or a live pending sign-up".
+
+(d) Replace the method `PrepareSignupMailAsync` and the method `StoredAddressOfAsync` (both, including their summaries) with:
+
+```csharp
+    /// <summary>
+    /// The mail of a sign-up (spec 0009): decided here, when it is sent, and never by the request. The account check comes first: with an account
+    /// under the address that belongs to a company the mail says so and holds no link, even when the pending sign-up is gone, and any pending row
+    /// of the address is deleted — in the transaction of the send, so a failed send keeps it. Otherwise (no account, or an account without a
+    /// company: Amendment 3) the live pending sign-up (which plays the part the invitation plays for an invitation mail) is locked, so that a
+    /// completion waits for the mail, the account is read again once the lock is held, and the row gets a new link token (the earlier link stops working); the mail goes to the address as typed. An
+    /// account that merely looks like the typed address (<see cref="SignupAccount.MayStartCompany"/>) is not one a link may start a company
+    /// for: it gets the notice. With no live pending sign-up and no account that belongs to a company there is nothing to send.
+    /// </summary>
+    private async Task<Func<Task<ComposedMail>>?> PrepareSignupMailAsync(
+        AuthDbContext db, MailRequest request, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var account = await SignupAccounts.FindAsync(db, request.NormalizedEmail, cancellationToken);
+        if (account is { BelongsToCompany: true })
+        {
+            return AccountExistsMail(db, request.NormalizedEmail, account.Email, cancellationToken);
+        }
+
+        var pending = await PendingSignups.LockUsableAsync(db, request.NormalizedEmail, now, cancellationToken);
+
+        // The lock may have waited, for a completion that has just committed or for an invitation that has just been accepted: the account is
+        // read again, whether or not the pending sign-up survived.
+        account = await SignupAccounts.FindAsync(db, request.NormalizedEmail, cancellationToken);
+        if (account is { BelongsToCompany: true })
+        {
+            return AccountExistsMail(db, request.NormalizedEmail, account.Email, cancellationToken);
+        }
+
+        if (pending is null)
+        {
+            return null;
+        }
+
+        if (account is not null && !account.MayStartCompany(pending.Email))
+        {
+            return AccountExistsMail(db, request.NormalizedEmail, account.Email, cancellationToken);
+        }
+
+        return async () =>
+        {
+            var token = await PendingSignups.IssueAsync(db, pending.NormalizedEmail, now, cancellationToken);
+            return composer.Compose(MailKind.Signup, pending.Email, token, pending.CompanyName);
+        };
+    }
+
+    private Func<Task<ComposedMail>> AccountExistsMail(AuthDbContext db, string normalizedEmail, string storedAddress, CancellationToken cancellationToken) =>
+        async () =>
+        {
+            await PendingSignups.DeleteAsync(db, normalizedEmail, cancellationToken);
+            return composer.ComposeAccountExists(storedAddress);
+        };
+```
+
+(`MailDispatcher` needs `using Auth.Server.Signup;` — it has it already for `PendingSignups`.)
+
+- [ ] **Step 11: The operation descriptions.** In `src/Auth.Server/Api/SignupRoutes.cs` replace the description of the request (`POST /auth/signup`; lines 27 to 29 at the base) with
+
+```csharp
+            .WithDescription(
+                "Asks to start a company. The answer is the same `202` for every address; a mail follows: a notice without a link when the address "
+                + "has an account that belongs to a company, otherwise a link to finish (also when the account belongs to no company). Off unless the "
+                + "manifest says `signup: self-service` and the completion address is configured (`403 signup_disabled`). One request a minute and "
+                + "five an hour per address.")
+```
+
+replace the description of the preview with
+
+```csharp
+            .WithDescription(
+                "Shows what the link of the mail is for: the address as it was typed, the company name of the request and `has_account`, which is true "
+                + "only when an account without a company has the address (then the completion needs no password). It changes nothing "
+                + "and the link stays usable. A token that is unknown, used, expired or replaced by a newer mail is `invalid_token`.")
+```
+
+and the description of the completion with
+
+```csharp
+            .WithDescription(
+                "Finishes a sign-up and signs the person in: in one transaction the account (its email confirmed), the company (named as given here, "
+                + "with a copy of the default roles) and the membership with the first admin's role are made, the pending sign-up is used up, and the "
+                + "session is issued; if the session cannot be written nothing of this stays. The answer is that of a successful login: the access token "
+                + "(carrying the new company and the first admin's role) and the refresh cookie. The checks are made in this order: the token, the "
+                + "password (a weak one leaves the token usable; an account that has no company keeps the password it has, so for it the member may be "
+                + "left out and is not used if sent), the account (`409 already_registered` when an account that belongs to a company has the address by now).")
+```
+
+- [ ] **Step 12: Run the classes.** Build as in Step 4, then run, with `-maxThreads 2`: `-class Auth.IntegrationTests.SignupComebackTests -class Auth.IntegrationTests.SignupComebackDispatchTests -class Auth.IntegrationTests.SignupCompleteTests -class Auth.IntegrationTests.SignupCompleteSignInTests -class Auth.IntegrationTests.SignupCompleteRaceTests -class Auth.IntegrationTests.SignupDispatchTests -class Auth.IntegrationTests.SignupDispatchPolishTests -class Auth.IntegrationTests.SignupPreviewTests -class Auth.IntegrationTests.SignupRequestTests -class Auth.IntegrationTests.SignupFirstAdminTests -class Auth.IntegrationTests.OpenApiTests -class Auth.IntegrationTests.MailDispatcherTests -class Auth.IntegrationTests.InvitationDispatchTests -class Auth.IntegrationTests.InviteAcceptTests` (`SignupDispatchPolishTests` holds the edited `The_mails_are_in_the_configured_language`; the last three are the other users of the dispatcher and of the lock; nothing in them was edited, and they must still pass). All green. A failure of the look-alike tests on their first assertion (the two spellings do not normalise alike on this host) means the pair is wrong for the host: take another pair from `InviteAcceptTests.An_invitation_for_another_spelling_of_an_existing_account_cannot_take_it_over` (the third row uses the theta symbol) in both test files. Do not run the rest of the suite.
+
+- [ ] **Step 13: The live script's expectation.** In `scripts/e2e-signup.sh`, step 5, change the two expected bodies
+
+```bash
+expect_status "step 5: preview" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
+```
+
+and
+
+```bash
+expect_status "step 5: preview again" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
+```
+
+to carry the third member:
+
+```bash
+expect_status "step 5: preview" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
+```
+
+and
+
+```bash
+expect_status "step 5: preview again" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
+```
+
+and the header line and the `pass` text of step 5 from "exactly the typed address and the company name" to "exactly the typed address, the company name and has_account false". Check it with `bash -n scripts/e2e-signup.sh`; do not run it.
+
+- [ ] **Step 14: Check and hand back.** `grep -rInP '\\u[0-9a-fA-F]{4}' src tests/Auth.IntegrationTests/*.cs tests/Auth.IntegrationTests/Infrastructure scripts --include=*.cs --include=*.sh` finds nothing that is not meant (the new tests build their characters with `char.ConvertFromUtf32` and `Backslash`). **Hand back** — uncommitted. Files: everything listed under Files. Proposed note for the verifiers: the live check of the comeback is Step 12 of `scripts/e2e-signup.sh` (Task 17); `OpenApiTests` and `SignupPreviewTests` gained the member `has_account`. Proposed subject: `feat(server): a person without a company comes back by sign-up`.
+
+---
+### Task 17: A person without a company comes back by sign-up: the sample, the Playwright test and `scripts/e2e-signup.sh`
+
+**Files:**
+- Modify: `samples/notes-web/src/app/account-api.ts`, `samples/notes-web/src/app/auth/auth.service.ts`, `samples/notes-web/src/app/texts.ts`, `samples/notes-web/src/app/pages/complete-signup.ts`
+- Modify (tests): `samples/notes-web/src/app/account-api.signup.spec.ts`, `samples/notes-web/src/app/auth/auth.service.signup.spec.ts`, `samples/notes-web/src/app/pages/complete-signup.spec.ts`, `samples/notes-web/e2e/09-signup.spec.ts`
+- Modify: `scripts/e2e-signup.sh` (Step 12 and its header), `scripts/e2e-web.sh` (the seeding of a returning person)
+
+**Interfaces:**
+- Consumes: Task 16's wire (`POST /auth/signup/preview` answers `has_account`; `POST /auth/signup/complete` takes `{"token","company_name"}` and an optional `"password"`; the audit detail `existing_account`); Tasks 10, 11, 12 and 15's `AccountApi`, `AuthService.completeSignup`, `CompleteSignupPage`, `texts`, the helpers of `samples/notes-web/src/testing/helpers.ts` and `e2e/support/*`; `scripts/e2e-signup.sh`'s helpers (`call`, `expect_*`, `login`, `wait_mail`, `token_body`, `cli`, `psql_value`, `mail_count`, `set_cookie_line`, `has_attr`, `jwt_payload`, `val`).
+- Produces: `SignupPreview.has_account: boolean`; `AuthService.completeSignup(token: string, password: string | null, companyName: string)`; the text `texts.completeSignup.keepsPassword(email)`; the test id `keeps-password`; the setting `E2E_COMEBACK_EMAIL` of the Playwright run; Step 12 of `scripts/e2e-signup.sh`.
+
+- [ ] **Step 1: Write the failing unit tests.**
+
+(a) `samples/notes-web/src/app/account-api.signup.spec.ts`: replace the test `reads the answer to a preview: the address and the company name`
+
+```ts
+  it('reads the answer to a preview: the address and the company name', async () => {
+    const done = api.previewSignup('tok');
+    const request = ctrl.expectOne('/auth/signup/preview');
+    expect(request.request.body).toEqual({ token: 'tok' });
+    request.flush({ email: 'anna@firma.example', company_name: 'Firma' });
+    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma' } });
+  });
+```
+
+with
+
+```ts
+  it('reads the answer to a preview: the address, the company name and whether the account exists', async () => {
+    const done = api.previewSignup('tok');
+    const request = ctrl.expectOne('/auth/signup/preview');
+    expect(request.request.body).toEqual({ token: 'tok' });
+    request.flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: false });
+    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
+  });
+
+  it('reads has_account true: the person has an account and no company', async () => {
+    const done = api.previewSignup('tok');
+    ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: true });
+    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: true } });
+  });
+
+  it.each([[{}], [{ has_account: 'true' }], [{ has_account: 1 }], [{ has_account: null }]])(
+    'an answer %j means has_account false: a password is asked for, which is the safe side',
+    async (extra) => {
+      const done = api.previewSignup('tok');
+      ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', ...extra });
+      expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
+    },
+  );
+```
+
+(b) `samples/notes-web/src/app/auth/auth.service.signup.spec.ts`: after the first test of the file (`posts the token, the password and the company name, keeps the token in memory and loads /auth/me`) add
+
+```ts
+  it('leaves the password out of the body when there is none to send (an account that exists, without a company)', async () => {
+    const done = auth.completeSignup('tok', null, 'Firma');
+    const request = ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok', company_name: 'Firma' });
+    expect('password' in (request.request.body as object)).toBe(false);
+    request.flush(signedIn);
+    await settle();
+    ctrl.expectOne('/auth/me').flush(adminMe);
+    expect(await done).toEqual({ ok: true });
+    expect(auth.token()).toBe('tok-c');
+    ctrl.verify();
+  });
+```
+
+(c) `samples/notes-web/src/app/pages/complete-signup.spec.ts`: replace the line
+
+```ts
+const preview = { email: 'anna@firma.example', company_name: 'Firma' };
+```
+
+with
+
+```ts
+const preview = { email: 'anna@firma.example', company_name: 'Firma', has_account: false };
+/** What the preview says of a person whose company is gone: the account exists and belongs to none (spec 0009, Amendment 3). */
+const returning = { ...preview, has_account: true };
+```
+
+replace the head of `open`
+
+```ts
+async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok') {
+```
+
+with
+
+```ts
+async function open(query = '?token=tok-s', previewAnswer: 'ok' | 'wait' = 'ok', answer: typeof preview = preview) {
+```
+
+and, in the same function, `ctrl.expectOne('/auth/signup/preview').flush(preview);` with `ctrl.expectOne('/auth/signup/preview').flush(answer);`. Then append at the end of the file:
+
+```ts
+describe('CompleteSignupPage for an account that exists without a company (has_account)', () => {
+  afterEach(() => history.replaceState(null, '', '/'));
+
+  it('shows the address, the company name and the sentence that the password stays; no password fields', async () => {
+    const { fixture } = await open('?token=tok-s', 'ok', returning);
+    expect(valueOf(fixture, '#email')).toBe('anna@firma.example');
+    expect((fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('#email')?.readOnly).toBe(true);
+    expect(valueOf(fixture, '#company')).toBe('Firma');
+    expect(has(fixture, '[data-testid="keeps-password"]')).toBe(true);
+    expect(pageText(fixture)).toContain('You already have an account as anna@firma.example. Its password stays as it is');
+    expect(pageText(fixture)).not.toContain('This sets the password');
+    expect(has(fixture, '#password')).toBe(false);
+    expect(has(fixture, '#repeat')).toBe(false);
+  });
+
+  it('a person with no account still sees the password fields and not the sentence that it stays', async () => {
+    const { fixture } = await open();
+    expect(has(fixture, '#password')).toBe(true);
+    expect(has(fixture, '[data-testid="keeps-password"]')).toBe(false);
+  });
+
+  it('200: posts only the token and the company name (trimmed), signs the person in and opens the notes screen in place of this one', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    typeInto(opened.fixture, '#company', '  Firma Again  ');
+    submitForm(opened.fixture);
+    const request = opened.ctrl.expectOne('/auth/signup/complete');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ token: 'tok-s', company_name: 'Firma Again' });
+    expect('password' in (request.request.body as object)).toBe(false);
+    await signInBy(opened, request);
+    expect(TestBed.inject(AuthService).token()).toBe('tok-c');
+    expect(opened.navigateByUrl).toHaveBeenCalledTimes(1);
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/notes', { replaceUrl: true });
+    expect(window.location.href).not.toContain('anna@firma.example');
+  });
+
+  it('a blank company name: a message, and no request', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    typeRaw(opened.fixture, '#company', '   ');
+    submitForm(opened.fixture);
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Enter the name of your company.');
+    opened.ctrl.expectNone('/auth/signup/complete');
+  });
+
+  it('409 already_registered (it joined a company meanwhile): says the account exists and links to the sign-in; no form', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'already_registered' }, status(409));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('An account with this address already exists.');
+    expect(has(opened.fixture, 'a[href="/login"]')).toBe(true);
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it('invalid_token on complete: the link is used up, with a link to sign up again; no form', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    opened.ctrl.expectOne('/auth/signup/complete').flush({ error: 'invalid_token' }, status(400));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(invalid);
+    expect(has(opened.fixture, 'a[href="/signup"][data-testid="signup-again"]')).toBe(true);
+    expect(has(opened.fixture, 'form')).toBe(false);
+  });
+
+  it('sends one request for a double submit', async () => {
+    const opened = await open('?token=tok-s', 'ok', returning);
+    submitForm(opened.fixture);
+    submitForm(opened.fixture);
+    await signInBy(opened, opened.ctrl.expectOne('/auth/signup/complete'));
+  });
+});
+```
+
+- [ ] **Step 2: Run them and see them fail.** In `samples/notes-web` (run `npm ci` once if `node_modules` is missing): `npx ng test --watch=false --include "src/app/account-api.signup.spec.ts" --include "src/app/auth/auth.service.signup.spec.ts" --include "src/app/pages/complete-signup.spec.ts"`. The new tests fail (`has_account` is not read, `completeSignup` takes a string, the fields are always there); the tests that were there pass or fail only where they name the preview.
+
+- [ ] **Step 3: The API call reads `has_account`.** In `samples/notes-web/src/app/account-api.ts` replace
+
+```ts
+/** What POST /auth/signup/preview answers: the address as it was typed and the company name of the request. */
+export interface SignupPreview {
+  email: string;
+  company_name: string;
+}
+```
+
+with
+
+```ts
+/**
+ * What POST /auth/signup/preview answers: the address as it was typed, the company name of the request, and whether an account without a
+ * company has the address (spec 0009, Amendment 3): then the completion asks for no password.
+ */
+export interface SignupPreview {
+  email: string;
+  company_name: string;
+  has_account: boolean;
+}
+```
+
+and, in `previewSignup`, replace
+
+```ts
+      return { ok: true, value: { email: body['email'], company_name: body['company_name'] } };
+```
+
+with
+
+```ts
+      // Anything but a true boolean means "no account": the screen then asks for a password, which is the safe side.
+      return { ok: true, value: { email: body['email'], company_name: body['company_name'], has_account: body['has_account'] === true } };
+```
+
+- [ ] **Step 4: The session call can leave the password out.** In `samples/notes-web/src/app/auth/auth.service.ts` replace the doc comment and the method `completeSignup`
+
+```ts
+  /**
+   * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
+   * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
+   * the session that exists alone, as a failed login does.
+   */
+  async completeSignup(token: string, password: string, companyName: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    try {
+      body = await firstValueFrom(
+        this.http.post<LoginBody | null>('/auth/signup/complete', { token, password, company_name: companyName }),
+      );
+    } catch (error) {
+```
+
+with
+
+```ts
+  /**
+   * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
+   * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
+   * the session that exists alone, as a failed login does. A person whose account exists and belongs to no company (the preview's
+   * `has_account`, Amendment 3) chooses no password: pass `null` and the member is left out of the body.
+   */
+  async completeSignup(token: string, password: string | null, companyName: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    const request =
+      password === null ? { token, company_name: companyName } : { token, password, company_name: companyName };
+    try {
+      body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/signup/complete', request));
+    } catch (error) {
+```
+
+(The lines after the `catch (error) {` are the file's own, unchanged.)
+
+- [ ] **Step 5: The text.** In `samples/notes-web/src/app/texts.ts`, in `completeSignup`, after the `setsPassword` line add
+
+```ts
+    // The account exists and belongs to no company (its company was deleted, or the person was removed from it): only the company is new.
+    keepsPassword: (email: string): string => `You already have an account as ${email}. Its password stays as it is; only the company is new.`,
+```
+
+- [ ] **Step 6: The screen.** In `samples/notes-web/src/app/pages/complete-signup.ts`:
+
+(a) In the template replace
+
+```html
+              <p class="status">{{ t.setsPassword(signup.email) }}</p>
+              <label for="password">{{ common.newPassword }}</label>
+              <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+              <label for="repeat">{{ common.repeatPassword }}</label>
+              <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
+```
+
+with
+
+```html
+              @if (signup.has_account) {
+                <p class="status" data-testid="keeps-password">{{ t.keepsPassword(signup.email) }}</p>
+              } @else {
+                <p class="status">{{ t.setsPassword(signup.email) }}</p>
+                <label for="password">{{ common.newPassword }}</label>
+                <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+                <label for="repeat">{{ common.repeatPassword }}</label>
+                <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              }
+              <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
+```
+
+(b) In `submit()` replace
+
+```ts
+    if (password !== repeat) {
+      this.error.set(this.common.passwordsDiffer);
+      return;
+    }
+    this.busy.set(true);
+    // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
+    // Auth-Core refuses white space at either end.
+    const result = await this.auth.completeSignup(this.token, password, company.trim());
+```
+
+with
+
+```ts
+    if (!signup.has_account && password !== repeat) {
+      this.error.set(this.common.passwordsDiffer);
+      return;
+    }
+    this.busy.set(true);
+    // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
+    // Auth-Core refuses white space at either end. An account that exists without a company has no password to choose: none is sent.
+    const result = await this.auth.completeSignup(this.token, signup.has_account ? null : password, company.trim());
+```
+
+(c) In `preview()` replace
+
+```ts
+      this.pending.set(result.value);
+      this.form.controls.company.setValue(result.value.company_name);
+      this.phase.set('form');
+```
+
+with
+
+```ts
+      this.pending.set(result.value);
+      this.form.controls.company.setValue(result.value.company_name);
+      if (result.value.has_account) {
+        // No password is chosen here: the two controls must not hold the form invalid.
+        this.form.controls.password.disable();
+        this.form.controls.repeat.disable();
+      }
+      this.phase.set('form');
+```
+
+- [ ] **Step 7: Run the unit tests and build.** The command of Step 2 passes, and `npx ng build` in `samples/notes-web` succeeds. `npx ng test --watch=false --include "src/app/texts.spec.ts"` (the texts are plain printable ASCII) passes.
+
+- [ ] **Step 8: The Playwright test.** In `samples/notes-web/e2e/09-signup.spec.ts` add, after the existing imports,
+
+```ts
+import { signIn, signOut } from './support/session';
+```
+
+and append at the end of the file:
+
+```ts
+test('a person whose company is gone comes back by sign-up: only the company name is asked for, and the old password still works', async ({ page }) => {
+  test.setTimeout(240_000);
+  // The script gave this address an account (an invitation to the development company, accepted with E2E_USER_PASSWORD) and then removed it
+  // from the company through the operator CLI: an account, and no company. The test asks for the sign-up itself.
+  const email = setting('E2E_COMEBACK_EMAIL');
+  const password = setting('E2E_USER_PASSWORD');
+  const company = `Back ${unique('co')}`;
+
+  await page.goto('/signup');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Company name').fill(`Asked ${unique('co')}`);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page.getByTestId('signup-sent')).toHaveText(SENT); // the sentence every address gets
+
+  // The mail carries the usual link (not the notice), and the screen it opens asks for the company name only.
+  const link = await waitForLink(email, 'complete-signup', MAIL_WAIT_MS);
+  await openMailLink(page, link);
+  await expect(page).toHaveURL(/\/complete-signup$/);
+  expectCleanAddressBar(page);
+  await expect(page.getByLabel('Email')).toHaveValue(email);
+  await expect(page.getByLabel('Email')).not.toBeEditable();
+  await expect(page.getByTestId('keeps-password')).toBeVisible();
+  await expect(page.getByLabel('New password')).toHaveCount(0);
+  await expect(page.getByLabel('Repeat the password')).toHaveCount(0);
+
+  await page.getByLabel('Company name').fill(company);
+  await page.getByRole('button', { name: 'Create company' }).click();
+
+  // Signed in at once, as the first admin of a company of their own; nothing of the former company.
+  await expect(page).toHaveURL(/\/notes$/);
+  expectNoEmailInAddressBar(page);
+  await expect(page.getByTestId('me-email')).toHaveText(email);
+  await expect(page.getByTestId('me-company')).toHaveText(company);
+  await expect(page.getByTestId('me-role')).toHaveText('admin');
+  await expect(page.getByText(setting('E2E_SEEDED_NOTE'))).toHaveCount(0);
+  await expect(page.getByText('No notes yet.')).toBeVisible();
+
+  // The password did not change: signing out and in again with the one the account always had lands in the new company.
+  await signOut(page);
+  await signIn(page, email, password);
+  await expect(page.getByTestId('me-company')).toHaveText(company);
+  await expect(page.getByTestId('me-role')).toHaveText('admin');
+});
+```
+
+The third test of the file (an account made between the request and the link) is unchanged and still right: `BOTH` has a company, so the preview says `has_account` `false` and the screen still shows the password fields before the `409`.
+
+- [ ] **Step 9: Seed the returning person in `scripts/e2e-web.sh`.**
+
+(a) In the header comment, after the paragraph that ends "(the database, because the test cannot move the server's clock).", add:
+
+```bash
+# It also prepares COMEBACK (Amendment 3 of spec 0009): invited to the development company, the invitation accepted by the API once the mail has
+# come, and the member then removed through the operator CLI (`remove-member`): an account with a password and no company. The test asks for the
+# sign-up and finishes it with a company name only.
+```
+
+(b) After the function `wait_mails`, add:
+
+```bash
+mail_token() { # mail_token <address> <subject start> <path>: the token in the link <path>?token= of the newest such mail to the address (printed; the callers keep it in a variable and never show it)
+  MAIL_TO="$1" MAIL_SUBJECT="$2" MAIL_PATH="$3" MAILPIT="$MAILPIT_URL" node -e '
+const base = process.env.MAILPIT;
+const to = process.env.MAIL_TO.toLowerCase();
+(async () => {
+  const found = await (await fetch(`${base}/api/v1/search?query=${encodeURIComponent("to:" + to)}`)).json();
+  const hit = found.messages.find((m) => m.Subject.startsWith(process.env.MAIL_SUBJECT) && (m.To ?? []).some((r) => r.Address.toLowerCase() === to));
+  if (!hit) process.exit(1);
+  const mail = await (await fetch(`${base}/api/v1/message/${hit.ID}`)).json();
+  const match = new RegExp(`/${process.env.MAIL_PATH}\\?token=([A-Za-z0-9_-]{43})`).exec(mail.Text);
+  if (!match) process.exit(1);
+  process.stdout.write(match[1]);
+})().catch(() => process.exit(1));
+'
+}
+```
+
+(c) In `seed_stack`, after `EXPIRED_EMAIL="expired-$run@e2e.test"` add `COMEBACK_EMAIL="comeback-$run@e2e.test"`; change the comment and the invitations to
+
+```bash
+  # Four invitations through the operator CLI (BOTH and COMEBACK are for the sign-up tests of spec 0009). The server sends the mails at its next poll.
+  cli invite --org "$org" --email "$VIEWER_EMAIL" --role viewer
+  cli invite --org "$org" --email "$RESETTER_EMAIL" --role user
+  cli invite --org "$org" --email "$BOTH_EMAIL" --role user
+  cli invite --org "$org" --email "$COMEBACK_EMAIL" --role user
+```
+
+and, after the lines that check `[[ "$updated" == "UPDATE 1" ]] || fail "seeding: the sign-up link was not made to expire"` and before `rm -f "$tmp/expired.json"`, add:
+
+```bash
+  # A person whose company is gone: accept the invitation by the API (the password is USER_PASSWORD), then remove the member through the CLI.
+  wait_mails "$COMEBACK_EMAIL" 1 150 || fail "seeding: no invitation mail for the returning person within 150s"
+  token="$(mail_token "$COMEBACK_EMAIL" "You are invited" invite)" || fail "seeding: the invitation mail of the returning person holds no link"
+  E2E_X_TOKEN="$token" E2E_X_PASSWORD="$USER_PASSWORD" node -e 'console.log(JSON.stringify({token: process.env.E2E_X_TOKEN, password: process.env.E2E_X_PASSWORD}))' > "$tmp/accept.json"
+  token=""
+  code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' -X POST "$HTTP_URL/auth/invites/accept" \
+    -H 'Content-Type: application/json' --data-binary "@$tmp/accept.json")" || fail "seeding: accepting the invitation of the returning person failed"
+  rm -f "$tmp/accept.json"
+  [[ "$code" == "204" ]] || fail "seeding: accepting the invitation of the returning person answered $code, not 204"
+  cli remove-member --org "$org" --email "$COMEBACK_EMAIL"
+```
+
+(d) In the `export` lines of the project loop change `export E2E_BOTH_EMAIL="$BOTH_EMAIL" E2E_EXPIRED_EMAIL="$EXPIRED_EMAIL"` to `export E2E_BOTH_EMAIL="$BOTH_EMAIL" E2E_EXPIRED_EMAIL="$EXPIRED_EMAIL" E2E_COMEBACK_EMAIL="$COMEBACK_EMAIL"`.
+
+- [ ] **Step 10: Step 12 of `scripts/e2e-signup.sh`.**
+
+(a) In the header, after item 11 (the one that ends "(the 24 hours themselves, and the hourly clean-up, are guarded by the tests).") add
+
+```bash
+#  12. INVITED, a member of the development company after step 10, is removed from it through the operator CLI (`remove-member`): an account
+#      and no company, whose password still logs in as the 403 no_membership. INVITED asks for a sign-up again (waiting out the mail limit if
+#      step 10 was less than a minute ago), the mail is the usual "complete your sign-up" with a new link, the preview says has_account true,
+#      and the completion with only the token and a company name is 200 as a login's (the cookie, roles ["admin"], a company that is neither
+#      the development company's nor NEW's); the password hash is as it was, the old password logs in to the new company, INVITED has
+#      one account, the pending sign-up is gone, and the audit log holds signup.completed with details.existing_account true (NEW's row has no
+#      details) - criterion 24.
+```
+
+and change "Takes about five minutes: one wait of 62 seconds for the mail limit, and up to a minute for the server to pick up the invitation the CLI queued." to "Takes about six minutes: one wait of 62 seconds for the mail limit (a second one in step 12 when step 10 was less than a minute before), and up to a minute for the server to pick up the invitation the CLI queued."
+
+(b) After the line `export E2E_COMPANY="$COMPANY" E2E_RENAMED="$RENAMED"` add
+
+```bash
+export E2E_BACK_ASKED="Back Asked $run" E2E_BACK_COMPANY="Back Company $run"
+```
+
+(c) Before the final `echo "ALL PASS"` add:
+
+```bash
+# --- Step 12: a person without a company comes back by sign-up (criterion 24) ------------------------------------------
+# After step 10 INVITED is a member of the development company with the password E2E_INVITED_PASSWORD. The operator removes the membership:
+# an account and no company, as after the company was deleted. INVITED asks for a sign-up again, gets the usual link, and finishes with
+# only a company name.
+login invited E2E_INVITED_EMAIL E2E_INVITED_PASSWORD
+BODY="$(jwt_payload "$tmp/invited.auth")"
+INVITED_SUB="$(val 'd["sub"]')"
+HASH_BEFORE="$(psql_value "SELECT md5(\"PasswordHash\") FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")"
+[[ -n "$HASH_BEFORE" ]] || fail "step 12: INVITED has no password hash"
+cli remove-member --org "$DEV_ORG" --email "$INVITED_EMAIL"
+[[ "$CLI_EXIT" == "0" ]] || fail "step 12: the operator CLI failed: admin remove-member"
+json_body "$tmp/invited.login" "{'email': os.environ['E2E_INVITED_EMAIL'], 'password': os.environ['E2E_INVITED_PASSWORD']}"
+call POST /auth/login "$tmp/invited.login"
+expect_error "step 12: INVITED has an account and no company" 403 no_membership
+
+# The link of step 10 (never printed) is told from the new one by its token: the catcher still holds the old mail.
+OLD_LINK_TOKEN="$("$PY" -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$tmp/invited-complete.json" | tr -d '\r')"
+MAILS_BEFORE="$(mail_count "$INVITED_EMAIL")"
+json_body "$tmp/back-signup.json" "{'email': os.environ['E2E_INVITED_EMAIL'], 'company_name': os.environ['E2E_BACK_ASKED']}"
+call POST /auth/signup "$tmp/back-signup.json"
+if [[ "$HTTP_CODE" == "429" ]]; then   # step 10's request was less than a minute ago
+  [[ "$BODY" =~ ^\{\"error\":\"too_many_attempts\",\"retry_after_seconds\":([0-9]+)\}$ ]] || fail "step 12: unexpected 429 body"
+  echo "waiting $((BASH_REMATCH[1] + 1)) s for the mail limit of INVITED..."
+  sleep "$((BASH_REMATCH[1] + 1))"
+  call POST /auth/signup "$tmp/back-signup.json"
+fi
+expect_status "step 12: the sign-up request of INVITED, who has an account and no company" 202 ""
+for _ in $(seq 1 90); do
+  [[ "$(mail_count "$INVITED_EMAIL")" -gt "$MAILS_BEFORE" ]] && break
+  sleep 1
+done
+[[ "$(mail_count "$INVITED_EMAIL")" -gt "$MAILS_BEFORE" ]] || fail "step 12: no new mail for INVITED within 90s"
+wait_mail "$INVITED_EMAIL" "Complete your sign-up" 5 || fail "step 12: INVITED did not get a sign-up mail (the newest mail is another)"
+token_body http://localhost:4200/complete-signup "$tmp/back-preview.json" || fail "step 12: no usable sign-up link in the mail"
+token_body http://localhost:4200/complete-signup "$tmp/back-complete.json" "" E2E_BACK_COMPANY || fail "step 12: the completion body could not be made"
+NEW_LINK_TOKEN="$("$PY" -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$tmp/back-preview.json" | tr -d '\r')"
+[[ "$NEW_LINK_TOKEN" != "$OLD_LINK_TOKEN" ]] || fail "step 12: the newest sign-up mail is the one of step 10, not a new link"
+
+call POST /auth/signup/preview "$tmp/back-preview.json"
+expect_status "step 12: preview" 200 "{\"email\":\"$INVITED_EMAIL\",\"company_name\":\"$E2E_BACK_ASKED\",\"has_account\":true}"
+call POST /auth/signup/complete "$tmp/back-complete.json"   # no password in the body
+expect_status "step 12: complete with only the token and a company name" 200
+expect_no_store "step 12: the 200"
+expect_eq "step 12: the body is a login's" "$(val 'sorted(d.keys())')" "['access_token', 'status']"
+LINE="$(set_cookie_line)"
+[[ -n "$LINE" ]] || fail "step 12: the completion set no auth_rt cookie"
+for attr in HttpOnly Secure SameSite=Strict Path=/auth; do
+  has_attr "$LINE" "$attr" || fail "step 12: the auth_rt cookie lacks the $attr attribute"
+done
+printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/back.auth"
+BODY="$(jwt_payload "$tmp/back.auth")"
+expect_eq "step 12: roles" "$(val 'd["roles"]')" "['admin']"
+expect_eq "step 12: the token is INVITED's" "$(val 'd["sub"]')" "$INVITED_SUB"
+BACK_ORG="$(val 'd["org_id"]')"
+[[ "$BACK_ORG" != "$DEV_ORG" && "$BACK_ORG" != "$NEW_ORG" ]] || fail "step 12: the new company is another company's"
+call GET /auth/me "" "$tmp/back.auth"
+expect_status "step 12: GET /auth/me" 200
+expect_eq "step 12: the company is the one named at the completion" "$(val 'd["org_name"]')" "$E2E_BACK_COMPANY"
+expect_eq "step 12: the address" "$(val 'd["email"]')" "$INVITED_EMAIL"
+
+# The account is the same one: its password is as it was, and works.
+login invited E2E_INVITED_EMAIL E2E_INVITED_PASSWORD
+BODY="$(jwt_payload "$tmp/invited.auth")"
+expect_eq "step 12: the password it always had logs INVITED in to the new company" "$(val 'd["org_id"]')" "$BACK_ORG"
+expect_eq "step 12: the password hash is as it was" \
+  "$(psql_value "SELECT md5(\"PasswordHash\") FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "$HASH_BEFORE"
+expect_eq "step 12: INVITED still has one account" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "1"
+expect_eq "step 12: the pending sign-up is gone" "$(psql_value "SELECT count(*) FROM \"PendingSignups\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "0"
+expect_eq "step 12: signup.completed names the account and says existing_account true" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.completed' AND subject_user_id = '$INVITED_SUB' AND org_id = '$BACK_ORG' AND details->>'existing_account' = 'true'")" "1"
+expect_eq "step 12: the signup.completed row of NEW has no details" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.completed' AND subject_email = '$NEW_EMAIL' AND details IS NULL")" "1"
+call POST /auth/signup/complete "$tmp/back-complete.json"
+expect_error "step 12: the same completion again" 400 invalid_token
+expect_no_cookie "step 12: the same completion again"
+pass "step 12: a member removed by the operator (login: 403 no_membership) asks for a sign-up and gets the usual link; the preview says has_account true; the completion with only the token and a company name is a login's answer with a new company of which INVITED is the admin; its password hash is as it was and logs in, INVITED has one account, and the audit row says existing_account true"
+```
+
+(The step is a plain extension: `login`, `call`, `expect_*`, `cli`, `token_body` and the rest are the script's own.)
+
+- [ ] **Step 11: Check what can be checked here.** In `samples/notes-web`: `npx tsc --noEmit -p e2e/tsconfig.json` and `npx ng build`. From the repository root: `bash -n scripts/e2e-signup.sh scripts/e2e-web.sh`; `grep -n "python3" scripts/e2e-signup.sh` shows only the default of `PY` and the comments; `grep -rInP '\\u[0-9a-fA-F]{4}' scripts samples/notes-web/src samples/notes-web/e2e --include=*.sh --include=*.ts` finds nothing that is not meant. Do not start a stack and do not run Playwright.
+
+- [ ] **Step 12: Hand back** — uncommitted. Files: everything listed under Files. Proposed note for the verifiers: `scripts/e2e-web.sh` now waits for a fourth invitation mail while seeding (the first start is a little slower), and `scripts/e2e-signup.sh` has a Step 12 (about a minute longer if step 10 was less than a minute before). Proposed subject: `feat(samples): a person without a company comes back by sign-up`.
+
+---
+
+## Day 6 — Saturday 04.04: the comeback, the guides, the acceptance map
+
+When the day is done, a person without a company can come back by sign-up (Tasks 16 and 17, in the section "Amendment (2026-04-04)" above), the guides and the threat model describe the feature (the sign-in on completion and the comeback included), the changelog has an `Unreleased` section, and the acceptance map names a guarding test for each of the 24 criteria. Task 13 comes last because it documents what Tasks 14 to 17 changed.
 
 ### Task 13: The guides, the threat model, the audit runbook, the changelog, `check-docs.py` and the acceptance map
 
@@ -9071,7 +11226,7 @@ and add two rows to the table of that step (after the `/invite?token=` row):
 
 ```markdown
 | `/signup` | email and company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` |
-| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
+| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice (not for a person whose account exists and has no company, which the preview says with `has_account`: the sentence that the password stays as it is takes the place of the fields); the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 ```
 
 (c) In the list of three rules of step 4, after the bullet **Do not put an email in the URL.** add a sentence to it: `The same holds after a sign-up is completed: the completion signs the person in (Auth-Core answers as it answers a login) and the screen opens the notes in place of itself, so the address is in no URL and no sign-in screen is shown; the password was chosen at the link, never on the sign-up form.`
@@ -9081,7 +11236,7 @@ and add two rows to the table of that step (after the `/invite?token=` row):
 
 (f) Three more sentences that name the mail screens: in the first rule of step 4, "the verify and invite screens offer "Try again"" becomes "the verify, invite and complete-signup screens offer "Try again""; in the second rule, "The reset and invite screens share one list of lines" becomes "The reset, invite and complete-signup screens share one list of lines"; in step 7, "Open a link from a reset mail (and an invitation, and a verification mail)" becomes "Open a link from a reset mail (and an invitation, a verification mail and a sign-up mail)".
 
-(g) **The sign-in is two calls now** (`samples/notes-web/src/app/auth/auth.service.ts`, Task 15). In step 2, the sentence that lists what `auth.service.ts` holds, ``(the token, the session, `login`, `logout`, `refresh`)``, becomes ``(the token, the session, `login`, `completeSignup`, `logout`, `refresh`)``; and at the end of the **Sign-in** bullet of the list that follows it (the one that starts ``**Sign-in** is `await auth.login(email, password)` ``) add the sentences: ``A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it).``
+(g) **The sign-in is two calls now** (`samples/notes-web/src/app/auth/auth.service.ts`, Task 15). In step 2, the sentence that lists what `auth.service.ts` holds, ``(the token, the session, `login`, `logout`, `refresh`)``, becomes ``(the token, the session, `login`, `completeSignup`, `logout`, `refresh`)``; and at the end of the **Sign-in** bullet of the list that follows it (the one that starts ``**Sign-in** is `await auth.login(email, password)` ``) add the sentences: ``A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it). A person whose account exists and belongs to no company (the preview's `has_account`, spec 0009 Amendment 3) chooses no password: pass `null` as the password and the body holds the token and the company name only.``
 
 Then `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/integration/angular.md` and, in `samples/notes-web`, `npm run check:docs` both pass.
 
@@ -9110,7 +11265,7 @@ the screen of your frontend that finishes a sign-up (`https://app.example.com/co
 (a restart does not read it again); after changing the manifest run `$C restart auth`. A visitor then gives an email address and a company name; the mail holds a link to your screen, where the person chooses a password and
 confirms the company's name; the company is made and the person is its first admin, with the first default role of your manifest that holds `"*"` (else the
 first that holds `members:manage`), and is signed in at once: `POST /auth/signup/complete` answers as a login does (the access token and the refresh cookie), so your screen
-opens the product and not the sign-in screen. An address that already has an account gets a mail that says so, with no link; every address gets the same answer.
+opens the product and not the sign-in screen. An address whose account belongs to a company gets a mail that says so, with no link; a person whose account has no company (the company was deleted, or they were removed from it) gets the usual link, finishes with a company name only and keeps their password; every address gets the same answer.
 `GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
 at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
 typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
@@ -9145,13 +11300,14 @@ query holds a token.
 (b) In the table of "Auth-Core", insert these rows right after the header row `| --- | --- | --- | --- |`:
 
 ```markdown
-| I | Sign-up used to learn who has an account | `POST /auth/signup` never reads the accounts: an address with an account and one without get the same status, headers and body and run the same statements (`SignupRequestTests.The_request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `SignupRequestTests.An_address_with_an_account_gets_the_same_status_headers_and_body`); the difference is a mail, to the owner of the mailbox only (`SignupDispatchTests`) | A holder of a valid link sees `409 already_registered` at the completion; the link comes only from the mailbox. Timing of the mail itself is not equalised |
+| I | Sign-up used to learn who has an account | `POST /auth/signup` never reads the accounts: an address with an account and one without get the same status, headers and body and run the same statements (`SignupRequestTests.The_request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `SignupRequestTests.An_address_with_an_account_gets_the_same_status_headers_and_body`, `SignupRequestTests.An_account_without_a_company_gets_the_same_status_headers_body_and_statements`); the difference is a mail, to the owner of the mailbox only (`SignupDispatchTests`) | A holder of a valid link sees `409 already_registered` at the completion and `has_account` in the preview (spec 0009, Amendment 3); the link comes only from the mailbox. Timing of the mail itself is not equalised |
 | S | A stranger's password on an account (sign-up with someone else's address) | The password is chosen at the link, never on the sign-up form, so only the reader of the mailbox sets it (spec 0009, Decision 3); the account does not exist until then | |
 | T | Hostile input in sign-up | The address passes the invitation rule (a mailbox, no look-alike of an ASCII address, no IP literal, dotless, numeric or hexadecimal domain: it cannot make the relay deliver to an internal host) and the company name the name rule (`SignupRequestTests`); a body of at most 8 KiB | |
 | I | The company name a visitor typed goes into a mail to a stranger | It is in the body only, never in the subject, encoded in the HTML part and not a format string (`SignupMailComposerTests`) | See residual risk 46: the text is the visitor's, up to 100 characters, in a mail from the product's own address |
 | D | Sign-up used to mail strangers or fill the queue | One mail a minute and five an hour per address (own kind `signup`), the per-IP limit of the mail policy (sign-up is counted with the other mail requests of a client address, 10 a minute by default), a pending sign-up per address that expires in 24 hours and is removed hourly (`SignupRateLimitTests`, `PendingSignupPruningTests`); a request that needs no mail is dropped by the bulk delete | See residual risk 46 |
-| E | Two ways to make one account | The completion takes the advisory lock that invitation acceptance takes, and uses its token with one `DELETE ... RETURNING`: of parallel completions with one token one is `200`, and a completion and an acceptance for one address never both create the account (`SignupCompleteRaceTests`) | A request for a sign-up whose mail is being sent waits for the send (at most 20 seconds): the dispatcher locks the pending sign-up |
-| S | A mail link that opens a session (spec 0009, Amendment 2) | The link is single-use (one `DELETE ... RETURNING`), valid 24 hours and replaced by a newer mail, and the person chooses the password in the same step; the session it opens is a login's in every respect (one builder for the principal: the same lifetime, cap, family and security stamp, so a logout or a password change ends it) and is written in the completion's transaction (`SignupCompleteSignInTests.The_cookie_refreshes_like_a_logins_and_belongs_to_a_family`, `SignupCompleteSignInTests.The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it`, `SignupCompleteSignInTests.The_path_is_no_second_way_to_log_in`) | Whoever can read the mailbox can already reset the password (spec 0004), so the link adds no capability |
+| E | Two ways to make one account | The completion takes the advisory lock that invitation acceptance takes, and uses its token with one `DELETE ... RETURNING`: of parallel completions with one token one is `200`, and a completion and an acceptance for one address never both create the account (`SignupCompleteRaceTests`, which also holds the comeback of an account without a company against an acceptance for it) | A request for a sign-up whose mail is being sent waits for the send (at most 20 seconds): the dispatcher locks the pending sign-up |
+| S | A sign-up link used to open an account that is someone else's (spec 0009, Amendment 3: a person without a company comes back by sign-up) | A link starts a company only for an account that belongs to no company and whose address is the typed one up to ASCII case (`EmailInput.IsSameAddress`, the rule invitation acceptance applies); an account that the lookup merely folds together with the typed address (the micro sign and Greek mu, final sigma and sigma) gets the notice and the `409`, never the link (`SignupComebackTests.An_account_under_a_spelling_the_normaliser_folds_is_409_and_is_left_alone`, `SignupComebackDispatchTests.An_account_that_only_looks_like_the_typed_address_gets_the_notice_and_no_link`); an account that has a company never gets a link (`SignupComebackDispatchTests.An_account_that_belongs_to_a_company_gets_the_notice_and_no_link`); any session still left from the lost company ends with the completion, as defence in depth: removing a member and deleting a company already revoke their sessions (`SignupComebackTests.Sessions_from_before_the_company_was_lost_end_with_the_completion`); the password is neither asked for nor changed (`SignupComebackTests.A_password_in_the_body_is_not_used`) | Whoever can read the mailbox can already reset the password (spec 0004), so the link adds no capability; the people of the former company keep their own (one company each, spec 0005), and the new company is a separate one |
+| S | A mail link that opens a session (spec 0009, Amendment 2) | The link is single-use (one `DELETE ... RETURNING`), valid 24 hours and replaced by a newer mail, and the person chooses the password in the same step (a comeback chooses none: the account keeps its own, Amendment 3); the session it opens is a login's in every respect (one builder for the principal: the same lifetime, cap, family and security stamp, so a logout or a password change ends it) and is written in the completion's transaction (`SignupCompleteSignInTests.The_cookie_refreshes_like_a_logins_and_belongs_to_a_family`, `SignupCompleteSignInTests.The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it`, `SignupCompleteSignInTests.A_form_or_a_credentials_body_is_refused_with_400_and_issues_nothing`, `SignupCompleteSignInTests.What_a_client_adds_to_a_valid_completion_never_reaches_the_OpenIddict_request`) | Whoever can read the mailbox can already reset the password (spec 0004), so the link adds no capability |
 ```
 
 (c) In the same table, in the row that starts `| R | Actions that leave no trace |`, change `The audit log: 22 kinds` to `The audit log: 24 kinds`.
@@ -9184,7 +11340,7 @@ Then `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/security/threat-model
 (a) In the paragraph "What `details` holds, where it is set", right after the words `(Development only)` in the clause about `"via": "seed"`, insert (with the comma):
 
 ```markdown
-, and `"via": "signup"` on the `org.created` row of a company a visitor started
+, and `"via": "signup"` on the `org.created` row of a company a visitor started, and `"existing_account": true` on the `signup.completed` row of a person who came back with an account that had no company
 ```
 
 (b) In the last paragraph before the closing remark about the address typed into a failed login, the list of kinds ends `... `org.deleted`, `org.delete_refused` (reason: `wrong_password`, `locked`) and `rate_limit.hit` (at most one per address and policy per minute).` Replace that ending with
@@ -9201,7 +11357,7 @@ so that the list holds the 24 kinds. Run `C:/p6v/Scripts/python.exe scripts/chec
 ```markdown
 Or let visitors start on their own: set `signup: self-service` in the manifest and give Auth-Core the address of your frontend's completion screen
 (`AUTH_FRONTEND_SIGNUP_URL`). A visitor gives an email address and a company name, opens the link in the mail, chooses a password and is the first admin of a
-new company. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
+new company; a person whose company was deleted, or who was removed from it, comes back the same way and keeps their password. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
 ```
 
 and fix the manifest example of "1. Declare your product's permissions" (the yaml block that stands for `deploy/auth.yaml`; `README.md` lines 44 to 50 at the base of this plan), which lacks the key that the file it stands for now has: add the line `signup: self-service` after the `permissions:` line of the block, and after the closing fence of the block add the paragraph
@@ -9212,7 +11368,7 @@ needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_S
 that address sign-up stays off and `/auth/health` says `Degraded`, so leave the line out of a copy of this file until you have the address.
 ```
 
-and in the list of scripts under "Develop it", after the line that starts `scripts/e2e-tenancy.sh`, add `scripts/e2e-signup.sh          # sign-up → link → company → first admin; an account that exists; an invitation first (~4 min)`.
+and in the list of scripts under "Develop it", after the line that starts `scripts/e2e-tenancy.sh`, add `scripts/e2e-signup.sh          # sign-up → link → company → first admin; an account that exists; an invitation first; a member removed who comes back (~6 min)`.
 In `samples/notes-web/README.md`: write the code span `` `src/index.html` `` of the "Work on the screens" paragraph as `` `samples/notes-web/src/index.html` `` (it fails `scripts/check-docs.py` today), change "Mails (reset, verification, invitation)" to "Mails (reset, verification, invitation, sign-up)", in the tree under "What is here" change the line of `src/app/pages/` to list `login, forgot, reset, verify, invite, signup, complete-signup, notes`, change "the three `FrontendUrls` in `compose.yml`" (broken over two lines there) to "the four `FrontendUrls` in `compose.yml`", and in the opening paragraph add "start a company of their own," after "join a company from an invitation,". In the same file the last bullet of the list of known limits (`samples/notes-web/README.md` line 105 at the base of this plan) says `There is no PWA, no sign-up and no screen for company admins; see the deferred list of the spec.`, which is false since this slice: write it as `There is no PWA and no screen for company admins; see the deferred list of the spec. Sign-up (/signup and /complete-signup) works only while Auth-Core has it on: the manifest says signup: self-service and the completion address is set; finishing a sign-up signs the person in and opens the notes.` (a plain line of text, no code spans, so that nothing in it is checked as a path). Run `C:/p6v/Scripts/python.exe scripts/check-docs.py README.md samples/notes-web/README.md`.
 
 - [ ] **Step 8: The changelog.** In `CHANGELOG.md`, between the introductory paragraph and `## 0.1.0 - 2026-02-24` insert
@@ -9229,7 +11385,8 @@ instance that does not turn it on behaves as `0.1.0`.
   `POST /auth/signup/complete` (the person chooses a password at the link of the mail, becomes the first admin of a new company, in one transaction, and is signed in:
   the answer is a login's, the access token and the refresh cookie, and the `login.succeeded` audit row is written in that transaction),
   and `GET /auth/options` (what a product's screens may offer). The first admin gets the first default role of the manifest that holds `*`, else the first that
-  holds `members:manage`. An address that already has an account gets a mail that says so, with no link.
+  holds `members:manage`. An address whose account belongs to a company gets a mail that says so, with no link.
+- **A person without a company comes back by sign-up** (Amendment 3). Someone whose company was deleted, or who was removed from it, has an account and no access; if they sign up with their address they get the usual link, `POST /auth/signup/preview` says `has_account` `true`, and `POST /auth/signup/complete` needs only the token and a company name (the `password` member is optional and, if sent, not used): the account keeps its password, its email is confirmed, its earlier sessions and mail links end (defence in depth), the company is made with the account as its first admin, the person is signed in, and the audit row `signup.completed` carries `details.existing_account` `true`. An account that belongs to a company still gets the "you already have an account" mail.
 - **The manifest key `signup`** (`invite-only`, the default, or `self-service`) and the optional setting `Auth:App:FrontendUrls:CompleteSignup`
   (`AUTH_FRONTEND_SIGNUP_URL` in `deploy/docker-compose.prod.yml`). Sign-up is on only with both; the key without the address leaves it off, logs a warning at start and makes
   `/auth/health` say `Degraded`.
@@ -9271,26 +11428,27 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 | 1 | `GET /auth/options` is `{"signup":"self-service"}` with sign-up on, `{"signup":"invite-only"}` with the key absent, `invite-only`, or the address not set | `SignupOptionsTests.Options_say_self_service_with_the_key_and_the_address`, `SignupOptionsTests.Options_say_invite_only_while_sign_up_is_off`, `SignupGateTests.Sign_up_is_off_unless_the_manifest_says_self_service_and_the_address_is_set`, `SignupGateTests.With_the_key_and_the_address_sign_up_is_on`; `scripts/e2e-signup.sh` step 1 |
 | 2 | With sign-up off the three endpoints answer `403 signup_disabled` and create nothing; an instance with the `v0.1.0` manifest and configuration starts and passes its earlier tests unchanged | `SignupDisabledRequestTests.Sign_up_off_answers_403_before_the_body_is_read_and_creates_nothing`, `SignupPreviewDisabledTests.Preview_off_answers_403_before_the_body_is_read`, `SignupCompleteDisabledTests.Complete_off_answers_403_before_the_body_is_read_and_creates_nothing`, `SignupGateTests.The_other_ways_to_be_off_are_healthy_and_log_no_warning`, `UpgradeFromV010Tests.A_database_of_v0_1_0_gets_the_table_keeps_its_rows_and_reads_its_manifest_as_invite_only`, `ShippedConfigurationTests.A_production_host_with_the_manifest_key_and_an_empty_address_starts_with_sign_up_off`; the earlier tests are the rest of the project, unedited (`OpenApiTests`, `AuditTableTests` and `ManifestActivationTests` got lines for the contract they enumerate, and one method of `AuditTableTests` is renamed; `RatePolicySignupTests` is new); `ShippedConfigurationTests.A_production_host_with_the_v0_1_0_manifest_and_no_address_setting_at_all_stays_invite_only` is the configuration of `v0.1.0` itself (no key at all) |
 | 3 | `POST /auth/signup` for a new address is `202` with an empty body; a mail "complete your sign-up" arrives with the configured address plus `token`, and the company name in its text | `SignupRequestTests.A_new_address_is_accepted_with_an_empty_body_and_a_pending_sign_up_is_stored`, `SignupDispatchTests.A_new_address_gets_the_complete_mail_with_the_link_and_the_company_name`, `SignupMailComposerTests.The_complete_mail_in_english_names_the_application_the_company_the_link_and_the_lifetime`; `scripts/e2e-signup.sh` steps 2 and 4 |
-| 4 | The same request for an address with an account has the same status, headers and body and runs the same statements, never reading the accounts; the mail says the account exists, with no link or token; the pending sign-up is gone | `SignupRequestTests.An_address_with_an_account_gets_the_same_status_headers_and_body`, `SignupRequestTests.The_request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone`, `SignupDispatchTests.An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone`, `SignupMailComposerTests.The_account_exists_mail_in_english_has_no_link_and_no_token`; `scripts/e2e-signup.sh` step 8; `e2e/09-signup.spec.ts` "an address that already has an account..." |
+| 4 | The same request for an address with an account that belongs to a company has the same status, headers and body and runs the same statements, never reading the accounts; the mail says the account exists, with no link or token; the pending sign-up is gone | `SignupRequestTests.An_address_with_an_account_gets_the_same_status_headers_and_body`, `SignupRequestTests.The_request_runs_the_same_statements_for_any_address_and_never_reads_the_accounts`, `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone`, `SignupDispatchTests.An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone`, `SignupMailComposerTests.The_account_exists_mail_in_english_has_no_link_and_no_token`, `SignupComebackDispatchTests.An_account_that_belongs_to_a_company_gets_the_notice_and_no_link`, `SignupRequestTests.An_account_without_a_company_gets_the_same_status_headers_body_and_statements` (the request is the same for an account without a company); `scripts/e2e-signup.sh` step 8; `e2e/09-signup.spec.ts` "an address that already has an account..." |
 | 5 | A malformed address, an address the invitation rule refuses, or a bad company name is `400 invalid_request` and queues nothing | `SignupRequestTests.Malformed_bodies_are_400_invalid_request_and_queue_nothing`, `SignupRequestTests.Addresses_the_invitation_rule_refuses_are_400_and_queue_nothing`, `SignupRequestTests.Company_names_that_break_the_name_rule_are_400_and_queue_nothing`; `scripts/e2e-signup.sh` step 3 |
 | 6 | A second request for one address within 60 seconds and a sixth within the hour are the `429` of spec 0004; the `signup` limit and those of `forgot` and `verify/request` do not affect each other | `SignupRequestTests.A_second_request_within_a_minute_is_refused_and_asking_again_does_not_add_to_the_wait`, `SignupRequestTests.The_sixth_request_within_the_hour_is_refused_until_the_hour_is_over`, `SignupRequestTests.The_sign_up_limit_and_the_limits_of_forgot_and_verify_do_not_affect_each_other`; `scripts/e2e-signup.sh` steps 2 and 9 (part of) |
 | 7 | A second accepted request replaces the first: the newer mail's link works, the older one is `invalid_token`, the company name shown is the newer one | `SignupRequestTests.A_second_accepted_request_replaces_the_first`, `SignupDispatchTests.A_second_mail_replaces_the_link_of_the_first`, `SignupPreviewTests.The_older_link_of_an_address_is_invalid_and_the_newer_shows_the_newer_company`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` |
-| 8 | `POST /auth/signup/preview` answers the typed address and the company name and changes nothing; an unknown, used or expired token is `400 invalid_token` | `SignupPreviewTests.Preview_answers_the_typed_address_and_the_company_and_changes_nothing`, `SignupPreviewTests.Unknown_and_expired_tokens_are_one_400_invalid_token`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (the used token); `scripts/e2e-signup.sh` steps 5, 6 and 11 |
+| 8 | `POST /auth/signup/preview` answers the typed address, the company name and `has_account` and changes nothing; an unknown, used or expired token is `400 invalid_token` | `SignupPreviewTests.Preview_answers_the_typed_address_and_the_company_and_changes_nothing`, `SignupComebackTests.Preview_says_has_account_for_an_account_without_a_company_and_only_for_it`, `SignupPreviewTests.Unknown_and_expired_tokens_are_one_400_invalid_token`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (the used token); `scripts/e2e-signup.sh` steps 5, 6 and 11 |
 | 9 | `POST /auth/signup/complete` answers `200` with an access token and the refresh cookie, as a login does (Amendment 2); the account (email confirmed), the company (given name, a copy of the default roles) and the sole membership with the first admin's role exist; the token of the completion and a later login carry `org_id`, `roles` and `permissions` of that role, and the cookie refreshes like a login's | `SignupCompleteTests.A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own`, `SignupCompleteTests.The_account_company_roles_and_membership_are_what_the_contract_says`, `SignupCompleteTests.The_company_name_of_the_request_is_only_a_suggestion`, `SignupCompleteSignInTests.The_completion_answers_as_a_login_does_with_the_status_and_the_access_token_only`, `SignupCompleteSignInTests.The_cookie_and_the_headers_are_those_of_a_login`, `SignupCompleteSignInTests.The_token_carries_the_new_company_and_the_first_admins_role_and_the_claims_of_a_login`, `SignupCompleteSignInTests.The_cookie_refreshes_like_a_logins_and_belongs_to_a_family`, `SignupCompleteSignInTests.The_session_starts_at_the_completion_and_ends_at_the_cap_of_a_login`, `SignupCompleteSignInTests.The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it`; `scripts/e2e-signup.sh` steps 6, 7 and 8 |
 | 10 | The first admin's role is the first default role holding `*`; with no such role, the first holding `members:manage` | `SignupFirstAdminTests.The_first_admin_gets_the_first_default_role_that_holds_the_star`, `SignupFirstAdminTests.Without_a_star_the_first_admin_gets_the_first_role_that_holds_members_manage`, `SignupFirstAdminTests.A_star_role_after_a_members_manage_role_still_wins`, `ManifestSignupTests.The_first_admin_role_is_the_first_default_role_that_holds_the_star`, `ManifestSignupTests.Without_a_star_the_first_admin_role_is_the_first_that_holds_members_manage`; `scripts/e2e-signup.sh` step 7 |
 | 11 | A completion with a weak password is `400 weak_password` with the rules, creates nothing, and the token still works | `SignupCompleteTests.A_weak_password_names_the_rules_creates_nothing_and_leaves_the_token_usable`, `SignupCompleteTests.The_order_of_the_checks_is_token_then_password_then_account`; `scripts/e2e-signup.sh` step 6 |
 | 12 | A token works once; of parallel completions with one token exactly one is `200`, and one account and one company exist | `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token`, `SignupCompleteRaceTests.Of_parallel_completions_with_one_token_exactly_one_is_200`, `SignupCompleteSignInTests.Every_refusal_is_what_it_was_and_issues_no_cookie_and_no_token`, `SignupCompleteSignInTests.The_same_body_posted_again_is_invalid_token_with_no_cookie_and_no_second_session`, `PendingSignupsTests.Consume_uses_the_link_up_once_and_removes_the_row`; `scripts/e2e-signup.sh` step 6 |
 | 13 | A link older than 24 hours is `400 invalid_token`, and the hourly clean-up removes pending sign-ups whose time has passed | `SignupPreviewTests.A_link_works_until_24_hours_after_the_mail_and_not_a_second_longer`, `SignupCompleteTests.A_used_unknown_expired_or_replaced_token_is_400_invalid_token` (expired), `PendingSignupsTests.A_link_works_until_exactly_24_hours_after_it_was_issued`, `PendingSignupPruningTests.Pruning_removes_pending_sign_ups_whose_time_has_passed_and_keeps_the_others`, `PendingSignupPruningServiceTests.The_hourly_pass_of_the_service_removes_expired_pending_sign_ups`; `scripts/e2e-signup.sh` step 11 (an expired link, live) |
-| 14 | An invitation accepted between the request and the completion makes the completion `409 already_registered` with no company and the pending sign-up gone; a completion and an acceptance at once never both create an account | `SignupCompleteTests.An_account_made_in_the_meantime_is_409_already_registered_and_the_pending_sign_up_is_gone`, `SignupCompleteTests.An_account_under_another_spelling_of_the_address_is_409_too`, `SignupCompleteRaceTests.A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account`; `scripts/e2e-signup.sh` step 10 |
+| 14 | An invitation accepted between the request and the completion makes the completion `409 already_registered` with no company and the pending sign-up gone; a completion and an acceptance at once never both create an account | `SignupCompleteTests.An_account_made_in_the_meantime_is_409_already_registered_and_the_pending_sign_up_is_gone`, `SignupCompleteTests.An_account_under_another_spelling_of_the_address_is_409_too`, `SignupCompleteRaceTests.A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account`, `SignupComebackTests.An_account_that_joined_a_company_meanwhile_is_409_and_the_pending_sign_up_is_gone`, `SignupCompleteRaceTests.A_comeback_and_an_invitation_acceptance_for_one_account_never_both_give_it_a_company`; `scripts/e2e-signup.sh` step 10 |
 | 15 | Pending sign-ups are invisible elsewhere: login is the `401` of an unknown address, `forgot password` sends nothing | `SignupDispatchTests.Pending_sign_ups_are_invisible_to_login_and_forgot_password`; `scripts/e2e-signup.sh` step 9 |
 | 16 | The manifest accepts `signup: self-service` and `invite-only`; any other value is refused by the rules of spec 0005 (the last valid manifest kept, `Degraded`); a stored manifest without the key reads as `invite-only` | `ManifestSignupTests.The_key_accepts_invite_only_and_self_service`, `ManifestSignupTests.Any_other_scalar_makes_the_manifest_invalid_and_names_the_key`, `ManifestSignupTests.A_list_or_a_map_makes_the_manifest_invalid`, `ManifestSignupTests.A_manifest_stored_by_v0_1_0_reads_as_invite_only`, `ManifestSignupActivationTests.A_refused_value_keeps_the_last_valid_manifest_and_health_says_degraded`, `ManifestSignupActivationTests.A_manifest_stored_by_v0_1_0_stays_invite_only_when_the_file_is_missing` |
 | 17 | With `self-service` and no address the start logs a warning, health is `Degraded` and sign-up answers `403`; a bad address stops the start naming the key | `SignupGateTests.Self_service_without_the_address_warns_at_the_start_and_health_says_degraded`, `SignupGateTests.A_bad_address_stops_the_start_naming_the_key_and_not_the_value`, `CompleteSignupSettingsTests.A_bad_address_is_refused_naming_the_key_and_never_echoing_the_value`, `CompleteSignupSettingsTests.Outside_Development_the_address_must_be_https`, `SignupDisabledRequestTests.Sign_up_off_answers_403_before_the_body_is_read_and_creates_nothing` (the variant without the address) |
 | 18 | The per-IP limits classify the four paths as written | `RatePolicySignupTests.The_four_paths_count_against_the_policies_of_the_contract`, `RatePolicySignupTests.The_paths_are_compared_without_regard_to_case_or_a_trailing_slash`, `SignupRateLimitTests.The_request_counts_against_the_mail_policy_of_the_per_ip_limit` |
-| 19 | The audit log holds `signup.requested`, and for a completion `signup.completed` and `org.created` with `details.via` `signup`, and `login.succeeded` for its sign-in (Amendment 2), in its transaction; no row holds a password or a token | `SignupRequestTests.An_accepted_request_is_recorded_with_the_address_and_nothing_secret`, `SignupRequestTests.A_refused_request_is_not_recorded`, `SignupCompleteTests.A_completion_is_recorded_with_the_account_the_company_and_the_address_and_nothing_secret`, `SignupCompleteTests.Nothing_is_left_when_the_audit_row_cannot_be_written`, `SignupCompleteSignInTests.The_completion_writes_login_succeeded_beside_signup_completed_and_org_created`, `SignupCompleteSignInTests.A_token_store_that_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.An_audit_log_that_refuses_the_sign_in_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.A_sign_in_that_OpenIddict_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `AuditTableTests.The_kinds_are_the_twenty_four_of_the_contract`; `scripts/e2e-signup.sh` step 7 (the rows in a live database) |
-| 20 | The OpenAPI document lists the four operations with their answers | `OpenApiTests.The_description_names_every_endpoint_of_the_service_and_nothing_else`, `OpenApiTests.Each_endpoint_describes_the_statuses_of_the_contract` (the completion is `200`, `400`, `403`, `409`, `415`, `429`), `OpenApiTests.The_completion_answers_with_the_body_of_the_login`, `OpenApiTests.The_answers_that_set_or_clear_the_refresh_cookie_say_so`, `OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`, `OpenApiTests.The_error_codes_of_the_contract_are_in_the_descriptions`, `OpenApiTests.The_responses_are_described_in_snake_case`, `OpenApiTests.Every_route_of_the_service_is_in_the_description`; `scripts/e2e-signup.sh` step 1 (the four paths) |
+| 19 | The audit log holds `signup.requested`, and for a completion `signup.completed` and `org.created` with `details.via` `signup`, and `login.succeeded` for its sign-in (Amendment 2), in its transaction, and `details.existing_account` `true` on `signup.completed` for an account that existed (Amendment 3); no row holds a password or a token | `SignupRequestTests.An_accepted_request_is_recorded_with_the_typed_address_only`, `SignupRequestTests.A_refused_request_is_not_recorded`, `SignupCompleteTests.A_completion_is_recorded_with_the_account_the_company_and_the_address_and_nothing_secret`, `SignupCompleteTests.Nothing_is_left_when_the_audit_row_cannot_be_written`, `SignupCompleteSignInTests.The_completion_writes_login_succeeded_beside_signup_completed_and_org_created`, `SignupCompleteSignInTests.A_token_store_that_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.An_audit_log_that_refuses_the_sign_in_leaves_nothing_of_the_completion_and_the_link_still_works`, `SignupCompleteSignInTests.A_sign_in_that_OpenIddict_refuses_leaves_nothing_of_the_completion_and_the_link_still_works`, `AuditTableTests.The_kinds_are_the_twenty_four_of_the_contract`, `SignupComebackTests.The_completion_is_recorded_with_existing_account_true_beside_login_succeeded_and_org_created`, `SignupComebackTests.A_sign_in_that_cannot_be_written_leaves_the_account_as_it_was`; `scripts/e2e-signup.sh` steps 7 and 12 (the rows in a live database) |
+| 20 | The OpenAPI document lists the four operations with their answers | `OpenApiTests.The_description_names_every_endpoint_of_the_service_and_nothing_else`, `OpenApiTests.Each_endpoint_describes_the_statuses_of_the_contract` (the completion is `200`, `400`, `403`, `409`, `415`, `429`), `OpenApiTests.The_completion_answers_with_the_body_of_the_login`, `OpenApiTests.The_answers_that_set_or_clear_the_refresh_cookie_say_so`, `OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`, `OpenApiTests.The_error_codes_of_the_contract_are_in_the_descriptions`, `OpenApiTests.The_responses_are_described_in_snake_case`, `OpenApiTests.Every_route_of_the_service_is_in_the_description`, `OpenApiTests.The_completion_asks_for_no_password_of_an_account_without_a_company` (and `has_account` in `The_responses_are_described_in_snake_case`); `scripts/e2e-signup.sh` step 1 (the four paths) |
 | 21 | Both mails exist in Polish and English, in HTML and text; the "complete" mail's HTML and text hold the same link | `SignupMailComposerTests.The_complete_mail_in_polish_keeps_its_letters`, `SignupMailComposerTests.The_html_and_the_text_hold_the_same_link`, `SignupMailComposerTests.Every_language_has_every_text_of_both_mails`, `SignupMailComposerTests.The_account_exists_mail_in_polish_has_no_link_and_no_token`, `SignupDispatchPolishTests.The_mails_are_in_the_configured_language`; `scripts/e2e-signup.sh` step 4 |
-| 22 | The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup`, is signed in at once (no sign-in screen on the way) and sees the company and the admin role, and a reload keeps them signed in — in Chromium and in WebKit; the token leaves the address bar; the address is in no URL; "already have an account" (the mail, and the completion screen when the account appeared meanwhile), a used link, an expired link and a link that never worked show their texts | `e2e/09-signup.spec.ts` (all five tests, both projects, by `scripts/e2e-web.sh`, which seeds the invited address and the expired link; the first test collects every URL the page requests and asserts the address is in none); the unit tests `signup.spec.ts`, `complete-signup.spec.ts` (the token leaves the address bar and the router; the person is signed in and the notes screen opens in place of the screen), `auth.service.signup.spec.ts` (the token in memory, `/auth/me`, an old session dropped), `login.signup.spec.ts`, `account-api.signup.spec.ts`, `app.routes.spec.ts` (the routes are public) |
+| 22 | The sample: a person signs up on `/signup`, opens the mail link, completes on `/complete-signup`, is signed in at once (no sign-in screen on the way) and sees the company and the admin role, and a reload keeps them signed in — in Chromium and in WebKit; the token leaves the address bar; the address is in no URL; "already have an account" (the mail, and the completion screen when the account appeared meanwhile), a used link, an expired link and a link that never worked show their texts | `e2e/09-signup.spec.ts` (all six tests, both projects, by `scripts/e2e-web.sh`, which seeds the invited address, the expired link and the returning person; the first test collects every URL the page requests and asserts the address is in none); the unit tests `signup.spec.ts`, `complete-signup.spec.ts` (the token leaves the address bar and the router; the person is signed in and the notes screen opens in place of the screen), `auth.service.signup.spec.ts` (the token in memory, `/auth/me`, an old session dropped), `login.signup.spec.ts`, `account-api.signup.spec.ts`, `app.routes.spec.ts` (the routes are public) |
 | 23 | `scripts/e2e-signup.sh` passes against a fresh stack, and every earlier e2e script and test still passes | `scripts/e2e-signup.sh` (all steps); the five older scripts and `scripts/e2e-hardening.sh`, `scripts/e2e-notes.sh`, `scripts/e2e-web.sh` and `scripts/e2e-prod.sh` (the last two with the address set: `ShippedConfigurationTests.The_sample_overlay_and_the_production_test_set_the_address_so_that_their_stacks_stay_healthy`); `dotnet build -warnaserror && dotnet test tests/Auth.IntegrationTests`; the Python and Angular suites |
+| 24 | (Amendment 3) For an account without a company the sign-up mail carries a link; the preview says `has_account: true`; a completion with only the token and a company name answers as a login, creates the company with that account as its first admin, leaves its password working and unchanged, confirms its email and writes `signup.completed` with `details.existing_account` `true`; the sample's completion screen asks only for the company name; if the account joins a company before the completion, `409 already_registered` | `SignupComebackDispatchTests.An_account_without_a_company_gets_the_complete_mail_with_the_link`, `SignupComebackDispatchTests.The_complete_mail_goes_to_the_address_as_typed`, `SignupComebackDispatchTests.A_sign_up_for_an_account_without_a_company_whose_pending_sign_up_is_gone_sends_nothing`, `SignupComebackDispatchTests.A_failed_send_to_an_account_without_a_company_leaves_the_previous_link_valid`, `SignupComebackDispatchTests.An_account_that_joins_a_company_while_the_dispatcher_waits_for_the_pending_sign_up_gets_the_notice`, `SignupComebackDispatchTests.An_account_that_joins_a_company_while_the_dispatcher_waits_and_the_pending_sign_up_survives_gets_the_notice`, `SignupComebackDispatchTests.An_account_that_only_looks_like_the_typed_address_gets_the_notice_and_no_link`, `SignupComebackTests.Preview_says_has_account_for_an_account_without_a_company_and_only_for_it`, `SignupComebackTests.A_person_without_a_company_comes_back_with_only_the_token_and_a_company_name`, `SignupComebackTests.A_password_in_the_body_is_not_used`, `SignupComebackTests.An_unconfirmed_address_is_confirmed_by_the_link`, `SignupComebackTests.The_completion_is_recorded_with_existing_account_true_beside_login_succeeded_and_org_created`, `SignupComebackTests.Sessions_from_before_the_company_was_lost_end_with_the_completion`, `SignupComebackTests.A_malformed_password_is_400_invalid_request_for_such_an_account_too_and_the_token_stays_usable`, `SignupComebackTests.A_new_address_without_a_password_is_400_invalid_request_and_the_token_stays_usable`, `SignupComebackTests.An_unknown_token_without_a_password_is_invalid_token`, `SignupComebackTests.An_account_that_joined_a_company_meanwhile_is_409_and_the_pending_sign_up_is_gone`, `SignupComebackTests.An_account_under_a_spelling_the_normaliser_folds_is_409_and_is_left_alone`, `SignupComebackTests.A_sign_in_that_cannot_be_written_leaves_the_account_as_it_was`, `SignupCompleteRaceTests.Of_parallel_completions_for_an_account_without_a_company_exactly_one_is_200`, `SignupCompleteRaceTests.A_comeback_and_an_invitation_acceptance_for_one_account_never_both_give_it_a_company`, `SignupRequestTests.An_account_without_a_company_gets_the_same_status_headers_body_and_statements`, `OpenApiTests.The_completion_asks_for_no_password_of_an_account_without_a_company`; the unit tests `complete-signup.spec.ts` (the block "for an account that exists without a company (has_account)"), `auth.service.signup.spec.ts` ("leaves the password out of the body") and `account-api.signup.spec.ts` ("reads has_account true"); `e2e/09-signup.spec.ts` "a person whose company is gone comes back by sign-up..." (both projects; `scripts/e2e-web.sh` seeds the member removed through the operator CLI); `scripts/e2e-signup.sh` step 12 |
 
 ## Contract sentences that are not acceptance criteria
 
@@ -9299,10 +11457,10 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 | The password is chosen at the link, never on the sign-up form (Decision 3) | `signup.spec.ts` ("asks for an email and a company name..." asserts there is no password field); `SignupRequest` has no password member (`OpenApiTests.Each_endpoint_that_reads_a_body_describes_it_in_snake_case`) |
 | The completion signs the person in, and the sign-in is part of it (Amendment 2, replacing Decision 10) | `SignupCompleteSignInTests` (all of it), `SignupCompleteTests.A_visitor_signs_up_finishes_and_is_signed_in_as_the_admin_of_a_company_of_their_own`; `scripts/e2e-signup.sh` step 6; `e2e/09-signup.spec.ts` first test; an invitation is unchanged (`InviteAcceptTests`: `204`, no cookie) |
 | The address of the completion is locked with the lock invitation acceptance uses | `SignupCompleteRaceTests.A_completion_and_an_invitation_acceptance_for_one_address_never_both_create_an_account` |
-| An existing account never signs up again, even without a company (Decision 9) | `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone` (all four combinations) |
+| An account that belongs to a company never signs up again: it gets the "you already have an account" mail (Decision 9, narrowed by Amendment 3: an account without a company may start a new company) | `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone` (confirmed or not), `SignupComebackDispatchTests.An_account_that_belongs_to_a_company_gets_the_notice_and_no_link` |
 | A failed sending leaves the previous link valid | `SignupDispatchTests.A_failed_send_leaves_the_previous_link_valid_and_the_retry_sends_a_new_one`, `PendingSignupsTests.Upsert_for_the_same_address_replaces_the_names_and_the_time_and_keeps_the_link` |
 | A completion after sign-up was turned off is refused the same way | `SignupPreviewDisabledTests.A_preview_after_sign_up_was_turned_off_is_403_and_changes_nothing`, `SignupCompleteDisabledTests.A_completion_after_sign_up_was_turned_off_is_403_and_consumes_nothing` |
-| The account check comes first when a sign-up mail is sent: an address with an account gets the notice even if its pending sign-up is gone; with no account and no live pending sign-up nothing is sent | `SignupDispatchTests.An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone`, `SignupDispatchTests.An_address_with_an_account_and_an_expired_pending_sign_up_gets_the_notice_and_loses_the_row`, `SignupDispatchTests.A_sign_up_whose_pending_sign_up_is_gone_and_whose_address_has_no_account_sends_nothing`, `SignupCompleteRaceTests.A_mail_sent_while_the_completion_runs_never_leaves_a_working_link_to_a_used_sign_up` |
+| The account check comes first when a sign-up mail is sent: an address with an account that belongs to a company gets the notice even if its pending sign-up is gone; with no live pending sign-up and no such account nothing is sent (Amendment 3: an account without a company is treated as a new address) | `SignupDispatchTests.An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone`, `SignupDispatchTests.An_address_with_an_account_and_an_expired_pending_sign_up_gets_the_notice_and_loses_the_row`, `SignupDispatchTests.A_sign_up_whose_pending_sign_up_is_gone_and_whose_address_has_no_account_sends_nothing`, `SignupCompleteRaceTests.A_mail_that_waits_for_a_completion_never_leaves_a_working_link_to_a_used_sign_up`, `SignupComebackDispatchTests.A_sign_up_for_an_account_without_a_company_whose_pending_sign_up_is_gone_sends_nothing` |
 | The mail queue's clean-up and composer know the `signup` kind (To verify) | `SignupDispatchTests.A_request_for_a_gone_pending_sign_up_is_dropped_by_the_bulk_delete`, `SignupMailComposerTests.An_unknown_kind_of_mail_is_not_composed`, `MailKindTests.The_values_of_the_kinds_are_stored_and_never_renumbered` |
 | The EF migration that adds the table (To verify) | `PendingSignupTableTests`, `UpgradeFromV010Tests.A_database_of_v0_1_0_gets_the_table_keeps_its_rows_and_reads_its_manifest_as_invite_only` |
 | The shipped manifests turn sign-up on, and the development and production files name the address | `ShippedConfigurationTests` |
@@ -9310,7 +11468,7 @@ running; `dotnet test tests/Auth.IntegrationTests`); the Angular sample's unit t
 
 Run `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md`: every class, method and file named in it must resolve.
 
-- [ ] **Step 10: Check them all.** From the repository root: `C:/p6v/Scripts/python.exe scripts/check-docs.py` (the default list, now with the guide), `C:/p6v/Scripts/python.exe scripts/check-docs.py --self-test`, `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md docs/operations/backup.md docs/integration/python-fastapi.md samples/notes-web/README.md docs/deployment/vps.md docs/security/threat-model.md CHANGELOG.md`; in `samples/notes-web`: `npm run check:docs`. Then `grep -rInP '\\u[0-9a-fA-F]{4}' src tests scripts docs samples/notes-web/src samples/notes-web/e2e --include=*.cs --include=*.sh --include=*.md --include=*.ts` finds nothing that is not meant, and `git status --porcelain` shows only the files of the 15 tasks (nothing else in the working tree).
+- [ ] **Step 10: Check them all.** From the repository root: `C:/p6v/Scripts/python.exe scripts/check-docs.py` (the default list, now with the guide), `C:/p6v/Scripts/python.exe scripts/check-docs.py --self-test`, `C:/p6v/Scripts/python.exe scripts/check-docs.py docs/superpowers/plans/0009-acceptance-map.md docs/operations/backup.md docs/integration/python-fastapi.md samples/notes-web/README.md docs/deployment/vps.md docs/security/threat-model.md CHANGELOG.md`; in `samples/notes-web`: `npm run check:docs`. Then `grep -rInP '\\u[0-9a-fA-F]{4}' src tests scripts docs samples/notes-web/src samples/notes-web/e2e --include=*.cs --include=*.sh --include=*.md --include=*.ts` finds nothing that is not meant, and `git status --porcelain` shows only the files of the 17 tasks (nothing else in the working tree).
 
 - [ ] **Step 11: Hand back** — uncommitted. Files: everything listed under Files. Proposed subject: `docs: self-service sign-up in the guides, the threat model, the changelog and the acceptance map`.
 
@@ -9333,28 +11491,29 @@ Run against the spec, section by section, after the tasks above were written.
 | Per-IP limits, mail limit, audit, OpenAPI, threat model | 2, 5, 8, 13 |
 | `samples/notes-web`, `samples/notes-api/auth.yaml` | 9, 10, 11, 12 |
 | `scripts/e2e-signup.sh`; guides and environment examples | 12, 13, 9 |
-| Out of scope (providers, a company-less account, CAPTCHA, unique names, several companies) | nothing built; `SignupDispatchTests.An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone` covers the second |
+| Out of scope (providers, CAPTCHA, unique names, several companies) | nothing built |
 | Contract: general rules, on/off, `403` before the body | 1, 5, 7, 8 (`Signup*DisabledTests`) |
 | Mails (the bullets with the account check first, locale, failed sending) | 4, 6 |
 | Manifest, Configuration, Limits, Audit events, OpenAPI | 1, 9, 2, 5/8, 2/5/7/8 |
 | Sample frontend | 10, 11, 12, and 15 (the completion opens the notes screen) |
+| Amendment 3: a person without a company comes back by sign-up (the link at send time, `has_account`, the completion without a password that keeps the account's password and confirms its email, `existing_account` in the audit row, `409` when the account joined a company meanwhile, the screen with the company name only; an account with a company still gets the notice) | 16 (server and tests, the `409` race with an invitation), 17 (sample, Playwright, `scripts/e2e-signup.sh` Step 12), 13 (guides, threat model, changelog, map: criterion 24) |
 | Amendment 2: the completion signs in (the answer of a login, the cookie, the token's company and role, `login.succeeded` in the completion's transaction, nothing stays if the sign-in cannot be written, the sample opens the product, an invitation unchanged) | 14 (server), 15 (sample, Playwright, `scripts/e2e-signup.sh`), 13 (guides, threat model, changelog, map) |
-| Acceptance criteria 1 to 23 | the map of Task 13 names a test or a step for each |
-| Decisions 1 to 13 | 1 (8, 12, 13), 3 and 5 (7), 5 and 6 (6, 9), 8 (3, 4, 5, 10), 5 and 13 (11) |
+| Acceptance criteria 1 to 24 | the map of Task 13 names a test or a step for each |
+| Decisions 1 to 13 (9 replaced by Amendment 3, 10 by Amendment 2) | 1 (8, 12, 13), 3 and 5 (7), 5 and 6 (6, 9), 8 (3, 4, 5, 10), 5 and 13 (11) |
 | To verify during implementation (four points) | the mail queue and composer: Tasks 4 and 6; the stored manifest: Task 1; the migration: Task 3; the order of checks and the lock: Task 8 |
 
 **2. Placeholder scan.** No "TBD", "similar to", or step without its code. The edits to existing files give the text to find and the text to put; the four documents are edited by instruction with the sentences written out. Two edits say "the line that starts ..." where the file's line carries characters that a tool parameter would mangle (the arrow in the `README.md` script list); the implementer reads the file.
 
-**3. Type consistency.** `SignupMode`/`SignupModes`, `Manifest.Signup`/`FirstAdminRole`, `SignupGate.IsOn/MissingAddress/ModeName/WarnIfMissingAddress`, `MailSettings.CompleteSignupUrl`, `MailSettingsLoader.CompleteSignupUrlKey`, `TenancyErrors.SignupDisabled/AlreadyRegistered`, `PendingSignup`, `PendingSignups.UpsertAsync/IssueAsync/FindUsableAsync/LockUsableAsync/ConsumeAsync/DeleteAsync`, `MailKind.Signup`, `MailRequestStore.SubmitAsync(..., typedEmail, companyName)`, `MailComposer.Compose(MailKind.Signup, ...)/ComposeAccountExists`, `MailTexts.AccountExists`, `AuditKinds.SignupRequested/SignupCompleted`, `SignupService.PreviewAsync/CompleteAsync`, `SignupApi`, `SignupVariants`, `SignupTestBase`, `PendingSignupSeed` have the same names and signatures wherever a later task uses them. The wire names (`company_name`, `signup`) match the contracts in `SignupContracts.cs`, the tests and the sample.
+**3. Type consistency.** `SignupMode`/`SignupModes`, `Manifest.Signup`/`FirstAdminRole`, `SignupGate.IsOn/MissingAddress/ModeName/WarnIfMissingAddress`, `MailSettings.CompleteSignupUrl`, `MailSettingsLoader.CompleteSignupUrlKey`, `TenancyErrors.SignupDisabled/AlreadyRegistered`, `PendingSignup`, `PendingSignups.UpsertAsync/IssueAsync/FindUsableAsync/LockUsableAsync/ConsumeAsync/DeleteAsync`, `MailKind.Signup`, `MailRequestStore.SubmitAsync(..., typedEmail, companyName)`, `MailComposer.Compose(MailKind.Signup, ...)/ComposeAccountExists`, `MailTexts.AccountExists`, `AuditKinds.SignupRequested/SignupCompleted`, `SignupService.PreviewAsync/CompleteAsync`, `SignupApi`, `SignupVariants`, `SignupTestBase`, `PendingSignupSeed` have the same names and signatures wherever a later task uses them. The wire names (`company_name`, `signup`) match the contracts in `SignupContracts.cs`, the tests and the sample. The names of Amendment 3 are the same wherever they are used: `SignupAccount.MayStartCompany`, `SignupAccounts.FindAsync`, the optional-member overload `JsonObjectBody.ReadStringsAsync(request, required, optional, cancellationToken)`, `SignupPreview.HasAccount` and `SignupPreviewResponse.HasAccount` (`has_account` on the wire and in `SignupPreview.has_account` of the sample), `SignupService.CompleteAsync(token, string? password, companyName, cancellationToken)`, `SignupApi.CompleteWithoutPassword`, `SignupTestBase.RemovedMemberAsync` and `JoinACompanyAsync`, `AuthService.completeSignup(token, string | null, companyName)`, `texts.completeSignup.keepsPassword`, the test id `keeps-password`, the audit detail `existing_account` and the Playwright setting `E2E_COMEBACK_EMAIL`.
 
 **4. Review Focus.** Each of the five has its named tests in the tasks it points at.
 
 ## Decisions taken in this plan
 
-The spec is not changed by this plan (the owner amends it where a line below says so). One line each; the owner has ruled on every one.
+The spec is not changed by this plan (the owner amends it where a line below says so). One line each; the owner has ruled on every one of 1 to 10; 11 to 17 are the plan's own choices for the owner's Amendment 3 (none of them changes the contract it states, and each is covered by a test).
 
 1. **The pending sign-up has two times** (`ExpiresAt`, when the row goes; `TokenExpiresAt`, when the current link stops working) as the spec's Amendment 2 says; the contract is unchanged.
-2. **The account check comes first when a sign-up mail is sent:** an address with an account gets "you already have an account" even when its pending sign-up is gone (and any pending row of the address is deleted); nothing is sent only with no account and no live pending sign-up (the owner's ruling; Task 6).
+2. **The account check comes first when a sign-up mail is sent:** an address with an account gets "you already have an account" even when its pending sign-up is gone (and any pending row of the address is deleted); nothing is sent only with no account and no live pending sign-up (the owner's ruling; Task 6) (narrowed by Amendment 3: an account that belongs to a company).
 3. **Tests that enumerate the contract get lines added and nothing else:** `OpenApiTests` (lines added; each replaces the previous task's line by itself and the new one, and one `foreach` array is extended), `AuditTableTests` (one list extended and its one test method renamed from `...twenty_two...` to `...twenty_four...`) and `ManifestActivationTests` (one assertion); every other earlier test is untouched, which is how criterion 2's "earlier tests pass unchanged" is kept.
 4. **The pipeline answers first:** the charset guard (`415`) and the per-IP limiter (`429`) run before the handlers, as for every endpoint, so a request with a UTF-16 charset or over the limit is answered by them even while sign-up is off; "`403` before the body is read" holds for the handlers.
 5. **A sign-up request or a completion waits for a mail being sent to the same address:** the dispatcher locks the pending sign-up while it sends (as it locks an invitation), at most the 20 seconds noted for the other mails; recorded in the threat model.
@@ -9363,6 +11522,14 @@ The spec is not changed by this plan (the owner amends it where a line below say
 8. **`signup:` with no value counts as absent,** like `permissions:` with no value; `signup: ''` is invalid (probed).
 9. **Smaller choices:** the subjects of the two mails start `Complete your sign-up` / `Dokończ rejestrację` and `You already have an account` / `Masz już konto` and never hold the company name; a completion address of only white space counts as not set; the account-exists mail goes to the address as the account stores it, the complete mail to the address as typed; a completion also clears the login streak of the address, as an invitation does; the sample trims the email and the company name before sending; `Sign-up` is the OpenAPI tag of the four operations; `400 invalid_request` has its own text on each sign-up screen ("Check the email address and the company name." and "Check the company name.").
 10. **The completion signs in through OpenIddict, not around it (Amendment 2, Tasks 14 and 15):** `/auth/signup/complete` is a third pass-through token endpoint beside `/auth/login` and `/auth/refresh`, claimed by an extraction handler that hands OpenIddict a placeholder request and never reads the body; the principal of both sign-ins is built by `SessionPrincipal`; `SignupService.CompleteAsync` hands its open transaction to `AtomicSignInResult`, which commits it after the session and `login.succeeded` are written. The choice was probed (a plain endpoint cannot sign in through OpenIddict; the pass-through variant answered, rolled back on a refusing token store and on a refusing audit table, and kept `405` for the other methods). The sample drops the session that exists before it holds the new one, and opens the notes screen with `replaceUrl`.
+
+11. **Amendment 3 (Tasks 16 and 17) replaces Decision 9.** An account that belongs to no company is, for a sign-up, a new address with a password it already has: the dispatcher sends the usual link, the preview says `has_account`, the completion neither asks for nor changes the password. `has_account` is `true` exactly when the account is the one the link would use as it is: it has no company and its stored address is the typed address up to ASCII case (the spec's "true only for an account without a company").
+12. **An account the lookup merely folds together with the typed address** (the micro sign and Greek mu, final sigma and sigma: the normaliser folds them) is not used by a link: it gets the notice mail and the `409`, as invitation acceptance refuses such an account (`EmailInput.IsSameAddress`). A link proves only the mailbox it was sent to. Invisible for ordinary addresses: the typed address already passes the look-alike rule of the request.
+13. **The password is an optional member of the completion body.** Absent is fine; present it follows the rule of every string member (non-blank, no NUL), so `123`, `""`, `null` and a NUL stay `400 invalid_request` for every account. For an address with no account at all an absent password is `400 invalid_request` after the token check, with the token left usable (the transaction is rolled back). For an account the link may not use, the answer is the `409` whether or not a password came: a screen that was told `has_account` sent none, and the contract says `409`.
+14. **A comeback ends whatever sessions and mail links the account still has** (`AccountSessions.EndAllAsync`, as for a new account and at an invitation). This is defence in depth: removing a member and deleting a company already revoke their sessions and a login without a company is `403`, so normally nothing is left; if something is (a state the tests make straight in the database), it must not refresh into the new company. The spec does not say it; it costs the person nothing, because the completion has just signed them in.
+15. **`details.existing_account` is written only when it is `true`.** A new account's `signup.completed` row has no details, as before (a test pins `Details` null), and the spec says the member is `true` "for an account that existed".
+16. **The two SQL statements of the dispatcher (the bulk delete and the choice of the next row) count only an account with a membership** as a reason to keep a sign-up row, so that requests for company-less accounts whose pending sign-up is gone are dropped in bulk, like requests for addresses with no account, and a flood of them is never handled one by one.
+17. **The tests of this slice that used `CreateUserAsync(..., member: false)` for "an account that exists" now say "an account that belongs to a company"** (the helper's default); their intent is unchanged. Decision 3's rule that earlier tests stay unedited concerns the tests of earlier specs.
 
 ## Open questions for the owner
 
