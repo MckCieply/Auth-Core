@@ -138,7 +138,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task The_order_of_the_checks_is_token_then_password_then_account()   // spec 0009 → To verify
     {
-        await CreateUserAsync(Address, confirmed: true, member: false);
+        await CreateUserAsync(Address, confirmed: true);
         var token = await PendingSignupSeed.IssueAsync(Factory.Services, Address, CompanyName);
 
         using (var unknown = await SignupApi.Complete(Client, EmailTokens.NewToken(), "short", CompanyName))
@@ -254,7 +254,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task An_account_under_another_spelling_of_the_address_is_409_too()   // Review Focus 2
     {
-        await CreateUserAsync("ANNA@Firma.TEST", confirmed: true, member: false);
+        await CreateUserAsync("ANNA@Firma.TEST", confirmed: true);
         var token = await PendingSignupSeed.IssueAsync(Factory.Services, "anna@firma.test", CompanyName);
 
         using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
@@ -301,7 +301,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         const string Boom = "boom@firma.test";
         var token = await MailedAsync();
         var boomToken = await MailedAsync(Boom);
-        await CreateUserAsync(Taken, confirmed: true, member: false);
+        await CreateUserAsync(Taken, confirmed: true);
         var takenToken = await PendingSignupSeed.IssueAsync(Factory.Services, Taken, CompanyName);
 
         using (await SignupApi.Complete(Client, token, "short", CompanyName))   // weak password

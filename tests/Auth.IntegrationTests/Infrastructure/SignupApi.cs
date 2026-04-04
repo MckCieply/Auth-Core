@@ -25,6 +25,10 @@ public static class SignupApi
     public static Task<HttpResponseMessage> Complete(HttpClient client, string token, string password, string companyName) =>
         client.PostAsJsonAsync(CompletePath, new { token, password, company_name = companyName });
 
+    /// <summary>A completion for an account that has no company: no password in the body (spec 0009, Amendment 3).</summary>
+    public static Task<HttpResponseMessage> CompleteWithoutPassword(HttpClient client, string token, string companyName) =>
+        client.PostAsJsonAsync(CompletePath, new { token, company_name = companyName });
+
     /// <summary>The <c>403</c> of a sign-up that is off: the exact body, never stored, no cookie.</summary>
     public static async Task AssertDisabledAsync(HttpResponseMessage response)
     {

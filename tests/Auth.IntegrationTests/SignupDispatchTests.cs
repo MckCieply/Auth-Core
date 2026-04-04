@@ -102,13 +102,11 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Theory]
-    [InlineData(true, true)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(false, false)]
-    public async Task An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone(bool confirmed, bool member)   // criterion 4
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_address_with_an_account_gets_the_account_exists_mail_and_the_pending_sign_up_is_gone(bool confirmed)   // criterion 4: an account that belongs to a company
     {
-        await CreateUserAsync(Address, confirmed, member: member);
+        await CreateUserAsync(Address, confirmed);
         using var response = await SignupApi.Request(Client, Address, CompanyName);
         await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
 
@@ -131,7 +129,7 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task The_account_exists_mail_goes_to_the_stored_address_spelled_as_stored()   // Review Focus 2
     {
-        await CreateUserAsync("Anna.Firma@Firma.Test", confirmed: true, member: false);
+        await CreateUserAsync("Anna.Firma@Firma.Test", confirmed: true);
         using var response = await SignupApi.Request(Client, "anna.firma@firma.test", CompanyName);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
 
@@ -180,7 +178,7 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task An_address_with_an_account_gets_the_notice_even_when_its_pending_sign_up_is_gone()   // the owner's ruling: the account check comes first
     {
-        await CreateUserAsync("Anna.Firma@Firma.Test", confirmed: true, member: false);
+        await CreateUserAsync("Anna.Firma@Firma.Test", confirmed: true);
         using var response = await SignupApi.Request(Client, "anna.firma@firma.test", CompanyName);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         await InDbAsync(db => db.PendingSignups.ExecuteDeleteAsync(TestContext.Current.CancellationToken));   // completed, or replaced by an account, since
@@ -218,7 +216,7 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
             }
 
             Assert.False(dispatch.IsCompleted);
-            await CreateUserAsync(Address, confirmed: true, member: false);   // the account the completion makes
+            await CreateUserAsync(Address, confirmed: true);   // the account the completion makes: it has a company
             await completion.CommitAsync(TestContext.Current.CancellationToken);
         }
 
@@ -234,7 +232,7 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task An_address_with_an_account_and_an_expired_pending_sign_up_gets_the_notice_and_loses_the_row()
     {
-        await CreateUserAsync(Address, confirmed: true, member: false);
+        await CreateUserAsync(Address, confirmed: true);
         await InDbAsync(async db =>
         {
             var now = StorableTime.Now(Clock);
@@ -306,7 +304,7 @@ public sealed class SignupDispatchTests(PostgresFixture postgres, KeyMaterialFix
     [Fact]
     public async Task A_failed_send_to_an_account_keeps_the_pending_sign_up_until_the_mail_is_sent()   // Review Focus 5
     {
-        await CreateUserAsync(Address, confirmed: true, member: false);
+        await CreateUserAsync(Address, confirmed: true);
         using var response = await SignupApi.Request(Client, Address, CompanyName);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
 
@@ -385,7 +383,7 @@ public sealed class SignupDispatchPolishTests : SignupTestBase
     public async Task The_mails_are_in_the_configured_language()   // criterion 21
     {
         await MailedAsync(company: "Żółw i Spółka");
-        await CreateUserAsync("ola@firma.test", confirmed: true, member: false);
+        await CreateUserAsync("ola@firma.test", confirmed: true);
         using var response = await SignupApi.Request(Client, "ola@firma.test", CompanyName);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         await DispatchAsync();

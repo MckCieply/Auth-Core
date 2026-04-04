@@ -340,7 +340,7 @@ public sealed class SignupCompleteSignInTests : SignupTestBase
     {
         const string Taken = "taken@firma.test";
         var token = await MailedAsync();
-        await CreateUserAsync(Taken, confirmed: true, member: false);
+        await CreateUserAsync(Taken, confirmed: true);
         var takenToken = await PendingSignupSeed.IssueAsync(Factory.Services, Taken, CompanyName);
 
         using (var weak = await SignupApi.Complete(Client, token, "short", CompanyName))

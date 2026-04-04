@@ -12,8 +12,15 @@ public sealed record SignupRequest(string Email, string CompanyName);
 /// <summary>Request of <c>POST /auth/signup/preview</c>.</summary>
 public sealed record SignupPreviewRequest(string Token);
 
-/// <summary>Response of <c>POST /auth/signup/preview</c>: the address as typed and the company name of the request.</summary>
-public sealed record SignupPreviewResponse(string Email, string CompanyName);
+/// <summary>
+/// Response of <c>POST /auth/signup/preview</c>: the address as typed, the company name of the request, and whether an account without a
+/// company has the address (spec 0009, Amendment 3): then the completion needs no password.
+/// </summary>
+public sealed record SignupPreviewResponse(string Email, string CompanyName, bool HasAccount);
 
-/// <summary>Request of <c>POST /auth/signup/complete</c>. The company name is the person's last word; the one of the request is a suggestion.</summary>
-public sealed record SignupCompleteRequest(string Token, string Password, string CompanyName);
+/// <summary>
+/// Request of <c>POST /auth/signup/complete</c>. The company name is the person's last word; the one of the request is a suggestion. The
+/// password is chosen here, except by an account that has no company (the preview says <c>has_account</c>): it may be left out, and when it
+/// is sent it is not used.
+/// </summary>
+public sealed record SignupCompleteRequest(string Token, string CompanyName, string? Password = null);

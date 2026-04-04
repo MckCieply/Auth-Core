@@ -278,12 +278,34 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["signup"], Properties("OptionsResponse"));
-        Assert.Equal(["company_name", "email"], Properties("SignupPreviewResponse"));
+        Assert.Equal(["company_name", "email", "has_account"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));
         Assert.Equal(["error"], Properties("ErrorBody"));
+    }
+
+    [Fact]
+    public async Task The_completion_asks_for_no_password_of_an_account_without_a_company()   // criterion 24
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operation = Operations(document)["POST /auth/signup/complete"];
+        var schema = operation["requestBody"]!["content"]!["application/json"]!["schema"]!.AsObject();
+        if (schema["$ref"] is { } reference)
+        {
+            schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
+        }
+
+        Assert.NotNull(schema["properties"]!["password"]);   // still described
+
+        // The sentence Step 11 adds to the description of the operation: it fails before the change whatever the generator does with `required`.
+        Assert.Contains("may be left out", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
+        if (schema["required"] is System.Text.Json.Nodes.JsonArray required)
+        {
+            Assert.DoesNotContain("password", required.Select(node => node!.GetValue<string>()));
+        }
     }
 
     [Fact]

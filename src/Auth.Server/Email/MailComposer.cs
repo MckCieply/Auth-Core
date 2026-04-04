@@ -90,9 +90,9 @@ public sealed class MailComposer(MailSettings settings)
     }
 
     /// <summary>
-    /// The mail an address with an account gets when someone signs up with it (spec 0009 → Mails): it says that someone, perhaps the
-    /// reader, tried, that the account exists, and how to sign in or reset the password. It holds no link and no token, and nothing
-    /// the requester typed.
+    /// The mail an address gets when someone signs up with it and its account belongs to a company, or only looks like the typed address
+    /// (spec 0009 → Mails, Amendment 3): it says that someone, perhaps the reader, tried, that the account exists, and how to sign in or
+    /// reset the password. It holds no link and no token, and nothing the requester typed.
     /// </summary>
     public ComposedMail ComposeAccountExists(string recipient)
     {

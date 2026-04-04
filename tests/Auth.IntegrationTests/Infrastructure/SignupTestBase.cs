@@ -41,4 +41,30 @@ public abstract class SignupTestBase : AuditTestBase
         await DispatchAsync();
         return TokenIn(Mail.Sent.Last(m => string.Equals(m.To, email, StringComparison.Ordinal)));
     }
+
+    /// <summary>
+    /// An account that lost its company (spec 0009, Amendment 3): it was a member of a company, with a password (<see cref="MailTestBase.UserPassword"/>),
+    /// and the membership ended straight in the database, which ends no session. That is a state the product does not make (removing a member and
+    /// deleting a company revoke the sessions); it is what a completion must still cope with. Returns the id of the account.
+    /// </summary>
+    protected async Task<Guid> RemovedMemberAsync(string email = Address, bool confirmed = true)
+    {
+        var company = await CreateCompanyAsync("Former company");
+        var userId = await AddMemberAsync(company, email, "user", confirmed);
+        await RemoveMembershipAsync(userId);
+        return userId;
+    }
+
+    /// <summary>Gives the account a company again, straight in the database: the account that "joined a company meanwhile".</summary>
+    protected async Task JoinACompanyAsync(Guid userId)
+    {
+        var company = await CreateCompanyAsync("Newer company");
+        var roleId = await RoleIdAsync(company, "user");
+        await InDbAsync(async db =>
+        {
+            db.Memberships.Add(new Membership { UserId = userId, CompanyId = company, RoleId = roleId, JoinedAt = StorableTime.Now(Clock) });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return 0;
+        });
+    }
 }

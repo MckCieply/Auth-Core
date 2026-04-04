@@ -169,6 +169,104 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
+    public async Task Of_parallel_completions_for_an_account_without_a_company_exactly_one_is_200()   // criteria 12 and 24
+    {
+        var userId = await RemovedMemberAsync();
+        var token = await MailedAsync();
+
+        Task<HttpResponseMessage>[] requests;
+        await using (var held = await HoldAddressAsync("ANNA@FIRMA.TEST"))
+        {
+            requests = [.. Enumerable.Range(0, 6).Select(_ => SignupApi.CompleteWithoutPassword(Client, token, CompanyName))];
+            await WaitForWaitersAsync(6);
+            await held.ReleaseAsync();
+        }
+
+        var responses = await Task.WhenAll(requests);
+        try
+        {
+            Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.OK));
+            foreach (var refused in responses.Where(r => r.StatusCode != HttpStatusCode.OK))
+            {
+                await AccountApi.AssertErrorAsync(refused, AccountApi.InvalidToken);
+            }
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == CompanyName, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_comeback_and_an_invitation_acceptance_for_one_account_never_both_give_it_a_company(bool completionFirst)   // criterion 24: the 409 race
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var address = completionFirst ? "back-first@firma.test" : "invite-first@firma.test";
+        var normalized = address.ToUpperInvariant();
+        const string Name = "Firma Race";
+        var userId = await RemovedMemberAsync(address);
+        var signupToken = await MailedAsync(address, "Asked for");   // an account without a company gets the link
+        var invite = await AddInviteAsync(company, address, "user");
+        await EnqueueInvitationAsync(invite, address);
+        await DispatchAsync();
+        var inviteToken = TokenIn(Mail.Sent.Last(m => m.To == address));
+
+        // Both have done everything up to the lock of the address and wait for it, in the order the test names.
+        Task<HttpResponseMessage> complete;
+        Task<HttpResponseMessage> accept;
+        await using (var held = await HoldAddressAsync(normalized))
+        {
+            if (completionFirst)
+            {
+                complete = SignupApi.CompleteWithoutPassword(Client, signupToken, Name);
+                await WaitForWaitersAsync(1);
+                accept = TenancyApi.Accept(Client, inviteToken, "Invited-Passw0rd");
+            }
+            else
+            {
+                accept = TenancyApi.Accept(Client, inviteToken, "Invited-Passw0rd");
+                await WaitForWaitersAsync(1);
+                complete = SignupApi.CompleteWithoutPassword(Client, signupToken, Name);
+            }
+
+            await WaitForWaitersAsync(2);
+            await held.ReleaseAsync();
+        }
+
+        using var completed = await complete;
+        using var accepted = await accept;
+
+        if (completionFirst)
+        {
+            _ = await SessionApi.ReadSessionAsync(completed);
+            Assert.Equal(HttpStatusCode.Conflict, accepted.StatusCode);
+            Assert.Equal("""{"error":"already_member"}""", await accepted.Content.ReadAsStringAsync());
+            Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
+            _ = await SessionApi.LoginAsync(Client, address, UserPassword);   // the invitation did not touch the password
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+            await SignupApi.AssertAlreadyRegisteredAsync(completed);
+            Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
+            var login = await SessionApi.LoginAsync(Client, address, "Invited-Passw0rd");   // the acceptance set its password, as it does for any existing account
+            Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        }
+
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.DoesNotContain(await PendingAsync(), p => p.NormalizedEmail == normalized);
+    }
+
+    [Fact]
     public async Task A_mail_that_replaces_the_link_while_a_completion_waits_for_it_makes_the_completion_invalid_token()   // the dispatcher locks the pending sign-up
     {
         var first = await MailedAsync();

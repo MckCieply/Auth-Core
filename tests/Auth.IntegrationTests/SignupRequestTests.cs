@@ -139,6 +139,42 @@ public sealed class SignupRequestTests(PostgresFixture postgres, KeyMaterialFixt
         Assert.DoesNotContain(forKnown.Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task An_account_without_a_company_gets_the_same_status_headers_body_and_statements()   // criteria 4 and 24: the request still never reads the accounts
+    {
+        await RemovedMemberAsync("gone@firma.test");
+
+        var mark = Logs.Entries.Count;
+        using var withCompany = await SignupApi.Request(Client, Factory.SeedEmail, CompanyName);
+        var forCompany = StatementsSince(mark);
+
+        mark = Logs.Entries.Count;
+        using var withoutCompany = await SignupApi.Request(Client, "gone@firma.test", CompanyName);
+        var forNone = StatementsSince(mark);
+
+        mark = Logs.Entries.Count;
+        using var unknown = await SignupApi.Request(Client, "nobody@firma.test", CompanyName);
+        var forUnknown = StatementsSince(mark);
+
+        static List<string> OfTheRequest(List<string> statements) =>
+            [.. statements.Where(sql => !sql.StartsWith("DELETE", StringComparison.Ordinal)
+                && (sql.Contains("PendingSignups", StringComparison.Ordinal)
+                    || sql.Contains("MailRequest", StringComparison.Ordinal)
+                    || sql.Contains("audit_events", StringComparison.Ordinal)))];
+
+        foreach (var response in new[] { withCompany, withoutCompany, unknown })
+        {
+            await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
+            Assert.Equal(LoginApi.HeaderNames(withCompany), LoginApi.HeaderNames(response));
+        }
+
+        Assert.NotEmpty(OfTheRequest(forNone));
+        Assert.Equal(OfTheRequest(forCompany), OfTheRequest(forNone));
+        Assert.Equal(OfTheRequest(forUnknown), OfTheRequest(forNone));
+        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
+        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("Memberships", StringComparison.Ordinal));
+    }
+
     [Theory]
     [MemberData(nameof(MalformedBodies))]
     public async Task Malformed_bodies_are_400_invalid_request_and_queue_nothing(string body)   // criterion 5

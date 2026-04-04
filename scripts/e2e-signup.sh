@@ -17,7 +17,7 @@
 #   4. the mail arrives: the subject names the application and does not hold the company; the text and the HTML part hold the same
 #      link <complete_signup url>?token=<43 characters> and the company name; exactly one signup.requested row for NEW has been written
 #      since the run began - criteria 3, 21 (part of: Polish).
-#   5. preview with the token -> 200 with exactly the typed address and the company name, twice (it changes nothing); an unknown token
+#   5. preview with the token -> 200 with exactly the typed address, the company name and has_account false, twice (it changes nothing); an unknown token
 #      -> 400 invalid_token - part of criterion 8 (an expired token is step 11).
 #   6. complete with a weak password -> 400 weak_password naming the rules, no cookie, and the token still works; then with a good password
 #      and another company name -> 200 {"status":"authenticated","access_token"} and the auth_rt cookie (HttpOnly, Secure, SameSite=Strict,
@@ -372,14 +372,14 @@ pass "step 4: the mail arrived (the subject names the application and not the co
 
 # --- Step 5: the preview (criterion 8) --------------------------------------------------------------------------------
 call POST /auth/signup/preview "$tmp/preview.json"
-expect_status "step 5: preview" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
+expect_status "step 5: preview" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
 expect_no_store "step 5: preview"
 call POST /auth/signup/preview "$tmp/preview.json"
-expect_status "step 5: preview again" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
+expect_status "step 5: preview again" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
 "$PY" -c 'import json; print(json.dumps({"token": "x" * 43}))' > "$tmp/unknown-token.json"
 call POST /auth/signup/preview "$tmp/unknown-token.json"
 expect_error "step 5: preview of an unknown token" 400 invalid_token
-pass "step 5: preview -> 200 with exactly the typed address and the company name, twice; an unknown token -> 400 invalid_token"
+pass "step 5: preview -> 200 with exactly the typed address, the company name and has_account false, twice; an unknown token -> 400 invalid_token"
 
 # --- Step 6: the completion, which signs in (criteria 9, 11, 12) ------------------------------------------------------
 call POST /auth/signup/complete "$tmp/complete-weak.json"

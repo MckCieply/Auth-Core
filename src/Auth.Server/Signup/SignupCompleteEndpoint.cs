@@ -17,13 +17,15 @@ namespace Auth.Server.Signup;
 /// was on. The answer is that of a successful login (<c>200 {"status":"authenticated","access_token"}</c> and the refresh cookie): the endpoint is a
 /// pass-through request of OpenIddict (<see cref="SignupCompleteRequestHandler"/>), builds the principal the way the login does
 /// (<see cref="SessionPrincipal"/>) and returns an <see cref="AtomicSignInResult"/> that issues the session, writes <c>login.succeeded</c> and
-/// commits the transaction of the completion. If any of that fails, nothing of the completion stays.
+/// commits the transaction of the completion. If any of that fails, nothing of the completion stays. The password is an optional member of the
+/// body (Amendment 3): an account without a company needs none, and a password that is sent for it is not used.
 /// </summary>
 public static class SignupCompleteEndpoint
 {
     public const string Path = "/auth/signup/complete";
 
-    private static readonly string[] Fields = ["token", "password", "company_name"];
+    private static readonly string[] Required = ["token", "company_name"];
+    private static readonly string[] Optional = ["password"];
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, SignupGate gate, SignupService signup, MembershipReader memberships, IOptions<TokenOptions> tokens, TimeProvider clock)
@@ -47,18 +49,22 @@ public static class SignupCompleteEndpoint
             return ApiResults.Error(TenancyErrors.SignupDisabled);
         }
 
-        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Fields, http.RequestAborted);
-        if (fields is null || fields[1].Contains('\0') || !NameInput.IsValid(fields[2]))
+        // [token, company_name, password]: the password is null when it is not in the body; when it is, it is a non-blank string like the others.
+        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Required, Optional, http.RequestAborted);
+        if (fields is not [{ } linkToken, { } name, var password] || password?.Contains('\0') == true || !NameInput.IsValid(name))
         {
             return AccountResults.InvalidRequest();
         }
 
-        var done = await signup.CompleteAsync(fields[0], fields[1], fields[2], http.RequestAborted);
+        var done = await signup.CompleteAsync(linkToken, password, name, http.RequestAborted);
         if (!done.Succeeded)
         {
-            return done.Error == TenancyErrors.WeakPassword
-                ? AccountResults.WeakPassword(done.BrokenRules!)
-                : ApiResults.Error(done.Error!);
+            return done.Error switch
+            {
+                TenancyErrors.WeakPassword => AccountResults.WeakPassword(done.BrokenRules!),
+                TenancyErrors.InvalidRequest => AccountResults.InvalidRequest(),
+                _ => ApiResults.Error(done.Error!),
+            };
         }
 
         try

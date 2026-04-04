@@ -90,7 +90,7 @@ public static class MailTexts
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}' and kind '{kind}'."),
     };
 
-    /// <summary>The mail an address with an account gets when someone signs up with it (spec 0009 → Mails).</summary>
+    /// <summary>The mail an address gets when someone signs up with it and its account belongs to a company, or only looks like the typed address (spec 0009 → Mails, Amendment 3).</summary>
     public static AccountExistsText AccountExists(string locale) => locale switch
     {
         "en" => new AccountExistsText(

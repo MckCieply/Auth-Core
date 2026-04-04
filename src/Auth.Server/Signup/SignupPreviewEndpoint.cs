@@ -35,6 +35,6 @@ public static class SignupPreviewEndpoint
         var preview = await signup.PreviewAsync(fields[0], http.RequestAborted);
         return preview is null
             ? AccountResults.InvalidToken()
-            : ApiResults.Ok(new SignupPreviewResponse(preview.Email, preview.CompanyName));
+            : ApiResults.Ok(new SignupPreviewResponse(preview.Email, preview.CompanyName, preview.HasAccount));
     }
 }
