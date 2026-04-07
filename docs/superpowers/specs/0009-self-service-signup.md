@@ -95,12 +95,15 @@ body and run the same database statements. Which mail goes out is decided when t
 When the mail is sent:
 
 - **The address has an account that belongs to a company** (confirmed or not): the mail "you already
-  have an account" goes out. It has no link and no token; it says that someone, perhaps the reader, tried to sign up
-  with this address, that the account exists, and that the reader can sign in or use "forgot password" on the
-  product's sign-in screen. The pending sign-up is deleted.
+  have an account" goes out, to the address stored on the account. It has no link and no token; it says that someone,
+  perhaps the reader, tried to sign up with this address, that the account exists, and that the reader can sign in or
+  use "forgot password" on the product's sign-in screen. The pending sign-up is deleted.
 - **The address has an account without a company** (its company was deleted, or it was removed from it) and the
   pending sign-up still exists: the "complete your sign-up" mail goes out as for a new address (Amendment 3); the
-  link starts a company for that account. If the pending sign-up is gone, nothing is sent.
+  link starts a company for that account. If the pending sign-up is gone, nothing is sent. When the address stored on
+  that account only resembles the typed one (it differs beyond ASCII case, for example the micro sign and the Greek
+  mu, which the normaliser folds into one key), the mail "you already have an account" goes out instead, to the
+  stored address, and the pending sign-up is deleted: the link would end in `409` (Amendment 4).
 - **Otherwise**, if the pending sign-up still exists: a new link token is issued for it (the previous link of the
   address stops working), valid 24 hours from the sending, and the mail "complete your sign-up" goes out with the
   link `<CompleteSignup>?token=<43 characters>` and the company name.
@@ -362,13 +365,19 @@ Settled while fixing the findings of the final review; the contract above alread
    only when there is no account with the address.
 3. **Turning sign-up off drops the queued sign-up mails.** A sign-up mail that was queued while sign-up was on is not
    sent once it is off (nor when the completion address is no longer set); the request is dropped.
+4. **The "you already have an account" mail goes to the stored address, and also to a look-alike account.** Every such
+   mail is sent to the address stored on the account, never to the spelling the visitor typed. An account without a
+   company whose stored address only resembles the typed one (it differs beyond ASCII case) gets this mail and not
+   the link, because the link would end in `409` (item 2); the typed mailbox receives nothing. An account without a
+   company whose stored address is the typed one, apart from ASCII case, gets the link (Amendment 3).
 
 ## Verification notes (for the local verifiers)
 
 - Criteria 4 and 7 need the dispatcher run by hand (the `MailTestBase` pattern); criterion 13 a controlled clock;
   criteria 12 and 14 parallel requests; criterion 2 a host with the `v0.1.0` manifest and settings.
 - The e2e script and the Playwright test need sign-up on: `deploy/auth.yaml` and `samples/notes-api/auth.yaml`
-  turn it on, and the development settings and the sample's compose file set the completion address.
+  turn it on, and the development settings and `samples/notes-web/compose.yml` set the completion address
+  (`samples/notes-api` sets none and relies on the Development settings).
 
 ## To verify during implementation
 
