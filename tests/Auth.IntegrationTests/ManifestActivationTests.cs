@@ -227,5 +227,6 @@ public sealed class ManifestActivationTests(PostgresFixture postgres, KeyMateria
         Assert.False(state.IsDegraded, state.DegradedReason);
         Assert.Equal(["documents:read", "documents:write", "documents:approve"], state.Manifest.Permissions);
         Assert.Equal(["admin", "user"], state.Manifest.DefaultRoles.Select(r => r.Name));
+        Assert.Equal(SignupMode.SelfService, state.Manifest.Signup);
     }
 }

@@ -1,8 +1,8 @@
 namespace Auth.Server.Email;
 
 /// <summary>
-/// Runs <see cref="EmailPruner"/> at host start and then every <see cref="Interval"/>: the link tokens, the mail limits and
-/// the invitations. An expired invitation is gone within the day (spec 0005), and an hour is well inside that.
+/// Runs <see cref="EmailPruner"/> at host start and then every <see cref="Interval"/>: the link tokens, the mail limits, the
+/// invitations and the pending sign-ups (spec 0009). An expired invitation is gone within the day (spec 0005), and an hour is well inside that.
 /// </summary>
 public sealed partial class EmailPruningService(EmailPruner pruner, TimeProvider clock, ILogger<EmailPruningService> logger) : BackgroundService
 {
@@ -31,6 +31,7 @@ public sealed partial class EmailPruningService(EmailPruner pruner, TimeProvider
         {
             await pruner.PruneOnceAsync(stoppingToken);
             await pruner.PruneInvitesAsync(stoppingToken);
+            await pruner.PrunePendingSignupsAsync(stoppingToken);
         }
         catch (Exception) when (stoppingToken.IsCancellationRequested)
         {
@@ -43,6 +44,6 @@ public sealed partial class EmailPruningService(EmailPruner pruner, TimeProvider
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Pruning of link tokens, mail limits and invitations failed; it will run again at the next interval.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Pruning of link tokens, mail limits, invitations and pending sign-ups failed; it will run again at the next interval.")]
     private static partial void LogFailed(ILogger logger, Exception exception);
 }

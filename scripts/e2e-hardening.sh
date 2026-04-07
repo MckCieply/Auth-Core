@@ -29,7 +29,7 @@
 #   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, for the whole sequence: never "auth-core", the development stack
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
 #   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh
+#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh && scripts/e2e-signup.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d            # recreates auth with the defaults (AUTH_RATE_LIMIT_ENABLED unset)
 #   scripts/e2e-hardening.sh              # this script (does NOT bring the stack up or down; it stops and starts PostgreSQL)
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
@@ -286,11 +286,16 @@ psql_value() {
   printf '%s\n' "$1" | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'
 }
 
-# secret_in_audit <secret>: how many rows of the audit log hold the text in any column; the secret goes on stdin only
+# secret_in_audit <secret>: how many rows of the audit log hold the text in any column; the secret goes on stdin only.
+# psql echoes a failed query to its standard error, and the query holds the secret: that stream goes to a file that is never printed,
+# and a result that is not a number fails the run with a fixed message.
 secret_in_audit() {
+  local count
   [[ "$1" != *"'"* ]] || fail "a secret with a quote cannot be looked for"
-  printf "SELECT count(*) FROM audit_events WHERE position('%s' in (kind || ' ' || coalesce(subject_email, '') || ' ' || coalesce(org_name, '') || ' ' || coalesce(client_ip, '') || ' ' || coalesce(details::text, ''))) > 0;\n" "$1" \
-    | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA | tr -d '\r'
+  count="$(printf "SELECT count(*) FROM audit_events WHERE position('%s' in (kind || ' ' || coalesce(subject_email, '') || ' ' || coalesce(org_name, '') || ' ' || coalesce(client_ip, '') || ' ' || coalesce(details::text, ''))) > 0;\n" "$1" \
+    | "${compose[@]}" exec -T postgres psql -U auth -d auth -tA 2> "$tmp/psql.err" | tr -d '\r' || true)"
+  [[ "$count" =~ ^[0-9]+$ ]] || fail "the audit log could not be searched for a secret (the database answer is not a number)"
+  printf '%s\n' "$count"
 }
 
 # flood <method> <path> <times> [body]: one curl, the same request <times> times; the status of each is a line of $tmp/flood.codes

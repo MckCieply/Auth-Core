@@ -9,7 +9,10 @@ export function ruleText(rule: string): string {
   return Object.hasOwn(texts.reset.rules, rule) ? texts.reset.rules[rule] : texts.reset.ruleOther;
 }
 
-/** The rules a password did not meet, one line each. Shared by the reset and the invite screens: the same policy. */
+/**
+ * The rules a password did not meet, one line each. Shared by the reset, the invite and the complete-sign-up screens: the same
+ * policy.
+ */
 @Component({
   selector: 'app-password-rules',
   template: `

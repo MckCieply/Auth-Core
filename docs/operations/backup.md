@@ -27,7 +27,7 @@ does, and an object that stays with the superuser stops the next migration of Au
 | --- | --- | --- |
 | The database | the `postgres-data` volume | Accounts, companies, members, sessions, the audit log |
 | The key files | the directory named by `AUTH_KEYS_DIR` | Without the signing key every issued token is void; without the encryption key no session can be read. A restore needs the **same** keys |
-| The manifest | the file named by `AUTH_MANIFEST` | The product's permissions and default roles |
+| The manifest | the file named by `AUTH_MANIFEST` | The product's permissions, default roles and sign-up mode |
 | `.env` | next to your compose command | The passwords, the issuer and audience, the URLs |
 
 Nothing else of Auth-Core is state: the rate-limit counters are in memory and the Data Protection keys are in memory too.
@@ -161,13 +161,13 @@ auth_psql() { docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml
 and run a query by giving it on the standard input, `auth_psql <<'SQL'` followed by the query and a line `SQL`, or with `auth_psql -c "..."`.
 
 The columns: `occurred_at`, `kind`, `actor_user_id` (the account that acted; empty for the operator CLI, an anonymous request or a failed
-login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account), `org_id`, `org_name` (its name at that
+login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account; always as typed on `password.reset_requested` and `signup.requested`), `org_id`, `org_name` (its name at that
 moment), `target_id` (the role or invitation), `client_ip` (the whole address; empty for the operator CLI, `unknown` for a request that had none), `details` (a small JSON
 object). A row outlives the account, company, role or invitation it names. It never holds a password, a token, a link, a cookie or a mail
 body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted every hour; a row exactly that old is still there.
 
 What `details` holds, where it is set: `"via": "cli"` for the operator CLI, and `"via": "seed"` on the `org.created` row of the
-development seeder (Development only); `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
+development seeder (Development only), and `"via": "signup"` on the `org.created` row of a company a visitor started, and `"existing_account": true` on the `signup.completed` row of a person who came back with an account that had no company; `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
 `org.renamed`; `role` on `invite.sent`, `invite.resent`, `invite.accepted` and `invite.cancelled`; `name` and `permissions` on
 `role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed` and
 `org.delete_refused`; `retry_after_seconds` on `login.locked`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
@@ -241,7 +241,8 @@ WHERE kind = 'rate_limit.hit' AND occurred_at > now() - interval '1 day' GROUP B
 The kinds are: `login.succeeded`, `login.failed` (reason: `wrong_password`, `unknown_address`, `unconfirmed_address`, `no_company`), `login.locked`, `logout`,
 `refresh.reuse_detected`, `password.reset_requested`, `password.reset`, `email.verified`, `invite.sent`, `invite.resent`, `invite.accepted`,
 `invite.cancelled`, `member.removed`, `member.role_changed`, `role.created`, `role.updated`, `role.deleted`, `org.created`, `org.renamed`,
-`org.deleted`, `org.delete_refused` (reason: `wrong_password`, `locked`) and `rate_limit.hit` (at most one per address and policy per minute).
+`org.deleted`, `org.delete_refused` (reason: `wrong_password`, `locked`), `rate_limit.hit` (at most one per address and policy per minute), `signup.requested`
+(an accepted request: the address as typed) and `signup.completed` (the account, the company and the address).
 
 The address typed into a failed or locked login is kept as typed, and a person may have pasted a password into that field: treat the
 audit log, and a dump that holds it, as private.

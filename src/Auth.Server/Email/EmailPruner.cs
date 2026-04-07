@@ -6,8 +6,9 @@ namespace Auth.Server.Email;
 /// <summary>
 /// One pruning pass over the tables of spec 0004: link tokens that have expired, and mail-limit rows without an
 /// accepted request for <see cref="MailLimitPolicy.Window"/>, which the rules already treat as absent. Anyone can
-/// create a limit row by submitting an address, so rows must expire. Expired invitations (spec 0005) go in a method of
-/// their own, <see cref="PruneInvitesAsync"/>, which <see cref="EmailPruningService"/> runs in the same pass.
+/// create a limit row by submitting an address, so rows must expire. Expired invitations (spec 0005) and expired pending
+/// sign-ups (spec 0009) go in methods of their own, <see cref="PruneInvitesAsync"/> and <see cref="PrunePendingSignupsAsync"/>, which
+/// <see cref="EmailPruningService"/> runs in the same pass.
 /// </summary>
 public sealed partial class EmailPruner(IServiceScopeFactory scopes, TimeProvider clock, ILogger<EmailPruner> logger)
 {
@@ -42,9 +43,28 @@ public sealed partial class EmailPruner(IServiceScopeFactory scopes, TimeProvide
         return invites;
     }
 
+    /// <summary>
+    /// Removes the pending sign-ups whose time has passed (spec 0009): an unused link leaves nothing behind. A queued mail for a removed
+    /// one is dropped by the dispatcher. Returns the number removed.
+    /// </summary>
+    public async Task<int> PrunePendingSignupsAsync(CancellationToken cancellationToken)
+    {
+        var now = clock.GetUtcNow();
+
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var pending = await db.PendingSignups.Where(p => p.ExpiresAt <= now).ExecuteDeleteAsync(cancellationToken);
+
+        LogPrunedPendingSignups(logger, pending);
+        return pending;
+    }
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Pruned {Tokens} link token and {Limits} mail limit entries.")]
     private static partial void LogPruned(ILogger logger, int tokens, int limits);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Pruned {Invites} expired invitations.")]
     private static partial void LogPrunedInvites(ILogger logger, int invites);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Pruned {Pending} expired pending sign-ups.")]
+    private static partial void LogPrunedPendingSignups(ILogger logger, int pending);
 }

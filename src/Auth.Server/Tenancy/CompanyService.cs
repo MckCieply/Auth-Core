@@ -7,8 +7,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Auth.Server.Tenancy;
 
 /// <summary>
-/// Creates companies (spec 0005 → Concepts): only the operator does, through the CLI, and the development seeder. And renames
-/// one, for a member who may manage it.
+/// Creates companies (spec 0005 → Concepts): only the operator does, through the CLI, and the development seeder, and a self-service
+/// sign-up (spec 0009). And renames one, for a member who may manage it.
 /// </summary>
 public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
 {
@@ -16,7 +16,7 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
     /// Creates a company with its own copy of the active default roles. After that its roles are its own: a later
     /// change to the manifest does not touch them.
     /// </summary>
-    /// <param name="via">Who made it, for the audit log: <c>cli</c> for the operator, <c>seed</c> for the development seeder.</param>
+    /// <param name="via">Who made it, for the audit log: <c>cli</c> for the operator, <c>seed</c> for the development seeder, <c>signup</c> for a self-service sign-up.</param>
     public async Task<Outcome<Guid>> CreateAsync(string name, CancellationToken cancellationToken, string via = "cli")
     {
         ArgumentNullException.ThrowIfNull(name);

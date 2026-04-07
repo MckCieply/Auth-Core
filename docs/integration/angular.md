@@ -40,10 +40,10 @@ developer machine a session cannot survive a reload there. The sample's Caddyfil
 with a certificate from Caddy's own authority; a browser warns about it, and the end-to-end tests accept it. In production you have
 real HTTPS and this does not arise.
 
-## 2. Copy `src/app/auth/` and register the initializer, the interceptor and the guard
+## 2. Copy `samples/notes-web/src/app/auth/` and register the initializer, the interceptor and the guard
 
 Copy the three files of [`samples/notes-web/src/app/auth/`](../../samples/notes-web/src/app/auth/) into your app:
-`auth.service.ts` (the token, the session, `login`, `logout`, `refresh`), `auth.interceptor.ts` and `auth.guard.ts`. They depend on
+`auth.service.ts` (the token, the session, `login`, `completeSignup`, `logout`, `refresh`), `auth.interceptor.ts` and `auth.guard.ts`. They depend on
 nothing else of the sample. Register them in your application config
 ([`app.config.ts`](../../samples/notes-web/src/app/app.config.ts)):
 
@@ -75,7 +75,7 @@ How it behaves:
 - **Sign-in** is `await auth.login(email, password)`, which answers `{ ok: true }` or `{ ok: false, failure }`; on success go to
   `safeReturnUrl(returnUrl)` (the guard file exports it: it follows only a path of your own app, never `//host`, `https://host` or
   a slash written as `%2f`). Give the result to `router.navigateByUrl`, never to `location.href` or `window.open`.
-  See [`pages/login.ts`](../../samples/notes-web/src/app/pages/login.ts).
+  See [`pages/login.ts`](../../samples/notes-web/src/app/pages/login.ts). A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it). A person whose account exists and belongs to no company (the preview's `has_account`, spec 0009 Amendment 3) chooses no password: pass `null` as the password and the body holds the token and the company name only.
 - **Sign-out** is `await auth.logout()` and then `/login`; the token is dropped whatever the server answers
   ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
 - There is no refresh ahead of expiry: a token is renewed only after a `401`, which costs one extra request about every 10 minutes.
@@ -90,28 +90,32 @@ export const TOKEN_PATHS: readonly string[] = ['/auth/me'];
 ```
 
 Edit them to the paths of your own backend (`/api/` is the sample's). It never adds the token to another origin or to the other
-`/auth` endpoints (`/auth/login`, `/auth/refresh`, the mail-link endpoints), and a path that only looks like one after `..` is
-resolved does not count. [`src/app/auth/auth.interceptor.spec.ts`](../../samples/notes-web/src/app/auth/auth.interceptor.spec.ts)
+`/auth` endpoints (`/auth/login`, `/auth/refresh`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
+resolved does not count. [`samples/notes-web/src/app/auth/auth.interceptor.spec.ts`](../../samples/notes-web/src/app/auth/auth.interceptor.spec.ts)
 shows the cases.
 
 ## 4. Build the screens for the mail links, and point Auth-Core at them
 
-Auth-Core's mails carry a link to your app; you build the screens, it sends the mails. Four screens (three of them open from a mail
-link), and the three settings that say where the links go (`Auth:App:FrontendUrls:ResetPassword`, `VerifyEmail` and `AcceptInvite`; as environment variables
-`Auth__App__FrontendUrls__ResetPassword` and so on, see the `auth` service in
-[`compose.yml`](../../samples/notes-web/compose.yml)). Each link is that URL plus `?token=<43 characters>`. Outside Development the
-URLs must be `https`.
+Auth-Core's mails carry a link to your app; you build the screens, it sends the mails. Six screens (four of them open from a mail
+link), and the settings that say where the links go (`Auth:App:FrontendUrls:ResetPassword`, `VerifyEmail` and `AcceptInvite`, and, only if your
+product lets visitors start a company on their own, `CompleteSignup`; as environment variables `Auth__App__FrontendUrls__ResetPassword` and so on,
+see the `auth` service in [`compose.yml`](../../samples/notes-web/compose.yml)). Each link is that URL plus `?token=<43 characters>`. Outside Development the
+URLs must be `https`. Self-service sign-up is off until the product's manifest says `signup: self-service` **and** `CompleteSignup` is set
+([`docs/deployment/vps.md`](../deployment/vps.md)); the sign-in screen asks `GET /auth/options` and offers "Create an account" only when the answer
+is `{"signup":"self-service"}`, so a product does not repeat its manifest in its frontend.
 
 | Route | The screen | Calls |
 | --- | --- | --- |
 | `/reset?token=` | new password, twice; the rules it did not meet; "link used up" | `POST /auth/password/reset` |
 | `/verify?token=` | confirms on opening; a form to ask for a new link when it is used up | `POST /auth/email/verify`, `POST /auth/email/verify/request` |
 | `/invite?token=` | "Join {company} as {role}" and the email; the password, twice | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
+| `/signup` | email and company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` |
+| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice (not for a person whose account exists and has no company, which the preview says with `has_account`: the sentence that the password stays as it is takes the place of the fields, and the `password` member of the call may be left out; if it is sent it must be a non-empty string, and it is not used); the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 | `/forgot` | email; always the same answer | `POST /auth/password/forgot` |
 
-The screens are in [`src/app/pages/`](../../samples/notes-web/src/app/pages/); the calls are in
-[`src/app/account-api.ts`](../../samples/notes-web/src/app/account-api.ts); the words are all in
-[`src/app/texts.ts`](../../samples/notes-web/src/app/texts.ts), so that a product changes them (or translates them) in one place.
+The screens are in [`samples/notes-web/src/app/pages/`](../../samples/notes-web/src/app/pages/); the calls are in
+[`samples/notes-web/src/app/account-api.ts`](../../samples/notes-web/src/app/account-api.ts); the words are all in
+[`samples/notes-web/src/app/texts.ts`](../../samples/notes-web/src/app/texts.ts), so that a product changes them (or translates them) in one place.
 
 Three rules the sample follows, and you should too:
 
@@ -119,17 +123,17 @@ Three rules the sample follows, and you should too:
   history entry (`replaceUrl`, [`pages/token-from-url.ts`](../../samples/notes-web/src/app/pages/token-from-url.ts)), so it stays out of
   the browser's history, of what a person copies and of the router's own copy of the address (`router.url`). The navigation lands on the
   same route, so the router keeps the screen and it makes no second call. The page that is served has `Referrer-Policy: no-referrer` (step 6), so the token is not sent on as a
-  referrer either. The token stays in memory, so after a server error the verify and invite screens offer "Try again" with it: a reload
+  referrer either. The token stays in memory, so after a server error the verify, invite and complete-signup screens offer "Try again" with it: a reload
   would find no token in the address bar and call the link used up.
 - **Password rules are Auth-Core's.** A `weak_password` answer names the rules not met (`too_short`, `requires_upper`,
-  `requires_lower`, `requires_digit`); show one line each, and do not repeat the policy in your app. The reset and invite screens
+  `requires_lower`, `requires_digit`); show one line each, and do not repeat the policy in your app. The reset, invite and complete-signup screens
   share one list of lines, [`pages/password-rules.ts`](../../samples/notes-web/src/app/pages/password-rules.ts).
 - **Do not put an email in the URL.** After an invitation is accepted the sample opens `/login` with the address filled in, passed in
-  the router's navigation state.
+  the router's navigation state. The same holds after a sign-up is completed: the completion signs the person in (Auth-Core answers as it answers a login) and the screen opens the notes in place of itself, so the address is in no URL and no sign-in screen is shown; the password was chosen at the link, never on the sign-up form.
 
 **Mind the logs.** The address bar and the referrer are covered, but the request itself, `GET /reset?token=...`, still reaches your
 proxy and your web server, and most of them write the whole line to an access log, token included. Keep the proxy's and the server's
-access logs off for `/reset`, `/verify` and `/invite`, or have them scrub `token=` (the query string) from what they write, and keep any log
+access logs off for `/reset`, `/verify`, `/invite` and `/complete-signup`, or have them scrub `token=` (the query string) from what they write, and keep any log
 that does hold one as private as a password. A token is single-use and expires, but one that is still valid in a log is a way into
 someone's account. (The sample's Caddy writes no access log.)
 
@@ -155,7 +159,7 @@ already running goes on, and if it ends the session the person still goes to `/l
 The `403 permissions_changed` and `503 auth_unavailable` answers are what Auth-Core's company API and a product's backend (the Python
 package, for one) answer; see the specs [0005](../superpowers/specs/0005-tenancy-and-rbac.md) and
 [0006](../superpowers/specs/0006-python-consumer-package.md). The messages are drawn by the shell
-([`src/app/app.ts`](../../samples/notes-web/src/app/app.ts)) from `AuthService.notice()`; the bar has no timer.
+([`samples/notes-web/src/app/app.ts`](../../samples/notes-web/src/app/app.ts)) from `AuthService.notice()`; the bar has no timer.
 
 ## 6. Set the headers on the app's responses
 
@@ -172,7 +176,7 @@ The app's own responses (not `/auth` and `/api`, which set theirs) carry:
 Three things make that work, all in the sample:
 
 - `index.html` has `<app-root ngCspNonce="...">`, and the server writes the same nonce into that attribute and into the header
-  ([`src/index.html`](../../samples/notes-web/src/index.html)). The sample's Caddy does it with its `templates` directive and the
+  ([`samples/notes-web/src/index.html`](../../samples/notes-web/src/index.html)). The sample's Caddy does it with its `templates` directive and the
   request's own id ([`Caddyfile`](../../samples/notes-web/Caddyfile)). Note the backticks in the template inside the attribute: the
   Angular build rewrites double quotes there.
 - The build does not inline critical CSS, which would put an `onload` and a `<style>` into `index.html`
@@ -191,7 +195,7 @@ once on a real phone (iOS Safari and Android Chrome), because cookie handling di
 - [ ] Open the app and sign in. You land on the page you asked for (or the default page).
 - [ ] Reload the page. You are still signed in, and the sign-in screen does not flash.
 - [ ] Close the browser completely and open the app again. You are still signed in (the refresh cookie outlives the browser).
-- [ ] Open a link from a reset mail (and an invitation, and a verification mail). The screen opens and the address bar does not show
+- [ ] Open a link from a reset mail (and an invitation, a verification mail and a sign-up mail). The screen opens and the address bar does not show
   the token.
 - [ ] Sign out. A reload shows the sign-in screen.
 - [ ] Wait out the access token (10 minutes) with the page open, then do something that calls your API. You stay signed in: one
@@ -205,7 +209,7 @@ because tabs are not synchronised; and a token in memory can be read by script r
 
 ## The limits and an outage (spec 0008)
 
-Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for an invitation and 300 others a minute) and
+Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for invitation and sign-up link requests and 300 others a minute) and
 answers `429 {"error":"too_many_requests","retry_after_seconds":n}` with `Retry-After` when a limit is reached. The sample's interceptor
 shows "Try again in N s." for such an answer from any endpoint of your origin and **does not sign the person out**: only a `401 invalid_grant`
 from the refresh ends the session. During a database outage a refresh answers `503 temporarily_unavailable` with `Retry-After: 5` instead of

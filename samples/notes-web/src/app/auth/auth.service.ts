@@ -20,6 +20,9 @@ export type Failure =
   | { kind: 'invalid_token' }
   | { kind: 'weak_password'; rules: string[] }
   | { kind: 'already_member' }
+  | { kind: 'already_registered' }
+  | { kind: 'signup_disabled' }
+  | { kind: 'invalid_request' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
@@ -85,7 +88,23 @@ export function failureOf(error: unknown): Failure {
   if (error.status === 409 && code === 'already_member') {
     return { kind: 'already_member' };
   }
+  if (error.status === 409 && code === 'already_registered') {
+    return { kind: 'already_registered' };
+  }
+  if (error.status === 403 && code === 'signup_disabled') {
+    return { kind: 'signup_disabled' };
+  }
   return { kind: 'other' };
+}
+
+/**
+ * Like `failureOf`, for the sign-up forms: a `400 invalid_request` is a failure of its own there, because each of those screens has a text
+ * for it (the sign-in and the other mail-link screens read it as "other").
+ */
+export function formFailureOf(error: unknown): Failure {
+  return error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request'
+    ? { kind: 'invalid_request' }
+    : failureOf(error);
 }
 
 interface LoginBody {
@@ -166,6 +185,29 @@ export class AuthService {
     } catch (error) {
       return { ok: false, failure: failureOf(error) };
     }
+    return this.startSession(body);
+  }
+
+  /**
+   * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
+   * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
+   * the session that exists alone, as a failed login does. A person whose account exists and belongs to no company (the preview's
+   * `has_account`, Amendment 3) chooses no password: pass `null` and the member is left out of the body.
+   */
+  async completeSignup(token: string, password: string | null, companyName: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    const request =
+      password === null ? { token, company_name: companyName } : { token, password, company_name: companyName };
+    try {
+      body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/signup/complete', request));
+    } catch (error) {
+      return { ok: false, failure: formFailureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /** What a sign-in that Auth-Core answered with `200` does: a session of its own, and who it is for. */
+  private async startSession(body: LoginBody | null): Promise<LoginResult> {
     const token = body?.access_token;
     if (body?.status !== 'authenticated' || typeof token !== 'string' || token === '') {
       return { ok: false, failure: { kind: 'other' } };

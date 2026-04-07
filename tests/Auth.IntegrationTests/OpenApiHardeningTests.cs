@@ -61,7 +61,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(26, operations.Count);
+        Assert.Equal(30, operations.Count);
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -95,7 +95,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(17, covered);
+        Assert.Equal(20, covered);
     }
 
     [Fact]

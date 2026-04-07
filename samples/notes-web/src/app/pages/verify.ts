@@ -81,6 +81,8 @@ export class VerifyPage implements OnInit {
       this.info.set(this.common.verificationSent);
     } else if (result.failure.kind === 'too_many_attempts') {
       this.error.set(this.common.waitSeconds(result.failure.retryAfterSeconds));
+    } else if (result.failure.kind === 'too_many_requests') {
+      // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {
       this.error.set(this.common.somethingWrong);
     }

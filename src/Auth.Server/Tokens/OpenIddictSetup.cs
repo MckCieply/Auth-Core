@@ -2,6 +2,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
 using Auth.Server.Sessions;
+using Auth.Server.Signup;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
 using OpenIddict.Validation.AspNetCore;
@@ -12,8 +13,8 @@ public static class OpenIddictSetup
 {
     /// <summary>
     /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) and reference refresh tokens from the
-    /// password and refresh-token flows, the token endpoint at <c>auth/login</c> and <c>auth/refresh</c> in pass-through mode, and the JWKS
-    /// endpoint at <c>auth/.well-known/jwks.json</c>.
+    /// password and refresh-token flows, the token endpoint at <c>auth/login</c>, <c>auth/refresh</c> and <c>auth/signup/complete</c> in
+    /// pass-through mode, and the JWKS endpoint at <c>auth/.well-known/jwks.json</c>.
     /// Signing and encryption credentials come from the mounted <paramref name="keys"/>, never from a generated certificate.
     /// </summary>
     /// <param name="isDevelopment">
@@ -59,12 +60,13 @@ public static class OpenIddictSetup
                 options.SetIssuer(issuer)
                     .SetTokenEndpointUris(
                         JsonLoginRequestHandler.LoginPath.TrimStart('/'),
-                        RefreshRequestHandler.RefreshPath.TrimStart('/'))
+                        RefreshRequestHandler.RefreshPath.TrimStart('/'),
+                        SignupCompleteEndpoint.Path.TrimStart('/'))
                     .SetJsonWebKeySetEndpointUris("auth/.well-known/jwks.json")
                     // No discovery document: it is built from the Host header and is not part of the contract.
                     .SetConfigurationEndpointUris(Array.Empty<Uri>());
 
-                // The login endpoint is the password flow's one entry point; the refresh-token flow renews a session.
+                // The password flow serves the login and, as a placeholder request, the sign-up completion; the refresh-token flow renews a session.
                 options.AllowPasswordFlow()
                     .AllowRefreshTokenFlow()
                     .AcceptAnonymousClients();
@@ -82,6 +84,7 @@ public static class OpenIddictSetup
                 options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
                     .AddEventHandler(JsonLoginRequestHandler.Descriptor)
                     .AddEventHandler(RefreshRequestHandler.Descriptor)
+                    .AddEventHandler(SignupCompleteRequestHandler.Descriptor)
                     .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
 
                 // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an

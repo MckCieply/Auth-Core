@@ -89,7 +89,7 @@ public sealed class AuditTableTests(PostgresFixture postgres, KeyMaterialFixture
     }
 
     [Fact]
-    public void The_kinds_are_the_twenty_two_of_the_contract()
+    public void The_kinds_are_the_twenty_four_of_the_contract()
     {
         Assert.Equal(
             [
@@ -98,6 +98,7 @@ public sealed class AuditTableTests(PostgresFixture postgres, KeyMaterialFixture
                 "invite.sent", "invite.resent", "invite.accepted", "invite.cancelled",
                 "member.removed", "member.role_changed", "role.created", "role.updated", "role.deleted",
                 "org.created", "org.renamed", "org.deleted", "org.delete_refused", "rate_limit.hit",
+                "signup.requested", "signup.completed",
             ],
             AuditKinds.All);
         Assert.All(AuditKinds.All, kind => Assert.True(kind.Length <= 40));

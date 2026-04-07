@@ -3,7 +3,10 @@
 # permissions    what the product's code checks. The package guards GET /api/notes with notes:read and
 #                POST /api/notes with notes:write (src/notes_api/app.py).
 # default_roles  the roles every new company starts with a copy of. "*" stands for every permission of the catalog.
+# signup         "self-service": a visitor may start a company of their own (spec 0009) and is its first admin, with the first
+#                role that holds "*" (admin). The overlay of the web sample sets the address of the completion screen.
 permissions: [notes:read, notes:write]
+signup: self-service
 default_roles:
   admin:  ["*"]
   user:   [notes:read, notes:write]

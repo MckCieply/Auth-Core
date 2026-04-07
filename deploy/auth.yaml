@@ -5,9 +5,14 @@
 # default_roles  the roles every new company starts with a copy of. After that its roles are its own.
 #                "*" stands for every permission of the catalog. At least one default role must hold
 #                members:manage or "*", so that the first admin of a company can manage it.
+# signup         "self-service" lets a visitor start a company of their own (spec 0009): the first default role that holds "*",
+#                else the first that holds members:manage, is the role of its first admin. It also needs the address of the
+#                product's completion screen (Auth:App:FrontendUrls:CompleteSignup; AUTH_FRONTEND_SIGNUP_URL in production).
+#                "invite-only" (the default when the key is absent) means companies are made by the operator.
 #
 # A broken file never stops the service: the last valid manifest stays active and /auth/health says "Degraded".
 permissions: [documents:read, documents:write, documents:approve]
+signup: self-service
 default_roles:
   admin: ["*"]
   user: [documents:read, documents:write]

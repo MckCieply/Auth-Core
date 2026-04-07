@@ -70,7 +70,7 @@ public static class SessionApi
         return request;
     }
 
-    private static async Task<Session> ReadSessionAsync(HttpResponseMessage response)
+    public static async Task<Session> ReadSessionAsync(HttpResponseMessage response)
     {
         var raw = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.OK, $"Expected 200, got {(int)response.StatusCode}: {raw}");

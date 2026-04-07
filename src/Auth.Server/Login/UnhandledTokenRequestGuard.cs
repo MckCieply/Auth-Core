@@ -10,7 +10,8 @@ namespace Auth.Server.Login;
 /// token endpoint, so a token-endpoint request that no extraction handler claims would reach OpenIddict's following
 /// handlers with a <see langword="null"/> request and crash with a <c>500</c>. This handler turns that case into a
 /// <c>400 invalid_request</c> instead. Every flow's extraction handler (<see cref="Auth.Server.Sessions.RefreshRequestHandler"/>
-/// for <c>/auth/refresh</c>) must be ordered before it.
+/// for <c>/auth/refresh</c>, <see cref="Auth.Server.Signup.SignupCompleteRequestHandler"/> for <c>/auth/signup/complete</c>) must be
+/// ordered before it.
 /// </summary>
 public sealed class UnhandledTokenRequestGuard : IOpenIddictServerHandler<OpenIddictServerEvents.ExtractTokenRequestContext>
 {

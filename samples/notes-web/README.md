@@ -1,7 +1,7 @@
 # notes-web: the Angular sample
 
 A small Angular 21 app over the [notes sample](../notes-api/): sign in, keep the session on reload, reset a forgotten
-password, confirm an email and join a company from an invitation, and read and add the company's notes. It is the first
+password, confirm an email and join a company from an invitation, start a company of their own, and read and add the company's notes. It is the first
 frontend of Auth-Core ([spec 0007](../../docs/superpowers/specs/0007-angular-sample.md)). Its sign-in pieces are written to be
 copied into a product: see [`docs/integration/angular.md`](../../docs/integration/angular.md).
 
@@ -9,8 +9,8 @@ copied into a product: see [`docs/integration/angular.md`](../../docs/integratio
 
 ```
 src/app/auth/       auth.service.ts, auth.interceptor.ts, auth.guard.ts   (the pieces a product copies)
-src/app/pages/      login, forgot, reset, verify, invite, notes           (the screens)
-src/app/account-api.ts   the calls of the mail-link screens
+src/app/pages/      login, forgot, reset, verify, invite, signup, complete-signup, notes   (the screens)
+src/app/account-api.ts   the calls of the mail-link screens, of the sign-up form and of `GET /auth/options`
 src/app/texts.ts    every text the person sees, in one file (English)
 e2e/                Playwright tests (Chromium and WebKit)
 proxy.conf.json     ng serve: /auth and /api go to the stack on :8088
@@ -32,13 +32,13 @@ docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f 
 Open `http://localhost:8088` and sign in as the development user of your `.env`. The same app is on
 `https://localhost:8443` with a certificate from Caddy's own authority: a browser warns, because it does not trust it. WebKit
 (Safari's engine) needs that address: it keeps Auth-Core's `Secure` refresh cookie but does not send it back over plain HTTP.
-Mails (reset, verification, invitation) are in the mail catcher at `http://localhost:8025`; their links open this app.
+Mails (reset, verification, invitation, sign-up) are in the mail catcher at `http://localhost:8025`; their links open this app.
 
 ## Work on the screens
 
 `ng serve` on `http://localhost:4200` with a proxy for `/auth` and `/api` to the stack on `:8088`, so the browser sees one
-origin and the cookie works in Chrome. The mail links point at `:8088`; change the three `FrontendUrls` in
-`compose.yml` if you want them to open the dev server. Under `ng serve` the nonce in `src/index.html` stays a literal
+origin and the cookie works in Chrome. The mail links point at `:8088`; change the four `FrontendUrls` in
+`compose.yml` if you want them to open the dev server. Under `ng serve` the nonce in `samples/notes-web/src/index.html` stays a literal
 template and no Content-Security-Policy is set: that is the dev server, not a bug.
 
 ```bash
@@ -102,4 +102,4 @@ the sign-in pieces should install a fixed release of its own.
 - `scripts/e2e-web.sh` removes `test-results/` (screenshots of failed tests show the page) when it ends; `E2E_KEEP_RESULTS=1` keeps it.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.
-- There is no PWA, no sign-up and no screen for company admins; see the deferred list of the spec.
+- There is no PWA and no screen for company admins; see the deferred list of the spec. Sign-up (`/signup` and `/complete-signup`) works only while Auth-Core has it on: the manifest says `signup: self-service` and the completion address is set; finishing a sign-up signs the person in and opens the notes.

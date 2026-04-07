@@ -4,10 +4,16 @@ namespace Auth.Server.Email;
 
 /// <summary>
 /// The texts of one mail. <see cref="Subject"/> and <see cref="Intro"/> hold <c>{0}</c> for the application name; an
-/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company and <c>{2}</c> for the role. Those two are
-/// set by members, so no subject uses them: nothing a member typed goes into a mail header.
+/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company and <c>{2}</c> for the role, and a sign-up's <c>{1}</c> for the company.
+/// People type those (members, or a visitor signing up), so no subject uses them: nothing a person typed goes into a mail header.
 /// </summary>
 public sealed record MailText(string Subject, string Greeting, string Intro, string Button, string Validity, string LinkHint, string Ignore);
+
+/// <summary>
+/// The texts of the mail "you already have an account" (spec 0009). It has no link and no button: <see cref="Subject"/>, <see cref="Intro"/>
+/// and <see cref="SignInHint"/> hold <c>{0}</c> for the application name. Nothing a visitor typed goes into it.
+/// </summary>
+public sealed record AccountExistsText(string Subject, string Greeting, string Intro, string SignInHint, string Ignore);
 
 /// <summary>
 /// The mail texts, Polish and English. Plain tables rather than <c>.resx</c> satellites: the container image runs
@@ -65,6 +71,40 @@ public static class MailTexts
             Validity: "Link jest ważny przez 7 dni i działa jeden raz.",
             LinkHint: "Jeśli przycisk nie działa, skopiuj ten adres do przeglądarki:",
             Ignore: "Jeśli nie spodziewałeś się tego zaproszenia, zignoruj tę wiadomość. Nic się nie zmieni, dopóki link nie zostanie użyty."),
+        ("en", MailKind.Signup) => new MailText(
+            Subject: "Complete your sign-up for {0}",
+            Greeting: "Hello,",
+            Intro: "Someone asked to create the company {1} on {0} with this email address. If it was you, use the link below to finish signing up.",
+            Button: "Finish signing up",
+            Validity: "The link is valid for 24 hours and works once.",
+            LinkHint: "If the button does not work, copy this address into your browser:",
+            Ignore: "If you did not ask for this, you can ignore this message. Nothing changes until the link is used."),
+        ("pl", MailKind.Signup) => new MailText(
+            Subject: "Dokończ rejestrację w {0}",
+            Greeting: "Dzień dobry,",
+            Intro: "Ktoś, podając ten adres e-mail, poprosił o utworzenie firmy {1} w {0}. Jeśli to Ty, użyj poniższego linku, aby dokończyć rejestrację.",
+            Button: "Dokończ rejestrację",
+            Validity: "Link jest ważny przez 24 godziny i działa jeden raz.",
+            LinkHint: "Jeśli przycisk nie działa, skopiuj ten adres do przeglądarki:",
+            Ignore: "Jeśli to nie Ty, zignoruj tę wiadomość. Nic się nie zmieni, dopóki link nie zostanie użyty."),
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}' and kind '{kind}'."),
+    };
+
+    /// <summary>The mail an address gets when someone signs up with it and its account belongs to a company, or only looks like the typed address (spec 0009 → Mails, Amendment 3).</summary>
+    public static AccountExistsText AccountExists(string locale) => locale switch
+    {
+        "en" => new AccountExistsText(
+            Subject: "You already have an account on {0}",
+            Greeting: "Hello,",
+            Intro: "Someone, perhaps you, tried to sign up for {0} with this email address. An account with this address already exists, so no new account was made.",
+            SignInHint: "To use your account, sign in on the sign-in screen of {0}. If you forgot your password, use \"forgot password\" on that screen to choose a new one.",
+            Ignore: "If it was not you, you can ignore this message. Nothing has changed."),
+        "pl" => new AccountExistsText(
+            Subject: "Masz już konto w {0}",
+            Greeting: "Dzień dobry,",
+            Intro: "Ktoś, być może Ty, próbował zarejestrować się w {0}, podając ten adres e-mail. Konto z tym adresem już istnieje, więc nie utworzono nowego.",
+            SignInHint: "Aby skorzystać ze swojego konta, zaloguj się na ekranie logowania {0}. Jeśli nie pamiętasz hasła, skorzystaj na tym ekranie z opcji ustawienia nowego hasła.",
+            Ignore: "Jeśli to nie Ty, zignoruj tę wiadomość. Nic się nie zmieniło."),
+        _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
     };
 }

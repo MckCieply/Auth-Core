@@ -1,6 +1,6 @@
 namespace Auth.Server.Audit;
 
-/// <summary>The kinds of the audit log (spec 0008 → Audit log). The names are the contract's; the runbook queries them.</summary>
+/// <summary>The kinds of the audit log (spec 0008 and spec 0009 → Audit log). The names are the contract's; the runbook queries them.</summary>
 public static class AuditKinds
 {
     public const string LoginSucceeded = "login.succeeded";
@@ -25,6 +25,8 @@ public static class AuditKinds
     public const string OrgDeleted = "org.deleted";
     public const string OrgDeleteRefused = "org.delete_refused";
     public const string RateLimitHit = "rate_limit.hit";
+    public const string SignupRequested = "signup.requested";
+    public const string SignupCompleted = "signup.completed";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -33,5 +35,6 @@ public static class AuditKinds
         InviteSent, InviteResent, InviteAccepted, InviteCancelled,
         MemberRemoved, MemberRoleChanged, RoleCreated, RoleUpdated, RoleDeleted,
         OrgCreated, OrgRenamed, OrgDeleted, OrgDeleteRefused, RateLimitHit,
+        SignupRequested, SignupCompleted,
     ];
 }

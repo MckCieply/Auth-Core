@@ -44,6 +44,7 @@ export const texts = {
     wrongCredentials: 'Wrong email or password.',
     notVerified: 'Your email address is not confirmed yet.',
     noMembership: 'Your account does not belong to a company.',
+    createAccount: 'Create an account',
     tooManyAttempts: (seconds: number): string =>
       `Too many attempts. Try again in ${counted(minutesFrom(seconds), 'minute', 'minutes')}.`,
   },
@@ -84,6 +85,30 @@ export const texts = {
     alreadyMember: 'This account already belongs to a company.',
     // Not the link texts of the other screens: a person cannot get a new invitation from this app, only from the company.
     invalid: 'This invitation has expired or was already used. Ask for a new one.',
+  },
+
+  signup: {
+    title: 'Create an account',
+    intro: 'Enter your email address and the name of your company. We will send you a link to finish.',
+    companyName: 'Company name',
+    submit: 'Create account',
+    // The same sentence for every address: the answer must not tell whether the address has an account.
+    sent: 'Check your inbox. We sent a message to this address.',
+    closed: 'Sign-up is closed. Ask the company you want to join for an invitation.',
+    invalidRequest: 'Check the email address and the company name.',
+  },
+
+  completeSignup: {
+    title: 'Finish creating your account',
+    loading: 'Opening your sign-up...',
+    setsPassword: (email: string): string => `This sets the password for ${email}.`,
+    // The account exists and belongs to no company (its company was deleted, or the person was removed from it): only the company is new.
+    keepsPassword: (email: string): string => `You already have an account as ${email}. Its password stays as it is; only the company is new.`,
+    submit: 'Create company',
+    signUpAgain: 'Sign up again',
+    alreadyRegistered: 'An account with this address already exists.',
+    companyRequired: 'Enter the name of your company.',
+    invalidRequest: 'Check the company name.',
   },
 
   notes: {

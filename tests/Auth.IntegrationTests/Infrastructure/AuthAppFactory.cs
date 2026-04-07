@@ -55,6 +55,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.ResetPasswordUrlKey] = DefaultResetUrl;
         _settings[MailSettingsLoader.VerifyEmailUrlKey] = DefaultVerifyUrl;
         _settings[MailSettingsLoader.AcceptInviteUrlKey] = DefaultInviteUrl;
+        // Blank, like the three above: the Development settings file the test host reads would otherwise turn the address on in every
+        // test, and a variable of the machine would change what a test sees. A test that wants sign-up on uses WithSignup().
+        _settings[MailSettingsLoader.CompleteSignupUrlKey] = "";
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
@@ -101,10 +104,14 @@ public class AuthAppFactory : WebApplicationFactory<Program>
           user: [reports:read, reports:approve]
         """;
 
+    /// <summary>The default manifest with <c>signup: self-service</c>.</summary>
+    public const string SelfServiceManifest = DefaultManifest + "\nsignup: self-service\n";
+
     public const string DefaultAppName = "Auth-Core Test";
     public const string DefaultResetUrl = "https://app.example.com/reset";
     public const string DefaultVerifyUrl = "https://app.example.com/verify";
     public const string DefaultInviteUrl = "https://app.example.com/invite";
+    public const string DefaultCompleteSignupUrl = "https://app.example.com/complete-signup";
     public const string DefaultFrom = "no-reply@example.com";
 
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
@@ -136,6 +143,13 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     {
         File.WriteAllText(ManifestPath, yaml);
         return this;
+    }
+
+    /// <summary>Turns sign-up on: the manifest says <c>signup: self-service</c> and the completion address is set. Call it before the host is built.</summary>
+    public AuthAppFactory WithSignup()
+    {
+        WithManifest(SelfServiceManifest);
+        return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
 
     /// <summary>Removes the manifest file, as if the product had not shipped one.</summary>
