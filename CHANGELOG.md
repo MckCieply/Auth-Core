@@ -32,6 +32,10 @@ instance that does not turn it on behaves as `0.1.0`.
 - The per-IP limits count `POST /auth/signup` against the mail policy and `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy.
 - The guides, the threat model (residual risk 46: sign-up mails any well-formed address) and the audit runbook describe the feature.
 
+### Fixed
+
+- **The sample no longer says "Something went wrong" on a per-IP `429`.** On the forgot-password, reset-password, verify and invitation screens of `samples/notes-web`, a `429 too_many_requests` (the per-IP limit) showed "Something went wrong" under the wait bar; now only the wait bar is shown (the invitation screen keeps its "Try again" button). The screens that already handled the per-address `429` are unchanged.
+
 ### Upgrading
 
 A new migration adds the table `PendingSignups`; the service applies it at start. Nothing else is required: without the manifest key and the address, sign-up is off and no

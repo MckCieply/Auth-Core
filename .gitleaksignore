@@ -3,3 +3,21 @@
 # file:rule:line, which matches in every commit (a commit's own hash would break whenever the history is rewritten).
 samples/notes-web/src/app/pages/invite.spec.ts:generic-api-key:65
 docs/superpowers/plans/0007-angular-sample.md:generic-api-key:3859
+# Spec 0009 (self-service sign-up): twelve more, all rule generic-api-key and all a throw-away test password (Invited-Passw0rd, Joined-Passw0rd) in a test of the
+# service or of the Angular sample and in the plan that wrote them. Not a secret of any system. Same fingerprint form: file:rule:line.
+tests/Auth.IntegrationTests/SignupCompleteRaceTests.cs:generic-api-key:135
+tests/Auth.IntegrationTests/SignupCompleteRaceTests.cs:generic-api-key:139
+tests/Auth.IntegrationTests/SignupCompleteRaceTests.cs:generic-api-key:232
+tests/Auth.IntegrationTests/SignupCompleteRaceTests.cs:generic-api-key:236
+tests/Auth.IntegrationTests/SignupCompleteTests.cs:generic-api-key:234
+tests/Auth.IntegrationTests/SignupDispatchTests.cs:generic-api-key:367
+samples/notes-web/src/app/pages/too-many-requests.spec.ts:generic-api-key:96
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:3423
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4223
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4448
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:9865
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:9869
+# The same three plan lines where they stand in the plan as it is today (the plan was edited after they were first committed), for the scan of the files.
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:3430
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4230
+docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4455
