@@ -345,6 +345,10 @@ a provider to it.
 | 0011  | GitHub; listing, linking and unlinking providers; accounts without a password; sample settings screen    | A person manages their linked logins                             |
 | 0012  | Threat model, guides and runbooks for the new flows; release                                             | `v0.2.0` tagged                                                  |
 
+*As built (spec 0009):* built as described above. Sign-up needs the manifest key and `AUTH_FRONTEND_SIGNUP_URL`; without the
+address it stays off and health says `Degraded`. `GET /auth/options` tells a product's screens whether to offer it. An address
+typed in a look-alike spelling never takes over an account or an earlier link; what remains is in the threat model (risk 47).
+
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
 per user, and any provider beyond the three.
 

@@ -388,3 +388,56 @@ Settled while fixing the findings of the final review; the contract above alread
 - The EF migration that adds the table.
 - The order of checks in the completion (token, then account, then password; Amendment 4) and the lock that invitation
   acceptance uses.
+
+## As built (owner, 2026-04-07)
+
+Recorded after implementation, the final review and local verification (plan 0009 with Tasks 14 to 17,
+[acceptance map](../plans/0009-acceptance-map.md)). What entered this stage stays in it; this section records
+it rather than rewriting the contract above. Where a sentence above and this section differ, this section is how
+the software behaves.
+
+**Contract as built.** As specified, with these readings:
+
+- **Amendment 4 holds in full**, in four points: a look-alike spelling voids the earlier link (item 1); at the
+  completion the account decides before the password (item 2); queued sign-up mails are dropped once sign-up is
+  off (item 3); the "you already have an account" mail goes to the stored address, also for a look-alike account
+  without a company (item 4).
+- **A missing `password`** is `400 invalid_request` only for an address without an account, after the token and the
+  account have been checked and with the token still usable; an unknown token without a password is
+  `400 invalid_token`. The two-times rule of "Pending sign-ups" is Amendment 1, item 2 (the section cites
+  Amendment 2).
+- **Residual risk 47 is accepted** (threat model): spellings that the normaliser folds into one key (the micro sign
+  and the Greek mu, the two sigmas) can be held by whoever signs up first; the owner of the other spelling can
+  neither sign up nor be invited, and the first holder gains no access to anything of theirs. Such mailboxes are
+  practically nonexistent, and refusing the characters would lock out the same people.
+- **The sample's older mail-link screens** (forgot password, reset, verify and invitation) show only the wait bar on a
+  per-IP `429`, no longer "Something went wrong"; the invitation screen keeps its "Try again". A fault found in
+  review, fixed in this stage and named in the changelog; it is not part of the contract.
+- **`scripts/e2e-prod.sh` sets the completion address**, so no e2e stack runs the `v0.1.0` configuration any more;
+  tests hold it (`ShippedConfigurationTests`, `UpgradeFromV010Tests`).
+- **Options.** `GET /auth/options` says `self-service` only when the manifest says so and the completion address
+  is set, so a screen never offers a sign-up that would answer `403`.
+- **Pending sign-ups** are rows of a table of their own, one per address, never accounts; an unused one expires
+  24 hours after its latest request (or its link's mail, if later) and the hourly clean-up removes it.
+- **The first admin** gets the first default role holding `*`, else the first holding `members:manage`.
+- **No CAPTCHA.** A request is limited per address (one a minute, five an hour), per IP (the mail policy) and by the
+  invitation address rule; the preview and the completion count against the invitation policy. What remains
+  (sign-up mails any well-formed address) is residual risk 46 of the threat model.
+- **The completion address is optional.** A product that never sets it sees no change: sign-up stays off, and with
+  `self-service` in the manifest the start warns and health says `Degraded`.
+
+**Plan departures** (the real files win over the plan's text, as its own notes say):
+
+- **Task order.** Tasks 14 and 15 (the completion signs in) and Tasks 16 and 17 (a person without a company comes
+  back) were added by plan amendments after Task 12; the order built is 12, 14, 15, 16, 17, 13, so that the guides of
+  Task 13 describe the finished sign-up.
+- **`OpenApiHardeningTests`**: the operation count and the count of operations the charset guard covers were
+  raised in each task that added a guarded `POST` (26 to 30 and 17 to 20 in all); the plan did not list them.
+- **The order of the checks in the completion**: the plan's text keeps the order token, password, account where its
+  header note says so (the test code of Task 8); the code and the test
+  `The_order_of_the_checks_is_token_then_account_then_password` follow Amendment 4.
+
+**Verified** on 2026-04-04 (final review) and 2026-04-07 (three verifiers: realization, end to end on a live stack,
+security; two rounds); the log is in the acceptance map. Live: all e2e scripts of specs 0001 to 0009 including
+`scripts/e2e-signup.sh`, the production compose, and the sample's Playwright tests (47 of 47 in Chromium and in
+WebKit). The secret scan is clean (the history and the files not committed yet).
