@@ -321,8 +321,8 @@ An account that loses its only space is deleted, and its address is free. This h
 | A private person deletes their account | `204` | `account.deleted` with `details.reason` `self` |
 | At upgrade, once per account without a membership | — | `account.deleted` with `details.reason` `upgrade` |
 
-- Rows written in one transaction carry the same time. The contract names no order among them; tests count the rows
-  and do not sort them.
+- These rows are written in the same transaction as the change. The contract names no order among them and no time
+  they share; tests count the rows and do not sort them.
 - The admin who deletes a company is a member too: their account goes with the others.
 - A removed or deleted person's access token gets `403 permissions_changed` at once at `/auth/me` and at every company
   endpoint whose permission the token claims (one that needs no permission included). An endpoint that needs a
@@ -686,8 +686,8 @@ Found while planning; the contract above already reads this way.
    deleted. Self-deletion reads the membership again under the lock.
 4. **The deletion routine deletes queued mail requests before the pending sign-up.** The mail sender locks them in
    that order; the other order can deadlock.
-5. **No order among audit rows of one transaction.** They share a time. The table says "and", not "then"; tests count
-   the rows.
+5. **No order among audit rows of one transaction.** They are written in the same transaction; no equal time is
+   claimed. The table says "and", not "then"; tests count the rows.
 6. **A blank `password` is `400 invalid_request`**, as the body reader already does. The general rules, sign-up
    completion, invitation acceptance and `DELETE /auth/account` say so.
 7. **A personal space's token is refused on every company endpoint**, `GET /auth/org` included: it needs no
