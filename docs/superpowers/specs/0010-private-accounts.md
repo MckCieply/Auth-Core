@@ -84,6 +84,8 @@ curl -i -X POST .../auth/login -d '{"email":"ola@poczta.test","password":"<p>"}'
 - **Organization sign-up is on** when the manifest says `signup: self-service` and the completion address
   (`Auth:App:FrontendUrls:CompleteSignup`) is set, as in spec 0009. **Private sign-up is on** when the manifest says
   `private.signup: self-service` and the same address is set. The two switches are independent.
+- **A blank `password`** (empty, or only white space) is `400 invalid_request`, like one that is not a string or holds
+  NUL. The body reader refuses it, as it does today at sign-up completion, invitation acceptance and `DELETE /auth/org`.
 
 ### Spaces
 
@@ -186,7 +188,7 @@ Both mails keep the rules of spec 0004: the instance's locale, HTML and text par
 
 1. Both switches off: `403 signup_disabled` before the body is read.
 2. A body that is not a JSON object; a `token` that is missing or not a string; a `password` that is present and not a
-   string or holds NUL; a `company_name` that is present and breaks the name rule: `400 invalid_request`.
+   string, is blank or holds NUL; a `company_name` that is present and breaks the name rule: `400 invalid_request`.
 3. A token that is unknown, used, expired or replaced: `400 invalid_token`.
 4. The switch of the pending sign-up's kind is off: `403 signup_disabled`.
 5. **Organization:** no `company_name`: `400 invalid_request`. **Private:** a `company_name`: `400 invalid_request`.
@@ -234,7 +236,9 @@ The access token gains one claim:
 ### The company API and the operator CLI
 
 - Every endpoint under `/auth/org` answers a caller whose space is personal, read from the database, with
-  `403 {"error":"forbidden"}`, whatever the token says. `GET /auth/me` stays open to every account.
+  `403 {"error":"forbidden"}`, whatever the token says. This holds also for an endpoint that needs no permission
+  (`GET /auth/org`): a check on permissions alone would let a personal account through. `GET /auth/me` stays open to
+  every account.
 - The CLI hides personal spaces: `list-orgs` does not list them, and `invite`, `remove-member` and `delete-org` given
   the id of one answer `error: not_found`.
 
@@ -267,7 +271,7 @@ company member: `409 already_member`, as before. Unknown, used, expired, cancell
 **`POST /auth/invites/accept` — `{"token", "password"?, "leave_private_account"?}`.** The checks, in this order:
 
 1. A body that is not a JSON object; a `token` that is missing or not a string; a `password` that is present and not
-   a string or holds NUL; a `leave_private_account` that is present and not a JSON boolean: `400 invalid_request`.
+   a string, is blank or holds NUL; a `leave_private_account` that is present and not a JSON boolean: `400 invalid_request`.
 2. Unknown, used, expired, cancelled, replaced or look-alike: `400 invalid_token`.
 3. The address belongs to a company member: `409 already_member`; the invitation stays usable.
 4. The address has a private account and `leave_private_account` is not `true`: `409
@@ -286,14 +290,15 @@ exist. As at sign-up, a missing `password` with an unknown token is now `400 inv
 ### `DELETE /auth/account` — `{"password"}`
 
 Authenticated with the access token. Only for a private account. The checks, in this order, mirror `DELETE /auth/org`
-(spec 0008):
+(spec 0008). The token's `org_kind` is judged first, against the database: an account that moved to a company is the
+case where the frontend must refresh, so it never reads as `forbidden`.
 
 | Answer | When |
 | --- | --- |
 | `401` | no token, or an invalid or expired one, as on the company API |
-| `403 forbidden` | the caller's space, read from the database, is a company: company accounts are managed by their admins |
-| `403 permissions_changed` | the token says `org_kind` `personal` but the database no longer does (the account moved or is gone) |
-| `400 invalid_request` | the body is not a JSON object, or `password` is missing, not a string, or holds NUL |
+| `403 permissions_changed` | the token says `org_kind` `personal` but the database does not show a personal space for the account (it moved to a company, or is gone); also an account with no membership whose token carries an `org_id` |
+| `403 forbidden` | the token does not say `personal` and the caller's space, read from the database, is a company: company accounts are managed by their admins; also an account with no membership and no `org_id` in the token |
+| `400 invalid_request` | the body is not a JSON object, or `password` is missing, not a string, blank or holds NUL |
 | `429 too_many_attempts` | the caller's identifier is locked (spec 0003), with `retry_after_seconds` |
 | `403 wrong_password` | the password is wrong; this counts in the login streak as a failed login does |
 | `204` | the account is deleted; the answer clears the refresh cookie as logout does |
@@ -311,27 +316,33 @@ An account that loses its only space is deleted, and its address is free. This h
 
 | When | Answer | Audit, in the same transaction |
 | --- | --- | --- |
-| An admin removes a member (API or `remove-member`) | unchanged, `204` | `member.removed`, then `account.deleted` with `details.reason` `member_removed` |
-| A company is deleted (`DELETE /auth/org` or `delete-org`) | unchanged, `204` | `account.deleted` with `details.reason` `org_deleted` for every member, then `org.deleted` |
+| An admin removes a member (API or `remove-member`) | unchanged, `204` | `member.removed` and `account.deleted` with `details.reason` `member_removed` |
+| A company is deleted (`DELETE /auth/org` or `delete-org`) | unchanged, `204` | `account.deleted` with `details.reason` `org_deleted` for every member, and `org.deleted` |
 | A private person deletes their account | `204` | `account.deleted` with `details.reason` `self` |
 | At upgrade, once per account without a membership | — | `account.deleted` with `details.reason` `upgrade` |
 
+- Rows written in one transaction carry the same time. The contract names no order among them; tests count the rows
+  and do not sort them.
 - The admin who deletes a company is a member too: their account goes with the others.
-- A removed or deleted person's access token gets `403 permissions_changed` at `/auth/me` and the company API at once;
-  their next refresh is `401 invalid_grant`; a login is the `401` of an unknown address (spec 0001). An invitation to
+- A removed or deleted person's access token gets `403 permissions_changed` at once at `/auth/me` and at every company
+  endpoint whose permission the token claims (one that needs no permission included). An endpoint that needs a
+  permission the token never claimed answers `403 forbidden`, as today (spec 0005). Their next refresh is `401 invalid_grant`; a login is the `401` of an unknown address (spec 0001). An invitation to
   the address later creates a new account; so does a sign-up.
 - `403 no_membership` at login (spec 0005) stays, as a safeguard for an account that should not exist.
 
 ### What an account deletion removes
 
-One routine serves the four places. Under the address lock that sign-up completion and invitation acceptance take, in
-the caller's transaction, it deletes:
+One routine serves the four places. It runs in the caller's transaction, under the locks of "Locks" below, and deletes:
 
 - the account, with what the identity tables hold for it (its linked logins, claims and stored tokens);
 - its membership; for a personal space also the space and its role row;
 - its refresh tokens and their authorizations (deleted, not only revoked);
 - its mail links, the queued mail requests of its address other than invitations, the pending sign-up of its address,
   and its login streak.
+
+The queued mail requests are deleted before the pending sign-up: the mail sender locks a mail request first and then
+the pending sign-up, and the other order can deadlock. Refresh tokens are deleted before their authorizations. The
+routine waits for a mail that is being sent; that is fine.
 
 It keeps:
 
@@ -341,7 +352,13 @@ It keeps:
 - the mail-limit counters, which hold a hash of the address and expire within hours.
 
 **Locks.** A flow that changes a company takes the company lock before the address lock, as invitation acceptance does
-today. A personal space has no lock of its own: only its account changes it, always under the address lock.
+today; no path takes them the other way round. Removal and company deletion hold the company lock and take **no
+address lock**, not even one per member: the company lock already keeps out the flows that could change those
+accounts, and a lock per member would stop a large company from being deleted (the database runs out of lock slots).
+Self-deletion, the invitation move and the start-up step change an account that no company lock guards. They take the
+address lock that sign-up completion takes, and read the membership again after taking it: a self-deletion that finds
+the space is no longer personal answers `403 permissions_changed`. A personal space has no lock of its own: only its
+account changes it, always under the address lock.
 
 ### Upgrade
 
@@ -482,7 +499,7 @@ Claims and permissions
     `GET /auth/me` returns `org_kind` for both kinds, and for a private account `org_name` `private`.
 13. After the manifest's `private.permissions` changes, a private account's next refresh carries the new list; after
     the block is removed, a private account still signs in, with `permissions` `[]`.
-14. Every company API endpoint answers a private account's token with `403 forbidden`; `list-orgs` does not list
+14. Every company API endpoint, `GET /auth/org` included, answers a private account's token with `403 forbidden`; `list-orgs` does not list
     personal spaces; `invite`, `remove-member` and `delete-org` with a personal space's id answer `error: not_found`.
 15. The Python package's `Principal` has `org_kind`; a token without the claim gives `"organization"`; a token with
     another value is refused with `401`; the package's earlier tests pass.
@@ -510,8 +527,9 @@ Deletion
     queued non-invitation mail requests, pending sign-up and login streak are gone; the audit rows that name it remain;
     `account.deleted` (`reason` `self`) is written. A login with the address is the `401` of an unknown address, and a
     new sign-up with the address completes.
-22. `DELETE /auth/account` answers as the table says: `401` without a token, `403 forbidden` for a company member,
-    `403 permissions_changed` for a token that says `personal` after the account moved, `400 invalid_request` for a bad
+22. `DELETE /auth/account` answers as the table says: `401` without a token, `403 permissions_changed` for a token
+    that says `personal` after the account moved to a company or is gone (never `403 forbidden`), `403 forbidden` for a
+    company member whose token does not say `personal`, `400 invalid_request` for a bad
     body, `403 wrong_password` (counted in the login streak, `account.delete_refused` written), `429 too_many_attempts`
     when locked, `415` for another charset; it counts against the `general` per-IP policy.
 23. Removing a member, by the API or by `remove-member`, still answers as before, and the member's account is deleted
@@ -653,6 +671,31 @@ Choices the decisions left open; the contract above reads this way.
     deletion, so nothing is lost against their will; the sample asks for the password on the same screen and says what
     happened on `wrong_password`.
 
+### Amendment (owner, 2026-04-09)
+
+Found while planning; the contract above already reads this way.
+
+1. **`DELETE /auth/account` judges the token's `org_kind` first.** A token that says `personal`, while the database
+   shows a company or nothing, is `403 permissions_changed`, so the frontend refreshes. `403 forbidden` is for a company
+   member whose token does not say `personal`. The table and criterion 22 follow.
+2. **`permissions_changed` is narrower.** A removed or deleted person's token gets it at `/auth/me` and at every
+   company endpoint whose permission the token claims. An endpoint that needs a permission the token never claimed
+   stays `403 forbidden`, as in spec 0005.
+3. **The address lock is taken only where no company lock guards the account**: self-deletion, the invitation move and
+   the start-up step. Removal and company deletion take none, never one per member, or a large company could not be
+   deleted. Self-deletion reads the membership again under the lock.
+4. **The deletion routine deletes queued mail requests before the pending sign-up.** The mail sender locks them in
+   that order; the other order can deadlock.
+5. **No order among audit rows of one transaction.** They share a time. The table says "and", not "then"; tests count
+   the rows.
+6. **A blank `password` is `400 invalid_request`**, as the body reader already does. The general rules, sign-up
+   completion, invitation acceptance and `DELETE /auth/account` say so.
+7. **A personal space's token is refused on every company endpoint**, `GET /auth/org` included: it needs no
+   permission, so only an explicit check on the space catches it. Criterion 14 names it.
+8. **"To verify during implementation"** lists what was settled, each with its answer. Only the removal list is open.
+   One answer is worth knowing: the sign-up body is read in two phases, the kind first, so `403 signup_disabled` still
+   comes before `400` for a bad `email`.
+
 ## Verification notes (for the local verifiers)
 
 - Criteria 5 and 16 need the dispatcher run by hand (the `MailTestBase` pattern); criterion 25 a database prepared
@@ -664,21 +707,29 @@ Choices the decisions left open; the contract above reads this way.
 
 ## To verify during implementation
 
-- **The start-up step's place**: after the migrations and the manifest, before `DevUserSeeder` (which creates a user
-  and then its membership); it must not run in the CLI, which builds the services without running the host.
-- **A deleted refresh-token entry** must make a refresh `401 invalid_grant` through the existing handlers, as a revoked
-  one does, and not a `500`.
-- **Lock order**: company lock, then address lock, in removal, company deletion (several address locks, one per
-  member) and invitation acceptance; the address lock alone in self-deletion and sign-up completion. No path may take
-  them the other way round.
-- **Identity's delete** must remove the account's logins, claims and tokens by cascade; the keys from `Invites`
-  (`InvitedBy`, set null) and `EmailTokens` (cascade) already allow it.
-- **The EF migration**: `Companies.Kind` and `PendingSignups.Kind` with the default `1` for existing rows, and
-  `PendingSignups.CompanyName` made nullable.
-- **The mail dispatcher's two bulk statements** (drop and pick) follow the switch rule of "Mails", item 1, and the
-  simpler account rule of item 2; the invitation composer reads the account's kind.
-- **`JsonObjectBody`** reads strings only; the accept body needs a boolean member and the sign-up bodies optional
-  strings.
+Settled while planning (the contract above already reads this way):
+
+- **The start-up step's place**: after the migrations, the manifest and the sign-up address warning, before
+  `DevUserSeeder`. The CLI returns before it builds a host, so the step never runs there.
+- **A deleted refresh-token entry** gives `401 invalid_grant` through the existing handlers, as a revoked one does.
+  Delete the tokens before their authorizations (there is no cascade between them).
+- **Lock order**: company lock, then address lock; no path takes them the other way round. Removal and company
+  deletion take no address lock (see "Locks").
+- **Identity's delete** removes the account's logins, claims, stored tokens, mail links and membership by cascade, and
+  sets `Invites.InvitedBy` to null.
+- **The EF migration**: `Companies.Kind` and `PendingSignups.Kind` need the default `1` set in the model, or existing
+  rows would get `0`; `PendingSignups.CompanyName` becomes nullable. A model change without its migration stops the
+  host from starting, so both go in one task.
+- **The mail dispatcher's two bulk statements** follow the switch rule of "Mails", item 1, and the simpler account rule
+  of item 2; checked against every combination of pending kind, both switches and an account or none. The invitation
+  composer reads the account's space kind.
+- **`JsonObjectBody`** reads strings only and rejects the whole body at its first bad member. The sign-up request needs
+  a reader that returns the members one by one (the body is read in two phases: the kind first, so that its switch is
+  judged before `email` and `company_name`). The accept body needs a reader for a JSON boolean. Completion and
+  acceptance can keep reading optional strings.
+
+Still open:
+
 - **The Amendment 3 code paths to remove**: `SignupAccount.MayStartCompany`, `has_account` and `HasAccount`, the
   password-free completion, `details.existing_account`, the dispatcher's branch for accounts without a company, the
   password replacement in `InviteAcceptance`, the sample's `keepsPassword` text, step 12 of `e2e-signup.sh` (it becomes:
