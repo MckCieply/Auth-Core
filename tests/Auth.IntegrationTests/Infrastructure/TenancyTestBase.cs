@@ -140,6 +140,22 @@ public abstract class TenancyTestBase : MailTestBase
             return role.Id;
         });
 
+    /// <summary>
+    /// A private account (spec 0010) made straight in the database, as a private sign-up leaves it: the account (with
+    /// <see cref="MailTestBase.UserPassword"/> unless told otherwise), its personal space, the space's role row and the membership.
+    /// </summary>
+    protected async Task<(Guid UserId, Guid SpaceId)> CreatePrivateAccountAsync(string email, string password = UserPassword, bool confirmed = true)
+    {
+        var user = await CreateUserAsync(email, confirmed, password, member: false);
+        var space = await InDbAsync(async db =>
+        {
+            var id = PersonalSpaces.Add(db, user.Id, StorableTime.Now(Clock));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return id;
+        });
+        return (user.Id, space);
+    }
+
     /// <summary>Makes an account with <see cref="MailTestBase.UserPassword"/> and puts it into the company with the named role.</summary>
     protected async Task<Guid> AddMemberAsync(Guid companyId, string email, string role, bool confirmed = true)
     {

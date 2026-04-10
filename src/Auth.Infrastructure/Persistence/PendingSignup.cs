@@ -15,7 +15,11 @@ public sealed class PendingSignup
     /// <summary>The address as the visitor typed it: the account is created with it, and the mail goes to it.</summary>
     public required string Email { get; set; }
 
-    public required string CompanyName { get; set; }
+    /// <summary>The company name of an organization sign-up; <see langword="null"/> exactly for a private one (spec 0010).</summary>
+    public string? CompanyName { get; set; }
+
+    /// <summary>Left unset (<c>0</c>, EF's sentinel) the database's default applies: an organization sign-up.</summary>
+    public SignupKind Kind { get; set; }
 
     public required DateTimeOffset RequestedAt { get; set; }
 

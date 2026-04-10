@@ -43,7 +43,8 @@ public sealed class SignupService(
         }
 
         var account = await SignupAccounts.FindAsync(db, pending.NormalizedEmail, cancellationToken);
-        return new SignupPreview(pending.Email, pending.CompanyName, account?.MayStartCompany(pending.Email) == true);
+        // A private sign-up has no company name; the preview does not answer the kind yet, so the empty name is a stop-gap (spec 0010 → Pending sign-ups).
+        return new SignupPreview(pending.Email, pending.CompanyName ?? string.Empty, account?.MayStartCompany(pending.Email) == true);
     }
 
     /// <summary>
