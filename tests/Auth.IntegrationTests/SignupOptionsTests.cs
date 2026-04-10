@@ -15,7 +15,7 @@ public sealed class SignupOptionsTests(PostgresFixture postgres, KeyMaterialFixt
         using var response = await SignupApi.Options(client);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("""{"signup":"invite-only"}""", await response.Content.ReadAsStringAsync());
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -27,7 +27,7 @@ public sealed class SignupOptionsTests(PostgresFixture postgres, KeyMaterialFixt
         using var response = await SignupApi.Options(client);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("""{"signup":"self-service"}""", await response.Content.ReadAsStringAsync());
+        Assert.Equal("""{"signup":"self-service","private_signup":"off"}""", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

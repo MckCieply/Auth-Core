@@ -107,6 +107,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     /// <summary>The default manifest with <c>signup: self-service</c>.</summary>
     public const string SelfServiceManifest = DefaultManifest + "\nsignup: self-service\n";
 
+    /// <summary>The block that turns private sign-up on (spec 0010), with two permissions of the default catalog for the private role.</summary>
+    public const string PrivateBlock = "\nprivate:\n  signup: self-service\n  permissions: [reports:read, reports:approve]\n";
+
     public const string DefaultAppName = "Auth-Core Test";
     public const string DefaultResetUrl = "https://app.example.com/reset";
     public const string DefaultVerifyUrl = "https://app.example.com/verify";
@@ -149,6 +152,16 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public AuthAppFactory WithSignup()
     {
         WithManifest(SelfServiceManifest);
+        return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
+    }
+
+    /// <summary>
+    /// Turns private sign-up on (spec 0010) and, unless told otherwise, organization sign-up too: the manifest and the completion address.
+    /// Call it before the host is built.
+    /// </summary>
+    public AuthAppFactory WithPrivateSignup(bool organization = true)
+    {
+        WithManifest((organization ? SelfServiceManifest : DefaultManifest) + PrivateBlock);
         return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
 

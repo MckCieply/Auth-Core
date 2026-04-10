@@ -3,7 +3,8 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 namespace Auth.Server.Signup;
 
 /// <summary>
-/// <c>Degraded</c> while the manifest asks for self-service sign-up and the completion address is not set (spec 0009 → Configuration).
+/// <c>Degraded</c> while the manifest asks for self-service sign-up, of either kind, and the completion address is not set
+/// (spec 0009 → Configuration, spec 0010).
 /// The answer of <c>/auth/health</c> is still <c>200</c>; the reason is in the log, not in a public response.
 /// </summary>
 public sealed class SignupHealthCheck(SignupGate gate) : IHealthCheck

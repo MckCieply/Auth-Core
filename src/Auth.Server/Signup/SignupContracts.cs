@@ -3,8 +3,11 @@ namespace Auth.Server.Signup;
 // The bodies of the sign-up endpoints (spec 0009 → Contract). Property names become snake_case on the wire. The endpoints read and write
 // these bodies by hand, so the types document the contract in OpenAPI; they do not enforce it.
 
-/// <summary>Response of <c>GET /auth/options</c>. A client ignores members it does not know (slice 0010 adds <c>providers</c>).</summary>
-public sealed record OptionsResponse(string Signup);
+/// <summary>
+/// Response of <c>GET /auth/options</c>: <c>signup</c> (spec 0009) and <c>private_signup</c> (spec 0010), each following its switch. A client
+/// ignores members it does not know.
+/// </summary>
+public sealed record OptionsResponse(string Signup, string PrivateSignup);
 
 /// <summary>Request of <c>POST /auth/signup</c>.</summary>
 public sealed record SignupRequest(string Email, string CompanyName);

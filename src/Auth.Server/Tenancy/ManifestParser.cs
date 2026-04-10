@@ -136,7 +136,27 @@ public static class ManifestParser
             return Fail($"signup must be '{SignupModes.InviteOnlyName}' or '{SignupModes.SelfServiceName}'");
         }
 
-        return new ManifestParseResult(new Manifest(permissions, defaults, signup), null);
+        // Spec 0010: the block `private`. `private:` with no value is no block. Its switch is on with `self-service` only, and any other value
+        // leaves it off (unlike the top-level `signup`, which refuses a value it does not know). The private role never manages a company.
+        var privateSignup = string.Equals(document.Private?.Signup, SignupModes.SelfServiceName, StringComparison.Ordinal);
+        var privateListed = (document.Private?.Permissions ?? []).Select(p => p ?? "").ToList();
+        if (privateListed.Count > MaxPermissions)
+        {
+            return Fail($"private.permissions must hold at most {MaxPermissions} permissions");
+        }
+
+        if (privateListed.FirstOrDefault(p => p == PermissionCatalog.All || PermissionCatalog.BuiltIn.Contains(p, StringComparer.Ordinal)) is { } managing)
+        {
+            return Fail($"private.permissions may not hold '{managing}': a private account manages no company");
+        }
+
+        if (privateListed.FirstOrDefault(p => !catalog.Accepts(p)) is { } outside)
+        {
+            return Fail($"private.permissions holds '{outside}', which is not in the catalog");
+        }
+
+        List<string> privatePermissions = [.. privateListed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        return new ManifestParseResult(new Manifest(permissions, defaults, signup, privateSignup, privatePermissions), null);
     }
 
     private static ManifestParseResult Fail(string error) => new(null, Printable(error));
@@ -178,7 +198,18 @@ public static class ManifestParser
         // `invite-only` or `self-service` (spec 0009); a text so that any other value reaches the check above instead of a binding error.
         public string? Signup { get; set; }
 
+        // The block of spec 0010. Its own keys only: any other is an error, like a typo at the top level.
+        public PrivateDocument? Private { get; set; }
+
         // Ordered: the roles keep the order of the file, which the development seeder reads.
         public OrderedDictionary<string, List<string?>?>? DefaultRoles { get; set; }
+    }
+
+    // The block `private` (spec 0010 → Manifest). The switch is a text, so that any value reaches the rule above.
+    internal sealed class PrivateDocument
+    {
+        public string? Signup { get; set; }
+
+        public List<string?>? Permissions { get; set; }
     }
 }

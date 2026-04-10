@@ -17,8 +17,8 @@ public static class SignupRoutes
         app.MapGet(SignupOptionsEndpoint.Path, SignupOptionsEndpoint.Handle)
             .WithTags("Sign-up")
             .WithDescription(
-                "What a product's screens may offer. `signup` is `self-service` while sign-up is on and `invite-only` otherwise. "
-                + "A client ignores members it does not know.")
+                "What a product's screens may offer. `signup` is `self-service` while organization sign-up is on and `invite-only` otherwise; "
+                + "`private_signup` is `self-service` while private sign-up is on and `off` otherwise. A client ignores members it does not know.")
             .Produces<OptionsResponse>();
 
         app.MapPost(SignupRequestEndpoint.Path, SignupRequestEndpoint.HandleAsync)

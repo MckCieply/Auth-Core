@@ -47,7 +47,7 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
     {
         using (var options = await SignupApi.Options(Client))
         {
-            Assert.Equal("""{"signup":"self-service"}""", await options.Content.ReadAsStringAsync());
+            Assert.Equal("""{"signup":"self-service","private_signup":"off"}""", await options.Content.ReadAsStringAsync());
         }
 
         var token = await MailedAsync("Anna@Firma.test");
