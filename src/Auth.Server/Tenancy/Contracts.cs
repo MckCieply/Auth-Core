@@ -2,8 +2,11 @@ namespace Auth.Server.Tenancy;
 
 // The bodies of the company API (spec 0005 → Contract). Property names become snake_case on the wire.
 
-/// <summary>Response of <c>GET /auth/me</c>: the caller as the database says now.</summary>
-public sealed record MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string[] Roles, string[] Permissions);
+/// <summary>
+/// Response of <c>GET /auth/me</c>: the caller as the database says now. <c>org_kind</c> is <c>organization</c> or <c>personal</c> (spec
+/// 0010); a private account's space is named <c>private</c> and its role is <c>private</c>.
+/// </summary>
+public sealed record MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions);
 
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);

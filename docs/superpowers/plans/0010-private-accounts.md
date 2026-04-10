@@ -1117,7 +1117,7 @@ passes.
 
 **Interfaces:**
 - Consumes: `CompanyKind` (Task 1), `Manifest.PrivatePermissions` (Task 2), `TenancyTestBase.CreatePrivateAccountAsync` (Task 1), `ManifestHolder.Set`.
-- Produces: `TenantContext(..., bool HoldsAll, CompanyKind Kind = CompanyKind.Organization)` (the new parameter last, defaulted: `AuditLogTests` builds one positionally); `TenantClaims.OrgKind = "org_kind"` in `TenantClaims.Types` (`[OrgId, OrgKind, Roles, Permissions]`); `SpaceKinds.OrganizationName`, `PersonalName`, `NameOf(CompanyKind)`; `MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions)`.
+- Produces: `TenantContext(..., bool HoldsAll, CompanyKind Kind)` (the new parameter last and required; `AuditLogTests` passes it); `TenantClaims.OrgKind = "org_kind"` in `TenantClaims.Types` (`[OrgId, OrgKind, Roles, Permissions]`); `SpaceKinds.OrganizationName`, `PersonalName`, `NameOf(CompanyKind)`; `MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions)`.
 
 **Contract counts:** the claim list of the access token gains `org_kind` in `TenantClaimsTests.Token_has_no_claim_beyond_the_contract_and_the_tenancy_claims_after_refreshes`, `LoginTests` (line 78) and `SignupCompleteSignInTests.AccessTokenClaims`; `OrgEndpointTests.Me_returns_the_callers_current_data_from_the_database` and `OpenApiTests.The_responses_are_described_in_snake_case` (`MeResponse`) gain `org_kind`.
 
@@ -1235,7 +1235,7 @@ Update the existing pins (the access token gains `org_kind`, `/auth/me` gains `o
 - `tests/Auth.IntegrationTests/TenantClaimsTests.cs`: replace
   `            ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"],` with
   `            ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"],`; and in
-  `The_claim_filter_takes_the_three_claims_out_of_a_refresh_token_and_leaves_them_in_an_access_token` replace
+  `The_claim_filter_takes_the_tenancy_claims_out_of_a_refresh_token_and_leaves_them_in_an_access_token` replace
   `                new Claim(TenantClaims.OrgId, Guid.NewGuid().ToString()),` with
   ```csharp
                 new Claim(TenantClaims.OrgId, Guid.NewGuid().ToString()),

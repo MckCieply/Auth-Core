@@ -38,7 +38,8 @@ public static class OrgEndpoints
             return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
-        return ApiResults.Ok(new MeResponse(caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, [caller.RoleName], [.. caller.Permissions]));
+        return ApiResults.Ok(new MeResponse(
+            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions]));
     }
 
     public static async Task<IResult> GetAsync(HttpContext http, MembershipReader memberships)

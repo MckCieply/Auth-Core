@@ -28,7 +28,7 @@ public static class SessionPrincipal
             nameType: Claims.Name,
             roleType: Claims.Role);
 
-        // The access token carries `sub` and the tenancy claims below (`org_id`, `roles`, `permissions`), and nothing else:
+        // The access token carries `sub` and the tenancy claims below (`org_id`, `org_kind`, `roles`, `permissions`), and nothing else:
         // no email, name or scope.
         identity.SetClaim(Claims.Subject, user.Id.ToString());
         identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));

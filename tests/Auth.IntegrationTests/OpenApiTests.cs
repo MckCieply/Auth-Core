@@ -272,7 +272,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["email", "org_id", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["email", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));

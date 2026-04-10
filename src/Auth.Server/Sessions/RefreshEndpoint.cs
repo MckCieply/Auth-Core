@@ -53,7 +53,7 @@ public static class RefreshEndpoint
         }
 
         // Someone who is no longer a member has no session (spec 0005 → Effects of removing a member), and everyone else
-        // gets the company, role and permissions as the database says now: a role change reaches the next token here.
+        // gets the company, its kind, role and permissions as the database says now: a role change reaches the next token here.
         if (await memberships.ReadAsync(user.Id, http.RequestAborted) is not { } tenant)
         {
             return InvalidGrant();

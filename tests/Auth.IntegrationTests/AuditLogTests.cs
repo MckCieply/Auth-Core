@@ -102,7 +102,7 @@ public sealed class AuditLogTests : TenancyTestBase
     public async Task The_operator_is_marked_and_a_member_is_the_actor()
     {
         var member = Guid.NewGuid();
-        var tenant = new TenantContext(member, Guid.NewGuid(), "Acme", Guid.NewGuid(), "admin", [], false);
+        var tenant = new TenantContext(member, Guid.NewGuid(), "Acme", Guid.NewGuid(), "admin", [], false, CompanyKind.Organization);
         using (var scope = Factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
