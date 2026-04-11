@@ -24,7 +24,9 @@ public sealed class OperatorCommands(
     /// <summary>Companies sorted by name, ordinally, with their number of members.</summary>
     public async Task<IReadOnlyList<OrgListing>> ListOrgsAsync(CancellationToken cancellationToken)
     {
+        // Personal spaces (spec 0010) are not companies: the operator never sees one.
         var rows = await db.Companies.AsNoTracking()
+            .Where(c => c.Kind == CompanyKind.Organization)
             .Select(c => new OrgListing(c.Id, c.Name, db.Memberships.Count(m => m.CompanyId == c.Id)))
             .ToListAsync(cancellationToken);
         return [.. rows.OrderBy(r => r.Name, StringComparer.Ordinal).ThenBy(r => r.Id)];

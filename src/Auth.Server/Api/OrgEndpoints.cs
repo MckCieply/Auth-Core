@@ -26,7 +26,7 @@ public static class OrgEndpoints
         ArgumentNullException.ThrowIfNull(memberships);
         ArgumentNullException.ThrowIfNull(users);
 
-        var access = await CompanyAccess.AuthorizeAsync(http, memberships);
+        var access = await CompanyAccess.AuthorizeAnyKindAsync(http, memberships);
         if (access.Caller is not { } caller)
         {
             return access.Failure!;
