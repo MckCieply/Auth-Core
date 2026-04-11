@@ -7,13 +7,19 @@ namespace Auth.Server.Email;
 /// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company and <c>{2}</c> for the role, and a sign-up's <c>{1}</c> for the company.
 /// People type those (members, or a visitor signing up), so no subject uses them: nothing a person typed goes into a mail header.
 /// </summary>
-public sealed record MailText(string Subject, string Greeting, string Intro, string Button, string Validity, string LinkHint, string Ignore);
+/// <param name="Paragraph">
+/// A paragraph after the intro, or none. The invitation to an address that has a private account (spec 0010) has one; it holds <c>{0}</c> for
+/// the application and <c>{1}</c> for the company.
+/// </param>
+public sealed record MailText(
+    string Subject, string Greeting, string Intro, string Button, string Validity, string LinkHint, string Ignore, string? Paragraph = null);
 
 /// <summary>
 /// The texts of the mail "you already have an account" (spec 0009). It has no link and no button: <see cref="Subject"/>, <see cref="Intro"/>
 /// and <see cref="SignInHint"/> hold <c>{0}</c> for the application name. Nothing a visitor typed goes into it.
 /// </summary>
-public sealed record AccountExistsText(string Subject, string Greeting, string Intro, string SignInHint, string Ignore);
+/// <param name="Deliberate">The sentence of spec 0010, after the sign-in hint: how to get a new account on purpose.</param>
+public sealed record AccountExistsText(string Subject, string Greeting, string Intro, string SignInHint, string Deliberate, string Ignore);
 
 /// <summary>
 /// The mail texts, Polish and English. Plain tables rather than <c>.resx</c> satellites: the container image runs
@@ -90,7 +96,7 @@ public static class MailTexts
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}' and kind '{kind}'."),
     };
 
-    /// <summary>The mail an address gets when someone signs up with it and its account belongs to a company, or only looks like the typed address (spec 0009 → Mails, Amendment 3).</summary>
+    /// <summary>The mail an address gets when someone signs up with it and it has an account, of either kind (spec 0009 → Mails; spec 0010 → Mails).</summary>
     public static AccountExistsText AccountExists(string locale) => locale switch
     {
         "en" => new AccountExistsText(
@@ -98,13 +104,54 @@ public static class MailTexts
             Greeting: "Hello,",
             Intro: "Someone, perhaps you, tried to sign up for {0} with this email address. An account with this address already exists, so no new account was made.",
             SignInHint: "To use your account, sign in on the sign-in screen of {0}. If you forgot your password, use \"forgot password\" on that screen to choose a new one.",
+            Deliberate: "If you want a new account on purpose, delete the one you have first, or sign up with another email address.",
             Ignore: "If it was not you, you can ignore this message. Nothing has changed."),
         "pl" => new AccountExistsText(
             Subject: "Masz już konto w {0}",
             Greeting: "Dzień dobry,",
             Intro: "Ktoś, być może Ty, próbował zarejestrować się w {0}, podając ten adres e-mail. Konto z tym adresem już istnieje, więc nie utworzono nowego.",
             SignInHint: "Aby skorzystać ze swojego konta, zaloguj się na ekranie logowania {0}. Jeśli nie pamiętasz hasła, skorzystaj na tym ekranie z opcji ustawienia nowego hasła.",
+            Deliberate: "Jeśli celowo chcesz założyć nowe konto, najpierw usuń dotychczasowe albo zarejestruj się z innym adresem e-mail.",
             Ignore: "Jeśli to nie Ty, zignoruj tę wiadomość. Nic się nie zmieniło."),
+        _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
+    };
+
+    /// <summary>
+    /// "Complete your sign-up" for a private person (spec 0010 → Mails): the subject, greeting, button, validity, link hint and ignore line of
+    /// spec 0009, with an intro that names no company (<c>{0}</c> is the application).
+    /// </summary>
+    public static MailText PrivateSignup(string locale) => locale switch
+    {
+        "en" => For(locale, MailKind.Signup) with
+        {
+            Intro = "Someone asked to create a private account on {0} with this email address. If it was you, use the link below to finish signing up.",
+        },
+        "pl" => For(locale, MailKind.Signup) with
+        {
+            Intro = "Ktoś, podając ten adres e-mail, poprosił o założenie konta prywatnego w {0}. Jeśli to Ty, użyj poniższego linku, aby dokończyć rejestrację.",
+        },
+        _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
+    };
+
+    /// <summary>
+    /// The invitation to an address that has a private account (spec 0010 → Invitations): the intro's last sentence asks no password, and a
+    /// paragraph says what accepting does. <c>{0}</c> the application, <c>{1}</c> the company, <c>{2}</c> the role.
+    /// </summary>
+    public static MailText InvitationToPrivateAccount(string locale) => locale switch
+    {
+        "en" => For(locale, MailKind.Invitation) with
+        {
+            Intro = "You have been invited to join {1} on {0} as {2}. Use the link below to accept the invitation.",
+            Paragraph = "You already have a private account on {0} with this email address. If you accept, you move to {1}: the space of your private "
+                + "account is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of {1}.",
+        },
+        "pl" => For(locale, MailKind.Invitation) with
+        {
+            Intro = "Zaproszono Cię do firmy {1} w {0} jako {2}. Użyj poniższego linku, aby przyjąć zaproszenie.",
+            Paragraph = "Masz już konto prywatne w {0} z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, przejdziesz do firmy {1}: przestrzeń Twojego "
+                + "konta prywatnego zostanie usunięta razem z całą zawartością. Samo konto zostaje, z tym samym adresem e-mail i hasłem, i stanie się kontem "
+                + "członka firmy {1}.",
+        },
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
     };
 }
