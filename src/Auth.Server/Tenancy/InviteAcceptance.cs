@@ -106,7 +106,7 @@ public sealed class InviteAcceptance(
 
         // One address, one acceptance at a time: two invitations of two companies accepted at once must not make the
         // same person a member of both (the tables would allow it; this version does not).
-        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({invite.NormalizedEmail}, 0))", cancellationToken);
+        await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
 
         // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
         // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.

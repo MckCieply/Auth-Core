@@ -87,7 +87,7 @@ public sealed class SignupService(
 
             // One address, one account-maker at a time: the lock that invitation acceptance takes, so that whichever of a completion and an
             // acceptance comes second sees the membership or the account the first one made and answers `409`.
-            await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({address}, 0))", cancellationToken);
+            await AddressLock.AcquireAsync(db, address, cancellationToken);
 
             // The token is used up by one statement: of parallel completions with one token one gets the row, and the others, which waited
             // for the lock, find nothing.

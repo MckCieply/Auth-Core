@@ -65,6 +65,7 @@ builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<SignupGate>();
+builder.Services.AddSingleton<AccountsWithoutSpaceCleanup>();
 builder.Services.AddScoped<SignupService>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
 builder.Services.AddSingleton<DecoyPasswordHash>();
@@ -90,6 +91,10 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 // A manifest that asks for self-service sign-up without the completion address leaves it off: say so (spec 0009).
 app.Services.GetRequiredService<SignupGate>().WarnIfMissingAddress();
+
+// No account is left without a space (spec 0010): the accounts an earlier version left without a company are deleted, once, before the
+// development seeder and the first request.
+await app.Services.GetRequiredService<AccountsWithoutSpaceCleanup>().RunAsync(app.Lifetime.ApplicationStopping);
 
 await DevUserSeeder.SeedAsync(app.Services, app.Lifetime.ApplicationStopping);
 
