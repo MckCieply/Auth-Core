@@ -21,29 +21,46 @@ public static class PendingSignups
     /// normalised key folds the micro sign into Greek mu, for one): a link that went to another mailbox must not complete a sign-up that
     /// now names this one, so then the link is dropped and the row lives its 24 hours from this request alone.
     /// </summary>
-    public static async Task UpsertAsync(
+    public static Task UpsertAsync(
         AuthDbContext db, string normalizedEmail, string email, string companyName, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(companyName);
+
+        return UpsertAsync(db, normalizedEmail, email, companyName, SignupKind.Organization, now, cancellationToken);
+    }
+
+    /// <summary>
+    /// As the overload above, with the kind of the sign-up (spec 0010): a private one has no company name. A request of another kind than the
+    /// stored one drops the link at once, as a look-alike spelling does: a link mailed for one kind never completes the other.
+    /// </summary>
+    public static async Task UpsertAsync(
+        AuthDbContext db, string normalizedEmail, string email, string? companyName, SignupKind kind, DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(normalizedEmail);
         ArgumentNullException.ThrowIfNull(email);
-        ArgumentNullException.ThrowIfNull(companyName);
 
         var expiresAt = now + Lifetime;
+        var kindValue = (short)kind;
         await db.Database.ExecuteSqlAsync(
             $"""
-            INSERT INTO "PendingSignups" ("NormalizedEmail", "Email", "CompanyName", "RequestedAt", "TokenHash", "TokenExpiresAt", "ExpiresAt")
-            VALUES ({normalizedEmail}, {email}, {companyName}, {now}, NULL, NULL, {expiresAt})
+            INSERT INTO "PendingSignups" ("NormalizedEmail", "Email", "CompanyName", "Kind", "RequestedAt", "TokenHash", "TokenExpiresAt", "ExpiresAt")
+            VALUES ({normalizedEmail}, {email}, {companyName}, {kindValue}, {now}, NULL, NULL, {expiresAt})
             ON CONFLICT ("NormalizedEmail") DO UPDATE SET
                 "TokenHash" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                        AND "PendingSignups"."Kind" = EXCLUDED."Kind"
                                    THEN "PendingSignups"."TokenHash" END,
                 "TokenExpiresAt" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                             AND "PendingSignups"."Kind" = EXCLUDED."Kind"
                                         THEN "PendingSignups"."TokenExpiresAt" END,
                 "ExpiresAt" = CASE WHEN translate("PendingSignups"."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') = translate(EXCLUDED."Email", 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+                                        AND "PendingSignups"."Kind" = EXCLUDED."Kind"
                                    THEN GREATEST(EXCLUDED."ExpiresAt", "PendingSignups"."TokenExpiresAt")
                                    ELSE EXCLUDED."ExpiresAt" END,
                 "Email" = EXCLUDED."Email",
                 "CompanyName" = EXCLUDED."CompanyName",
+                "Kind" = EXCLUDED."Kind",
                 "RequestedAt" = EXCLUDED."RequestedAt"
             """,
             cancellationToken);

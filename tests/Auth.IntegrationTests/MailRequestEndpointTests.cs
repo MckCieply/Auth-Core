@@ -9,6 +9,7 @@ namespace Auth.IntegrationTests;
 public sealed class MailRequestEndpointTests(PostgresFixture postgres, KeyMaterialFixture keys) : MailTestBase(postgres, keys)
 {
     private const string Unknown = "nobody@example.com";
+    private const string Backslash = "\\";
 
     private static readonly string[] MalformedBodies =
     [
@@ -25,6 +26,7 @@ public sealed class MailRequestEndpointTests(PostgresFixture postgres, KeyMateri
         """{"email":"a@example.com\n"}""",                   // control character
         """{"email":"a\uFFFEb@example.com"}""",              // the noncharacter of escalation E1
         """{"email":"a\uD800b@example.com"}""",              // unpaired surrogate escape
+        "{\"email\":\"a@example.com\",\"" + Backslash + "ud800\":1}",   // a member name with an unpaired surrogate escape, after the one that is read
         $$"""{"email":"{{new string('a', 243)}}@example.com"}""",   // 255 characters
     ];
 

@@ -245,7 +245,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify", "token")]
     [InlineData("POST /auth/invites/preview", "token")]
     [InlineData("POST /auth/invites/accept", "password,token")]
-    [InlineData("POST /auth/signup", "company_name,email")]
+    [InlineData("POST /auth/signup", "company_name,email,kind")]
     [InlineData("POST /auth/signup/preview", "token")]
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]

@@ -9,8 +9,11 @@ namespace Auth.Server.Signup;
 /// </summary>
 public sealed record OptionsResponse(string Signup, string PrivateSignup);
 
-/// <summary>Request of <c>POST /auth/signup</c>.</summary>
-public sealed record SignupRequest(string Email, string CompanyName);
+/// <summary>
+/// Request of <c>POST /auth/signup</c>: <c>kind</c> is <c>organization</c> (the default) or <c>private</c> (spec 0010); <c>company_name</c> is
+/// required for an organization and refused for a private person.
+/// </summary>
+public sealed record SignupRequest(string Email, string? Kind = null, string? CompanyName = null);
 
 /// <summary>Request of <c>POST /auth/signup/preview</c>.</summary>
 public sealed record SignupPreviewRequest(string Token);

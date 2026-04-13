@@ -24,11 +24,10 @@ public static class SignupRoutes
         app.MapPost(SignupRequestEndpoint.Path, SignupRequestEndpoint.HandleAsync)
             .WithTags("Sign-up")
             .WithDescription(
-                "Asks to start a company. The answer is the same `202` for every address; a mail follows: a notice without a link when the address "
-                + "has an account that belongs to a company or only resembles the typed address, otherwise a link to finish (also when the account "
-                + "belongs to no company). Off unless the "
-                + "manifest says `signup: self-service` and the completion address is configured (`403 signup_disabled`). One request a minute and "
-                + "five an hour per address.")
+                "Asks to start a company (`kind` `organization`, the default, with `company_name`) or to open a private account (`kind` `private`, "
+                + "no `company_name`). The answer is the same `202` for every address; a mail follows: a notice without a link when the address has an "
+                + "account, of either kind, otherwise a link to finish. `403 signup_disabled` while the switch of the kind is off (with both off, before "
+                + "the body is read). One request a minute and five an hour per address, for both kinds together.")
             .ReadsJson<SignupRequest>()
             .Produces(StatusCodes.Status202Accepted)
             .ProducesError(StatusCodes.Status400BadRequest, AccountResults.InvalidRequestError)

@@ -42,6 +42,8 @@ public sealed class SignupRequestTests : SignupTestBase
         "{\"email\":\"anna@firma.test\",\"company_name\":\"Fi" + Backslash + "u0000rma\"}",   // NUL
         "{\"email\":\"anna@firma.test\",\"company_name\":\"Fi" + Backslash + "ud800rma\"}",   // an unpaired surrogate escape
         "{\"email\":\"anna@firma" + Backslash + "u0000.test\",\"company_name\":\"Firma\"}",
+        "{\"" + Backslash + "ud800\":1,\"email\":\"anna@firma.test\",\"company_name\":\"Firma\"}",   // a member name with an unpaired surrogate escape
+        "{\"email\":\"anna@firma.test\",\"company_name\":\"Firma\",\"" + Backslash + "ud800\":1}",
     };
 
     public static TheoryData<string> RefusedAddresses => new()
@@ -145,33 +147,33 @@ public sealed class SignupRequestTests : SignupTestBase
     }
 
     [Fact]
-    public async Task An_account_without_a_company_gets_the_same_status_headers_body_and_statements()   // criteria 4 and 24: the request still never reads the accounts
+    public async Task A_private_account_gets_the_same_status_headers_body_and_statements()   // spec 0010, criterion 5: the request never reads the accounts
     {
-        await RemovedMemberAsync("gone@firma.test");
+        await CreatePrivateAccountAsync("gone@firma.test");
 
         var mark = Logs.Entries.Count;
         using var withCompany = await SignupApi.Request(Client, Factory.SeedEmail, CompanyName);
         var forCompany = StatementsSince(mark);
 
         mark = Logs.Entries.Count;
-        using var withoutCompany = await SignupApi.Request(Client, "gone@firma.test", CompanyName);
-        var forNone = StatementsSince(mark);
+        using var withPrivate = await SignupApi.Request(Client, "gone@firma.test", CompanyName);
+        var forPrivate = StatementsSince(mark);
 
         mark = Logs.Entries.Count;
         using var unknown = await SignupApi.Request(Client, "nobody@firma.test", CompanyName);
         var forUnknown = StatementsSince(mark);
 
-        foreach (var response in new[] { withCompany, withoutCompany, unknown })
+        foreach (var response in new[] { withCompany, withPrivate, unknown })
         {
             await AccountApi.AssertEmptyAsync(response, HttpStatusCode.Accepted);
             Assert.Equal(LoginApi.HeaderNames(withCompany), LoginApi.HeaderNames(response));
         }
 
-        Assert.NotEmpty(forNone);
-        Assert.Equal(forCompany, forNone);
-        Assert.Equal(forUnknown, forNone);
-        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
-        Assert.DoesNotContain(forCompany.Concat(forNone).Concat(forUnknown), sql => sql.Contains("Memberships", StringComparison.Ordinal));
+        Assert.NotEmpty(forPrivate);
+        Assert.Equal(forCompany, forPrivate);
+        Assert.Equal(forUnknown, forPrivate);
+        Assert.DoesNotContain(forCompany.Concat(forPrivate).Concat(forUnknown), sql => sql.Contains("AspNetUsers", StringComparison.Ordinal));
+        Assert.DoesNotContain(forCompany.Concat(forPrivate).Concat(forUnknown), sql => sql.Contains("Memberships", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -353,7 +355,8 @@ public sealed class SignupRequestTests : SignupTestBase
         Assert.Null(row.OrgId);
         Assert.Null(row.OrgName);
         Assert.Null(row.TargetId);
-        Assert.Null(row.Details);
+        Assert.Equal("organization", AuditApi.Text(row, "kind"));   // spec 0010: details.kind
+        Assert.Equal(["kind"], AuditApi.DetailNames(row));
     }
 
     [Fact]

@@ -31,6 +31,17 @@ public sealed class PendingSignupsTests : MailTestBase
         });
     }
 
+    private Task<int> UpsertAsync(SignupKind kind, string typed = "Anna@Firma.test")
+    {
+        var now = StorableTime.Now(Clock);
+        return InDbAsync(async db =>
+        {
+            await PendingSignups.UpsertAsync(
+                db, Normalized, typed, kind == SignupKind.Private ? null : "Firma", kind, now, TestContext.Current.CancellationToken);
+            return 0;
+        });
+    }
+
     private Task<string> IssueAsync(string normalized = Normalized)
     {
         var now = StorableTime.Now(Clock);
@@ -54,6 +65,43 @@ public sealed class PendingSignupsTests : MailTestBase
         Assert.Equal(StorableTime.Now(Clock) + Day, row.ExpiresAt);
         Assert.Null(row.TokenHash);
         Assert.Null(row.TokenExpiresAt);
+    }
+
+    [Theory]
+    [InlineData(SignupKind.Organization, SignupKind.Private)]
+    [InlineData(SignupKind.Private, SignupKind.Organization)]
+    public async Task Upsert_that_changes_the_kind_drops_the_link_and_starts_the_24_hours_again(SignupKind stored, SignupKind requested)   // spec 0010, criterion 7
+    {
+        await UpsertAsync(stored);
+        await IssueAsync();
+        Clock.Advance(TimeSpan.FromHours(5));
+
+        await UpsertAsync(requested);
+
+        var row = await RowAsync();
+        Assert.Equal(requested, row.Kind);
+        Assert.Equal(requested == SignupKind.Private ? null : "Firma", row.CompanyName);
+        Assert.Null(row.TokenHash);
+        Assert.Null(row.TokenExpiresAt);
+        Assert.Equal(StorableTime.Now(Clock) + Day, row.ExpiresAt);
+    }
+
+    [Theory]
+    [InlineData(SignupKind.Organization)]
+    [InlineData(SignupKind.Private)]
+    public async Task Upsert_of_the_same_kind_keeps_the_link(SignupKind kind)
+    {
+        await UpsertAsync(kind);
+        var token = await IssueAsync();
+        var issued = await RowAsync();
+        Clock.Advance(TimeSpan.FromHours(5));
+
+        await UpsertAsync(kind, typed: "ANNA@firma.test");
+
+        var row = await RowAsync();
+        Assert.Equal(kind, row.Kind);
+        Assert.Equal(EmailTokens.HashOf(token), row.TokenHash);
+        Assert.Equal(issued.TokenExpiresAt, row.TokenExpiresAt);
     }
 
     [Fact]

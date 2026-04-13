@@ -19,15 +19,17 @@ public sealed class MailRequestStore(IServiceScopeFactory scopes, TimeProvider c
     /// queued request, and with no account: the request does not look the account up (spec 0004). A sign-up (spec 0009) needs it: it is
     /// the address of the pending sign-up and of its audit row.
     /// </param>
-    /// <param name="companyName">The company name of a sign-up request; required for <see cref="MailKind.Signup"/>, ignored otherwise.</param>
+    /// <param name="companyName">The company name of an organization sign-up; required for it, ignored otherwise.</param>
+    /// <param name="signupKind">The kind of a sign-up request (spec 0010); a private one carries no company name. Ignored for other mails.</param>
     public async Task<MailLimitDecision> SubmitAsync(
-        MailKind kind, string normalizedEmail, CancellationToken cancellationToken, string? typedEmail = null, string? companyName = null)
+        MailKind kind, string normalizedEmail, CancellationToken cancellationToken, string? typedEmail = null, string? companyName = null,
+        SignupKind signupKind = SignupKind.Organization)
     {
         ArgumentNullException.ThrowIfNull(normalizedEmail);
-        if (kind == MailKind.Signup && (typedEmail is null || companyName is null))
+        if (kind == MailKind.Signup && (typedEmail is null || (signupKind == SignupKind.Organization && companyName is null)))
         {
             throw new ArgumentException(
-                "A sign-up request carries the address as typed and the company name.",
+                "A sign-up request carries the address as typed, and an organization sign-up its company name.",
                 typedEmail is null ? nameof(typedEmail) : nameof(companyName));
         }
 
@@ -48,12 +50,18 @@ public sealed class MailRequestStore(IServiceScopeFactory scopes, TimeProvider c
             {
                 audit.Stage(new AuditEntry { Kind = AuditKinds.PasswordResetRequested, SubjectEmail = typedEmail });
             }
-            else if (kind == MailKind.Signup && typedEmail is not null && companyName is not null)
+            else if (kind == MailKind.Signup && typedEmail is not null)
             {
                 // The pending sign-up takes the place an account would have: it is what the mail, when it is sent, is about. One
-                // statement, whether the address has an account or not (which the request never learns).
-                await PendingSignups.UpsertAsync(db, normalizedEmail, typedEmail, companyName, now, cancellationToken);
-                audit.Stage(new AuditEntry { Kind = AuditKinds.SignupRequested, SubjectEmail = typedEmail });
+                // statement, whether the address has an account or not (which the request never learns). The row records its kind.
+                await PendingSignups.UpsertAsync(
+                    db, normalizedEmail, typedEmail, signupKind == SignupKind.Private ? null : companyName, signupKind, now, cancellationToken);
+                audit.Stage(new AuditEntry
+                {
+                    Kind = AuditKinds.SignupRequested,
+                    SubjectEmail = typedEmail,
+                    Details = new Dictionary<string, object?> { ["kind"] = SignupKinds.NameOf(signupKind) },
+                });
             }
 
             await db.SaveChangesAsync(cancellationToken);
