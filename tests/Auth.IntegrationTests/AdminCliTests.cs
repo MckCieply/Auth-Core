@@ -201,8 +201,9 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
         Assert.Null(await InDbAsync(db => db.Memberships.SingleOrDefaultAsync(m => m.UserId == worker, TestContext.Current.CancellationToken)));
         using var refresh = await SessionApi.Refresh(Client, session.RefreshToken);
         await SessionApi.AssertInvalidGrantAsync(refresh);
+        Assert.Null(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));   // spec 0010
         using var login = await LoginApi.Login(Client, "worker@acme.test", UserPassword);
-        Assert.Equal("""{"error":"no_membership"}""", await login.Content.ReadAsStringAsync());
+        Assert.Equal("""{"error":"invalid_credentials"}""", await login.Content.ReadAsStringAsync());
     }
 
     [Fact]

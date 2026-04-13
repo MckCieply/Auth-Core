@@ -188,7 +188,7 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
     // ---- removing
 
     [Fact]
-    public async Task Removing_a_member_ends_the_membership_and_every_session_and_keeps_the_account()   // criterion 13
+    public async Task Removing_a_member_ends_the_membership_and_every_session_and_deletes_the_account()   // criterion 13; spec 0010, criterion 23
     {
         var (company, _, token) = await CompanyWithAdminAsync();
         var worker = await AddMemberAsync(company, "worker@acme.test", "user");
@@ -201,7 +201,7 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
         }
 
         Assert.Null(await MembershipAsync(worker));
-        Assert.NotNull(await InDbAsync(db => db.Users.FindAsync([worker], TestContext.Current.CancellationToken).AsTask()));   // the account stays
+        Assert.Null(await InDbAsync(db => db.Users.FindAsync([worker], TestContext.Current.CancellationToken).AsTask()));   // gone with its only space (spec 0010)
         foreach (var session in new[] { first, second })
         {
             using var refresh = await SessionApi.Refresh(Client, session.RefreshToken);
@@ -209,8 +209,8 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
         }
 
         using var login = await LoginApi.Login(Client, "worker@acme.test", UserPassword);
-        Assert.Equal("""{"error":"no_membership"}""", await login.Content.ReadAsStringAsync());
-        Assert.Equal(HttpStatusCode.Forbidden, login.StatusCode);
+        Assert.Equal("""{"error":"invalid_credentials"}""", await login.Content.ReadAsStringAsync());   // the 401 of an unknown address
+        Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
     }
 
     [Fact]
@@ -236,6 +236,7 @@ public sealed class OrgMemberTests(PostgresFixture postgres, KeyMaterialFixture 
 
         var again = await SessionApi.LoginAsync(Client, "worker@acme.test", "Chosen-Passw0rd");
         Assert.Equal(globex.ToString(), AccessTokens.Text(again.AccessToken, "org_id"));
+        Assert.NotEqual(worker.ToString(), AccessTokens.Text(again.AccessToken, "sub"));   // a new account (spec 0010)
         using var refresh = await SessionApi.Refresh(Client, old.RefreshToken);
         await SessionApi.AssertInvalidGrantAsync(refresh);
     }

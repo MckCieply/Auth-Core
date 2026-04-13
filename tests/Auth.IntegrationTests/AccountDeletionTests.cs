@@ -8,7 +8,9 @@ using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using OpenIddict.EntityFrameworkCore.Models;
 
 namespace Auth.IntegrationTests;
@@ -285,8 +287,18 @@ public sealed class AccountDeletionTests : AuditTestBase
         await using var transaction = await db.Database.BeginTransactionAsync(cancellation);
         _statements.Watch(db);
 
-        // Another request deletes the account just before the routine deletes it.
-        _statements.BeforeUserDelete = () => InDbAsync(other => other.Users.Where(u => u.Id == user).ExecuteDeleteAsync(cancellation));
+        // The account goes away on the routine's own connection, which no row lock stops, just before the routine deletes it.
+        _statements.BeforeUserDelete = async () =>
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction!.GetDbTransaction();
+            command.CommandText = "DELETE FROM \"AspNetUsers\" WHERE \"Id\" = @id";
+            var id = command.CreateParameter();
+            id.ParameterName = "id";
+            id.Value = user;
+            command.Parameters.Add(id);
+            await command.ExecuteNonQueryAsync(cancellation);
+        };
         try
         {
             await Assert.ThrowsAsync<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<AccountDeletion>()
@@ -303,6 +315,53 @@ public sealed class AccountDeletionTests : AuditTestBase
         Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
         Assert.Equal(1, await CountAsync(d => d.PendingSignups.CountAsync(p => p.NormalizedEmail == normalized, cancellation)));
         Assert.Equal(1, await CountAsync(d => d.Companies.CountAsync(c => c.Id == space, cancellation)));
+    }
+
+    [Fact]
+    public async Task The_accounts_are_locked_from_the_read_to_the_end_of_the_transaction()   // spec 0010 → Locks
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        var (user, _) = await CreatePrivateAccountAsync(Private);
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellation);
+        _statements.Watch(db);
+
+        // Another request tries to delete the account while the routine holds it: it waits for the lock, and gives up here after a moment.
+        PostgresException? refused = null;
+        _statements.BeforeUserDelete = async () =>
+        {
+            try
+            {
+                await InDbAsync(async other =>
+                {
+                    await using var attempt = await other.Database.BeginTransactionAsync(cancellation);
+                    await other.Database.ExecuteSqlRawAsync("SET LOCAL lock_timeout = '300ms'", cancellation);
+                    return await other.Users.Where(u => u.Id == user).ExecuteDeleteAsync(cancellation);
+                });
+            }
+            catch (Exception exception) when (exception is PostgresException || exception.InnerException is PostgresException)
+            {
+                // The execution strategy wraps a failure it takes for a transient one.
+                refused = exception as PostgresException ?? (PostgresException)exception.InnerException!;
+            }
+        };
+        try
+        {
+            Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<AccountDeletion>()
+                .DeleteAsync([user], AccountDeletionReason.Self, actor: null, cancellation));
+        }
+        finally
+        {
+            _ = _statements.Stop();
+        }
+
+        await db.SaveChangesAsync(cancellation);
+        await transaction.CommitAsync(cancellation);
+
+        Assert.NotNull(refused);
+        Assert.Equal(PostgresErrorCodes.LockNotAvailable, refused.SqlState);
+        Assert.Equal(0, await CountAsync(d => d.Users.CountAsync(u => u.Id == user, cancellation)));
     }
 
     [Fact]

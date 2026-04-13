@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Identity;
+using Auth.Server.Login;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -16,7 +17,9 @@ namespace Auth.Server.Sessions;
 /// <summary>
 /// The pass-through half of <c>POST /auth/refresh</c>. By the time it runs, OpenIddict has validated the refresh
 /// token from the cookie (unknown, expired, revoked and reused tokens never get here). This endpoint checks that the
-/// user still exists and is still a member of a company, and asks OpenIddict to issue the next pair of tokens.
+/// user still exists and is still a member of a company, and asks OpenIddict to issue the next pair of tokens. The tokens are written in a
+/// transaction that begins by reading the user again under a share lock (<see cref="AtomicSignInResult"/>): a user deleted in the meantime
+/// gets <c>invalid_grant</c> and no token entry is written for them.
 /// </summary>
 public static class RefreshEndpoint
 {
@@ -75,7 +78,7 @@ public static class RefreshEndpoint
         principal.SetRefreshTokenLifetime(lifetime);
         http.Items[RefreshCookie.LifetimeItemKey] = lifetime;
 
-        return Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+        return new AtomicSignInResult(principal, entry: null, whenGone: () => Task.FromResult(InvalidGrant()));
     }
 
     /// <summary>Rejects through OpenIddict, so the failure takes the same path (and shape) as its own rejections.</summary>

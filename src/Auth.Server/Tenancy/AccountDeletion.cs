@@ -16,15 +16,26 @@ public enum AccountDeletionReason
 }
 
 /// <summary>
-/// Deletes accounts (spec 0010 → What an account deletion removes): the one routine behind a self-deletion, the removal of a member, the deletion
-/// of a company and the start-up step. It runs in the caller's transaction, under the caller's locks, by set-based statements, and stages one
-/// <c>account.deleted</c> row per account for the caller's save. For each account it deletes: the queued mail requests of its address other than
-/// invitations, then the pending sign-up of its address (the mail sender locks them in that order; the other one can deadlock), its login streak,
-/// its refresh tokens and then their authorizations (deleted, not only revoked: they name the account; there is no cascade between them), the
-/// account (its Identity rows, its mail links and its membership go by cascade; invitations it sent lose their sender) and, for a personal space,
-/// the space with its role row. It keeps the audit rows, the invitations of companies to the address and the mail-limit counters. It needs the
-/// caller's transaction (it throws without one) and relies on the caller's locks to keep the accounts from changing between its read and its
-/// delete: when the delete removes another number of accounts than the read found, it throws and the caller's transaction rolls back.
+/// Deletes accounts (spec 0010 → What an account deletion removes): the one routine behind a self-deletion, the removal of a
+/// member, the deletion of a company and the start-up step. It runs in the caller's transaction, under the caller's locks, by
+/// set-based statements, and stages one <c>account.deleted</c> row per account for the caller's save. It needs the caller's
+/// transaction (it throws without one).
+/// <para>
+/// The order matters, because the mail sender locks a mail request first and then, by the kind of mail, either the pending sign-up
+/// (a sign-up mail) or the account row (the link of a reset or verification mail, whose foreign key takes a share lock on it); any
+/// other order can deadlock. So the routine first deletes the queued mail requests of the addresses other than invitations, then
+/// the pending sign-ups of the addresses, without any account row locked. Only then does it read the accounts under a row lock
+/// that is held to the end of the transaction, and delete, for each account: its login streak, its refresh tokens and then their
+/// authorizations (deleted, not only revoked: they name the account; there is no cascade between them), the account (its Identity
+/// rows, its mail links and its membership go by cascade; invitations it sent lose their sender) and, for a personal space, the
+/// space with its role row. The row lock precedes the deletes of the sessions, so that no sign-in or refresh writes a session of
+/// an account it is deleting (they read their account again under a share lock first).
+/// </para>
+/// <para>
+/// It keeps the audit rows, the invitations of companies to the address and the mail-limit counters. It relies on the caller's
+/// locks for the rest: when the delete removes another number of accounts than the read found, it throws and the caller's
+/// transaction rolls back.
+/// </para>
 /// </summary>
 public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
 {
@@ -56,8 +67,21 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
         }
 
         List<Guid> ids = [.. userIds.Distinct()];
-        var accounts = await db.Users.AsNoTracking()
-            .Where(u => ids.Contains(u.Id))
+
+        // The mail requests and the pending sign-ups of the addresses first, before any account row is locked: the mail sender locks a mail
+        // request and then needs the account row, so the other order could wait forever. The addresses are read inside each statement, so the
+        // count of statements does not depend on the number of accounts.
+        var addressesOf = db.Users.Where(u => ids.Contains(u.Id)).Select(u => u.NormalizedEmail);
+        await db.MailRequests
+            .Where(r => r.Kind != MailKind.Invitation && addressesOf.Contains(r.NormalizedEmail))
+            .ExecuteDeleteAsync(cancellationToken);
+        await db.PendingSignups.Where(p => addressesOf.Contains(p.NormalizedEmail)).ExecuteDeleteAsync(cancellationToken);
+
+        // The accounts, read under a row lock held to the end of the transaction: from here on no sign-in or refresh can write a session for them.
+        Guid[] wanted = [.. ids];
+        var accounts = await db.Users
+            .FromSql($"""SELECT * FROM "AspNetUsers" WHERE "Id" = ANY({wanted}) ORDER BY "Id" FOR UPDATE""")
+            .AsNoTracking()
             .Select(u => new { u.Id, u.Email, u.NormalizedEmail })
             .ToListAsync(cancellationToken);
         if (accounts.Count == 0)
@@ -78,10 +102,6 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
         var lost = spaces.GroupBy(s => s.UserId).ToDictionary(g => g.Key, g => g.First());
 
         List<string> addresses = [.. accounts.Select(a => a.NormalizedEmail).OfType<string>().Distinct(StringComparer.Ordinal)];
-        await db.MailRequests
-            .Where(r => addresses.Contains(r.NormalizedEmail) && r.Kind != MailKind.Invitation)
-            .ExecuteDeleteAsync(cancellationToken);
-        await db.PendingSignups.Where(p => addresses.Contains(p.NormalizedEmail)).ExecuteDeleteAsync(cancellationToken);
         List<byte[]> streaks = [.. addresses.Select(LoginIdentifier.HashOf)];
         await db.LoginStreaks.Where(s => streaks.Contains(s.IdentifierHash)).ExecuteDeleteAsync(cancellationToken);
 

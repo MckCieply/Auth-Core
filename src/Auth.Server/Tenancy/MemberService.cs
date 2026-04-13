@@ -1,7 +1,6 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
-using OpenIddict.Abstractions;
 
 namespace Auth.Server.Tenancy;
 
@@ -10,9 +9,7 @@ namespace Auth.Server.Tenancy;
 /// The company API and the operator command both call it. Everything that changes anything runs in one transaction
 /// that begins by locking the company, so that the last-manager check and the change cannot be interleaved with another.
 /// </summary>
-public sealed class MemberService(
-    AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, IOpenIddictTokenManager tokens, IOpenIddictAuthorizationManager authorizations,
-    AuditLog audit)
+public sealed class MemberService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, AccountDeletion deletion, AuditLog audit)
 {
     /// <summary>The company's members, sorted by address, ordinally.</summary>
     public async Task<IReadOnlyList<MemberItem>> ListAsync(Guid companyId, CancellationToken cancellationToken)
@@ -93,8 +90,9 @@ public sealed class MemberService(
     }
 
     /// <summary>
-    /// Removes a member and ends every one of their sessions: every refresh token issued before is refused. The account stays,
-    /// so the person can be invited again. Refused: not a member (<c>not_found</c>); the actor is the member
+    /// Removes a member. The account loses its only space and is deleted with it (spec 0010), its sessions, links and membership included:
+    /// every refresh token issued before is refused, a login is the <c>401</c> of an unknown address, and a later invitation makes a new
+    /// account. Refused: not a member (<c>not_found</c>); the actor is the member
     /// (<c>cannot_change_self</c>); the member's role holds what the actor does not (<c>permission_not_held</c>, rule 1); the removal would leave the company without a manager (<c>last_manager</c>), unless
     /// <paramref name="force"/> — which only the operator has.
     /// </summary>
@@ -110,7 +108,8 @@ public sealed class MemberService(
         }
 
         var current = entered.Value!;
-        var membership = await db.Memberships.FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == userId, cancellationToken);
+        var membership = await db.Memberships.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == userId, cancellationToken);
         if (membership is null)
         {
             return Outcome.Fail(TenancyErrors.NotFound);
@@ -143,7 +142,7 @@ public sealed class MemberService(
             details["forced"] = true;
         }
 
-        db.Memberships.Remove(membership);
+        // Read before the deletion: the address goes with the account.
         audit.Stage(
             new AuditEntry
             {
@@ -155,13 +154,11 @@ public sealed class MemberService(
                 Details = details,
             },
             current);
+
+        // The account loses its only space, so it is deleted (spec 0010): its membership, sessions and links go with it, and its own row is
+        // staged. Under the company lock only: no address lock (spec 0010 → Locks).
+        await deletion.DeleteAsync(userId, AccountDeletionReason.MemberRemoved, current, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-
-        // Every session ends: the refresh tokens, and the authorizations they hang on (spec 0002, Decision 11).
-        var subject = userId.ToString();
-        await tokens.RevokeBySubjectAsync(subject, cancellationToken);
-        await authorizations.RevokeBySubjectAsync(subject, cancellationToken);
-
         await transaction.CommitAsync(cancellationToken);
         return Outcome.Done;
     }

@@ -28,13 +28,14 @@ public sealed class AuditAtomicityTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(HttpStatusCode.InternalServerError, role.StatusCode);
         Assert.Equal("Acme", await InDbAsync(db => db.Companies.Where(c => c.Id == company).Select(c => c.Name).SingleAsync(TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == worker, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));   // the account is not deleted either
         Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.Name == "Auditor", TestContext.Current.CancellationToken)));
     }
 
     [Fact]
     public async Task When_the_row_cannot_be_written_the_company_is_not_deleted()   // every change reaches the database before the save: only the transaction undoes them
     {
-        var (company, _, token) = await CompanyWithAdminAsync();
+        var (company, admin, token) = await CompanyWithAdminAsync();
         await AddMemberAsync(company, "worker@acme.test", "user");
         var worker = await SessionApi.LoginAsync(Client, "worker@acme.test", UserPassword);
         using (var sent = await TenancyApi.Send(Client, HttpMethod.Post, "/auth/org/invites", token, new { email = "new@acme.test", role_id = await RoleIdAsync(company, "user") }))
@@ -50,9 +51,10 @@ public sealed class AuditAtomicityTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
         Assert.Equal(2, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == company, TestContext.Current.CancellationToken)));
         Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(2, await InDbAsync(db => db.Users.CountAsync(u => u.Id == admin || u.Email == "worker@acme.test", TestContext.Current.CancellationToken)));   // no member's account is deleted
         Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(i => i.CompanyId == company, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.MailRequests.CountAsync(m => m.Kind == MailKind.Invitation, TestContext.Current.CancellationToken)));
-        _ = await SessionApi.RefreshOk(Client, worker.RefreshToken);   // the revocations were rolled back with the rest
+        _ = await SessionApi.RefreshOk(Client, worker.RefreshToken);   // the deleted sessions were rolled back with the rest
     }
 
     [Fact]

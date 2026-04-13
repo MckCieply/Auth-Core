@@ -64,7 +64,7 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
 
         using (var login = await LoginApi.Login(Client, "worker@acme.test", UserPassword))
         {
-            await TenancyApi.AssertErrorAsync(login, HttpStatusCode.Forbidden, "no_membership");
+            await TenancyApi.AssertErrorAsync(login, HttpStatusCode.Unauthorized, "invalid_credentials");   // the account is gone (spec 0010)
         }
 
         using var again = await DeleteAsync(token);   // the deleting admin's own token is just as stale
