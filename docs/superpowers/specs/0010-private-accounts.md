@@ -358,7 +358,9 @@ accounts, and a lock per member would stop a large company from being deleted (t
 Self-deletion, the invitation move and the start-up step change an account that no company lock guards. They take the
 address lock that sign-up completion takes, and read the membership again after taking it: a self-deletion that finds
 the space is no longer personal answers `403 permissions_changed`. A personal space has no lock of its own: only its
-account changes it, always under the address lock.
+account changes it, always under the address lock. The deletion removes the queued mail requests and the pending sign-up of
+the addresses first, as the mail sender locks them, and then reads the accounts it deletes under a row lock; a sign-in or a
+refresh reads its account again under a share lock before it writes a session, so no session of a deleted account survives.
 
 ### Upgrade
 
