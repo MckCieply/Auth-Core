@@ -3,7 +3,9 @@ using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
@@ -32,6 +34,31 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         "not json",
         "",
     };
+
+    private static readonly string Mu = char.ConvertFromUtf32(0x3BC);
+    private static readonly string Micro = char.ConvertFromUtf32(0xB5);
+    private static readonly string FinalSigma = char.ConvertFromUtf32(0x3C2);
+    private static readonly string Sigma = char.ConvertFromUtf32(0x3C3);
+
+    /// <summary>Two different addresses that the account lookup folds into one (the pairs of <c>InviteAcceptTests</c>): the account's, the typed one, and the kind of the account.</summary>
+    public static TheoryData<string, string, string> FoldedAccounts
+    {
+        get
+        {
+            TheoryData<string, string, string> data = [];
+            foreach (var (account, typed) in new[]
+            {
+                (Mu + "aria@firma.test", Micro + "aria@firma.test"),
+                ("kosta" + FinalSigma + "@firma.test", "kosta" + Sigma + "@firma.test"),
+            })
+            {
+                data.Add(account, typed, "private");
+                data.Add(account, typed, "company");
+            }
+
+            return data;
+        }
+    }
 
     private Task<int> CountAsync<T>(Func<AuthDbContext, IQueryable<T>> set)
         where T : class =>
@@ -286,6 +313,53 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         await SignupApi.AssertAlreadyRegisteredAsync(done);
         Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.NormalizedEmail == "ANNA@FIRMA.TEST", TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CompaniesAsync());
+        Assert.Empty(await PendingAsync());
+    }
+
+    private async Task<Guid> FoldedAccountAsync(string account, string typed, string accountKind)
+    {
+        using (var scope = Factory.Services.CreateScope())
+        {
+            var normalizer = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>();
+            Assert.Equal(normalizer.NormalizeEmail(account), normalizer.NormalizeEmail(typed));   // the premise: the lookup folds the two together
+        }
+
+        return accountKind == "private"
+            ? (await CreatePrivateAccountAsync(account, confirmed: false)).UserId
+            : await AddMemberAsync(await CreateCompanyAsync("Acme"), account, "user", confirmed: false);
+    }
+
+    [Theory]
+    [MemberData(nameof(FoldedAccounts))]
+    public async Task An_account_under_a_spelling_the_normaliser_folds_is_409_and_is_left_alone(string account, string typed, string accountKind)   // the link proves the typed mailbox only
+    {
+        var userId = await FoldedAccountAsync(account, typed, accountKind);
+        var before = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken));
+        var token = await PendingSignupSeed.IssueAsync(Factory.Services, typed, CompanyName);
+        var companiesBefore = await CompaniesAsync();
+
+        using var done = await SignupApi.Complete(Client, token, Password, "Never Made");
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        var after = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken));
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.False(after.EmailConfirmed);   // the link did not confirm an address it was not sent to
+        Assert.Equal(companiesBefore, await CompaniesAsync());
+        Assert.Empty(await PendingAsync());
+    }
+
+    [Theory]
+    [MemberData(nameof(FoldedAccounts))]
+    public async Task A_weak_password_does_not_hide_that_the_account_only_looks_like_the_typed_address(string account, string typed, string accountKind)   // weak_password only when there is no account
+    {
+        await FoldedAccountAsync(account, typed, accountKind);
+        var token = await PendingSignupSeed.IssueAsync(Factory.Services, typed, CompanyName);
+        var companiesBefore = await CompaniesAsync();
+
+        using var done = await SignupApi.Complete(Client, token, "short", "Never Made");
+
+        await SignupApi.AssertAlreadyRegisteredAsync(done);
+        Assert.Equal(companiesBefore, await CompaniesAsync());
         Assert.Empty(await PendingAsync());
     }
 

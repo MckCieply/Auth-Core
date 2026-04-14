@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 
 namespace Auth.IntegrationTests.Infrastructure;
 
-/// <summary>Drives the four endpoints of spec 0009 over HTTP.</summary>
+/// <summary>Drives the four endpoints of specs 0009 and 0010 over HTTP.</summary>
 public static class SignupApi
 {
     public const string OptionsPath = "/auth/options";
@@ -25,9 +25,9 @@ public static class SignupApi
     public static Task<HttpResponseMessage> Complete(HttpClient client, string token, string password, string companyName) =>
         client.PostAsJsonAsync(CompletePath, new { token, password, company_name = companyName });
 
-    /// <summary>A completion for an account that has no company: no password in the body (spec 0009, Amendment 3).</summary>
-    public static Task<HttpResponseMessage> CompleteWithoutPassword(HttpClient client, string token, string companyName) =>
-        client.PostAsJsonAsync(CompletePath, new { token, company_name = companyName });
+    /// <summary>A private sign-up (spec 0010): the address and the kind, no company name.</summary>
+    public static Task<HttpResponseMessage> RequestPrivate(HttpClient client, string email) =>
+        client.PostAsJsonAsync(RequestPath, new { email, kind = "private" });
 
     /// <summary>The <c>403</c> of a sign-up that is off: the exact body, never stored, no cookie.</summary>
     public static async Task AssertDisabledAsync(HttpResponseMessage response)

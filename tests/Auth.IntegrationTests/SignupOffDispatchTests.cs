@@ -12,7 +12,7 @@ namespace Auth.IntegrationTests;
 
 /// <summary>
 /// An instance that has sign-up off sends no sign-up mail (spec 0009 → General rules): a request that was queued while sign-up was on is dropped
-/// when it comes up, whatever its address has (a pending sign-up, an account with a company, an account without one), and nothing is logged as a
+/// when it comes up, whatever its address has (a pending sign-up, an account with a company, a private account), and nothing is logged as a
 /// failure.
 /// </summary>
 public sealed class SignupOffDispatchTests(PostgresFixture postgres, KeyMaterialFixture keys) : SignupTestBase(postgres, keys)
@@ -32,16 +32,16 @@ public sealed class SignupOffDispatchTests(PostgresFixture postgres, KeyMaterial
     [Theory]
     [InlineData("new address")]
     [InlineData("account with a company")]
-    [InlineData("account without a company")]
+    [InlineData("private account")]
     public async Task A_sign_up_request_queued_before_sign_up_was_turned_off_sends_nothing_and_is_dropped(string address)
     {
         if (address == "account with a company")
         {
             await CreateUserAsync(Address, confirmed: true);
         }
-        else if (address == "account without a company")
+        else if (address == "private account")
         {
-            await RemovedMemberAsync();
+            await CreatePrivateAccountAsync(Address);
         }
 
         using var response = await SignupApi.Request(Client, Address, CompanyName);
