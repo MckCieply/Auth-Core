@@ -6,8 +6,9 @@ using Auth.Server.Tenancy;
 namespace Auth.Server.Signup;
 
 /// <summary>
-/// <c>POST /auth/signup/preview</c> (spec 0009): what the link of a mail is for. No access token: the link token is the credential. While
-/// sign-up is off it answers <c>403 signup_disabled</c> before it reads the body.
+/// <c>POST /auth/signup/preview</c> (specs 0009 and 0010): what the link of a mail is for. No access token: the link token is the credential.
+/// While both switches are off it answers <c>403 signup_disabled</c> before it reads the body; while the switch of the link's kind is off,
+/// after the token.
 /// </summary>
 public static class SignupPreviewEndpoint
 {
@@ -21,7 +22,7 @@ public static class SignupPreviewEndpoint
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(signup);
 
-        if (!gate.IsOn)
+        if (!gate.AnyOn)
         {
             return ApiResults.Error(TenancyErrors.SignupDisabled);
         }
@@ -33,8 +34,14 @@ public static class SignupPreviewEndpoint
         }
 
         var preview = await signup.PreviewAsync(fields[0], http.RequestAborted);
-        return preview is null
-            ? AccountResults.InvalidToken()
-            : ApiResults.Ok(new SignupPreviewResponse(preview.Email, preview.CompanyName, preview.HasAccount));
+        if (preview is null)
+        {
+            return AccountResults.InvalidToken();
+        }
+
+        // The kind is known only from the token: its switch is judged now (spec 0010 → preview, step 3).
+        return gate.IsOnFor(preview.Kind)
+            ? ApiResults.Ok(new SignupPreviewResponse(SignupKinds.NameOf(preview.Kind), preview.Email, preview.CompanyName))
+            : ApiResults.Error(TenancyErrors.SignupDisabled);
     }
 }

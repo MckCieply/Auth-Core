@@ -12,20 +12,20 @@ using TokenOptions = Auth.Server.Tokens.TokenOptions;
 namespace Auth.Server.Signup;
 
 /// <summary>
-/// <c>POST /auth/signup/complete</c> (spec 0009): finishes a sign-up and signs the person in (Amendment 2). No access token: the link token is the
-/// credential. While sign-up is off it answers <c>403 signup_disabled</c> before it reads the body — also for a request that was made while it
-/// was on. The answer is that of a successful login (<c>200 {"status":"authenticated","access_token"}</c> and the refresh cookie): the endpoint is a
-/// pass-through request of OpenIddict (<see cref="SignupCompleteRequestHandler"/>), builds the principal the way the login does
-/// (<see cref="SessionPrincipal"/>) and returns an <see cref="AtomicSignInResult"/> that issues the session, writes <c>login.succeeded</c> and
-/// commits the transaction of the completion. If any of that fails, nothing of the completion stays. The password is an optional member of the
-/// body (Amendment 3): an account without a company needs none, and a password that is sent for it is not used.
+/// <c>POST /auth/signup/complete</c> (specs 0009 and 0010): finishes a sign-up and signs the person in (Amendment 2). No access token: the link
+/// token is the credential. While both switches are off it answers <c>403 signup_disabled</c> before it reads the body — also for a request that
+/// was made while its kind was on. The answer is that of a successful login (<c>200 {"status":"authenticated","access_token"}</c> and the
+/// refresh cookie): the endpoint is a pass-through request of OpenIddict (<see cref="SignupCompleteRequestHandler"/>), builds the principal the
+/// way the login does (<see cref="SessionPrincipal"/>) and returns an <see cref="AtomicSignInResult"/> that issues the session, writes
+/// <c>login.succeeded</c> and commits the transaction of the completion. If any of that fails, nothing of the completion stays. The password and
+/// the company name are optional members of the body: the order of spec 0010 → Complete judges them after the token, which says the kind.
 /// </summary>
 public static class SignupCompleteEndpoint
 {
     public const string Path = "/auth/signup/complete";
 
-    private static readonly string[] Required = ["token", "company_name"];
-    private static readonly string[] Optional = ["password"];
+    private static readonly string[] Required = ["token"];
+    private static readonly string[] Optional = ["password", "company_name"];
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, SignupGate gate, SignupService signup, MembershipReader memberships, IOptions<TokenOptions> tokens, TimeProvider clock)
@@ -44,14 +44,15 @@ public static class SignupCompleteEndpoint
                 "The sign-up completion was reached without an OpenIddict request; the token endpoint passthrough is misconfigured.");
         }
 
-        if (!gate.IsOn)
+        if (!gate.AnyOn)
         {
             return ApiResults.Error(TenancyErrors.SignupDisabled);
         }
 
-        // [token, company_name, password]: the password is null when it is not in the body; when it is, it is a non-blank string like the others.
+        // [token, password, company_name]: an optional member is null when it is not in the body; when it is, it is a non-blank string like the
+        // others. Which of the two a link needs is known only from its token: the service judges it (spec 0010 → Complete, step 5).
         var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Required, Optional, http.RequestAborted);
-        if (fields is not [{ } linkToken, { } name, var password] || password?.Contains('\0') == true || !NameInput.IsValid(name))
+        if (fields is not [{ } linkToken, var password, var name] || password?.Contains('\0') == true || (name is not null && !NameInput.IsValid(name)))
         {
             return AccountResults.InvalidRequest();
         }
@@ -72,10 +73,10 @@ public static class SignupCompleteEndpoint
             // Read inside the transaction of the completion (the same context): it sees the membership that is not committed yet.
             var account = done.Account!;
             var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
-                ?? throw new InvalidOperationException("The account that was just made has no company.");
+                ?? throw new InvalidOperationException("The account that was just made has no space.");
             if (tenant.CompanyId != done.CompanyId)
             {
-                throw new InvalidOperationException("The membership read is not the company the completion made.");
+                throw new InvalidOperationException("The membership read is not the space the completion made.");
             }
 
             var principal = SessionPrincipal.Create(http, account, tenant, tokens.Value.Audience, clock);

@@ -355,7 +355,7 @@ public sealed class SignupCompleteSignInTests : SignupTestBase
 
         using (var malformed = await AccountApi.PostRaw(Client, SignupApi.CompletePath, """{"token":"x"}"""))
         {
-            await AccountApi.AssertErrorAsync(malformed, AccountApi.InvalidRequest);
+            await AccountApi.AssertErrorAsync(malformed, AccountApi.InvalidToken);   // spec 0010: the token is judged before the company name
         }
 
         using (var registered = await SignupApi.Complete(Client, takenToken, Password, CompanyName))

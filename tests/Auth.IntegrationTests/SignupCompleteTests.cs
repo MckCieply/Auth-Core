@@ -452,7 +452,8 @@ public sealed class SignupCompleteTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(CallerAddress, completed.ClientIp);
         Assert.Null(completed.ActorUserId);
         Assert.Null(completed.TargetId);
-        Assert.Null(completed.Details);
+        Assert.Equal("organization", AuditApi.Text(completed, "kind"));   // spec 0010: details.kind and nothing else
+        Assert.Equal(["kind"], AuditApi.DetailNames(completed));
 
         var created = Assert.Single(await AuditAsync(AuditKinds.OrgCreated), row => row.OrgId == company.Id);
         Assert.Equal(CompanyName, created.OrgName);

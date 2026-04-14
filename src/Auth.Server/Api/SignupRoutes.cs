@@ -37,9 +37,9 @@ public static class SignupRoutes
         app.MapPost(SignupPreviewEndpoint.Path, SignupPreviewEndpoint.HandleAsync)
             .WithTags("Sign-up")
             .WithDescription(
-                "Shows what the link of the mail is for: the address as it was typed, the company name of the request and `has_account`, which is true "
-                + "only when an account without a company has the address (then the completion needs no password). It changes nothing "
-                + "and the link stays usable. A token that is unknown, used, expired or replaced by a newer mail is `invalid_token`.")
+                "Shows what the link of the mail is for: `kind` (`organization` or `private`), the address as it was typed and, for an organization, "
+                + "the company name of the request. It changes nothing and the link stays usable. A token that is unknown, used, expired or replaced "
+                + "by a newer mail is `invalid_token`; a link whose kind of sign-up is off is `403 signup_disabled`.")
             .ReadsJson<SignupPreviewRequest>()
             .Produces<SignupPreviewResponse>()
             .ProducesError(StatusCodes.Status400BadRequest, AccountResults.InvalidRequestError, AccountResults.InvalidTokenError)
@@ -48,13 +48,14 @@ public static class SignupRoutes
         app.MapPost(SignupCompleteEndpoint.Path, SignupCompleteEndpoint.HandleAsync)
             .WithTags("Sign-up")
             .WithDescription(
-                "Finishes a sign-up and signs the person in: in one transaction the account (its email confirmed), the company (named as given here, "
-                + "with a copy of the default roles) and the membership with the first admin's role are made, the pending sign-up is used up, and the "
-                + "session is issued; if the session cannot be written nothing of this stays. The answer is that of a successful login: the access token "
-                + "(carrying the new company and the first admin's role) and the refresh cookie. The checks are made in this order: the token, the "
-                + "account (`409 already_registered`, whatever the password, when an account that belongs to a company, or one that only resembles the "
-                + "typed address, has the address by now), the password (only where no account exists: a weak one is `400 weak_password` and leaves "
-                + "the token usable; an account that has no company keeps the password it has, so for it the member may be left out and is not used if sent).")
+                "Finishes a sign-up and signs the person in: in one transaction the account (its email confirmed) and its space are made (an organization: "
+                + "the company named as given here, with a copy of the default roles, and the membership with the first admin's role; a private person: "
+                + "the personal space), the pending sign-up is used up, and the session is issued; if the session cannot be written nothing of this stays. "
+                + "The answer is that of a successful login: the access token (carrying the new space, `org_kind` and the role) and the refresh cookie. "
+                + "The checks are made in this order: the token, the switch of its kind (`403 signup_disabled`), the company name (required for an "
+                + "organization, refused for a private sign-up: `400 invalid_request`, the token stays usable), any account under the address "
+                + "(`409 already_registered`, whatever the password), the password (missing: `400 invalid_request`; weak: `400 weak_password`; the "
+                + "token stays usable).")
             .ReadsJson<SignupCompleteRequest>()
             .Produces<LoginResponse>()
             .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet + " The person is signed in, as after a login.")

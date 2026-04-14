@@ -278,7 +278,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["private_signup", "signup"], Properties("OptionsResponse"));
-        Assert.Equal(["company_name", "email", "has_account"], Properties("SignupPreviewResponse"));
+        Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
@@ -287,7 +287,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task The_completion_asks_for_no_password_of_an_account_without_a_company()   // criterion 24
+    public async Task The_completion_takes_the_token_an_optional_password_and_an_optional_company_name()   // spec 0010 → Complete
     {
         await using var factory = new AuthAppFactory(postgres, keys);
         var document = await DescriptionAsync(factory);
@@ -298,13 +298,12 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
             schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
         }
 
-        Assert.NotNull(schema["properties"]!["password"]);   // still described
-
-        // The sentence Step 11 adds to the description of the operation: it fails before the change whatever the generator does with `required`.
-        Assert.Contains("may be left out", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.NotNull(schema["properties"]!["password"]);
+        Assert.NotNull(schema["properties"]!["company_name"]);
+        Assert.Contains("private", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
         if (schema["required"] is System.Text.Json.Nodes.JsonArray required)
         {
-            Assert.DoesNotContain("password", required.Select(node => node!.GetValue<string>()));
+            Assert.DoesNotContain("company_name", required.Select(node => node!.GetValue<string>()));
         }
     }
 

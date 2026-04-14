@@ -29,6 +29,10 @@ public static class SignupApi
     public static Task<HttpResponseMessage> RequestPrivate(HttpClient client, string email) =>
         client.PostAsJsonAsync(RequestPath, new { email, kind = "private" });
 
+    /// <summary>The completion of a private sign-up (spec 0010): the token and the password, no company name.</summary>
+    public static Task<HttpResponseMessage> CompletePrivate(HttpClient client, string token, string password) =>
+        client.PostAsJsonAsync(CompletePath, new { token, password });
+
     /// <summary>The <c>403</c> of a sign-up that is off: the exact body, never stored, no cookie.</summary>
     public static async Task AssertDisabledAsync(HttpResponseMessage response)
     {
