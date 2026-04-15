@@ -17,6 +17,9 @@ public sealed record RenameOrgRequest(string Name);
 /// <summary>Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password.</summary>
 public sealed record DeleteOrgRequest(string Name, string Password);
 
+/// <summary>Request of <c>DELETE /auth/account</c> (spec 0010): the caller's own password.</summary>
+public sealed record DeleteAccountRequest(string Password);
+
 /// <summary>A role as a list names it: its id and its name.</summary>
 public sealed record RoleRef(Guid Id, string Name);
 

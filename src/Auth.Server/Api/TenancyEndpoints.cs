@@ -1,3 +1,4 @@
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 
 namespace Auth.Server.Api;
@@ -17,6 +18,26 @@ public static class TenancyEndpoints
             .RequireAuthorization()
             .WithTags("Company")
             .Produces<MeResponse>()
+            .ProducesGuarded();
+
+        // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.
+        app.MapDelete(AccountDeletionEndpoint.Path, AccountDeletionEndpoint.DeleteAsync)
+            .RequireAuthorization()
+            .WithTags("Account")
+            .WithDescription(
+                "Deletes the caller's own private account with everything Auth-Core holds of it: the personal space, the sessions, the mail links, "
+                + "the queued mails, the pending sign-up and the login streak; the audit rows stay for their retention. Needs the caller's password. "
+                + "The product deletes its own data under the token's `org_id` first: Auth-Core does not tell it. A token that says `org_kind` "
+                + "`personal` while the account has moved to a company or is gone is `403 permissions_changed`; a company member is `403 forbidden` "
+                + "(company accounts are managed by their admins). A wrong password counts in the login streak as a failed login does; while the "
+                + "identifier is locked the answer is `429 too_many_attempts`.")
+            .ReadsJson<DeleteAccountRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .SetsRefreshCookie(
+                StatusCodes.Status204NoContent, $"`{RefreshCookie.Name}` emptied, with `Max-Age=0`: the browser drops the cookie, as at a logout.")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword)
+            .ProducesTooManyAttempts()
             .ProducesGuarded();
 
         app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)

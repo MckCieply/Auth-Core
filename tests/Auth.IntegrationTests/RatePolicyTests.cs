@@ -19,6 +19,7 @@ public sealed class RatePolicyTests
     [InlineData("GET", "/auth/.well-known/jwks.json", RatePolicy.General)]
     [InlineData("GET", "/auth/me", RatePolicy.General)]
     [InlineData("PATCH", "/auth/org", RatePolicy.General)]
+    [InlineData("DELETE", "/auth/account", RatePolicy.General)]   // spec 0010 → Limits, as DELETE /auth/org
     [InlineData("POST", "/auth/org/invites", RatePolicy.General)]
     [InlineData("GET", "/auth/nothing/here", RatePolicy.General)]
     [InlineData("GET", "/auth", RatePolicy.General)]
