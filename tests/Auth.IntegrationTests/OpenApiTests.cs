@@ -201,6 +201,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_grant", Description(operations["POST /auth/refresh"], "401"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
+        Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
@@ -244,7 +245,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify/request", "email")]
     [InlineData("POST /auth/email/verify", "token")]
     [InlineData("POST /auth/invites/preview", "token")]
-    [InlineData("POST /auth/invites/accept", "password,token")]
+    [InlineData("POST /auth/invites/accept", "leave_private_account,password,token")]
     [InlineData("POST /auth/signup", "company_name,email,kind")]
     [InlineData("POST /auth/signup/preview", "token")]
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
@@ -279,7 +280,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["private_signup", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
-        Assert.Equal(["email", "org_name", "role"], Properties("InvitePreviewResponse"));
+        Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));

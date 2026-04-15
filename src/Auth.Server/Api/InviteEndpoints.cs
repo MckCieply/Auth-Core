@@ -14,7 +14,6 @@ public static class InviteEndpoints
     public const string AcceptPath = "/auth/invites/accept";
 
     private static readonly string[] PreviewFields = ["token"];
-    private static readonly string[] AcceptFields = ["token", "password"];
 
     public static async Task<IResult> PreviewAsync(HttpContext http, InviteAcceptance acceptance)
     {
@@ -29,7 +28,7 @@ public static class InviteEndpoints
 
         var preview = await acceptance.PreviewAsync(fields[0], http.RequestAborted);
         return preview.Succeeded
-            ? ApiResults.Ok(new InvitePreviewResponse(preview.Value!.OrgName, preview.Value.Email, preview.Value.Role))
+            ? ApiResults.Ok(new InvitePreviewResponse(preview.Value!.OrgName, preview.Value.Email, preview.Value.Role, preview.Value.HasPrivateAccount))
             : ApiResults.Error(preview.Error!);
     }
 
@@ -38,13 +37,24 @@ public static class InviteEndpoints
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(acceptance);
 
-        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, AcceptFields, http.RequestAborted);
-        if (fields is null || fields[1].Contains('\0'))
+        // Spec 0010: the password is needed only where an account is made, so it is optional here and judged after the token; when it is there it
+        // is a non-blank string with no NUL. leave_private_account is a JSON boolean when it is there.
+        var body = await JsonObjectBody.ReadObjectAsync(http.Request, http.RequestAborted);
+        if (body is not { } fields
+            || !fields.TryString("token", out var token)
+            || !fields.TryOptionalString("password", out var password)
+            || password?.Contains('\0') == true)
         {
             return ApiResults.InvalidRequest();
         }
 
-        var accepted = await acceptance.AcceptAsync(fields[0], fields[1], http.RequestAborted);
+        var leave = fields.Boolean("leave_private_account");
+        if (leave == JsonBoolean.Invalid)
+        {
+            return ApiResults.InvalidRequest();
+        }
+
+        var accepted = await acceptance.AcceptAsync(token, password, leave == JsonBoolean.True, http.RequestAborted);
         if (accepted.Succeeded)
         {
             return ApiResults.NoContent();

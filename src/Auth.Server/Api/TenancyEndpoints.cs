@@ -21,16 +21,23 @@ public static class TenancyEndpoints
 
         app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)
             .WithTags("Invitations")
+            .WithDescription(
+                "The company, the address and the role of an invitation, and `has_private_account`: whether the address has a private account, "
+                + "which accepting moves into the company (its personal space is deleted). An address of a company member is `409 already_member`.")
             .ReadsJson<PreviewInviteRequest>()
             .Produces<InvitePreviewResponse>()
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
         app.MapPost(InviteEndpoints.AcceptPath, InviteEndpoints.AcceptAsync)
             .WithTags("Invitations")
+            .WithDescription(
+                "Accepts an invitation. A new account needs `password`. An account that exists keeps its own password (a `password` sent is not "
+                + "used); a private account moves only with `leave_private_account: true` (its personal space is deleted, every session ends), "
+                + "and without it the answer is `409 private_account_exists` and nothing changes. A company member is `409 already_member`.")
             .ReadsJson<AcceptInviteRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesPasswordError(TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
-            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember, TenancyErrors.PrivateAccountExists);
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 

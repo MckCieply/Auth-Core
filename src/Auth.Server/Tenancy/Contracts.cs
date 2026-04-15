@@ -32,11 +32,14 @@ public sealed record SendInviteRequest(string Email, Guid RoleId);
 /// <summary>Request of <c>POST /auth/invites/preview</c>.</summary>
 public sealed record PreviewInviteRequest(string Token);
 
-/// <summary>Response of <c>POST /auth/invites/preview</c>.</summary>
-public sealed record InvitePreviewResponse(string OrgName, string Email, string Role);
+/// <summary>Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a private account.</summary>
+public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount);
 
-/// <summary>Request of <c>POST /auth/invites/accept</c>.</summary>
-public sealed record AcceptInviteRequest(string Token, string Password);
+/// <summary>
+/// Request of <c>POST /auth/invites/accept</c>: the password of a new account (not used for an account that exists), and
+/// <c>leave_private_account</c>, a JSON boolean, which a private account needs to move (spec 0010).
+/// </summary>
+public sealed record AcceptInviteRequest(string Token, string? Password = null, bool? LeavePrivateAccount = null);
 
 /// <summary>One member of <c>GET /auth/org/members</c>. The time is ISO 8601 in UTC.</summary>
 public sealed record MemberItem(Guid UserId, string Email, RoleRef Role, DateTime JoinedAt);

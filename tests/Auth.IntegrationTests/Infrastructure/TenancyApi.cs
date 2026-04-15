@@ -41,6 +41,12 @@ public static class TenancyApi
     public static Task<HttpResponseMessage> Accept(HttpClient client, string token, string password) =>
         client.PostAsJsonAsync(AcceptPath, new { token, password });
 
+    /// <summary>Accepts for an address that has a private account, on purpose (spec 0010): <c>leave_private_account: true</c>.</summary>
+    public static Task<HttpResponseMessage> AcceptLeaving(HttpClient client, string token, string? password = null) =>
+        password is null
+            ? client.PostAsJsonAsync(AcceptPath, new { token, leave_private_account = true })
+            : client.PostAsJsonAsync(AcceptPath, new { token, password, leave_private_account = true });
+
     /// <summary>Asserts the status, that the answer is never stored and sets no cookie, and returns the raw body.</summary>
     public static async Task<string> ReadAsync(HttpResponseMessage response, HttpStatusCode status)
     {
