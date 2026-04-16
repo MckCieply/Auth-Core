@@ -13,7 +13,7 @@ import { AuthService, errorCode, retryAfterOf } from './auth.service';
 /** Paths that start like this get the access token. A product edits these two lists (guide, step 3). */
 export const TOKEN_PATH_PREFIXES: readonly string[] = ['/api/', '/auth/org'];
 /** Paths that are exactly this get it too. */
-export const TOKEN_PATHS: readonly string[] = ['/auth/me'];
+export const TOKEN_PATHS: readonly string[] = ['/auth/me', '/auth/account'];
 /**
  * A call to the app's own origin that has not been answered after this long fails, so no screen waits for ever. A product with
  * calls that take longer (an upload) raises it, or ends the call itself.

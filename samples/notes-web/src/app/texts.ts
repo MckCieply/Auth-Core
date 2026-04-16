@@ -45,6 +45,7 @@ export const texts = {
     notVerified: 'Your email address is not confirmed yet.',
     noMembership: 'Your account does not belong to a company.',
     createAccount: 'Create an account',
+    accountDeleted: 'Your account was deleted.',
     tooManyAttempts: (seconds: number): string =>
       `Too many attempts. Try again in ${counted(minutesFrom(seconds), 'minute', 'minutes')}.`,
   },
@@ -83,6 +84,11 @@ export const texts = {
     setsPassword: (email: string): string => `This sets the password for ${email}.`,
     submit: 'Join',
     alreadyMember: 'This account already belongs to a company.',
+    // The paragraph of the invitation mail (spec 0010), for an address that has a private account.
+    privateWarning: (company: string): string =>
+      `You already have a private account with this email address. If you accept, you move to ${company}: the space of your private account ` +
+      `is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of ${company}.`,
+    move: 'Move me to the company and delete my private account',
     // Not the link texts of the other screens: a person cannot get a new invitation from this app, only from the company.
     invalid: 'This invitation has expired or was already used. Ask for a new one.',
   },
@@ -119,9 +125,36 @@ export const texts = {
   notes: {
     title: 'Notes',
     signOut: 'Sign out',
+    privateAccount: 'Private account',
+    team: 'Team',
+    deleteAccount: 'Delete account',
+    deleteWarning: 'This deletes your account and all your notes. It cannot be undone.',
+    deleteConfirm: 'Delete my account',
+    cancel: 'Cancel',
+    // The notes are deleted first (spec 0010): a wrong password then leaves the account without them, and the screen says so.
+    wrongPassword: 'The password is wrong, so your account was not deleted. Your notes are already gone.',
+    // Said next to every refusal that comes after the notes were deleted.
+    notesGone: 'Your notes are already gone.',
+    // The account moved into a company while the person was deleting it (an invitation was accepted in another tab).
+    movedToCompany: 'Your account now belongs to a company, so it cannot be deleted here.',
+    passwordRequired: 'Enter your password.',
     newNote: 'New note',
     add: 'Add note',
     empty: 'No notes yet.',
     tooLong: (max: number): string => `A note can be at most ${max} characters.`,
+  },
+
+  team: {
+    title: 'Team',
+    loading: 'Loading...',
+    back: 'Back to the notes',
+    remove: 'Remove',
+    cancel: 'Cancel',
+    // Spec 0010: removing a member deletes the account. A product's own team screen says the same.
+    removeConfirm: "This person's account will be deleted.",
+    permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',
+    lastManager: 'The company needs at least one person who manages its members.',
+    cannotChangeSelf: 'You cannot remove yourself.',
+    notAllowed: "You don't have access to this.",
   },
 };

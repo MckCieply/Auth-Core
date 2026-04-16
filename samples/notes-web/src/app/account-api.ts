@@ -8,11 +8,12 @@ export const OPTIONS_TIMEOUT_MS = 10_000;
 
 export type Outcome<T = void> = { ok: true; value: T } | { ok: false; failure: Failure };
 
-/** What POST /auth/invites/preview answers: who invites, for whom, as what. */
+/** What POST /auth/invites/preview answers: who invites, for whom, as what, and whether the address has a private account (spec 0010). */
 export interface InvitePreview {
   org_name: string;
   email: string;
   role: string;
+  has_private_account: boolean;
 }
 
 /** What GET /auth/options answers, as far as the screens care: whether a visitor may start a company, or sign up alone (spec 0010). */
@@ -67,13 +68,18 @@ export class AccountApi {
       typeof body['email'] === 'string' &&
       typeof body['role'] === 'string'
     ) {
-      return { ok: true, value: { org_name: body['org_name'], email: body['email'], role: body['role'] } };
+      return {
+        ok: true,
+        // Anything but a true boolean means "no private account": the screen of spec 0005, which asks for a password.
+        value: { org_name: body['org_name'], email: body['email'], role: body['role'], has_private_account: body['has_private_account'] === true },
+      };
     }
     return { ok: false, failure: { kind: 'other' } };
   }
 
-  acceptInvite(token: string, password: string): Promise<Outcome> {
-    return this.post('/auth/invites/accept', { token, password });
+  /** With `leavePrivateAccount` (spec 0010) the private account moves into the company on purpose, and no password is sent. */
+  acceptInvite(token: string, password: string | null, leavePrivateAccount = false): Promise<Outcome> {
+    return this.post('/auth/invites/accept', leavePrivateAccount ? { token, leave_private_account: true } : { token, password });
   }
 
   /**

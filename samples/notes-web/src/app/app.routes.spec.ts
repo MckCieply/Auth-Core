@@ -65,4 +65,10 @@ describe('routes', () => {
     await harness.navigateByUrl(url);
     expect(TestBed.inject(Router).url).toBe(url);
   });
+
+  it('an anonymous person who asks for /team lands on /login?returnUrl=%2Fteam', async () => {
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/team');
+    expect(TestBed.inject(Router).url).toBe('/login?returnUrl=%2Fteam');
+  });
 });

@@ -24,6 +24,8 @@ export type Failure =
   | { kind: 'already_member' }
   | { kind: 'already_registered' }
   | { kind: 'signup_disabled' }
+  | { kind: 'wrong_password' }
+  | { kind: 'private_account_exists' }
   | { kind: 'invalid_request' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
@@ -95,6 +97,12 @@ export function failureOf(error: unknown): Failure {
   }
   if (error.status === 403 && code === 'signup_disabled') {
     return { kind: 'signup_disabled' };
+  }
+  if (error.status === 403 && code === 'wrong_password') {
+    return { kind: 'wrong_password' };
+  }
+  if (error.status === 409 && code === 'private_account_exists') {
+    return { kind: 'private_account_exists' };
   }
   return { kind: 'other' };
 }
@@ -233,6 +241,20 @@ export class AuthService {
       // The answer does not matter: this tab is signed out either way.
     }
     this.dropSession();
+  }
+
+  /**
+   * Deletes the private account of the person who is signed in (spec 0010): DELETE /auth/account with the password. On `204` the session is
+   * over here too (Auth-Core has cleared the cookie). The product deletes its own data before it calls this: Auth-Core does not tell it.
+   */
+  async deleteAccount(password: string): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.delete('/auth/account', { body: { password } }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    this.dropSession();
+    return { ok: true };
   }
 
   /**
