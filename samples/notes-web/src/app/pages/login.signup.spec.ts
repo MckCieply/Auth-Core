@@ -35,6 +35,11 @@ describe('LoginPage: the link to sign-up', () => {
     expect(pageText(fixture)).not.toContain('Create an account');
   });
 
+  it('offers "Create an account" when only private sign-up is on (spec 0010)', async () => {
+    const fixture = await open({ signup: 'invite-only', private_signup: 'self-service' });
+    expect(has(fixture, 'a[href="/signup"][data-testid="create-account"]')).toBe(true);
+  });
+
   it.each([[500], [502], [429]])('offers nothing when the options cannot be read (%s)', async (code) => {
     const fixture = await open('oops', code);
     expect(has(fixture, 'a[href="/signup"]')).toBe(false);

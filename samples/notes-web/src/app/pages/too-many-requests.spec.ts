@@ -79,6 +79,8 @@ describe('the mail and link screens when the address has made too many requests'
 
   it('SignupPage: leaves the words to the notice bar and does not say it sent anything', async () => {
     const opened = await open(SignupPage, '/signup');
+    opened.ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off' }); // spec 0010: the page asks first
+    await settle(opened.fixture);
     typeInto(opened.fixture, '#email', 'anna@firma.example');
     typeInto(opened.fixture, '#company', 'Firma');
     submitForm(opened.fixture);

@@ -90,25 +90,30 @@ export const texts = {
   signup: {
     title: 'Create an account',
     intro: 'Enter your email address and the name of your company. We will send you a link to finish.',
+    introPrivate: 'Enter your email address. We will send you a link to finish.',
+    kindLegend: 'Create an account for',
+    kindOrganization: 'Organization',
+    kindPrivate: 'Private person',
     companyName: 'Company name',
     submit: 'Create account',
     // The same sentence for every address: the answer must not tell whether the address has an account.
     sent: 'Check your inbox. We sent a message to this address.',
-    closed: 'Sign-up is closed. Ask the company you want to join for an invitation.',
+    closed: 'Sign-up is closed. To join a company, ask it for an invitation.',
     invalidRequest: 'Check the email address and the company name.',
+    invalidRequestPrivate: 'Check the email address.',
   },
 
   completeSignup: {
     title: 'Finish creating your account',
     loading: 'Opening your sign-up...',
     setsPassword: (email: string): string => `This sets the password for ${email}.`,
-    // The account exists and belongs to no company (its company was deleted, or the person was removed from it): only the company is new.
-    keepsPassword: (email: string): string => `You already have an account as ${email}. Its password stays as it is; only the company is new.`,
     submit: 'Create company',
+    submitPrivate: 'Create account',
     signUpAgain: 'Sign up again',
     alreadyRegistered: 'An account with this address already exists.',
     companyRequired: 'Enter the name of your company.',
     invalidRequest: 'Check the company name.',
+    invalidRequestPrivate: 'Check the password.',
   },
 
   notes: {

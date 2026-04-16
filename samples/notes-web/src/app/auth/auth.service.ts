@@ -8,6 +8,8 @@ export interface Me {
   email: string;
   org_id: string;
   org_name: string;
+  /** "personal" for a private account (spec 0010), whose space is named "private"; "organization" for a company member. */
+  org_kind: 'organization' | 'personal';
   roles: string[];
   permissions: string[];
 }
@@ -136,6 +138,7 @@ function asMe(body: unknown): Me | null {
       email: body['email'],
       org_id: body['org_id'],
       org_name: body['org_name'],
+      org_kind: body['org_kind'] === 'personal' ? 'personal' : 'organization',
       roles: body['roles'],
       permissions: body['permissions'],
     };
@@ -191,13 +194,12 @@ export class AuthService {
   /**
    * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
    * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
-   * the session that exists alone, as a failed login does. A person whose account exists and belongs to no company (the preview's
-   * `has_account`, Amendment 3) chooses no password: pass `null` and the member is left out of the body.
+   * the session that exists alone, as a failed login does. A private sign-up (spec 0010) names no company: pass `null` and the member is
+   * left out of the body.
    */
-  async completeSignup(token: string, password: string | null, companyName: string): Promise<LoginResult> {
+  async completeSignup(token: string, password: string, companyName: string | null): Promise<LoginResult> {
     let body: LoginBody | null;
-    const request =
-      password === null ? { token, company_name: companyName } : { token, password, company_name: companyName };
+    const request = companyName === null ? { token, password } : { token, password, company_name: companyName };
     try {
       body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/signup/complete', request));
     } catch (error) {

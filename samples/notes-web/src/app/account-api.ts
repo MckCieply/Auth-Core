@@ -1,7 +1,10 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { Failure, failureOf, formFailureOf, isRecord } from './auth/auth.service';
+
+/** How long the screens wait for GET /auth/options: a call that is slower counts as failed, as the refresh does (ten seconds). */
+export const OPTIONS_TIMEOUT_MS = 10_000;
 
 export type Outcome<T = void> = { ok: true; value: T } | { ok: false; failure: Failure };
 
@@ -12,19 +15,23 @@ export interface InvitePreview {
   role: string;
 }
 
-/** What GET /auth/options answers, as far as the screens care: whether a visitor may start a company of their own. */
+/** What GET /auth/options answers, as far as the screens care: whether a visitor may start a company, or sign up alone (spec 0010). */
 export interface SiteOptions {
   signup: 'self-service' | 'invite-only';
+  private_signup: 'self-service' | 'off';
 }
 
+/** A company of one's own, or a private account (spec 0010). */
+export type SignupKind = 'organization' | 'private';
+
 /**
- * What POST /auth/signup/preview answers: the address as it was typed, the company name of the request, and whether an account without a
- * company has the address (spec 0009, Amendment 3): then the completion asks for no password.
+ * What POST /auth/signup/preview answers: the kind, the address as it was typed and, for an organization, the company name of the
+ * request.
  */
 export interface SignupPreview {
+  kind: SignupKind;
   email: string;
-  company_name: string;
-  has_account: boolean;
+  company_name: string | null;
 }
 
 /** Auth-Core's endpoints for the mail links and the account, which need no access token. */
@@ -70,20 +77,25 @@ export class AccountApi {
   }
 
   /**
-   * Whether the product's screens may offer sign-up. A call that fails, and an answer this app does not know, mean "invite-only":
-   * the link "Create an account" is then not offered, which is the safe side.
+   * Whether the product's screens may offer sign-up. Each switch is read on its own (spec 0010). A call that fails, and an answer this
+   * app does not know, and one that takes longer than ten seconds, mean "invite-only" and "off": the link "Create an account" is then
+   * not offered, which is the safe side.
    */
   async options(): Promise<SiteOptions> {
     try {
-      const body = await firstValueFrom(this.http.get<unknown>('/auth/options'));
-      return { signup: isRecord(body) && body['signup'] === 'self-service' ? 'self-service' : 'invite-only' };
+      const body = await firstValueFrom(this.http.get<unknown>('/auth/options').pipe(timeout(OPTIONS_TIMEOUT_MS)));
+      return {
+        signup: isRecord(body) && body['signup'] === 'self-service' ? 'self-service' : 'invite-only',
+        private_signup: isRecord(body) && body['private_signup'] === 'self-service' ? 'self-service' : 'off',
+      };
     } catch {
-      return { signup: 'invite-only' };
+      return { signup: 'invite-only', private_signup: 'off' };
     }
   }
 
-  signUp(email: string, companyName: string): Promise<Outcome> {
-    return this.postForm('/auth/signup', { email, company_name: companyName });
+  /** A company of one's own (`companyName`), or a private account (`null`: the kind is sent and no company name). */
+  signUp(email: string, companyName: string | null): Promise<Outcome> {
+    return this.postForm('/auth/signup', companyName === null ? { email, kind: 'private' } : { email, company_name: companyName });
   }
 
   async previewSignup(token: string): Promise<Outcome<SignupPreview>> {
@@ -92,9 +104,13 @@ export class AccountApi {
       return outcome;
     }
     const body = outcome.value;
-    if (isRecord(body) && typeof body['email'] === 'string' && typeof body['company_name'] === 'string') {
-      // Anything but a true boolean means "no account": the screen then asks for a password, which is the safe side.
-      return { ok: true, value: { email: body['email'], company_name: body['company_name'], has_account: body['has_account'] === true } };
+    if (isRecord(body) && typeof body['email'] === 'string') {
+      if (body['kind'] === 'private') {
+        return { ok: true, value: { kind: 'private', email: body['email'], company_name: null } };
+      }
+      if (typeof body['company_name'] === 'string') {
+        return { ok: true, value: { kind: 'organization', email: body['email'], company_name: body['company_name'] } };
+      }
     }
     return { ok: false, failure: { kind: 'other' } };
   }

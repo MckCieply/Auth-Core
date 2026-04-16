@@ -59,11 +59,13 @@ export class LoginPage implements OnInit {
   protected readonly info = signal<string | null>(null);
   protected readonly canResend = signal(false);
   protected readonly resending = signal(false);
-  /** True while GET /auth/options says a visitor may start a company: then the screen offers "Create an account". */
+  /** True while GET /auth/options says a visitor may sign up, either kind (spec 0010): then the screen offers "Create an account". */
   protected readonly signupOpen = signal(false);
 
   ngOnInit(): void {
-    void this.account.options().then((options) => this.signupOpen.set(options.signup === 'self-service'));
+    void this.account
+      .options()
+      .then((options) => this.signupOpen.set(options.signup === 'self-service' || options.private_signup === 'self-service'));
   }
 
   protected async submit(): Promise<void> {
