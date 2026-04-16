@@ -80,6 +80,9 @@ def _check_shape(claims: dict, audience: str) -> None:
             raise TokenRejected("time_claim")
 
 
+_ORG_KINDS = ("organization", "personal")
+
+
 def _principal(claims: dict) -> Principal:
     sub, org_id = claims.get("sub"), claims.get("org_id")
     roles, permissions = claims.get("roles"), claims.get("permissions")
@@ -87,7 +90,12 @@ def _principal(claims: dict) -> Principal:
         raise TokenRejected("claims")
     if not (_is_list_of_text(roles) and _is_list_of_text(permissions)):
         raise TokenRejected("claims")
-    return Principal(sub=sub, org_id=org_id, roles=tuple(roles), permissions=frozenset(permissions))
+    # Absent: a token of an Auth-Core before spec 0010, a company member's. Present it must be one of the two names. A JSON null
+    # is a claim that is present, hence "in claims" and not a default for a falsy value: it is refused.
+    org_kind = claims["org_kind"] if "org_kind" in claims else "organization"
+    if not (isinstance(org_kind, str) and org_kind in _ORG_KINDS):
+        raise TokenRejected("claims")
+    return Principal(sub=sub, org_id=org_id, roles=tuple(roles), permissions=frozenset(permissions), org_kind=org_kind)
 
 
 def _is_list_of_text(value: object) -> bool:

@@ -59,7 +59,9 @@ def test_the_allow_header_of_every_route_lists_all_the_methods_of_its_path(clien
     assert {"/api/notes", "/api/health"} <= set(methods_of)  # the routes were found
 
     for path, methods in methods_of.items():
-        response = client.request("DELETE", path.replace("{note_id}", "x"))
+        probe = next((m for m in ("DELETE", "PATCH", "PUT") if m not in methods), None)  # /api/me has DELETE (spec 0010)
+        assert probe is not None, f"{path} has DELETE, PATCH and PUT: pick another method to probe it with"
+        response = client.request(probe, path.replace("{note_id}", "x"))
 
         assert response.status_code == 405, path
         assert response.headers["allow"] == ", ".join(sorted(methods)), path

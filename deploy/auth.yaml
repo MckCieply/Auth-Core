@@ -9,10 +9,16 @@
 #                else the first that holds members:manage, is the role of its first admin. It also needs the address of the
 #                product's completion screen (Auth:App:FrontendUrls:CompleteSignup; AUTH_FRONTEND_SIGNUP_URL in production).
 #                "invite-only" (the default when the key is absent) means companies are made by the operator.
+# private        the block of spec 0010. "signup: self-service" lets a private person sign up alone, into a hidden one-person space
+#                nobody else can join; it needs the same completion address. "permissions" is what the private role grants:
+#                permissions of the catalog, never the four built-in ones or "*". Without the block private sign-up is off.
 #
 # A broken file never stops the service: the last valid manifest stays active and /auth/health says "Degraded".
 permissions: [documents:read, documents:write, documents:approve]
 signup: self-service
+private:
+  signup: self-service
+  permissions: [documents:read, documents:write]
 default_roles:
   admin: ["*"]
   user: [documents:read, documents:write]
