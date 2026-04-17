@@ -360,6 +360,11 @@ a provider to it.
 address it stays off and health says `Degraded`. `GET /auth/options` tells a product's screens whether to offer it. An address
 typed in a look-alike spelling never takes over an account or an earlier link; what remains is in the threat model (risk 47).
 
+*Spec 0010:* a private person signs up with an email address only and works in a hidden one-person space; the access token says
+`org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation warns a
+private person and moves the account only on purpose; an account that loses its only space is deleted (a removal, a company deletion, once
+at upgrade). The comeback of spec 0009, Amendment 3, was removed before any release.
+
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
 per user, and any provider beyond the three.
 
