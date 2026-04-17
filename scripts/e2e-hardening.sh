@@ -17,9 +17,10 @@
 #      health check does not reach the database); a logout and a replayed refresh token leave their audit rows - criteria 3, 4, 8.
 #   5. the operator makes a company and its admin, the admin has a pending invitation and the operator queues another; DELETE /auth/org
 #      with a wrong password (403 wrong_password), a wrong name (400) and the right ones (204); then the old access token is 403
-#      permissions_changed, the refresh 401 invalid_grant, the login 403 no_membership, the pending link invalid_token, the company's
-#      rows and the queued mail are gone, and the accounts stay - criteria 10, 8. (That the queued mail is never sent is not checked here: the
-#      dispatcher may send a queued request in the second before the deletion; CompanyDeletionTests pins it.)
+#      permissions_changed, the refresh 401 invalid_grant, the login the 401 of an unknown address, the pending link invalid_token, the
+#      company's rows and the queued mail are gone, and the accounts are deleted (spec 0010) - criteria 10, 8. (That the queued mail is
+#      never sent is not checked here: the dispatcher may send a queued request in the second before the deletion; CompanyDeletionTests
+#      pins it.)
 #   6. the audit log holds a row of each kind the run produced, and none of the passwords, links or session tokens the run used - criterion 8.
 #
 # Full sequence, from the repo root. The older scripts run first on a stack whose limiter is off (the lockout script makes about 58
@@ -29,7 +30,7 @@
 #   export COMPOSE_PROJECT_NAME=auth-core-hardening   # a project of its own, for the whole sequence: never "auth-core", the development stack
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # clean slate
 #   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh && scripts/e2e-signup.sh
+#   scripts/e2e-login.sh && scripts/e2e-refresh.sh && scripts/e2e-lockout.sh && scripts/e2e-email.sh && scripts/e2e-tenancy.sh && scripts/e2e-signup.sh && scripts/e2e-private.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env up -d            # recreates auth with the defaults (AUTH_RATE_LIMIT_ENABLED unset)
 #   scripts/e2e-hardening.sh              # this script (does NOT bring the stack up or down; it stops and starts PostgreSQL)
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
@@ -580,7 +581,7 @@ call POST /auth/refresh "" "$tmp/admin.cookie"
 expect_error "step 5: the refresh of a member of a deleted company" 401 invalid_grant
 expect_no_cookie "step 5: that refresh"
 call POST /auth/login "$tmp/admin.login"
-expect_error "step 5: a new login" 403 no_membership
+expect_error "step 5: a new login (spec 0010: the account is gone)" 401 invalid_credentials
 call POST /auth/invites/preview "$tmp/pending.json"
 expect_error "step 5: the pending invitation link" 400 invalid_token
 for table in '"Companies" WHERE "Id"' '"CompanyRoles" WHERE "CompanyId"' '"Memberships" WHERE "CompanyId"' '"Invites" WHERE "CompanyId"'; do
@@ -588,17 +589,19 @@ for table in '"Companies" WHERE "Id"' '"CompanyRoles" WHERE "CompanyId"' '"Membe
 done
 expect_eq "step 5: the queued mail of the company's invitation" \
   "$(psql_value "SELECT count(*) FROM \"MailRequests\" WHERE \"NormalizedEmail\" = '${QUEUED_EMAIL^^}'")" "0"
-expect_eq "step 5: the account of the admin stays" \
-  "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = '${ADMIN_EMAIL^^}'")" "1"
+expect_eq "step 5: the account of the admin is deleted with its company (spec 0010)" \
+  "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = '${ADMIN_EMAIL^^}'")" "0"
+expect_eq "step 5: account.deleted says org_deleted" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'account.deleted' AND org_id = '$ORG' AND details->>'reason' = 'org_deleted'")" "1"
 expect_eq "step 5: the deletion is in the audit log" \
   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'org.deleted' AND org_id = '$ORG' AND org_name = '$ORG_NAME' AND actor_user_id IS NOT NULL")" "1"
 expect_eq "step 5: the refused deletion is in the audit log" \
   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'org.delete_refused' AND org_id = '$ORG' AND details->>'reason' = 'wrong_password'")" "1"
-pass "step 5: DELETE /auth/org (403 wrong_password, 400 wrong name, 204); then permissions_changed, invalid_grant, no_membership, an invalid link, no rows left, the queued mail gone, the account stays"
+pass "step 5: DELETE /auth/org (403 wrong_password, 400 wrong name, 204); then permissions_changed, invalid_grant, the 401 of an unknown address, an invalid link, no rows left, the queued mail gone, the account deleted"
 
 # --- Step 6: the audit log -------------------------------------------------------------------------------------------------------
 KINDS="$(psql_value "SELECT string_agg(DISTINCT kind, ',' ORDER BY kind) FROM audit_events WHERE occurred_at >= '$START_TS'")"
-for kind in login.succeeded login.failed logout refresh.reuse_detected password.reset_requested invite.sent invite.accepted org.created org.deleted org.delete_refused rate_limit.hit; do
+for kind in login.succeeded login.failed logout refresh.reuse_detected password.reset_requested invite.sent invite.accepted org.created org.deleted org.delete_refused rate_limit.hit account.deleted; do
   [[ ",$KINDS," == *",$kind,"* ]] || fail "step 6: this run left no audit row of the kind $kind (kinds: $KINDS)"
 done
 for secret in "$SEED_PASSWORD" "$E2E_PASSWORD" "$WRONG_PASSWORD" "$ADMIN_LINK" "$PENDING_LINK" "${SESSION_SECRETS[@]}"; do

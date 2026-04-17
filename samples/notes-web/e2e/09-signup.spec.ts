@@ -3,7 +3,6 @@ import { acceptInviteByApi } from './support/api';
 import { setting } from './support/env';
 import { openMailLink, waitForAccountExistsMail, waitForLink } from './support/mail';
 import { expectCleanAddressBar, expectNoEmailInAddressBar } from './support/page';
-import { signIn, signOut } from './support/session';
 
 // The request wakes the server's dispatcher, so a mail comes within seconds; an invitation queued by the operator CLI waits for the poll
 // (a minute or two). Each wait is below the test's timeout.
@@ -174,48 +173,4 @@ test('a link that never worked says so and offers to sign up again', async ({ pa
 
   await page.getByRole('link', { name: 'Sign up again' }).click();
   await expect(page).toHaveURL(/\/signup$/);
-});
-
-test('a person whose company is gone comes back by sign-up: only the company name is asked for, and the old password still works', async ({ page }) => {
-  test.setTimeout(240_000);
-  // The script gave this address an account (an invitation to the development company, accepted with E2E_USER_PASSWORD) and then removed it
-  // from the company through the operator CLI: an account, and no company. The test asks for the sign-up itself.
-  const email = setting('E2E_COMEBACK_EMAIL');
-  const password = setting('E2E_USER_PASSWORD');
-  const company = `Back ${unique('co')}`;
-
-  await page.goto('/signup');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Company name').fill(`Asked ${unique('co')}`);
-  await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page.getByTestId('signup-sent')).toHaveText(SENT); // the sentence every address gets
-
-  // The mail carries the usual link (not the notice), and the screen it opens asks for the company name only.
-  const link = await waitForLink(email, 'complete-signup', MAIL_WAIT_MS);
-  await openMailLink(page, link);
-  await expect(page).toHaveURL(/\/complete-signup$/);
-  expectCleanAddressBar(page);
-  await expect(page.getByLabel('Email')).toHaveValue(email);
-  await expect(page.getByLabel('Email')).not.toBeEditable();
-  await expect(page.getByTestId('keeps-password')).toBeVisible();
-  await expect(page.getByLabel('New password')).toHaveCount(0);
-  await expect(page.getByLabel('Repeat the password')).toHaveCount(0);
-
-  await page.getByLabel('Company name').fill(company);
-  await page.getByRole('button', { name: 'Create company' }).click();
-
-  // Signed in at once, as the first admin of a company of their own; nothing of the former company.
-  await expect(page).toHaveURL(/\/notes$/);
-  expectNoEmailInAddressBar(page);
-  await expect(page.getByTestId('me-email')).toHaveText(email);
-  await expect(page.getByTestId('me-company')).toHaveText(company);
-  await expect(page.getByTestId('me-role')).toHaveText('admin');
-  await expect(page.getByText(setting('E2E_SEEDED_NOTE'))).toHaveCount(0);
-  await expect(page.getByText('No notes yet.')).toBeVisible();
-
-  // The password did not change: signing out and in again with the one the account always had lands in the new company.
-  await signOut(page);
-  await signIn(page, email, password);
-  await expect(page.getByTestId('me-company')).toHaveText(company);
-  await expect(page.getByTestId('me-role')).toHaveText('admin');
 });

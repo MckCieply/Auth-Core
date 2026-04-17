@@ -7,7 +7,7 @@
 # finishes, INVITED = an address that is invited and also signs up, EXPIRED = an address whose link is made to have expired). Each step
 # names the criteria it touches; the ones it touches only in part are marked "part of", and the guarding tests are in the acceptance map.
 #   1. health answers 200 "Healthy" (the development settings name the completion address and deploy/auth.yaml says self-service); the
-#      mail catcher answers; GET /auth/options -> 200 {"signup":"self-service"}, never stored; the OpenAPI description names the four
+#      mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service"}, never stored; the OpenAPI description names the four
 #      paths - part of criteria 1 (the other answers of options) and 20 (the answers and bodies of the operations).
 #   2. POST /auth/signup for NEW -> 202 with an empty body, never stored, no cookie; the same request at once -> 429 too_many_attempts
 #      with Retry-After - part of criteria 3 (the mail is step 4) and 6 (the hourly limit and the independence of the kinds).
@@ -17,7 +17,7 @@
 #   4. the mail arrives: the subject names the application and does not hold the company; the text and the HTML part hold the same
 #      link <complete_signup url>?token=<43 characters> and the company name; exactly one signup.requested row for NEW has been written
 #      since the run began - criteria 3, 21 (part of: Polish).
-#   5. preview with the token -> 200 with exactly the typed address, the company name and has_account false, twice (it changes nothing); an unknown token
+#   5. preview with the token -> 200 with exactly the kind organization, the typed address and the company name, twice (it changes nothing); an unknown token
 #      -> 400 invalid_token - part of criterion 8 (an expired token is step 11).
 #   6. complete with a weak password -> 400 weak_password naming the rules, no cookie, and the token still works; then with a good password
 #      and another company name -> 200 {"status":"authenticated","access_token"} and the auth_rt cookie (HttpOnly, Secure, SameSite=Strict,
@@ -41,15 +41,13 @@
 #  11. EXPIRED asks; once its mail has arrived the end of its link is moved into the past (one UPDATE of "PendingSignups"."TokenExpiresAt",
 #      as scripts/e2e-web.sh does for the browser test); preview and complete answer 400 invalid_token and no account is made - part of
 #      criteria 8 and 13 (the 24 hours themselves, and the hourly clean-up, are guarded by the tests).
-#  12. INVITED, a member of the development company after step 10, is removed from it through the operator CLI (`remove-member`): an account
-#      and no company, whose password still logs in as the 403 no_membership. INVITED asks for a sign-up again (waiting out the mail limit if
-#      step 10 was less than a minute ago), the mail is the usual "complete your sign-up" with a new link, the preview says has_account true,
-#      and the completion with only a token and a company name is 200 as a login's (the cookie, roles ["admin"], a company that is neither
-#      the development company's nor NEW's); the password hash is as it was, the old password logs in to the new company, INVITED has
-#      one account, the pending sign-up is gone, and the audit log holds signup.completed with details.existing_account true (NEW's row has no
-#      details) - part of criterion 24 (the confirmation of the email, the 409 after joining a company and the sample's screen are guarded by
-#      the integration tests and the Playwright test).
-# Criteria 2, 7 (the replacement of a link), 16, 17, 18, 22, 23 and 24's other halves are guarded by the integration tests and the Playwright
+#  12. INVITED, a member of the development company after step 10, is removed from it through the operator CLI (`remove-member`): spec 0010
+#      deletes the account with its only space (the CLI says so, a login is the 401 of an unknown address, and account.deleted says
+#      member_removed and via cli). INVITED asks for a sign-up again (waiting out the mail limit if step 10 was less than a minute ago) and
+#      finishes it as a new address: the usual mail with a new link, the preview of an organization, a new password, a new account (a new
+#      id) that is the admin of a new company; the old password no longer works, and signup.completed says kind organization - criterion 11
+#      of spec 0010.
+# Criteria 2, 7 (the replacement of a link), 16, 17, 18, 22 and 23 are guarded by the integration tests and the Playwright
 # tests: see docs/superpowers/plans/0009-acceptance-map.md.
 #
 # Full sequence, from the repo root (the same stack and .env as the other e2e scripts, with the per-IP limiter OFF as for them; run this
@@ -61,6 +59,7 @@
 #   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 #   scripts/e2e-login.sh; scripts/e2e-refresh.sh; scripts/e2e-lockout.sh; scripts/e2e-email.sh; scripts/e2e-tenancy.sh
 #   scripts/e2e-signup.sh                 # this script (does NOT bring the stack up or down)
+#   scripts/e2e-private.sh                # spec 0010 (private accounts), after this one
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The operator commands run as
@@ -115,7 +114,7 @@ RENAMED="Firma Renamed $run"
 export E2E_SEED_EMAIL="$SEED_EMAIL" E2E_SEED_PASSWORD="$SEED_PASSWORD"
 export E2E_NEW_EMAIL="$NEW_EMAIL" E2E_INVITED_EMAIL="$INVITED_EMAIL" E2E_PENDING_EMAIL="$PENDING_EMAIL" E2E_UNKNOWN_EMAIL="$UNKNOWN_EMAIL"
 export E2E_COMPANY="$COMPANY" E2E_RENAMED="$RENAMED"
-export E2E_BACK_ASKED="Back Asked $run" E2E_BACK_COMPANY="Back Company $run"
+export E2E_BACK_ASKED="Back Asked $run" E2E_BACK_COMPANY="Back Company $run" E2E_BACK_PASSWORD="E2e-Back-Passw0rd-$run"
 export E2E_PASSWORD="E2e-Passw0rd-$run" E2E_INVITED_PASSWORD="E2e-Invited-Passw0rd-$run" E2E_WEAK_PASSWORD="abc"
 
 wait_healthy() {
@@ -325,7 +324,7 @@ wait_mailpit || fail "step 1: $MAILPIT_URL/readyz did not return 200 within 60s 
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service"}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service"}'
 expect_no_store "step 1: the options"
 expect_no_cookie "step 1: the options"
 call GET /auth/openapi/v1.json
@@ -386,14 +385,14 @@ pass "step 4: the mail arrived (the subject names the application and not the co
 
 # --- Step 5: the preview (criterion 8) --------------------------------------------------------------------------------
 call POST /auth/signup/preview "$tmp/preview.json"
-expect_status "step 5: preview" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
+expect_status "step 5: preview" 200 "{\"kind\":\"organization\",\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
 expect_no_store "step 5: preview"
 call POST /auth/signup/preview "$tmp/preview.json"
-expect_status "step 5: preview again" 200 "{\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\",\"has_account\":false}"
+expect_status "step 5: preview again" 200 "{\"kind\":\"organization\",\"email\":\"$NEW_EMAIL\",\"company_name\":\"$COMPANY\"}"
 "$PY" -c 'import json; print(json.dumps({"token": "x" * 43}))' > "$tmp/unknown-token.json"
 call POST /auth/signup/preview "$tmp/unknown-token.json"
 expect_error "step 5: preview of an unknown token" 400 invalid_token
-pass "step 5: preview -> 200 with exactly the typed address, the company name and has_account false, twice; an unknown token -> 400 invalid_token"
+pass "step 5: preview -> 200 with exactly the kind, the typed address and the company name, twice; an unknown token -> 400 invalid_token"
 
 # --- Step 6: the completion, which signs in (criteria 9, 11, 12) ------------------------------------------------------
 call POST /auth/signup/complete "$tmp/complete-weak.json"
@@ -561,20 +560,21 @@ expect_error "step 11: completion with the expired link" 400 invalid_token
 expect_eq "step 11: no account was made" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$EXPIRED_EMAIL')")" "0"
 pass "step 11: a link whose end lies in the past -> preview and completion are 400 invalid_token, and no account is made"
 
-# --- Step 12: a person without a company comes back by sign-up (criterion 24) ------------------------------------------
-# After step 10 INVITED is a member of the development company with the password E2E_INVITED_PASSWORD. The operator removes the membership:
-# an account and no company, as after the company was deleted. INVITED asks for a sign-up again, gets the usual link, and finishes with
-# only a company name.
+# --- Step 12: a removed member's address signs up as a new address (spec 0010: the removal deleted the account) ----------------
+# After step 10 INVITED is a member of the development company. The operator removes it: the account is deleted with its only space.
+# INVITED asks for a sign-up again and finishes it as any new address does.
 login invited E2E_INVITED_EMAIL E2E_INVITED_PASSWORD
 BODY="$(jwt_payload "$tmp/invited.auth")"
 INVITED_SUB="$(val 'd["sub"]')"
-HASH_BEFORE="$(psql_value "SELECT md5(\"PasswordHash\") FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")"
-[[ -n "$HASH_BEFORE" ]] || fail "step 12: INVITED has no password hash"
 cli remove-member --org "$DEV_ORG" --email "$INVITED_EMAIL"
 [[ "$CLI_EXIT" == "0" ]] || fail "step 12: the operator CLI failed: admin remove-member"
+expect_eq "step 12: what remove-member says" "$CLI_OUT" "Member removed; the account is deleted."
 json_body "$tmp/invited.login" "{'email': os.environ['E2E_INVITED_EMAIL'], 'password': os.environ['E2E_INVITED_PASSWORD']}"
 call POST /auth/login "$tmp/invited.login"
-expect_error "step 12: INVITED has an account and no company" 403 no_membership
+expect_error "step 12: INVITED's login is that of an unknown address" 401 invalid_credentials
+expect_eq "step 12: no account under INVITED's address" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "0"
+expect_eq "step 12: account.deleted says member_removed, by the CLI" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'account.deleted' AND subject_user_id = '$INVITED_SUB' AND details->>'reason' = 'member_removed' AND details->>'via' = 'cli'")" "1"
 
 # The link of step 10 (never printed) is told from the new one by its token: the catcher still holds the old mail.
 OLD_LINK_TOKEN="$("$PY" -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$tmp/invited-complete.json" | tr -d '\r')"
@@ -587,56 +587,46 @@ if [[ "$HTTP_CODE" == "429" ]]; then   # step 10's request was less than a minut
   sleep "$((BASH_REMATCH[1] + 1))"
   call POST /auth/signup "$tmp/back-signup.json"
 fi
-expect_status "step 12: the sign-up request of INVITED, who has an account and no company" 202 ""
+expect_status "step 12: the sign-up request of INVITED's address" 202 ""
 for _ in $(seq 1 90); do
   [[ "$(mail_count "$INVITED_EMAIL")" -gt "$MAILS_BEFORE" ]] && break
   sleep 1
 done
 [[ "$(mail_count "$INVITED_EMAIL")" -gt "$MAILS_BEFORE" ]] || fail "step 12: no new mail for INVITED within 90s"
-wait_mail "$INVITED_EMAIL" "Complete your sign-up" 5 || fail "step 12: INVITED did not get a sign-up mail (the newest mail is another)"
+wait_mail "$INVITED_EMAIL" "Complete your sign-up" 5 || fail "step 12: the address did not get a sign-up mail (the newest mail is another)"
 token_body http://localhost:4200/complete-signup "$tmp/back-preview.json" || fail "step 12: no usable sign-up link in the mail"
-token_body http://localhost:4200/complete-signup "$tmp/back-complete.json" "" E2E_BACK_COMPANY || fail "step 12: the completion body could not be made"
+token_body http://localhost:4200/complete-signup "$tmp/back-complete.json" E2E_BACK_PASSWORD E2E_BACK_COMPANY || fail "step 12: the completion body could not be made"
 NEW_LINK_TOKEN="$("$PY" -c 'import json,sys; print(json.load(sys.stdin)["token"])' < "$tmp/back-preview.json" | tr -d '\r')"
 [[ "$NEW_LINK_TOKEN" != "$OLD_LINK_TOKEN" ]] || fail "step 12: the newest sign-up mail is the one of step 10, not a new link"
 
 call POST /auth/signup/preview "$tmp/back-preview.json"
-expect_status "step 12: preview" 200 "{\"email\":\"$INVITED_EMAIL\",\"company_name\":\"$E2E_BACK_ASKED\",\"has_account\":true}"
-call POST /auth/signup/complete "$tmp/back-complete.json"   # no password in the body
-expect_status "step 12: complete with only the token and a company name" 200
-expect_no_store "step 12: the 200"
+expect_status "step 12: preview" 200 "{\"kind\":\"organization\",\"email\":\"$INVITED_EMAIL\",\"company_name\":\"$E2E_BACK_ASKED\"}"
+call POST /auth/signup/complete "$tmp/back-complete.json"
+expect_status "step 12: complete with a new password and a company name" 200
 expect_eq "step 12: the body is a login's" "$(val 'sorted(d.keys())')" "['access_token', 'status']"
-expect_eq "step 12: the status" "$(val 'd["status"]')" "authenticated"
 LINE="$(set_cookie_line)"
 [[ -n "$LINE" ]] || fail "step 12: the completion set no auth_rt cookie"
-for attr in HttpOnly Secure SameSite=Strict Path=/auth; do
-  has_attr "$LINE" "$attr" || fail "step 12: the auth_rt cookie lacks the $attr attribute"
-done
 printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/back.auth"
 BODY="$(jwt_payload "$tmp/back.auth")"
 expect_eq "step 12: roles" "$(val 'd["roles"]')" "['admin']"
-expect_eq "step 12: the token is INVITED's" "$(val 'd["sub"]')" "$INVITED_SUB"
+expect_eq "step 12: org_kind" "$(val 'd["org_kind"]')" "organization"
+BACK_SUB="$(val 'd["sub"]')"
+[[ "$BACK_SUB" != "$INVITED_SUB" ]] || fail "step 12: the new account has the id of the deleted one"
 BACK_ORG="$(val 'd["org_id"]')"
 [[ "$BACK_ORG" != "$DEV_ORG" && "$BACK_ORG" != "$NEW_ORG" ]] || fail "step 12: the new company is another company's"
 call GET /auth/me "" "$tmp/back.auth"
 expect_status "step 12: GET /auth/me" 200
 expect_eq "step 12: the company is the one named at the completion" "$(val 'd["org_name"]')" "$E2E_BACK_COMPANY"
-expect_eq "step 12: the address" "$(val 'd["email"]')" "$INVITED_EMAIL"
 
-# The account is the same one: its password is as it was, and works.
-login invited E2E_INVITED_EMAIL E2E_INVITED_PASSWORD
-BODY="$(jwt_payload "$tmp/invited.auth")"
-expect_eq "step 12: the password it always had logs INVITED in to the new company" "$(val 'd["org_id"]')" "$BACK_ORG"
-expect_eq "step 12: the password hash is as it was" \
-  "$(psql_value "SELECT md5(\"PasswordHash\") FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "$HASH_BEFORE"
-expect_eq "step 12: INVITED still has one account" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "1"
+call POST /auth/login "$tmp/invited.login"
+expect_error "step 12: the old password belongs to the deleted account" 401 invalid_credentials
+login back E2E_INVITED_EMAIL E2E_BACK_PASSWORD
+expect_eq "step 12: one account under the address" "$(psql_value "SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "1"
 expect_eq "step 12: the pending sign-up is gone" "$(psql_value "SELECT count(*) FROM \"PendingSignups\" WHERE \"NormalizedEmail\" = upper('$INVITED_EMAIL')")" "0"
-expect_eq "step 12: signup.completed names the account and says existing_account true" \
-  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.completed' AND subject_user_id = '$INVITED_SUB' AND org_id = '$BACK_ORG' AND details->>'existing_account' = 'true'")" "1"
-expect_eq "step 12: the signup.completed row of NEW has no details" \
-  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.completed' AND subject_email = '$NEW_EMAIL' AND details IS NULL")" "1"
+expect_eq "step 12: signup.completed says kind organization and nothing of an existing account" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'signup.completed' AND subject_user_id = '$BACK_SUB' AND org_id = '$BACK_ORG' AND details->>'kind' = 'organization' AND NOT (details ? 'existing_account')")" "1"
 call POST /auth/signup/complete "$tmp/back-complete.json"
 expect_error "step 12: the same completion again" 400 invalid_token
-expect_no_cookie "step 12: the same completion again"
-pass "step 12: a member removed by the operator (login: 403 no_membership) asks for a sign-up and gets the usual link; the preview says has_account true; the completion with only the token and a company name is a login's answer with a new company of which INVITED is the admin; its password hash is as it was and logs in, INVITED has one account, and the audit row says existing_account true"
+pass "step 12: a member removed by the operator is deleted (the CLI says so; login: the 401 of an unknown address; account.deleted member_removed via cli); the address signs up again as a new address, with a new account, a new password and a company of its own"
 
 echo "ALL PASS"

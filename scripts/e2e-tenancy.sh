@@ -28,11 +28,11 @@
 #   8. B: a role or member of another company is 404 on the member and role endpoints; an invitation to an address of
 #      another company is answered with the same status and headers as one to an unknown address, and its preview and
 #      acceptance say already_member - criterion 8; part of 14.
-#   9. removal: WORKER's refresh cookie -> 401 with no cookie written, login with the right password -> 403
-#      no_membership with no cookie, the old access token -> permissions_changed - part of 11 and 13 (no wrong password,
+#   9. removal: WORKER's refresh cookie -> 401 with no cookie written, login with the right password -> 401 invalid_credentials (spec 0010:
+#      the removal deleted the account) with no cookie, the old access token -> permissions_changed - part of 11 and 13 (no wrong password,
 #      no invitation back in).
 #  10. the CLI refuses to remove the last manager (last_manager) and removes it with --force; afterwards ADMIN's sessions
-#      are over - criterion 22; part of 16.
+#      are over and its account is gone (spec 0010) - criterion 22; part of 16.
 # Criteria 5, 9, 10, 19 (GET and PATCH /auth/org), 20, 21, 23 and 24 as a whole, the parallel accepts of 6 and the rest
 # of the partial ones above are guarded by the integration tests, not here: see docs/superpowers/plans/0005-acceptance-map.md.
 #
@@ -50,6 +50,7 @@
 #   scripts/e2e-email.sh                  # spec 0004 regression
 #   scripts/e2e-tenancy.sh                # this script (does NOT bring the stack up or down)
 #   scripts/e2e-signup.sh                 # spec 0009 (self-service sign-up), which runs after this one
+#   scripts/e2e-private.sh                # spec 0010 (private accounts), after e2e-signup.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The operator
@@ -471,12 +472,12 @@ expect_error "step 9: WORKER's refresh cookie" 401 invalid_grant
 [[ -z "$(header set-cookie)" ]] || fail "step 9: a failed refresh wrote the cookie"
 json_body "$tmp/worker.login2" "{'email': os.environ['E2E_WORKER_EMAIL'], 'password': os.environ['E2E_PASSWORD']}"
 call POST /auth/login "$tmp/worker.login2"
-expect_error "step 9: WORKER logs in" 403 no_membership
-expect_no_store "step 9: no_membership"
-[[ -z "$(header set-cookie)" ]] || fail "step 9: no_membership set a cookie"
+expect_error "step 9: WORKER logs in (spec 0010: the removal deleted the account)" 401 invalid_credentials
+expect_no_store "step 9: the refused login"
+[[ -z "$(header set-cookie)" ]] || fail "step 9: the refused login set a cookie"
 call GET /auth/org "" "$tmp/worker.auth"
 expect_error "step 9: WORKER's old access token on the company API" 403 permissions_changed
-pass "step 9: the removed member's refresh -> 401 invalid_grant, login -> 403 no_membership, old access token -> permissions_changed"
+pass "step 9: the removed member's refresh -> 401 invalid_grant, login -> 401 invalid_credentials (the account is gone), old access token -> permissions_changed"
 
 # --- Step 10: the CLI removes the last manager only with --force -------------------------------------------------------
 cli remove-member --org "$A" --email "$ADMIN_EMAIL"
@@ -489,9 +490,9 @@ expect_eq "step 10: remove-member --force exit code" "$CLI_EXIT" "0"
 refresh admin
 expect_error "step 10: ADMIN's refresh cookie" 401 invalid_grant
 call POST /auth/login "$tmp/admin.login"
-expect_error "step 10: ADMIN logs in" 403 no_membership
+expect_error "step 10: ADMIN logs in (spec 0010: the account is gone)" 401 invalid_credentials
 cli list-orgs
 grep -qF "$A"$'\t'"E2E Acme $run"$'\t'"0" <<< "$CLI_OUT" || fail "step 10: company A should be left with no members"
-pass "step 10: remove-member refused the last manager (last_manager) and removed it with --force; ADMIN's sessions are over"
+pass "step 10: remove-member refused the last manager (last_manager) and removed it with --force; ADMIN's sessions and account are gone"
 
 echo "ALL PASS"
