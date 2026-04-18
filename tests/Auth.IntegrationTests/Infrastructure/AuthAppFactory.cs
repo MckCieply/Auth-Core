@@ -26,6 +26,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     private TimeProvider? _clock;
     private readonly List<Action<IServiceCollection>> _serviceOverrides = [];
     private readonly string _manifestDirectory;
+    private readonly string? _dropConnectionString;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -37,7 +38,18 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public AuthAppFactory(PostgresFixture postgres, KeyMaterialFixture keys, string? database = null)
     {
         DatabaseName = database ?? "auth_" + Guid.NewGuid().ToString("N");
-        _settings["ConnectionStrings:Auth"] = postgres.ConnectionStringFor(DatabaseName);
+        if (database is null)
+        {
+            _dropConnectionString = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringFor("postgres")) { Pooling = false, Timeout = 30 }.ConnectionString;
+        }
+
+        // The default 15 s to connect and 30 s per command are too short when the shared server is busy (a big run, other sessions on the
+        // same Docker): a test then fails with a timeout that says nothing about the code under test.
+        _settings["ConnectionStrings:Auth"] = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringFor(DatabaseName))
+        {
+            Timeout = 30,
+            CommandTimeout = 60,
+        }.ConnectionString;
         _settings["Auth:Database:MigrateOnStartup"] = "true";
         _settings["Auth:Keys:SigningCertificatePath"] = keys.SigningCertPath;
         _settings["Auth:Keys:SigningKeyPath"] = keys.SigningKeyPath;
@@ -237,8 +249,15 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 
         // Every factory has a database of its own, hence a connection pool of its own that would stay open for
         // minutes after the test. Without this the suite runs out of server connections as it grows.
-        await using var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]);
-        NpgsqlConnection.ClearPool(connection);
+        await using (var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]))
+        {
+            NpgsqlConnection.ClearPool(connection);
+        }
+
+        if (_dropConnectionString is not null)
+        {
+            DropDatabase(_dropConnectionString);
+        }
 
         try
         {
@@ -247,6 +266,26 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         catch (IOException)
         {
             // A temporary directory that cannot be removed is not a failure of the test.
+        }
+    }
+
+    /// <summary>
+    /// Drops the database this factory created for itself, so the server does not keep one database per test of the run. Only a database
+    /// the factory named itself is dropped: one that a test named is shared by several factories (restart scenarios) and belongs to the
+    /// test. Connections still open to it are terminated by the drop. A drop that fails leaves the database behind and fails nothing.
+    /// </summary>
+    private void DropDatabase(string maintenanceConnectionString)
+    {
+        try
+        {
+            using var connection = new NpgsqlConnection(maintenanceConnectionString);
+            connection.Open();
+            using var drop = new NpgsqlCommand("DROP DATABASE IF EXISTS \"" + DatabaseName.Replace("\"", "\"\"", StringComparison.Ordinal) + "\" WITH (FORCE)", connection);
+            drop.ExecuteNonQuery();
+        }
+        catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException or TimeoutException or IOException)
+        {
+            // A database that cannot be dropped now is not a failure of the test that has already ended.
         }
     }
 
