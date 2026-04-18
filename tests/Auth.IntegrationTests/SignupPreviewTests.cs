@@ -30,8 +30,8 @@ public sealed class SignupPreviewTests(PostgresFixture postgres, KeyMaterialFixt
             using var response = await SignupApi.Preview(Client, token);
 
             var body = await TenancyApi.ReadOkAsync(response);
-            Assert.Equal(["company_name", "email", "has_account"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
-            Assert.False(body.GetProperty("has_account").GetBoolean());   // a new address
+            Assert.Equal(["kind", "email", "company_name"], body.EnumerateObject().Select(p => p.Name));   // spec 0010: the kind first, and no flag about an account
+            Assert.Equal("organization", body.GetProperty("kind").GetString());
             Assert.Equal("Anna@Firma.test", body.GetProperty("email").GetString());
             Assert.Equal("Firma & Syn", body.GetProperty("company_name").GetString());
         }

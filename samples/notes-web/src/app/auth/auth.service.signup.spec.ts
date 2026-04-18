@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { adminMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
+import { adminMe, privateMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
 import { AuthService } from './auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -38,17 +38,17 @@ describe('AuthService.completeSignup', () => {
     ctrl.verify();
   });
 
-  it('leaves the password out of the body when there is none to send (an account that exists, without a company)', async () => {
-    const done = auth.completeSignup('tok', null, 'Firma');
+  it('leaves the company name out of the body of a private sign-up (spec 0010)', async () => {
+    const done = auth.completeSignup('tok', 'Pw-1 x', null);
     const request = ctrl.expectOne('/auth/signup/complete');
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ token: 'tok', company_name: 'Firma' });
-    expect('password' in (request.request.body as object)).toBe(false);
+    expect(request.request.body).toEqual({ token: 'tok', password: 'Pw-1 x' });
     request.flush(signedIn);
     await settle();
-    ctrl.expectOne('/auth/me').flush(adminMe);
+    ctrl.expectOne('/auth/me').flush(privateMe);
     expect(await done).toEqual({ ok: true });
     expect(auth.token()).toBe('tok-c');
+    expect(auth.me()).toEqual(privateMe);
     ctrl.verify();
   });
 

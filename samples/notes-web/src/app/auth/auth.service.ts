@@ -8,6 +8,8 @@ export interface Me {
   email: string;
   org_id: string;
   org_name: string;
+  /** "personal" for a private account (spec 0010), whose space is named "private"; "organization" for a company member. */
+  org_kind: 'organization' | 'personal';
   roles: string[];
   permissions: string[];
 }
@@ -22,6 +24,8 @@ export type Failure =
   | { kind: 'already_member' }
   | { kind: 'already_registered' }
   | { kind: 'signup_disabled' }
+  | { kind: 'wrong_password' }
+  | { kind: 'private_account_exists' }
   | { kind: 'invalid_request' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
@@ -94,6 +98,12 @@ export function failureOf(error: unknown): Failure {
   if (error.status === 403 && code === 'signup_disabled') {
     return { kind: 'signup_disabled' };
   }
+  if (error.status === 403 && code === 'wrong_password') {
+    return { kind: 'wrong_password' };
+  }
+  if (error.status === 409 && code === 'private_account_exists') {
+    return { kind: 'private_account_exists' };
+  }
   return { kind: 'other' };
 }
 
@@ -136,6 +146,7 @@ function asMe(body: unknown): Me | null {
       email: body['email'],
       org_id: body['org_id'],
       org_name: body['org_name'],
+      org_kind: body['org_kind'] === 'personal' ? 'personal' : 'organization',
       roles: body['roles'],
       permissions: body['permissions'],
     };
@@ -191,13 +202,12 @@ export class AuthService {
   /**
    * Finishes a self-service sign-up with the token of the mail link. Auth-Core answers as it answers a login (spec 0009, Amendment 2): the
    * access token in the body and the refresh cookie, so the person is signed in at once and the screen opens the product. A refusal leaves
-   * the session that exists alone, as a failed login does. A person whose account exists and belongs to no company (the preview's
-   * `has_account`, Amendment 3) chooses no password: pass `null` and the member is left out of the body.
+   * the session that exists alone, as a failed login does. A private sign-up (spec 0010) names no company: pass `null` and the member is
+   * left out of the body.
    */
-  async completeSignup(token: string, password: string | null, companyName: string): Promise<LoginResult> {
+  async completeSignup(token: string, password: string, companyName: string | null): Promise<LoginResult> {
     let body: LoginBody | null;
-    const request =
-      password === null ? { token, company_name: companyName } : { token, password, company_name: companyName };
+    const request = companyName === null ? { token, password } : { token, password, company_name: companyName };
     try {
       body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/signup/complete', request));
     } catch (error) {
@@ -231,6 +241,20 @@ export class AuthService {
       // The answer does not matter: this tab is signed out either way.
     }
     this.dropSession();
+  }
+
+  /**
+   * Deletes the private account of the person who is signed in (spec 0010): DELETE /auth/account with the password. On `204` the session is
+   * over here too (Auth-Core has cleared the cookie). The product deletes its own data before it calls this: Auth-Core does not tell it.
+   */
+  async deleteAccount(password: string): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.delete('/auth/account', { body: { password } }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    this.dropSession();
+    return { ok: true };
   }
 
   /**

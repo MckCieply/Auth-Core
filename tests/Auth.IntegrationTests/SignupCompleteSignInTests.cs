@@ -37,8 +37,8 @@ public sealed class SignupCompleteSignInTests : SignupTestBase
     private const string AllowTokens = """DROP TRIGGER refuse_row ON "OpenIddictTokens" """;
     private const string AllowAudit = "DROP TRIGGER refuse_row ON audit_events";
 
-    // The claims of an access token as LoginTests pins them: the contract, OpenIddict's own metadata, and the three of spec 0005.
-    private static readonly string[] AccessTokenClaims = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"];
+    // The claims of an access token as LoginTests pins them: the contract, OpenIddict's own metadata, the three of spec 0005 and org_kind of spec 0010.
+    private static readonly string[] AccessTokenClaims = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"];
 
     public SignupCompleteSignInTests(PostgresFixture postgres, KeyMaterialFixture keys)
         : base(postgres, keys)
@@ -355,7 +355,7 @@ public sealed class SignupCompleteSignInTests : SignupTestBase
 
         using (var malformed = await AccountApi.PostRaw(Client, SignupApi.CompletePath, """{"token":"x"}"""))
         {
-            await AccountApi.AssertErrorAsync(malformed, AccountApi.InvalidRequest);
+            await AccountApi.AssertErrorAsync(malformed, AccountApi.InvalidToken);   // spec 0010: the token is judged before the company name
         }
 
         using (var registered = await SignupApi.Complete(Client, takenToken, Password, CompanyName))

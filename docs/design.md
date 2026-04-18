@@ -316,9 +316,19 @@ a provider to it.
 - **Sign-up.** The product's sign-up screen asks for an email address and a company name and always answers "check
   your inbox". A new address gets a link; the link opens the product's screen where the person chooses a password
   (twice) and confirms the company's name; the company is then created, the person is its first admin and is
-  signed in. An address whose account belongs to a company gets a mail that says so instead; a person whose company
-  was deleted, or who was removed from it, gets the link and only names the new company (their password stays). An
-  unused link expires and leaves nothing behind.
+  signed in. An address that already has an account gets a mail that says so instead. An unused link expires and
+  leaves nothing behind.
+- **Sign-up as a private person.** When the product allows it, the sign-up screen asks "organization or private
+  person". A private person gives only an email address, chooses a password (twice) at the link and is signed in. They
+  use the product alone, with the features of a company member unless the product decides otherwise; nobody can join
+  them.
+- **Deleting one's own account.** A private person deletes their account with their password, after the product has
+  deleted their data; the address is then free for a new sign-up. A company account is deleted by the company's admins.
+- **An invitation to a private person.** The inviter sees nothing different. The invited person is warned, in the mail
+  and on the screen, that accepting moves them to the company and deletes their private space and its data; they keep
+  their address and their password. A member of another company still cannot accept.
+- **No account without a space.** A person who is removed from a company, or whose company is deleted, loses their
+  account; the address is free to be invited again or to sign up.
 - **"Continue with Google / Microsoft / GitHub".** The person signs in at the provider and comes back to the
   product. A provider already linked signs them in. A provider account whose email matches an existing account
   asks for that account's password once, then links. A new person names their company (when sign-up is on) and is
@@ -334,20 +344,32 @@ a provider to it.
 - The provider's answer comes back to Auth-Core, not to the browser's code: provider secrets never reach the
   browser, and the return addresses come from configuration only.
 - No user enumeration: a sign-up answers the same for every address.
-- Access tokens do not change: a backend that verifies tokens today needs no change.
+- Access tokens gain only `org_kind` (spec 0010): a backend that verifies tokens today needs no change.
 
 **Slices.** Each slice ships its backend, the screens of `samples/notes-web` and its end-to-end tests.
 
 | Slice | Content                                                                                                  | Milestone                                                        |
 | ----- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 0009  | Self-service sign-up: request, mail, completion, expiry, manifest switch; sample screens                 | A visitor creates a company by mail and signs in                 |
-| 0010  | Google and Microsoft: the provider round trip, sign-in, linking with the password, sign-up and invitations through a provider; sample buttons and screens | "Continue with Google" works end to end against a test provider |
-| 0011  | GitHub; listing, linking and unlinking providers; accounts without a password; sample settings screen    | A person manages their linked logins                             |
-| 0012  | Threat model, guides and runbooks for the new flows; release                                             | `v0.2.0` tagged                                                  |
+| 0009 (done) | Self-service sign-up: request, mail, completion, expiry, manifest switch; sample screens           | A visitor creates a company by mail and signs in                 |
+| 0010 (done) | Private accounts: sign-up as a private person, the `org_kind` claim, deleting one's own account, accounts never left without a space; sample screens | A private person signs up, works alone and deletes their account |
+| 0011  | Google and Microsoft: the provider round trip, sign-in, linking with the password, sign-up and invitations through a provider; sample buttons and screens | "Continue with Google" works end to end against a test provider |
+| 0012  | GitHub; listing, linking and unlinking providers; accounts without a password; sample settings screen    | A person manages their linked logins                             |
+| 0013  | Threat model, guides and runbooks for the new flows; release                                             | `v0.2.0` tagged                                                  |
 
 *As built (spec 0009):* built as described above. Sign-up needs the manifest key and `AUTH_FRONTEND_SIGNUP_URL`; without the
 address it stays off and health says `Degraded`. `GET /auth/options` tells a product's screens whether to offer it. An address
 typed in a look-alike spelling never takes over an account or an earlier link; what remains is in the threat model (risk 47).
+
+*Spec 0010:* a private person signs up with an email address only and works in a hidden one-person space; the access token says
+`org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation warns a
+private person and moves the account only on purpose; an account that loses its only space is deleted (a removal, a company deletion, once
+at upgrade). The comeback of spec 0009, Amendment 3, was removed before any release.
+
+*As built (spec 0010):* built as described above. Private sign-up needs `private.signup: self-service` in the manifest and the
+same completion address as company sign-up; `GET /auth/options` tells a product's screens which of the two to offer. One
+routine deletes an account, whoever causes it, and a sign-in cannot write a session for an account that is being deleted. The
+product deletes its own data before it calls `DELETE /auth/account`; what remains (a wrong password after that, the data of a
+space that moved to a company, the audit rows and the backups) is in the threat model (risks 48 to 51).
 
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
 per user, and any provider beyond the three.

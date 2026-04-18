@@ -37,7 +37,7 @@ describe('AccountApi', () => {
     const request = ctrl.expectOne('/auth/invites/preview');
     expect(request.request.body).toEqual({ token: 'tok' });
     request.flush({ org_name: 'Acme', email: 'a@b.example', role: 'viewer' });
-    expect(await done).toEqual({ ok: true, value: { org_name: 'Acme', email: 'a@b.example', role: 'viewer' } });
+    expect(await done).toEqual({ ok: true, value: { org_name: 'Acme', email: 'a@b.example', role: 'viewer', has_private_account: false } });
   });
 
   it('a preview that is not what the contract says is a failure, not a half-filled screen', async () => {

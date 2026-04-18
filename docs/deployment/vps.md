@@ -53,7 +53,7 @@ write it in your calendar and rotate before it.
 
 Copy your product's `auth.yaml` to `/etc/auth-core/auth.yaml` and make it readable by the container's user (uid `1654`), for example `sudo chmod 0644 /etc/auth-core/auth.yaml`:
 a file that cannot be read does not stop the service, see "`Degraded`" in step 5. At least one default role must hold `members:manage` or `"*"`, so that the first admin of a
-company can manage it. (`deploy/auth.yaml` in the repository is a development example; it also says `signup: self-service`, which makes `/auth/health` say `Degraded` unless `AUTH_FRONTEND_SIGNUP_URL` is set, so do not copy that line without the address.) The built-in permissions are `members:manage`, `roles:manage`,
+company can manage it. (`deploy/auth.yaml` in the repository is a development example; it also says `signup: self-service` and, since spec 0010, `private.signup: self-service`; either one turns sign-up on and makes `/auth/health` say `Degraded` unless `AUTH_FRONTEND_SIGNUP_URL` is set, so do not copy those lines without the address; to keep sign-up off, write `signup: invite-only` (or drop the line) and `private.signup: off` (or drop the `private` block).) The built-in permissions are `members:manage`, `roles:manage`,
 `org:manage` and `org:delete`; a role with `"*"` holds all of them, **including the right to delete the company**.
 The optional key `signup: self-service` (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`) lets a visitor start a company of
 their own: see "Self-service sign-up" in step 7.
@@ -239,7 +239,7 @@ the screen of your frontend that finishes a sign-up (`https://app.example.com/co
 (a restart does not read it again); after changing the manifest run `$C restart auth`. A visitor then gives an email address and a company name; the mail holds a link to your screen, where the person chooses a password and
 confirms the company's name; the company is made and the person is its first admin, with the first default role of your manifest that holds `"*"` (else the
 first that holds `members:manage`), and is signed in at once: `POST /auth/signup/complete` answers as a login does (the access token and the refresh cookie), so your screen
-opens the product and not the sign-in screen. An address whose account belongs to a company gets a mail that says so, with no link; a person whose account has no company (the company was deleted, or they were removed from it) gets the usual link, finishes with a company name only and keeps their password; every address gets the same answer.
+opens the product and not the sign-in screen. Any account under the address, of either kind, gets a mail that says so, with no link; every address gets the same answer. The block `private` of the manifest (`signup: self-service` and `permissions`) turns private sign-up on (spec 0010): a person signs up alone, with an email address only, into a space nobody else joins; it needs the same `AUTH_FRONTEND_SIGNUP_URL`. Removing a member, or deleting a company, deletes the accounts of the people concerned (spec 0010).
 `GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
 at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
 typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
@@ -280,7 +280,7 @@ something is wrong". Then sign in through your frontend and call one product end
 
 1. Read the [changelog](../../CHANGELOG.md) for the version, and compare the `deploy/.env.prod.example` and `deploy/docker-compose.prod.yml` of its tag with your own
    files: a new required variable makes compose stop and name it. A version that adds a table or a manifest key does not need you to change anything unless you turn the feature on; the changelog says so.
-2. **Back up** ([`backup.md`](../operations/backup.md)): a new version may migrate the database, and there is no downgrade of a migration.
+2. **Back up** ([`backup.md`](../operations/backup.md)): a new version may migrate the database, and there is no downgrade of a migration. The first start of the version of spec 0010 also deletes, once, every account that belongs to no company or space (one that an earlier version kept after a removal or a company deletion; see the changelog), whether or not you turn any sign-up on. That cannot be undone: the backup is the only way back.
 3. Set `AUTH_CORE_VERSION` in `.env` to the new version and:
 
    ```bash
@@ -297,6 +297,7 @@ something is wrong". Then sign in through your frontend and call one product end
 | What you see | Why, and what to do |
 | --- | --- |
 | The `auth` container exits at start | `$C logs auth`: it names the setting (a key file, the relay's security, a frontend URL, the issuer or audience, a proxy entry, the database) |
+| The `auth` container exits at start and the log says it could not delete an account that has no space (level Critical, with the account id) | The start-up step of spec 0010 failed on that account: read the exception above the line in `$C logs auth`, remove its cause and start again, or restore the backup of the upgrade (step 2) |
 | It says the setting `ASPNETCORE_FORWARDEDHEADERS_ENABLED` trusts every sender | Remove it from the `environment:` of the `auth` service (in `deploy/docker-compose.prod.yml` or an override file you added) or from a `run -e`; list the proxies in `AUTH_PROXY_KNOWN_PROXIES` and `AUTH_PROXY_KNOWN_NETWORKS` instead |
 | `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
 | `/auth/health` says `Degraded` (still status 200), or a new company has the built-in roles instead of your product's | The manifest file was not used: `$C logs auth \| grep "was not used"` names the path and the reason (missing, not readable by uid `1654`, too large, not valid). Fix the file (`sudo chmod 0644 /etc/auth-core/auth.yaml` for the permission), then `$C restart auth` |

@@ -2,7 +2,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { adminMe, holdToken, settle, signedInAs, viewerMe } from '../../testing/helpers';
+import { adminMe, holdToken, privateMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
 import { AuthService, failureOf } from './auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -126,6 +126,36 @@ describe('AuthService', () => {
       expect(auth.notice()).toBe('unreachable');
       ctrl.verify();
     });
+  });
+
+  describe('org_kind of /auth/me (spec 0010)', () => {
+    async function meFor(body: object) {
+      const started = auth.start();
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok-1' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush(body);
+      await started;
+      return auth.me();
+    }
+
+    it('reads "personal" as a private account', async () => {
+      expect((await meFor(privateMe))?.org_kind).toBe('personal');
+    });
+
+    it('reads "organization" as a company member', async () => {
+      expect((await meFor(adminMe))?.org_kind).toBe('organization');
+    });
+
+    it.each([['missing (an Auth-Core before 0010)', undefined], ['not one it knows', 'something-new'], ['not text', 1]])(
+      'reads an org_kind that is %s as a company member',
+      async (_name, kind) => {
+        const body: Record<string, unknown> = { ...adminMe, org_kind: kind };
+        if (kind === undefined) {
+          delete body['org_kind'];
+        }
+        expect((await meFor(body))?.org_kind).toBe('organization');
+      },
+    );
   });
 
   describe('login', () => {

@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { AccountApi, InvitePreview } from '../account-api';
+import { AccountApi, InvitePreview, Outcome } from '../account-api';
 import { texts } from '../texts';
 import { PasswordRules } from './password-rules';
 import { takeTokenFromUrl } from './token-from-url';
@@ -22,16 +22,24 @@ import { takeTokenFromUrl } from './token-from-url';
               {{ t.joinPrefix }} <strong>{{ invitation.org_name }}</strong> {{ t.joinMiddle }}
               <strong>{{ invitation.role }}</strong>
             </p>
-            <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+            @if (invitation.has_private_account) {
+              <!-- The address has a private account. Accepting moves it and deletes its space; it keeps its password. -->
+              <p class="error" role="alert" data-testid="invite-private-warning">{{ t.privateWarning(invitation.org_name) }}</p>
               <label for="email">{{ common.email }}</label>
               <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
-              <p class="status">{{ t.setsPassword(invitation.email) }}</p>
-              <label for="password">{{ common.newPassword }}</label>
-              <input id="password" type="password" formControlName="password" autocomplete="new-password" />
-              <label for="repeat">{{ common.repeatPassword }}</label>
-              <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
-              <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
-            </form>
+              <button type="button" data-testid="move" [disabled]="busy()" (click)="move()">{{ t.move }}</button>
+            } @else {
+              <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+                <label for="email">{{ common.email }}</label>
+                <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
+                <p class="status">{{ t.setsPassword(invitation.email) }}</p>
+                <label for="password">{{ common.newPassword }}</label>
+                <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+                <label for="repeat">{{ common.repeatPassword }}</label>
+                <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+                <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
+              </form>
+            }
           }
           <app-password-rules [rules]="rules()" />
           @if (error(); as text) {
@@ -102,7 +110,23 @@ export class InvitePage implements OnInit {
       return;
     }
     this.busy.set(true);
-    const result = await this.account.acceptInvite(this.token, password);
+    await this.answer(await this.account.acceptInvite(this.token, password), invitation);
+    this.busy.set(false);
+  }
+
+  /** The one button of an address with a private account: it moves on purpose, with no password (spec 0010). */
+  protected async move(): Promise<void> {
+    const invitation = this.invite();
+    if (this.busy() || this.token === null || invitation === null) {
+      return;
+    }
+    this.error.set(null);
+    this.busy.set(true);
+    await this.answer(await this.account.acceptInvite(this.token, null, true), invitation);
+    this.busy.set(false);
+  }
+
+  private async answer(result: Outcome, invitation: InvitePreview): Promise<void> {
     if (result.ok) {
       // The email goes in the navigation state: it is never in the URL. The button stays off until the login is open: the
       // token is used up, and a second Enter would only post it again.
@@ -118,12 +142,14 @@ export class InvitePage implements OnInit {
       this.phase.set('invalid');
     } else if (result.failure.kind === 'already_member') {
       this.phase.set('member');
+    } else if (result.failure.kind === 'private_account_exists' && this.token !== null) {
+      // The address has a private account by now: ask again, and the screen shows the warning and its button.
+      await this.preview(this.token);
     } else if (result.failure.kind === 'too_many_requests') {
       // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {
       this.error.set(this.common.somethingWrong);
     }
-    this.busy.set(false);
   }
 
   private async preview(token: string): Promise<void> {

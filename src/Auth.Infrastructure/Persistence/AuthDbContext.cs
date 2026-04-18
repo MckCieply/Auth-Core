@@ -71,6 +71,9 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
         {
             company.HasKey(c => c.Id);
             company.Property(c => c.Name).HasMaxLength(100);
+            // Spec 0010: every row made before the column is an organization. Without the default the migration would give them 0.
+            // Zero is EF's sentinel for "not set" (the database default applies); saying so avoids EF's start-up warning about a database default.
+            company.Property(c => c.Kind).HasDefaultValue(CompanyKind.Organization).HasSentinel((CompanyKind)0);
         });
 
         builder.Entity<CompanyRole>(role =>
@@ -130,6 +133,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             pending.Property(p => p.NormalizedEmail).HasMaxLength(256);
             pending.Property(p => p.Email).HasMaxLength(256);
             pending.Property(p => p.CompanyName).HasMaxLength(100);
+            // Spec 0010: every row made before the column is an organization sign-up.
+            pending.Property(p => p.Kind).HasDefaultValue(SignupKind.Organization).HasSentinel((SignupKind)0);
             // A link is looked up by its hash when it is used; rows without a link yet (null) do not collide.
             pending.HasIndex(p => p.TokenHash).IsUnique();
             // The clean-up selects by expiry.

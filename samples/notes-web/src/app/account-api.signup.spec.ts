@@ -1,7 +1,8 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { AccountApi } from './account-api';
+import { vi } from 'vitest';
+import { AccountApi, OPTIONS_TIMEOUT_MS } from './account-api';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 
@@ -23,13 +24,23 @@ describe('AccountApi: sign-up', () => {
       const request = ctrl.expectOne('/auth/options');
       expect(request.request.method).toBe('GET');
       request.flush({ signup: 'self-service' });
-      expect(await done).toEqual({ signup: 'self-service' });
+      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off' });
     });
 
     it('ignores the members it does not know', async () => {
       const done = api.options();
       ctrl.expectOne('/auth/options').flush({ signup: 'self-service', providers: ['google'] });
-      expect(await done).toEqual({ signup: 'self-service' });
+      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off' });
+    });
+
+    it('reads private_signup: self-service, and anything else as off (spec 0010)', async () => {
+      const done = api.options();
+      ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'self-service' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'self-service' });
+
+      const other = api.options();
+      ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'on' });
+      expect(await other).toEqual({ signup: 'self-service', private_signup: 'off' });
     });
 
     it.each([[{ signup: 'invite-only' }], [{ signup: 'something-new' }], [{ signup: 1 }], [{}], [[]], ['<html>oops</html>'], [null]])(
@@ -37,20 +48,35 @@ describe('AccountApi: sign-up', () => {
       async (body) => {
         const done = api.options();
         ctrl.expectOne('/auth/options').flush(body);
-        expect(await done).toEqual({ signup: 'invite-only' });
+        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
       },
     );
 
     it.each([500, 502, 429, 403])('a %s means invite-only', async (code) => {
       const done = api.options();
       ctrl.expectOne('/auth/options').flush('oops', status(code));
-      expect(await done).toEqual({ signup: 'invite-only' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+    });
+
+    it('an answer that does not come within ten seconds means invite-only, and the request is cancelled', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }); // the timeout of rxjs runs on setInterval
+      try {
+        const done = api.options();
+        const request = ctrl.expectOne('/auth/options');
+        vi.advanceTimersByTime(OPTIONS_TIMEOUT_MS - 1);
+        expect(request.cancelled).toBe(false);
+        vi.advanceTimersByTime(2);
+        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+        expect(request.cancelled).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('no network means invite-only', async () => {
       const done = api.options();
       ctrl.expectOne('/auth/options').error(new ProgressEvent('error'));
-      expect(await done).toEqual({ signup: 'invite-only' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
     });
   });
 
@@ -63,28 +89,27 @@ describe('AccountApi: sign-up', () => {
     expect((await done).ok).toBe(true);
   });
 
-  it('reads the answer to a preview: the address, the company name and whether the account exists', async () => {
+  it('signUp of a private person posts the email and the kind, and no company name (spec 0010)', async () => {
+    const done = api.signUp('ola@poczta.example', null);
+    const request = ctrl.expectOne('/auth/signup');
+    expect(request.request.body).toEqual({ email: 'ola@poczta.example', kind: 'private' });
+    request.flush(null, status(202));
+    expect((await done).ok).toBe(true);
+  });
+
+  it('reads the preview of an organization: the kind, the address and the company name', async () => {
     const done = api.previewSignup('tok');
     const request = ctrl.expectOne('/auth/signup/preview');
     expect(request.request.body).toEqual({ token: 'tok' });
-    request.flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: false });
-    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
+    request.flush({ kind: 'organization', email: 'anna@firma.example', company_name: 'Firma' });
+    expect(await done).toEqual({ ok: true, value: { kind: 'organization', email: 'anna@firma.example', company_name: 'Firma' } });
   });
 
-  it('reads has_account true: the person has an account and no company', async () => {
+  it('reads the preview of a private sign-up: the kind and the address, no company name (spec 0010)', async () => {
     const done = api.previewSignup('tok');
-    ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', has_account: true });
-    expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: true } });
+    ctrl.expectOne('/auth/signup/preview').flush({ kind: 'private', email: 'ola@poczta.example' });
+    expect(await done).toEqual({ ok: true, value: { kind: 'private', email: 'ola@poczta.example', company_name: null } });
   });
-
-  it.each([[{}], [{ has_account: 'true' }], [{ has_account: 1 }], [{ has_account: null }]])(
-    'an answer %j means has_account false: a password is asked for, which is the safe side',
-    async (extra) => {
-      const done = api.previewSignup('tok');
-      ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example', company_name: 'Firma', ...extra });
-      expect(await done).toEqual({ ok: true, value: { email: 'anna@firma.example', company_name: 'Firma', has_account: false } });
-    },
-  );
 
   it('a 400 invalid_request on a preview stays "other": that screen has the common text', async () => {
     const done = api.previewSignup('tok');
@@ -92,9 +117,20 @@ describe('AccountApi: sign-up', () => {
     expect(await done).toEqual({ ok: false, failure: { kind: 'other' } });
   });
 
-  it('a preview that is not what the contract says is a failure, not a half-filled screen', async () => {
+  it.each([
+    [{ email: 'anna@firma.example' }],
+    [{ kind: 'organization', email: 'anna@firma.example' }],
+    [{ kind: 'organization', email: 'anna@firma.example', company_name: 1 }],
+    [{ kind: 'organization', company_name: 'Firma' }],
+    [{ kind: 'private' }],
+    [{ kind: 'private', email: 1 }],
+    [{}],
+    [[]],
+    ['<html>oops</html>'],
+    [null],
+  ])('a preview that is not what the contract says (%j) is a failure, not a half-filled screen', async (body) => {
     const done = api.previewSignup('tok');
-    ctrl.expectOne('/auth/signup/preview').flush({ email: 'anna@firma.example' });
+    ctrl.expectOne('/auth/signup/preview').flush(body);
     expect(await done).toEqual({ ok: false, failure: { kind: 'other' } });
   });
 

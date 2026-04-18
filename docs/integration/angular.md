@@ -70,12 +70,12 @@ How it behaves:
 - **At start** the app calls `POST /auth/refresh` once. `200` keeps the token and asks `GET /auth/me`; `401` means nobody is
   signed in; anything else (or no network, or no answer within 10 seconds) also leaves nobody signed in, and the bar says the server
   cannot be reached.
-- **A screen** reads `AuthService.me()` (email, company, roles, permissions) and `AuthService.token()` (a signal: `null` when nobody is
+- **A screen** reads `AuthService.me()` (email, company, `org_kind`, roles, permissions) and `AuthService.token()` (a signal: `null` when nobody is
   signed in). Show a control only when `me().permissions` lists what it needs; the server still checks.
 - **Sign-in** is `await auth.login(email, password)`, which answers `{ ok: true }` or `{ ok: false, failure }`; on success go to
   `safeReturnUrl(returnUrl)` (the guard file exports it: it follows only a path of your own app, never `//host`, `https://host` or
   a slash written as `%2f`). Give the result to `router.navigateByUrl`, never to `location.href` or `window.open`.
-  See [`pages/login.ts`](../../samples/notes-web/src/app/pages/login.ts). A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it). A person whose account exists and belongs to no company (the preview's `has_account`, spec 0009 Amendment 3) chooses no password: pass `null` as the password and the body holds the token and the company name only.
+  See [`pages/login.ts`](../../samples/notes-web/src/app/pages/login.ts). A self-service sign-up ends in the same state: `await auth.completeSignup(token, password, companyName)` posts to `POST /auth/signup/complete`, which Auth-Core answers as it answers a login (the access token in the body and the refresh cookie), and it answers `{ ok: true }` or `{ ok: false, failure }` like `login`. On success open your product (the sample goes to `/notes`, replacing the screen of the used link, so that Back does not return to it). A private sign-up (spec 0010) names no company: pass `null` as the company name and the body holds the token and the password only.
 - **Sign-out** is `await auth.logout()` and then `/login`; the token is dropped whatever the server answers
   ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
 - There is no refresh ahead of expiry: a token is renewed only after a `401`, which costs one extra request about every 10 minutes.
@@ -86,8 +86,10 @@ The token goes only to your app's own origin, and only to paths on two lists at 
 
 ```ts
 export const TOKEN_PATH_PREFIXES: readonly string[] = ['/api/', '/auth/org'];
-export const TOKEN_PATHS: readonly string[] = ['/auth/me'];
+export const TOKEN_PATHS: readonly string[] = ['/auth/me', '/auth/account'];
 ```
+
+`/auth/account` is the self-deletion of a private account (spec 0010): it needs the token too.
 
 Edit them to the paths of your own backend (`/api/` is the sample's). It never adds the token to another origin or to the other
 `/auth` endpoints (`/auth/login`, `/auth/refresh`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
@@ -101,16 +103,16 @@ link), and the settings that say where the links go (`Auth:App:FrontendUrls:Rese
 product lets visitors start a company on their own, `CompleteSignup`; as environment variables `Auth__App__FrontendUrls__ResetPassword` and so on,
 see the `auth` service in [`compose.yml`](../../samples/notes-web/compose.yml)). Each link is that URL plus `?token=<43 characters>`. Outside Development the
 URLs must be `https`. Self-service sign-up is off until the product's manifest says `signup: self-service` **and** `CompleteSignup` is set
-([`docs/deployment/vps.md`](../deployment/vps.md)); the sign-in screen asks `GET /auth/options` and offers "Create an account" only when the answer
-is `{"signup":"self-service"}`, so a product does not repeat its manifest in its frontend.
+([`docs/deployment/vps.md`](../deployment/vps.md)); the sign-in screen asks `GET /auth/options` and offers "Create an account" when the answer says `self-service` for `signup` or for `private_signup` (for example `{"signup":"self-service","private_signup":"off"}`
+for a product with company sign-up only), so a product does not repeat its manifest in its frontend. `private_signup` says whether a private person may sign up alone (spec 0010); the sign-up screen draws the choice "Organization / Private person" only when both are on. The sample waits at most 10 seconds for this call and reads a slower one as "off", so a hung call never leaves the sign-up screen empty.
 
 | Route | The screen | Calls |
 | --- | --- | --- |
 | `/reset?token=` | new password, twice; the rules it did not meet; "link used up" | `POST /auth/password/reset` |
 | `/verify?token=` | confirms on opening; a form to ask for a new link when it is used up | `POST /auth/email/verify`, `POST /auth/email/verify/request` |
-| `/invite?token=` | "Join {company} as {role}" and the email; the password, twice | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
-| `/signup` | email and company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` |
-| `/complete-signup?token=` | the address (read-only) and the company name (editable); the password, twice (not for a person whose account exists and has no company, which the preview says with `has_account`: the sentence that the password stays as it is takes the place of the fields, and the `password` member of the call may be left out; if it is sent it must be a non-empty string, and it is not used); the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview`, `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
+| `/invite?token=` | "Join {company} as {role}" and the email; the password, twice; for an address with a private account (the preview's `has_private_account`) the warning in red instead and one button, "Move me to the company and delete my private account", which sends `leave_private_account: true` and no password | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
+| `/signup` | "Organization / Private person" when `GET /auth/options` says both are on (with one on, that one); the email, and for an organization the company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` (`kind` `private` for a private person, with no `company_name`) |
+| `/complete-signup?token=` | the address (read-only); for an organization the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview` (it says `kind`), `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 | `/forgot` | email; always the same answer | `POST /auth/password/forgot` |
 
 The screens are in [`samples/notes-web/src/app/pages/`](../../samples/notes-web/src/app/pages/); the calls are in
@@ -206,6 +208,28 @@ once on a real phone (iOS Safari and Android Chrome), because cookie handling di
 Known limits, in the spec's words: another open tab keeps its token until it expires (up to 10 minutes) after a sign-out in one tab,
 because tabs are not synchronised; and a token in memory can be read by script running in the page, which the
 `Content-Security-Policy` of step 6 limits to your own files.
+
+## Private accounts (spec 0010)
+
+When your manifest says `private.signup: self-service`, a person can sign up alone. Your screens tell the two kinds apart by `me().org_kind`:
+`personal` for a private account (its `org_name` is `private` and its role `private`), `organization` for a company member. The sample shows
+"Private account" and no company or role to a private account, and "Team" only to a company member who holds `members:manage`
+([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
+
+- **"Delete account"** is for a private account only. Delete your product's data first, with an endpoint of your own backend that deletes
+  what belongs to the token's `org_id` (the sample's `DELETE /api/me`), and call `auth.deleteAccount(password)` (`DELETE /auth/account`) only
+  after its `204`: Auth-Core does not tell your product that an account is gone. Warn first ("This deletes your account and all your notes. It
+  cannot be undone."), ask for the password on the same screen, and on `403 wrong_password` say what happened: the data is gone, the account
+  is not. A `429 too_many_attempts` is the lockout: show the wait. On success open the sign-in screen.
+- **An invitation to a private account:** when the preview says `has_private_account`, show the warning (the paragraph of the mail) and one
+  button that sends `leave_private_account: true` with no password: the account keeps its own. Without it the acceptance answers
+  `409 private_account_exists` ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)).
+- **Removing a member deletes the account,** and deleting a company deletes every member's, the admin's included. Say so in the confirmation
+  of your own team screen, with the sample's sentence: "This person's account will be deleted." ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)).
+  The person can be invited again, as a new account.
+- **Personal data after deletion:** Auth-Core deletes the account and what it holds of it, keeps the audit rows that name it (its id, its
+  address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
+  rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.
 
 ## The limits and an outage (spec 0008)
 

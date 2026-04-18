@@ -14,6 +14,6 @@ public static class SignupOptionsEndpoint
     {
         ArgumentNullException.ThrowIfNull(gate);
 
-        return ApiResults.Ok(new OptionsResponse(gate.ModeName));
+        return ApiResults.Ok(new OptionsResponse(gate.ModeName, gate.PrivateModeName));
     }
 }

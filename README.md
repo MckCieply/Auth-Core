@@ -11,7 +11,7 @@ A self-hosted authentication service in .NET: sign-in, companies, roles and toke
 - **Headless.** A REST API with no screens: your frontend owns the login, reset and invitation pages, in its own look.
 - **Standard tokens.** Short RS256 JWT access tokens that carry the user, the company, the roles and the permissions. Any backend in any language
   checks them offline against the public keys at `/auth/.well-known/jwks.json`.
-- **Companies built in.** Users belong to companies, with members, roles, invitations and a permission catalog that your product declares.
+- **Companies built in.** Users belong to companies (a private person to a hidden one-person space of their own), with members, roles, invitations and a permission catalog that your product declares.
 
 ```
 Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
@@ -54,6 +54,7 @@ default_roles:
 `signup: self-service` is optional (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`): it lets a visitor start a company of their own, and it
 needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
+The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
 
 ### 2. Run it on your server
 
@@ -76,7 +77,7 @@ invites the rest of the company through the company API (`POST /auth/org/invites
 
 Or let visitors start on their own: set `signup: self-service` in the manifest and give Auth-Core the address of your frontend's completion screen
 (`AUTH_FRONTEND_SIGNUP_URL`). A visitor gives an email address and a company name, opens the link in the mail, chooses a password and is the first admin of a
-new company; a person whose company was deleted, or who was removed from it, comes back the same way and keeps their password. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
+new company. It is off by default ([`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up").
 
 ### 4. Connect your backend
 
@@ -121,7 +122,8 @@ scripts/e2e-refresh.sh          # refresh → rotation → reuse detection → l
 scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 min)
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
-scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a member removed who comes back (~6 min)
+scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
+scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
@@ -141,8 +143,8 @@ auth() { docker compose -p "${COMPOSE_PROJECT_NAME:?set it to the project of you
 auth create-org --name "Acme"                                     # prints the company id
 auth invite --org <id> --email boss@acme.test --role admin
 auth list-orgs                                                    # id, name, number of members
-auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager
-auth delete-org --org <id> --confirm "Acme"                       # deletes the company; the name must be exact
+auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted
+auth delete-org --org <id> --confirm "Acme"                       # deletes the company and its members' accounts
 ```
 
 The commands work on the database with the service's configuration and never migrate it. A product's permissions and default roles come from its manifest

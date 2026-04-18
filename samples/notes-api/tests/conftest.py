@@ -35,12 +35,14 @@ class Signer:
         numbers = self.key.public_key().public_numbers()
         self.jwk = {"kty": "RSA", "use": "sig", "alg": "RS256", "kid": "k1", "n": _b64url(numbers.n), "e": _b64url(numbers.e)}
 
-    def token(self, org_id: str, permissions: list[str], sub: str = "user-1") -> str:
+    def token(self, org_id: str, permissions: list[str], sub: str = "user-1", org_kind: str | None = None) -> str:
         now = int(time.time())
         claims = {
             "iss": ISSUER, "aud": AUDIENCE, "sub": sub, "org_id": org_id, "roles": [],
             "permissions": permissions, "iat": now, "exp": now + 600,
         }
+        if org_kind is not None:  # without it the token is a company member's, as Auth-Core's was before spec 0010
+            claims["org_kind"] = org_kind
         return jwt.encode(claims, self.key, algorithm="RS256", headers={"kid": "k1", "typ": "at+jwt"})
 
 
@@ -86,5 +88,7 @@ def client(settings, engine, auth) -> TestClient:
     return TestClient(create_app(settings, engine=engine, auth=auth, migrate=False))
 
 
-def headers(signer: Signer, org_id: str = COMPANY_A, permissions=("notes:read", "notes:write"), sub: str = "user-1") -> dict:
-    return {"Authorization": "Bearer " + signer.token(org_id, list(permissions), sub)}
+def headers(
+    signer: Signer, org_id: str = COMPANY_A, permissions=("notes:read", "notes:write"), sub: str = "user-1", org_kind: str | None = None
+) -> dict:
+    return {"Authorization": "Bearer " + signer.token(org_id, list(permissions), sub, org_kind)}

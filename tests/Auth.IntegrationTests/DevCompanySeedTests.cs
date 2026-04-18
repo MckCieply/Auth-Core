@@ -1,7 +1,9 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Email;
 using Auth.Server.Seeding;
+using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -179,6 +181,32 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
 
         Assert.Equal(("Development", "admin"), await MembershipOfAsync(second, second.SeedEmail));
         Assert.Equal(2, await InDbAsync(second, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_development_company_named_private_is_an_organization_never_the_personal_space()   // spec 0010: the seeder picks only organizations
+    {
+        var database = UniqueDatabase();
+        await using var first = Factory(database).WithSetting(DevUserSeeder.EmailKey, "").WithSetting(DevUserSeeder.PasswordKey, "");
+        _ = first.Services;   // nothing seeded: the database holds only the private account made below
+        var (owner, space) = await InDbAsync(first, async db =>
+        {
+            var user = new ApplicationUser { UserName = "ola@poczta.test", Email = "ola@poczta.test", EmailConfirmed = true };
+            db.Users.Add(user);
+            var id = PersonalSpaces.Add(db, user.Id, StorableTime.Now(TimeProvider.System));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return (user.Id, id);
+        });
+
+        await using var second = Factory(database).WithSetting(DevUserSeeder.OrgNameKey, PersonalSpaces.Name);
+        _ = second.Services;
+
+        Assert.Equal((PersonalSpaces.Name, "admin"), await MembershipOfAsync(second, second.SeedEmail));
+        var seeded = await InDbAsync(second, db => db.Companies.AsNoTracking().Where(c => c.Name == PersonalSpaces.Name).OrderBy(c => c.Kind).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal([CompanyKind.Organization, CompanyKind.Personal], seeded.Select(c => c.Kind));
+        Assert.Equal(space, seeded.Single(c => c.Kind == CompanyKind.Personal).Id);
+        Assert.Equal(1, await InDbAsync(second, db => db.Memberships.CountAsync(m => m.CompanyId == space && m.UserId == owner, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(second, db => db.Memberships.CountAsync(m => m.CompanyId == space, TestContext.Current.CancellationToken)));
     }
 
     [Fact]

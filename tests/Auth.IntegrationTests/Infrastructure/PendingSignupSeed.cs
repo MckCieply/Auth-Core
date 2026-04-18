@@ -10,7 +10,8 @@ namespace Auth.IntegrationTests.Infrastructure;
 public static class PendingSignupSeed
 {
     /// <summary>The pending sign-up of the address as the dispatcher leaves it after sending; returns the token in clear.</summary>
-    public static async Task<string> IssueAsync(IServiceProvider services, string email, string companyName)
+    /// <param name="kind">Spec 0010: a private sign-up has no company name.</param>
+    public static async Task<string> IssueAsync(IServiceProvider services, string email, string? companyName, SignupKind kind = SignupKind.Organization)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -19,7 +20,7 @@ public static class PendingSignupSeed
         var normalized = scope.ServiceProvider.GetRequiredService<ILookupNormalizer>().NormalizeEmail(email);
         var now = StorableTime.Now(services.GetRequiredService<TimeProvider>());
         var cancellation = TestContext.Current.CancellationToken;
-        await PendingSignups.UpsertAsync(db, normalized, email, companyName, now, cancellation);
+        await PendingSignups.UpsertAsync(db, normalized, email, companyName, kind, now, cancellation);
         return await PendingSignups.IssueAsync(db, normalized, now, cancellation);
     }
 }

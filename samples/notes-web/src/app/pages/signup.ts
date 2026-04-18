@@ -1,7 +1,7 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { AccountApi } from '../account-api';
+import { AccountApi, SignupKind } from '../account-api';
 import { texts } from '../texts';
 import { requiredText } from './required-text';
 
@@ -13,13 +13,42 @@ import { requiredText } from './required-text';
       <h1>{{ t.title }}</h1>
       @if (closed()) {
         <p class="error" role="alert" data-testid="signup-closed">{{ t.closed }}</p>
-      } @else {
-        <p>{{ t.intro }}</p>
+      } @else if (ready()) {
+        <p>{{ kind() === 'private' ? t.introPrivate : t.intro }}</p>
         <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+          @if (choice()) {
+            <fieldset class="choice" data-testid="signup-kind">
+              <legend>{{ t.kindLegend }}</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="kind"
+                  value="organization"
+                  data-testid="kind-organization"
+                  [checked]="kind() === 'organization'"
+                  (change)="choose('organization')"
+                />
+                {{ t.kindOrganization }}
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="kind"
+                  value="private"
+                  data-testid="kind-private"
+                  [checked]="kind() === 'private'"
+                  (change)="choose('private')"
+                />
+                {{ t.kindPrivate }}
+              </label>
+            </fieldset>
+          }
           <label for="email">{{ common.email }}</label>
           <input id="email" type="email" formControlName="email" autocomplete="username" autocapitalize="none" />
-          <label for="company">{{ t.companyName }}</label>
-          <input id="company" type="text" formControlName="company" maxlength="100" autocomplete="organization" />
+          @if (kind() === 'organization') {
+            <label for="company">{{ t.companyName }}</label>
+            <input id="company" type="text" formControlName="company" maxlength="100" autocomplete="organization" />
+          }
           <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
         </form>
         @if (sent()) {
@@ -33,7 +62,7 @@ import { requiredText } from './required-text';
     </main>
   `,
 })
-export class SignupPage {
+export class SignupPage implements OnInit {
   protected readonly t = texts.signup;
   protected readonly common = texts.common;
   private readonly account = inject(AccountApi);
@@ -44,6 +73,38 @@ export class SignupPage {
   protected readonly sent = signal(false);
   protected readonly closed = signal(false);
   protected readonly error = signal<string | null>(null);
+  /** An organization until the person, or the options, say otherwise. */
+  protected readonly kind = signal<SignupKind>('organization');
+  /** "Organization / Private person" is offered only while GET /auth/options says both are on (spec 0010). */
+  protected readonly choice = signal(false);
+  /** The form is drawn once GET /auth/options has answered, so that it never shows the wrong kind first. */
+  protected readonly ready = signal(false);
+
+  ngOnInit(): void {
+    // With one kind on, the screen is that one. With both off, or when the call fails, it is the organization form: the request is then
+    // answered by Auth-Core itself (403 signup_disabled), and the screen says that sign-up is closed.
+    void this.account.options().then((options) => {
+      const organization = options.signup === 'self-service';
+      const privatePerson = options.private_signup === 'self-service';
+      this.choice.set(organization && privatePerson);
+      if (privatePerson && !organization) {
+        this.choose('private');
+      }
+      this.ready.set(true);
+    });
+  }
+
+  protected choose(kind: SignupKind): void {
+    this.kind.set(kind);
+    // A private person names no company: the field leaves the form and does not hold it invalid.
+    if (kind === 'private') {
+      this.form.controls.company.disable();
+    } else {
+      this.form.controls.company.enable();
+    }
+    this.sent.set(false);
+    this.error.set(null);
+  }
 
   protected async submit(): Promise<void> {
     if (this.busy() || this.form.invalid) {
@@ -53,8 +114,9 @@ export class SignupPage {
     this.sent.set(false);
     this.error.set(null);
     const { email, company } = this.form.getRawValue();
+    const isPrivate = this.kind() === 'private';
     // Trimmed: Auth-Core refuses a name with white space at either end.
-    const result = await this.account.signUp(email.trim(), company.trim());
+    const result = await this.account.signUp(email.trim(), isPrivate ? null : company.trim());
     this.busy.set(false);
     if (result.ok) {
       this.sent.set(true);
@@ -63,7 +125,7 @@ export class SignupPage {
     } else if (result.failure.kind === 'signup_disabled') {
       this.closed.set(true);
     } else if (result.failure.kind === 'invalid_request') {
-      this.error.set(this.t.invalidRequest);
+      this.error.set(isPrivate ? this.t.invalidRequestPrivate : this.t.invalidRequest);
     } else if (result.failure.kind === 'too_many_requests') {
       // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {

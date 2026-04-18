@@ -43,21 +43,32 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         Assert.Equal(0, await CountAsync(db => db.Invites.CountAsync(i => i.CompanyId == acme, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CountAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));   // only the other company's mail is left
 
-        // The other company is untouched, and the accounts stay.
+        // The other company is untouched; the accounts of the deleted company's members are gone with it (spec 0010).
         Assert.Equal(1, await CountAsync(db => db.Companies.CountAsync(c => c.Id == globex, TestContext.Current.CancellationToken)));
         Assert.Equal(2, await CountAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == globex, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CountAsync(db => db.Memberships.CountAsync(m => m.UserId == globexAdmin, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await CountAsync(db => db.Invites.CountAsync(i => i.CompanyId == globex, TestContext.Current.CancellationToken)));
-        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
-        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Email == "boss@acme.test", TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CountAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CountAsync(db => db.Users.CountAsync(u => u.Email == "boss@acme.test", TestContext.Current.CancellationToken)));
 
-        // Read from the store, so the revocation is proved apart from the membership check, which would refuse these sessions anyway.
-        await AssertSessionsAsync(acmeAdmin, revoked: true);
-        await AssertSessionsAsync(worker, revoked: true);
-        await AssertSessionsAsync(globexAdmin, revoked: false);
+        // Read from the store: the sessions of the deleted accounts are gone with them; the other company's are untouched.
+        await AssertNoSessionsAsync(acmeAdmin);
+        await AssertNoSessionsAsync(worker);
+        await AssertLiveSessionsAsync(globexAdmin);
     }
 
-    private async Task AssertSessionsAsync(Guid user, bool revoked)
+    private async Task AssertNoSessionsAsync(Guid user)
+    {
+        var subject = user.ToString();
+        using var scope = Factory.Services.CreateScope();
+        var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
+        var authorizations = scope.ServiceProvider.GetRequiredService<IOpenIddictAuthorizationManager>();
+
+        Assert.Empty(await tokens.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await authorizations.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    private async Task AssertLiveSessionsAsync(Guid user)
     {
         var subject = user.ToString();
         using var scope = Factory.Services.CreateScope();
@@ -68,14 +79,14 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         Assert.NotEmpty(foundTokens);
         foreach (var item in foundTokens)
         {
-            Assert.Equal(revoked, await tokens.GetStatusAsync(item, TestContext.Current.CancellationToken) == OpenIddictConstants.Statuses.Revoked);
+            Assert.NotEqual(OpenIddictConstants.Statuses.Revoked, await tokens.GetStatusAsync(item, TestContext.Current.CancellationToken));
         }
 
         var foundGrants = await authorizations.FindBySubjectAsync(subject, TestContext.Current.CancellationToken).ToListAsync(TestContext.Current.CancellationToken);
         Assert.NotEmpty(foundGrants);
         foreach (var item in foundGrants)
         {
-            Assert.Equal(revoked, await authorizations.GetStatusAsync(item, TestContext.Current.CancellationToken) == OpenIddictConstants.Statuses.Revoked);
+            Assert.NotEqual(OpenIddictConstants.Statuses.Revoked, await authorizations.GetStatusAsync(item, TestContext.Current.CancellationToken));
         }
     }
 
@@ -112,7 +123,7 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
 
         using (var login = await LoginApi.Login(Client, "worker@acme.test", UserPassword))
         {
-            await TenancyApi.AssertErrorAsync(login, HttpStatusCode.Forbidden, "no_membership");
+            await TenancyApi.AssertErrorAsync(login, HttpStatusCode.Unauthorized, "invalid_credentials");   // the account is gone (spec 0010)
         }
 
         using (var preview = await TenancyApi.Preview(Client, link))

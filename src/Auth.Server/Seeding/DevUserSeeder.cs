@@ -121,7 +121,9 @@ public static partial class DevUserSeeder
         AuthDbContext db, CompanyService companies, ILogger logger, string? configuredName, CancellationToken ct)
     {
         var name = string.IsNullOrWhiteSpace(configuredName) ? DefaultOrgName : configuredName;
-        var existing = await db.Companies.AsNoTracking().OrderBy(c => c.CreatedAt).FirstOrDefaultAsync(c => c.Name == name, ct);
+        // A personal space is named "private" (spec 0010): only a company is the development company.
+        var existing = await db.Companies.AsNoTracking().OrderBy(c => c.CreatedAt)
+            .FirstOrDefaultAsync(c => c.Name == name && c.Kind == CompanyKind.Organization, ct);
         if (existing is not null)
         {
             return existing.Id;

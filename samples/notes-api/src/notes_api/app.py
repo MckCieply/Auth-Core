@@ -6,11 +6,11 @@ from contextlib import asynccontextmanager
 from datetime import timezone
 
 from auth_core_fastapi import AuthCore, AuthError, Principal
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -117,6 +117,21 @@ def create_app(
             log.debug("the client went away in the middle of the body")
             return _error(400, "invalid_request")  # nobody is left to read it
         return await run_in_threadpool(_insert, engine, org_id, user.sub, note_text)
+
+    @app.delete("/api/me", status_code=204)
+    def delete_my_data(user: Principal = Depends(auth.current_user)):
+        """The sample's "delete my data" (Auth-Core spec 0010): a private person's notes go before the account does.
+
+        No permission is needed: a person may always delete their own data. This is for private accounts only. A company
+        member is refused: the company's notes belong to the company, and its accounts are managed by the company's admins.
+        """
+        if user.org_kind != "personal":
+            return _error(403, "forbidden")
+        org_id = _org_id(user)
+        with Session(engine) as session:
+            session.execute(delete(Note).where(Note.org_id == org_id))  # every note of the token's space, and no other
+            session.commit()
+        return Response(status_code=204)
 
     return app
 

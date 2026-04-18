@@ -21,3 +21,17 @@ docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:9869
 docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:3430
 docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4230
 docs/superpowers/plans/0009-self-service-signup.md:generic-api-key:4455
+# Spec 0010 (private accounts): eleven more, all rule generic-api-key and all a throw-away test password (Invited-Passw0rd, Joined-Passw0rd) in a test of the
+# service or of the Angular sample and in the plan that wrote them (twelve findings: PrivateAccountRaceTests.cs line 160 is in two commits). Not a secret of any system.
+# Same fingerprint form: file:rule:line.
+tests/Auth.IntegrationTests/PrivateAccountRaceTests.cs:generic-api-key:62
+tests/Auth.IntegrationTests/PrivateAccountRaceTests.cs:generic-api-key:96
+tests/Auth.IntegrationTests/PrivateAccountRaceTests.cs:generic-api-key:130
+tests/Auth.IntegrationTests/PrivateAccountRaceTests.cs:generic-api-key:140
+tests/Auth.IntegrationTests/PrivateAccountRaceTests.cs:generic-api-key:160
+samples/notes-web/src/app/pages/invite.private.spec.ts:generic-api-key:89
+docs/superpowers/plans/0010-private-accounts.md:generic-api-key:6611
+docs/superpowers/plans/0010-private-accounts.md:generic-api-key:6645
+docs/superpowers/plans/0010-private-accounts.md:generic-api-key:6655
+docs/superpowers/plans/0010-private-accounts.md:generic-api-key:6675
+docs/superpowers/plans/0010-private-accounts.md:generic-api-key:8459

@@ -10,25 +10,28 @@ using OpenIddict.Abstractions;
 
 namespace Auth.Server.Tenancy;
 
-/// <summary>What the acceptance screen shows before it asks for a password.</summary>
-public sealed record InvitePreview(string OrgName, string Email, string Role);
+/// <summary>
+/// What the acceptance screen shows before it asks for anything: the company, the address, the role, and whether the address has a private
+/// account (spec 0010), which accepting would move into the company.
+/// </summary>
+public sealed record InvitePreview(string OrgName, string Email, string Role, bool HasPrivateAccount);
 
 /// <summary>
-/// Previews and accepts an invitation by its link token (spec 0005 → Invitations — public, Effects). Accepting is how
-/// anyone becomes a member, and it is one transaction: it uses the invitation up, makes the account if there is none,
-/// sets the password, confirms the email, ends every session of the account and makes it a member with the role of
-/// the invitation — or, when anything is refused, changes nothing at all, the invitation included.
+/// Previews and accepts an invitation by its link token (spec 0005 → Invitations — public, Effects; spec 0010 → Invitations). Accepting is how
+/// anyone becomes a member of a company, and it is one transaction: it uses the invitation up, makes the account if there is none (with the
+/// password sent) or takes the account there is (keeping its password; a private account only with <c>leave_private_account</c>, and its
+/// personal space is deleted), confirms the email, ends every session of the account and makes it a member with the role of the invitation —
+/// or, when anything is refused, changes nothing at all, the invitation included.
 /// </summary>
 public sealed class InviteAcceptance(
     AuthDbContext db, UserManager<ApplicationUser> users, IOpenIddictTokenManager tokens,
     IOpenIddictAuthorizationManager authorizations, TimeProvider clock, AuditLog audit)
 {
     /// <summary>
-    /// The company, address and role of a usable invitation; the token stays usable. Unknown, used, expired, cancelled and
-    /// replaced tokens are all <c>invalid_token</c>, and so is an invitation whose address matches an existing account
-    /// that is not spelled the same (<see cref="EmailInput.IsSameAddress"/>), or that
-    /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An address that already belongs to a
-    /// company is <c>already_member</c>.
+    /// The company, address and role of a usable invitation, and whether the address has a private account; the token stays usable. Unknown,
+    /// used, expired, cancelled and replaced tokens are all <c>invalid_token</c>, and so is an invitation whose address matches an existing
+    /// account that is not spelled the same (<see cref="EmailInput.IsSameAddress"/>), or that
+    /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An address that belongs to a company is <c>already_member</c>.
     /// </summary>
     public async Task<Outcome<InvitePreview>> PreviewAsync(string token, CancellationToken cancellationToken)
     {
@@ -48,28 +51,31 @@ public sealed class InviteAcceptance(
             return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
         }
 
-        // The account the acceptance would act on. Another spelling that only normalises to the invited address is not
-        // the invited mailbox: acceptance refuses it, so the preview does too, and says nothing about that account.
+        // The account the acceptance would act on. Another spelling that only normalises to the invited address is not the invited mailbox:
+        // acceptance refuses it, so the preview does too, and says nothing about that account.
         var user = await users.FindByEmailAsync(row.Email);
         if (user is not null && !EmailInput.IsSameAddress(user.Email, row.Email))
         {
             return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
         }
 
-        return user is not null && await db.Memberships.AnyAsync(m => m.UserId == user.Id, cancellationToken)
+        var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
+        return space is { Kind: CompanyKind.Organization }
             ? Outcome.Fail<InvitePreview>(TenancyErrors.AlreadyMember)
-            : Outcome.Ok(new InvitePreview(row.CompanyName, row.Email, row.RoleName));
+            : Outcome.Ok(new InvitePreview(row.CompanyName, row.Email, row.RoleName, space is { Kind: CompanyKind.Personal }));
     }
 
     /// <summary>
-    /// Accepts the invitation. An existing account is used only when its address is the invited one up to ASCII case
-    /// (<see cref="EmailInput.IsSameAddress"/>). Refused with <c>invalid_token</c>, with <c>weak_password</c> (the broken rules are the value;
-    /// the token stays usable) or with <c>already_member</c> (the invitation stays usable until it expires).
+    /// Accepts the invitation, in the order of spec 0010 → Invitations: <c>invalid_token</c>; <c>already_member</c> (an account of a company; the
+    /// invitation stays usable); <c>private_account_exists</c> (a private account and <paramref name="leavePrivateAccount"/> not set: nothing
+    /// changes); the move of a private account; or, with no account, <c>invalid_request</c> without a password and <c>weak_password</c> (the
+    /// broken rules are the value; the token stays usable). An existing account is used only when its address is the invited one up to ASCII
+    /// case (<see cref="EmailInput.IsSameAddress"/>), and it keeps its password: a <paramref name="password"/> sent for it is not used.
     /// </summary>
-    public async Task<Outcome<IReadOnlyList<string>>> AcceptAsync(string token, string password, CancellationToken cancellationToken)
+    public async Task<Outcome<IReadOnlyList<string>>> AcceptAsync(
+        string token, string? password, bool leavePrivateAccount, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(token);
-        ArgumentNullException.ThrowIfNull(password);
 
         var hash = EmailTokens.HashOf(token);
         var now = StorableTime.Now(clock);
@@ -104,9 +110,9 @@ public sealed class InviteAcceptance(
             return Refused(TenancyErrors.InvalidToken);
         }
 
-        // One address, one acceptance at a time: two invitations of two companies accepted at once must not make the
-        // same person a member of both (the tables would allow it; this version does not).
-        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({invite.NormalizedEmail}, 0))", cancellationToken);
+        // One address at a time, after the company lock (spec 0010 → Locks): two invitations accepted at once, a self-deletion and a sign-up
+        // completion of the address wait for each other here.
+        await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
 
         // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
         // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.
@@ -116,39 +122,74 @@ public sealed class InviteAcceptance(
             return Refused(TenancyErrors.InvalidToken);
         }
 
-        if (user is not null && await db.Memberships.AnyAsync(m => m.UserId == user.Id, cancellationToken))
+        var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
+        if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
+        {
+            // The account was there when it was read and its space is not: a removal committed between the two reads, taking the account with
+            // its membership. The address now belongs to no account, which is the case of an invitation to a new address.
+            user = null;
+        }
+
+        if (space is { Kind: CompanyKind.Organization })
         {
             return Refused(TenancyErrors.AlreadyMember);
         }
 
-        var account = user ?? new ApplicationUser { UserName = invite.Email, Email = invite.Email };
-        var broken = await PasswordRules.BrokenAsync(users, account, password);
-        if (broken.Count > 0)
+        if (space is { Kind: CompanyKind.Personal } && !leavePrivateAccount)
         {
-            return new Outcome<IReadOnlyList<string>>(broken, TenancyErrors.WeakPassword);
+            return Refused(TenancyErrors.PrivateAccountExists);   // nothing changes; the invitation stays usable
         }
 
-        // The link came through the mailbox of the address: that proves it, and it is why a password is set here.
-        account.EmailConfirmed = true;
+        ApplicationUser account;
         if (user is null)
         {
+            if (password is null)
+            {
+                return Refused(TenancyErrors.InvalidRequest);
+            }
+
+            account = new ApplicationUser { UserName = invite.Email, Email = invite.Email, EmailConfirmed = true };
+            var broken = await PasswordRules.BrokenAsync(users, account, password);
+            if (broken.Count > 0)
+            {
+                return new Outcome<IReadOnlyList<string>>(broken, TenancyErrors.WeakPassword);
+            }
+
+            // The link came through the mailbox of the address: that proves it, and it is why a password is set here.
             Ensure(await users.CreateAsync(account, password));
         }
         else
         {
-            if (await users.HasPasswordAsync(user))
+            // The account keeps its password and its address. A private account moves on purpose (spec 0010): its personal space, the space's
+            // role row and its membership are deleted, with everything the product keeps under that space's id left behind (spec 0010, Accepted
+            // 16). An account with no space at all, which only a direct change of the database leaves, simply joins.
+            if (space is { Kind: CompanyKind.Personal } personal)
             {
-                Ensure(await users.RemovePasswordAsync(user));
+                await db.Memberships.Where(m => m.UserId == user.Id && m.CompanyId == personal.Id).ExecuteDeleteAsync(cancellationToken);
+                await db.Companies.Where(c => c.Id == personal.Id && c.Kind == CompanyKind.Personal).ExecuteDeleteAsync(cancellationToken);
             }
 
-            Ensure(await users.AddPasswordAsync(user, password));
+            account = user;
+            account.EmailConfirmed = true;
+            // A new stamp: a login that raced this acceptance cannot refresh into the company.
+            Ensure(await users.UpdateSecurityStampAsync(account));
         }
 
-        // A new account has no sessions or links yet, but its address may have a streak: streaks do not need an account.
+        // Every session, mail link and the login streak end, as at any acceptance.
         await AccountSessions.EndAllAsync(db, tokens, authorizations, account, cancellationToken);
 
         db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now });
         // The person who holds the link is anonymous: no actor. Who joined, where, and as what; never the link or the password.
+        var details = new Dictionary<string, object?>
+        {
+            ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
+        };
+        if (space is { Kind: CompanyKind.Personal } left)
+        {
+            details["left_private_account"] = true;
+            details["personal_org_id"] = left.Id;
+        }
+
         audit.Stage(new AuditEntry
         {
             Kind = AuditKinds.InviteAccepted,
@@ -157,10 +198,7 @@ public sealed class InviteAcceptance(
             OrgId = invite.CompanyId,
             OrgName = await audit.CompanyNameAsync(invite.CompanyId, cancellationToken),
             TargetId = invite.Id,
-            Details = new Dictionary<string, object?>
-            {
-                ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
-            },
+            Details = details,
         });
         await db.SaveChangesAsync(cancellationToken);
 
@@ -169,7 +207,43 @@ public sealed class InviteAcceptance(
         return new Outcome<IReadOnlyList<string>>([]);
     }
 
+    /// <summary>
+    /// The space of the account and its kind; <see langword="null"/> when it has none. A company wins over a personal space, should an account
+    /// ever hold both (only a direct change of the database leaves that), so that it is refused as any member of a company is.
+    /// </summary>
+    private Task<Space?> SpaceOfAsync(Guid userId, CancellationToken cancellationToken) =>
+        (from membership in db.Memberships.AsNoTracking()
+         join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
+         where membership.UserId == userId
+         orderby company.Kind, membership.JoinedAt   // Organization (1) before Personal (2)
+         select new Space(company.Id, company.Kind))
+        .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// Locks the row of an account that has no space, until the transaction ends, and reads it afresh; <see langword="false"/> when it is gone.
+    /// A removal of a member takes no address lock, so it can commit between the read of the account and the read of its space; an account
+    /// that really has no space is changed only by flows that hold the address lock, which this one holds. The lock is the last one of the
+    /// order (company, address, account row) and is taken by <c>UpdateSecurityStampAsync</c> a few statements later in any case.
+    /// </summary>
+    private async Task<bool> LockAccountAsync(ApplicationUser user, CancellationToken cancellationToken)
+    {
+        var locked = await db.Database
+            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "AspNetUsers" WHERE "Id" = {user.Id} FOR UPDATE""")
+            .ToListAsync(cancellationToken);
+        var entry = db.Entry(user);
+        if (locked.Count == 0)
+        {
+            entry.State = EntityState.Detached;
+            return false;
+        }
+
+        await entry.ReloadAsync(cancellationToken);   // what a sign-in or a password change wrote meanwhile
+        return true;
+    }
+
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 
     private static void Ensure(IdentityResult result) => AccountSessions.Ensure(result, "Could not set up the account");
+
+    private sealed record Space(Guid Id, CompanyKind Kind);
 }

@@ -14,7 +14,19 @@ export const adminMe: Me = {
   email: 'admin@example.test',
   org_id: '22222222-2222-2222-2222-222222222222',
   org_name: 'Acme',
+  org_kind: 'organization',
   roles: ['admin'],
+  permissions: ['notes:read', 'notes:write'],
+};
+
+/** A private account (spec 0010): its space is named "private", its role is "private". */
+export const privateMe: Me = {
+  sub: '33333333-3333-3333-3333-333333333333',
+  email: 'ola@poczta.example',
+  org_id: '44444444-4444-4444-4444-444444444444',
+  org_name: 'private',
+  org_kind: 'personal',
+  roles: ['private'],
   permissions: ['notes:read', 'notes:write'],
 };
 

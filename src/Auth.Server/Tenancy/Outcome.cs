@@ -24,6 +24,7 @@ public static class TenancyErrors
     public const string WrongPassword = "wrong_password";
     public const string SignupDisabled = "signup_disabled";
     public const string AlreadyRegistered = "already_registered";
+    public const string PrivateAccountExists = "private_account_exists";
 
     public static int StatusOf(string error) => error switch
     {
@@ -32,7 +33,7 @@ public static class TenancyErrors
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
-            => StatusCodes.Status409Conflict,
+            or PrivateAccountExists => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };

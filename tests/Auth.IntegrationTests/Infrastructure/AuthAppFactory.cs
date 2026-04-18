@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Network;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -24,6 +26,7 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     private TimeProvider? _clock;
     private readonly List<Action<IServiceCollection>> _serviceOverrides = [];
     private readonly string _manifestDirectory;
+    private readonly string? _dropConnectionString;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -35,7 +38,18 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public AuthAppFactory(PostgresFixture postgres, KeyMaterialFixture keys, string? database = null)
     {
         DatabaseName = database ?? "auth_" + Guid.NewGuid().ToString("N");
-        _settings["ConnectionStrings:Auth"] = postgres.ConnectionStringFor(DatabaseName);
+        if (database is null)
+        {
+            _dropConnectionString = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringFor("postgres")) { Pooling = false, Timeout = 30 }.ConnectionString;
+        }
+
+        // The default 15 s to connect and 30 s per command are too short when the shared server is busy (a big run, other sessions on the
+        // same Docker): a test then fails with a timeout that says nothing about the code under test.
+        _settings["ConnectionStrings:Auth"] = new NpgsqlConnectionStringBuilder(postgres.ConnectionStringFor(DatabaseName))
+        {
+            Timeout = 30,
+            CommandTimeout = 60,
+        }.ConnectionString;
         _settings["Auth:Database:MigrateOnStartup"] = "true";
         _settings["Auth:Keys:SigningCertificatePath"] = keys.SigningCertPath;
         _settings["Auth:Keys:SigningKeyPath"] = keys.SigningKeyPath;
@@ -107,6 +121,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     /// <summary>The default manifest with <c>signup: self-service</c>.</summary>
     public const string SelfServiceManifest = DefaultManifest + "\nsignup: self-service\n";
 
+    /// <summary>The block that turns private sign-up on (spec 0010), with two permissions of the default catalog for the private role.</summary>
+    public const string PrivateBlock = "\nprivate:\n  signup: self-service\n  permissions: [reports:read, reports:approve]\n";
+
     public const string DefaultAppName = "Auth-Core Test";
     public const string DefaultResetUrl = "https://app.example.com/reset";
     public const string DefaultVerifyUrl = "https://app.example.com/verify";
@@ -149,6 +166,16 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public AuthAppFactory WithSignup()
     {
         WithManifest(SelfServiceManifest);
+        return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
+    }
+
+    /// <summary>
+    /// Turns private sign-up on (spec 0010) and, unless told otherwise, organization sign-up too: the manifest and the completion address.
+    /// Call it before the host is built.
+    /// </summary>
+    public AuthAppFactory WithPrivateSignup(bool organization = true)
+    {
+        WithManifest((organization ? SelfServiceManifest : DefaultManifest) + PrivateBlock);
         return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
 
@@ -222,8 +249,15 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 
         // Every factory has a database of its own, hence a connection pool of its own that would stay open for
         // minutes after the test. Without this the suite runs out of server connections as it grows.
-        await using var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]);
-        NpgsqlConnection.ClearPool(connection);
+        await using (var connection = new NpgsqlConnection(_settings["ConnectionStrings:Auth"]))
+        {
+            NpgsqlConnection.ClearPool(connection);
+        }
+
+        if (_dropConnectionString is not null)
+        {
+            DropDatabase(_dropConnectionString);
+        }
 
         try
         {
@@ -235,8 +269,85 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>
+    /// Drops the database this factory created for itself, so the server does not keep one database per test of the run. Only a database
+    /// the factory named itself is dropped: one that a test named is shared by several factories (restart scenarios) and belongs to the
+    /// test. Connections still open to it are terminated by the drop. A drop that fails leaves the database behind and fails nothing.
+    /// </summary>
+    private void DropDatabase(string maintenanceConnectionString)
+    {
+        try
+        {
+            using var connection = new NpgsqlConnection(maintenanceConnectionString);
+            connection.Open();
+            using var drop = new NpgsqlCommand("DROP DATABASE IF EXISTS \"" + DatabaseName.Replace("\"", "\"\"", StringComparison.Ordinal) + "\" WITH (FORCE)", connection);
+            drop.ExecuteNonQuery();
+        }
+        catch (Exception ex) when (ex is NpgsqlException or InvalidOperationException or TimeoutException or IOException)
+        {
+            // A database that cannot be dropped now is not a failure of the test that has already ended.
+        }
+    }
+
+    /// <summary>
+    /// Creates this host's database and migrates it, by a context of its own that logs nothing, if the server does not have the database
+    /// yet; a database that is there is left as it is (the restart and upgrade tests start hosts on a database in a state of their own). The
+    /// host's start-up migration then finds nothing to do. Left to itself it probes a database that is not there, and then a history table
+    /// that is not there, and EF logs each failed probe as an error line in every test. A failure of the creation or of a migration is not
+    /// caught: it fails the test that started the host. A test that blanks or breaks the connection string, or turns the start-up migration
+    /// off, gets the host as it is: the host reports its own error.
+    /// </summary>
+    private void EnsureDatabase()
+    {
+        if (_settings.GetValueOrDefault("Auth:Database:MigrateOnStartup") != "true"
+            || string.IsNullOrWhiteSpace(_settings.GetValueOrDefault("ConnectionStrings:Auth")))
+        {
+            return;
+        }
+
+        var connectionString = _settings["ConnectionStrings:Auth"]!;
+        NpgsqlConnectionStringBuilder maintenance;
+        try
+        {
+            maintenance = new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (ArgumentException)
+        {
+            return;   // not a connection string: the host fails on it, as it would without this step
+        }
+
+        var database = maintenance.Database;
+        if (string.IsNullOrWhiteSpace(database))
+        {
+            return;
+        }
+
+        maintenance.Database = "postgres";
+        maintenance.Pooling = false;
+        using var connection = new NpgsqlConnection(maintenance.ConnectionString);
+        connection.Open();
+        using var exists = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @name", connection);
+        exists.Parameters.AddWithValue("name", database);
+        if (exists.ExecuteScalar() is not null)
+        {
+            return;
+        }
+
+        // A database name cannot be a parameter: quote it as an identifier (the name is generated or chosen by the test).
+        using (var create = new NpgsqlCommand("CREATE DATABASE \"" + database.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"", connection))
+        {
+            create.ExecuteNonQuery();
+        }
+
+        var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connectionString).UseOpenIddict().Options;
+        using var db = new AuthDbContext(options);
+        db.Database.Migrate();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        EnsureDatabase();
+
         if (_environment is not null)
         {
             builder.UseEnvironment(_environment);

@@ -74,8 +74,8 @@ public sealed class LoginTests : IAsyncLifetime
 
         // iss, aud, sub, exp are the contract. iat, jti and oi_tkn_id are OpenIddict metadata that cannot be
         // switched off; they are accepted extras pending an owner decision. org_id, roles and permissions came with
-        // spec 0005. Anything else is a contract leak.
-        string[] expected = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"];
+        // spec 0005, org_kind with spec 0010. Anything else is a contract leak.
+        string[] expected = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"];
         Assert.Equal(expected, jwt.Claims.Select(c => c.Type).Distinct().Order(StringComparer.Ordinal));
     }
 

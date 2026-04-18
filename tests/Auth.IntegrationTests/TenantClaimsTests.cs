@@ -84,7 +84,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
         Assert.Equal(EveryPermission, AccessTokens.Array(session.AccessToken, "permissions"));
         Assert.Equal(
-            ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "permissions", "roles", "sub"],
+            ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"],
             AccessTokens.Payload(session.AccessToken).Select(p => p.Key).Order(StringComparer.Ordinal));
     }
 
@@ -104,7 +104,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
-    public async Task The_claim_filter_takes_the_three_claims_out_of_a_refresh_token_and_leaves_them_in_an_access_token()
+    public async Task The_claim_filter_takes_the_tenancy_claims_out_of_a_refresh_token_and_leaves_them_in_an_access_token()
     {
         static OpenIddictServerEvents.GenerateTokenContext ContextFor(string tokenType)
         {
@@ -113,6 +113,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
             [
                 new Claim(OpenIddictConstants.Claims.Subject, "someone"),
                 new Claim(TenantClaims.OrgId, Guid.NewGuid().ToString()),
+                new Claim(TenantClaims.OrgKind, "organization"),
                 new Claim(TenantClaims.Roles, """["admin"]"""),
                 new Claim(TenantClaims.Permissions, """["reports:read"]"""),
             ]);

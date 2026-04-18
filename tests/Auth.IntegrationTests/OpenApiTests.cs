@@ -11,13 +11,14 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0009, as "METHOD path".
+    // Every endpoint of specs 0001–0010, as "METHOD path".
     private static readonly string[] Endpoints =
     [
         "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
         "POST /auth/password/forgot", "POST /auth/password/reset", "POST /auth/email/verify/request", "POST /auth/email/verify",
         "GET /auth/.well-known/jwks.json", "GET /auth/health",
         "GET /auth/me",
+        "DELETE /auth/account",
         "GET /auth/options",
         "POST /auth/signup",
         "POST /auth/signup/preview",
@@ -160,6 +161,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify/request", "202,400,415,429")]
     [InlineData("POST /auth/email/verify", "204,400,415,429")]
     [InlineData("GET /auth/me", "200,401,403,429")]
+    [InlineData("DELETE /auth/account", "204,400,401,403,415,429")]
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
     [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
@@ -201,6 +203,8 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_grant", Description(operations["POST /auth/refresh"], "401"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
+        Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
+        Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
@@ -244,12 +248,13 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify/request", "email")]
     [InlineData("POST /auth/email/verify", "token")]
     [InlineData("POST /auth/invites/preview", "token")]
-    [InlineData("POST /auth/invites/accept", "password,token")]
-    [InlineData("POST /auth/signup", "company_name,email")]
+    [InlineData("POST /auth/invites/accept", "leave_private_account,password,token")]
+    [InlineData("POST /auth/signup", "company_name,email,kind")]
     [InlineData("POST /auth/signup/preview", "token")]
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
+    [InlineData("DELETE /auth/account", "password")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "role_id")]
     [InlineData("POST /auth/org/roles", "name,permissions")]
@@ -272,14 +277,14 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["email", "org_id", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["email", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
-        Assert.Equal(["signup"], Properties("OptionsResponse"));
-        Assert.Equal(["company_name", "email", "has_account"], Properties("SignupPreviewResponse"));
-        Assert.Equal(["email", "org_name", "role"], Properties("InvitePreviewResponse"));
+        Assert.Equal(["private_signup", "signup"], Properties("OptionsResponse"));
+        Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
+        Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));
@@ -287,7 +292,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task The_completion_asks_for_no_password_of_an_account_without_a_company()   // criterion 24
+    public async Task The_completion_takes_the_token_an_optional_password_and_an_optional_company_name()   // spec 0010 → Complete
     {
         await using var factory = new AuthAppFactory(postgres, keys);
         var document = await DescriptionAsync(factory);
@@ -298,13 +303,12 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
             schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
         }
 
-        Assert.NotNull(schema["properties"]!["password"]);   // still described
-
-        // The sentence Step 11 adds to the description of the operation: it fails before the change whatever the generator does with `required`.
-        Assert.Contains("may be left out", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.NotNull(schema["properties"]!["password"]);
+        Assert.NotNull(schema["properties"]!["company_name"]);
+        Assert.Contains("private", operation["description"]!.GetValue<string>(), StringComparison.Ordinal);
         if (schema["required"] is System.Text.Json.Nodes.JsonArray required)
         {
-            Assert.DoesNotContain("password", required.Select(node => node!.GetValue<string>()));
+            Assert.DoesNotContain("company_name", required.Select(node => node!.GetValue<string>()));
         }
     }
 
@@ -320,7 +324,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal("JWT", scheme["bearerFormat"]!.GetValue<string>());
         foreach (var (endpoint, operation) in Operations(document))
         {
-            var guarded = endpoint.Split(' ')[1].StartsWith("/auth/org", StringComparison.Ordinal) || endpoint.EndsWith("/auth/me", StringComparison.Ordinal);
+            var guarded = endpoint.Split(' ')[1].StartsWith("/auth/org", StringComparison.Ordinal) || endpoint.EndsWith("/auth/me", StringComparison.Ordinal) || endpoint == "DELETE /auth/account";
             Assert.Equal(guarded, operation["security"] is JsonArray { Count: > 0 });
         }
     }
@@ -352,6 +356,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/complete", "200")]
     [InlineData("POST /auth/refresh", "200")]
     [InlineData("POST /auth/logout", "204")]
+    [InlineData("DELETE /auth/account", "204")]
     public async Task The_answers_that_set_or_clear_the_refresh_cookie_say_so(string endpoint, string status)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -377,7 +382,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

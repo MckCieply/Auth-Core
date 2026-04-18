@@ -57,11 +57,32 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
+    public async Task The_account_deletion_is_described_with_its_body_its_answers_and_the_cookie_it_clears()   // spec 0010, criterion 30
+    {
+        var (document, operations) = await DescriptionAsync();
+
+        var operation = operations["DELETE /auth/account"];
+
+        var schema = operation["requestBody"]!["content"]!["application/json"]!["schema"]!.AsObject();
+        if (schema["$ref"] is { } reference)
+        {
+            schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
+        }
+
+        Assert.Equal(["password"], schema["properties"]!.AsObject().Select(p => p.Key));
+        Assert.Equal(["204", "400", "401", "403", "415", "429"], operation["responses"]!.AsObject().Select(r => r.Key).Order(StringComparer.Ordinal));
+        Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operation, "403")));
+        Assert.All(["too_many_attempts", "too_many_requests"], code => Assert.Contains(code, Description(operation, "429")));
+        Assert.Contains("auth_rt", operation["responses"]!["204"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
+        Assert.NotNull(operation["security"]);
+    }
+
+    [Fact]
     public async Task Every_operation_can_say_429_too_many_requests_with_retry_after_the_two_added_by_hand_included()   // spec 0008 → OpenAPI
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(30, operations.Count);
+        Assert.Equal(31, operations.Count);   // spec 0010: DELETE /auth/account
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -95,7 +116,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(20, covered);
+        Assert.Equal(21, covered);   // spec 0010: DELETE /auth/account
     }
 
     [Fact]

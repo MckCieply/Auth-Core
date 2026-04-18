@@ -1,3 +1,4 @@
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 
 namespace Auth.Server.Api;
@@ -19,18 +20,45 @@ public static class TenancyEndpoints
             .Produces<MeResponse>()
             .ProducesGuarded();
 
+        // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.
+        app.MapDelete(AccountDeletionEndpoint.Path, AccountDeletionEndpoint.DeleteAsync)
+            .RequireAuthorization()
+            .WithTags("Account")
+            .WithDescription(
+                "Deletes the caller's own private account with everything Auth-Core holds of it: the personal space, the sessions, the mail links, "
+                + "the queued mails, the pending sign-up and the login streak; the audit rows stay for their retention. Needs the caller's password. "
+                + "The product deletes its own data under the token's `org_id` first: Auth-Core does not tell it. A token that says `org_kind` "
+                + "`personal` while the account has moved to a company or is gone is `403 permissions_changed`; a company member is `403 forbidden` "
+                + "(company accounts are managed by their admins). A wrong password counts in the login streak as a failed login does; while the "
+                + "identifier is locked the answer is `429 too_many_attempts`.")
+            .ReadsJson<DeleteAccountRequest>()
+            .Produces(StatusCodes.Status204NoContent)
+            .SetsRefreshCookie(
+                StatusCodes.Status204NoContent, $"`{RefreshCookie.Name}` emptied, with `Max-Age=0`: the browser drops the cookie, as at a logout.")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword)
+            .ProducesTooManyAttempts()
+            .ProducesGuarded();
+
         app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)
             .WithTags("Invitations")
+            .WithDescription(
+                "The company, the address and the role of an invitation, and `has_private_account`: whether the address has a private account, "
+                + "which accepting moves into the company (its personal space is deleted). An address of a company member is `409 already_member`.")
             .ReadsJson<PreviewInviteRequest>()
             .Produces<InvitePreviewResponse>()
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
         app.MapPost(InviteEndpoints.AcceptPath, InviteEndpoints.AcceptAsync)
             .WithTags("Invitations")
+            .WithDescription(
+                "Accepts an invitation. A new account needs `password`. An account that exists keeps its own password (a `password` sent is not "
+                + "used); a private account moves only with `leave_private_account: true` (its personal space is deleted, every session ends), "
+                + "and without it the answer is `409 private_account_exists` and nothing changes. A company member is `409 already_member`.")
             .ReadsJson<AcceptInviteRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesPasswordError(TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
-            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember, TenancyErrors.PrivateAccountExists);
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 
@@ -44,9 +72,10 @@ public static class TenancyEndpoints
             .ProducesGuarded();
         company.MapDelete("", OrgEndpoints.DeleteAsync)
             .WithDescription(
-                "Deletes the caller's company with its roles, members, invitations and the mails queued for them; the accounts stay. "
-                + "Needs the permission `org:delete`, the company's name exactly and the caller's own password. The members' sessions end: "
-                + "an access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new login `403 no_membership`. "
+                "Deletes the caller's company with its roles, invitations and the mails queued for them, and the account of every member, the "
+                + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
+                + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
+                + "login the `401` of an unknown address. "
                 + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`.")
             .ReadsJson<DeleteOrgRequest>()
             .Produces(StatusCodes.Status204NoContent)
@@ -93,6 +122,9 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CannotChangeSelf, TenancyErrors.LastManager)
             .ProducesGuarded();
         company.MapDelete("members/{user_id}", OrgMemberEndpoints.RemoveAsync)
+            .WithDescription(
+                "Removes a member. The account loses its only space and is deleted with its sessions and links; the address can be invited "
+                + "again or sign up, as a new account.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)

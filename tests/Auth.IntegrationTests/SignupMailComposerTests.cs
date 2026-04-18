@@ -36,7 +36,7 @@ public sealed class SignupMailComposerTests
         Assert.Contains(Link, mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("valid for 24 hours", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("ignore this message", mail.TextBody, StringComparison.Ordinal);
-        // The link also serves an account that keeps its password (Amendment 3): the text does not promise a password to choose.
+        // The text does not promise a password to choose: the completion screen asks for it.
         Assert.Contains("use the link below to finish signing up.", mail.TextBody, StringComparison.Ordinal);
         Assert.DoesNotContain("password", mail.TextBody + mail.HtmlBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains($"href=\"{Link}\"", mail.HtmlBody, StringComparison.Ordinal);

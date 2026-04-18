@@ -13,12 +13,20 @@ function startEmail(router: Router): string {
   return typeof email === 'string' ? email : '';
 }
 
+/** The notice the notes screen passes on after a deleted account (spec 0010), in the navigation state. */
+function startNotice(router: Router): string | null {
+  return router.currentNavigation()?.extras.state?.['notice'] === 'deleted' ? texts.login.accountDeleted : null;
+}
+
 @Component({
   selector: 'app-login',
   imports: [ReactiveFormsModule, RouterLink],
   template: `
     <main>
       <h1>{{ t.title }}</h1>
+      @if (notice(); as text) {
+        <p class="status" role="status" data-testid="login-notice">{{ text }}</p>
+      }
       <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
         <label for="email">{{ common.email }}</label>
         <input id="email" type="email" formControlName="email" autocomplete="username" autocapitalize="none" />
@@ -59,11 +67,14 @@ export class LoginPage implements OnInit {
   protected readonly info = signal<string | null>(null);
   protected readonly canResend = signal(false);
   protected readonly resending = signal(false);
-  /** True while GET /auth/options says a visitor may start a company: then the screen offers "Create an account". */
+  protected readonly notice = signal<string | null>(startNotice(this.router));
+  /** True while GET /auth/options says a visitor may sign up, either kind (spec 0010): then the screen offers "Create an account". */
   protected readonly signupOpen = signal(false);
 
   ngOnInit(): void {
-    void this.account.options().then((options) => this.signupOpen.set(options.signup === 'self-service'));
+    void this.account
+      .options()
+      .then((options) => this.signupOpen.set(options.signup === 'self-service' || options.private_signup === 'self-service'));
   }
 
   protected async submit(): Promise<void> {

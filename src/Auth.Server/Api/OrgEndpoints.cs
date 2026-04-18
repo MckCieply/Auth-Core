@@ -26,7 +26,7 @@ public static class OrgEndpoints
         ArgumentNullException.ThrowIfNull(memberships);
         ArgumentNullException.ThrowIfNull(users);
 
-        var access = await CompanyAccess.AuthorizeAsync(http, memberships);
+        var access = await CompanyAccess.AuthorizeAnyKindAsync(http, memberships);
         if (access.Caller is not { } caller)
         {
             return access.Failure!;
@@ -38,7 +38,8 @@ public static class OrgEndpoints
             return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
-        return ApiResults.Ok(new MeResponse(caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, [caller.RoleName], [.. caller.Permissions]));
+        return ApiResults.Ok(new MeResponse(
+            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions]));
     }
 
     public static async Task<IResult> GetAsync(HttpContext http, MembershipReader memberships)

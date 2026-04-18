@@ -11,13 +11,17 @@ namespace Auth.Server.Tenancy;
 /// </summary>
 public static class CompanyLock
 {
-    /// <summary>Locks the company's row until the transaction ends; <see langword="false"/> when there is no such company.</summary>
+    /// <summary>
+    /// Locks the company's row until the transaction ends; <see langword="false"/> when there is no such company. A personal space (spec 0010)
+    /// is no company here: nobody locks one, so no company service and no operator command ever acts on it (they answer <c>not_found</c>).
+    /// </summary>
     public static async Task<bool> AcquireAsync(AuthDbContext db, Guid companyId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(db);
 
+        var organization = (short)CompanyKind.Organization;
         var locked = await db.Database
-            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "Companies" WHERE "Id" = {companyId} FOR UPDATE""")
+            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "Companies" WHERE "Id" = {companyId} AND "Kind" = {organization} FOR UPDATE""")
             .ToListAsync(cancellationToken);
         return locked.Count == 1;
     }

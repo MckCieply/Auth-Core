@@ -19,9 +19,10 @@ public sealed class ComposedMail
 }
 
 /// <summary>
-/// Builds the mails of specs 0004, 0005 and 0009 in the configured language, each as plain text and as HTML with the same content. Only
-/// configuration, the token and the names below go into a mail: an invitation names its company and role, and a sign-up the company its
-/// visitor typed. They are encoded in the HTML part and are never in a header; nothing else a requester submitted goes in.
+/// Builds the mails of specs 0004, 0005, 0009 and 0010 in the configured language, each as plain text and as HTML with the same
+/// content. Only configuration, the token and the names below go into a mail: an invitation names its company and role, and an
+/// organization sign-up the company its visitor typed (a private sign-up names none). They are encoded in the HTML part and are never in
+/// a header; nothing else a requester submitted goes in.
 /// </summary>
 public sealed class MailComposer(MailSettings settings)
 {
@@ -31,11 +32,16 @@ public sealed class MailComposer(MailSettings settings)
     private const string BodyStyle = "font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-height: 1.5; color: #1f2933;";
 
     /// <param name="companyName">
-    /// The company of an invitation or of a sign-up; required for <see cref="MailKind.Invitation"/> and <see cref="MailKind.Signup"/>,
-    /// ignored otherwise.
+    /// The company of an invitation or of an organization sign-up; required for <see cref="MailKind.Invitation"/> and for
+    /// <see cref="MailKind.Signup"/> unless <paramref name="privateAccount"/> is set, ignored otherwise (a private sign-up names no company).
     /// </param>
     /// <param name="roleName">The role of an invitation; required for <see cref="MailKind.Invitation"/>, ignored otherwise.</param>
-    public ComposedMail Compose(MailKind kind, string recipient, string token, string? companyName = null, string? roleName = null)
+    /// <param name="privateAccount">
+    /// Spec 0010. For <see cref="MailKind.Signup"/>: the private variant, which names no company. For <see cref="MailKind.Invitation"/>: the
+    /// invited address has a private account, and the mail says what accepting does to it. Ignored otherwise.
+    /// </param>
+    public ComposedMail Compose(
+        MailKind kind, string recipient, string token, string? companyName = null, string? roleName = null, bool privateAccount = false)
     {
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(token);
@@ -44,12 +50,17 @@ public sealed class MailComposer(MailSettings settings)
             throw new ArgumentException("An invitation names its company and its role.", nameof(kind));
         }
 
-        if (kind == MailKind.Signup && companyName is null)
+        if (kind == MailKind.Signup && companyName is null && !privateAccount)
         {
-            throw new ArgumentException("A sign-up names its company.", nameof(companyName));
+            throw new ArgumentException("An organization sign-up names its company.", nameof(companyName));
         }
 
-        var text = MailTexts.For(settings.Locale, kind);
+        var text = (kind, privateAccount) switch
+        {
+            (MailKind.Signup, true) => MailTexts.PrivateSignup(settings.Locale),
+            (MailKind.Invitation, true) => MailTexts.InvitationToPrivateAccount(settings.Locale),
+            _ => MailTexts.For(settings.Locale, kind),
+        };
         var target = kind switch
         {
             MailKind.PasswordReset => settings.ResetPasswordUrl,
@@ -64,21 +75,32 @@ public sealed class MailComposer(MailSettings settings)
         // for that. They appear in the body, encoded in its HTML part.
         var subject = string.Format(CultureInfo.InvariantCulture, text.Subject, settings.AppName);
         var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName, roleName);
+        // Formatted first and encoded whole, like the intro: the company and the role in it are encoded in the HTML part.
+        var paragraph = text.Paragraph is null
+            ? null
+            : string.Format(CultureInfo.InvariantCulture, text.Paragraph, settings.AppName, companyName, roleName);
+        var paragraphHtml = paragraph is null ? "" : "\n<p>" + Html.Encode(paragraph) + "</p>";
+        var lines = new List<string> { text.Greeting, "", intro, "" };
+        if (paragraph is not null)
+        {
+            lines.Add(paragraph);
+            lines.Add("");
+        }
+
+        lines.AddRange([link, "", text.Validity, text.Ignore, ""]);
 
         return new ComposedMail
         {
             To = recipient,
             Subject = subject,
-            TextBody = string.Join(
-                "\r\n",
-                text.Greeting, "", intro, "", link, "", text.Validity, text.Ignore, ""),
+            TextBody = string.Join("\r\n", lines),
             HtmlBody = $"""
                 <!DOCTYPE html>
                 <html lang="{settings.Locale}">
                 <head><meta charset="utf-8"><title>{Html.Encode(subject)}</title></head>
                 <body style="{BodyStyle}">
                 <p>{Html.Encode(text.Greeting)}</p>
-                <p>{Html.Encode(intro)}</p>
+                <p>{Html.Encode(intro)}</p>{paragraphHtml}
                 <p><a href="{Html.Encode(link)}" style="display: inline-block; padding: 12px 20px; background-color: #1f6feb; color: #ffffff; text-decoration: none; border-radius: 6px;">{Html.Encode(text.Button)}</a></p>
                 <p>{Html.Encode(text.LinkHint)}<br><a href="{Html.Encode(link)}">{Html.Encode(link)}</a></p>
                 <p>{Html.Encode(text.Validity)}</p>
@@ -90,9 +112,9 @@ public sealed class MailComposer(MailSettings settings)
     }
 
     /// <summary>
-    /// The mail an address gets when someone signs up with it and its account belongs to a company, or only looks like the typed address
-    /// (spec 0009 → Mails, Amendment 3): it says that someone, perhaps the reader, tried, that the account exists, and how to sign in or
-    /// reset the password. It holds no link and no token, and nothing the requester typed.
+    /// The mail an address gets when someone signs up with it and it has an account of either kind (spec 0010 → Mails): it says that
+    /// someone, perhaps the reader, tried, that the account exists, and how to sign in or reset the password. It holds no link and no token,
+    /// and nothing the requester typed. It ends with how to get a new account on purpose (spec 0010, Decision 6).
     /// </summary>
     public ComposedMail ComposeAccountExists(string recipient)
     {
@@ -107,7 +129,7 @@ public sealed class MailComposer(MailSettings settings)
         {
             To = recipient,
             Subject = subject,
-            TextBody = string.Join("\r\n", text.Greeting, "", intro, "", hint, "", text.Ignore, ""),
+            TextBody = string.Join("\r\n", text.Greeting, "", intro, "", hint, "", text.Deliberate, "", text.Ignore, ""),
             HtmlBody = $"""
                 <!DOCTYPE html>
                 <html lang="{settings.Locale}">
@@ -116,6 +138,7 @@ public sealed class MailComposer(MailSettings settings)
                 <p>{Html.Encode(text.Greeting)}</p>
                 <p>{Html.Encode(intro)}</p>
                 <p>{Html.Encode(hint)}</p>
+                <p>{Html.Encode(text.Deliberate)}</p>
                 <p style="font-size: 14px; color: #52606d;">{Html.Encode(text.Ignore)}</p>
                 </body>
                 </html>

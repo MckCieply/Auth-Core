@@ -140,6 +140,34 @@ public abstract class TenancyTestBase : MailTestBase
             return role.Id;
         });
 
+    /// <summary>
+    /// A private account (spec 0010) made straight in the database, as a private sign-up leaves it: the account (with
+    /// <see cref="MailTestBase.UserPassword"/> unless told otherwise), its personal space, the space's role row and the membership.
+    /// </summary>
+    protected async Task<(Guid UserId, Guid SpaceId)> CreatePrivateAccountAsync(string email, string password = UserPassword, bool confirmed = true)
+    {
+        var user = await CreateUserAsync(email, confirmed, password, member: false);
+        var space = await InDbAsync(async db =>
+        {
+            var id = PersonalSpaces.Add(db, user.Id, StorableTime.Now(Clock));
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return id;
+        });
+        return (user.Id, space);
+    }
+
+    /// <summary>
+    /// Gives an account a membership of a company in the database, an hour after its other ones, as only a direct change of the database can
+    /// leave an account with two.
+    /// </summary>
+    protected Task AddLaterMembershipAsync(Guid userId, Guid companyId, string role) =>
+        InDbAsync(async db =>
+        {
+            var roleId = await RoleIdAsync(companyId, role);
+            db.Memberships.Add(new Membership { UserId = userId, CompanyId = companyId, RoleId = roleId, JoinedAt = StorableTime.Now(Clock).AddHours(1) });
+            return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        });
+
     /// <summary>Makes an account with <see cref="MailTestBase.UserPassword"/> and puts it into the company with the named role.</summary>
     protected async Task<Guid> AddMemberAsync(Guid companyId, string email, string role, bool confirmed = true)
     {

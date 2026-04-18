@@ -8,6 +8,7 @@ import { LoginPage } from './pages/login';
 import { NotesPage } from './pages/notes';
 import { ResetPage } from './pages/reset';
 import { SignupPage } from './pages/signup';
+import { TeamPage } from './pages/team';
 import { VerifyPage } from './pages/verify';
 import { texts } from './texts';
 
@@ -27,5 +28,6 @@ export const routes: Routes = [
   { path: 'signup', component: SignupPage, title: texts.signup.title },
   { path: 'complete-signup', component: CompleteSignupPage, title: texts.completeSignup.title },
   { path: 'notes', component: NotesPage, canActivate: [authGuard], title: texts.notes.title },
+  { path: 'team', component: TeamPage, canActivate: [authGuard], title: texts.team.title },
   { path: '**', redirectTo: toNotes },
 ];

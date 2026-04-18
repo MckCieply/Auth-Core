@@ -47,6 +47,8 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         Assert.Null(result.Error);
         Assert.Equal(SignupMode.SelfService, result.Manifest!.Signup);
         Assert.Equal("admin", result.Manifest.FirstAdminRole.Name);
+        Assert.True(result.Manifest.PrivateSignup);
+        Assert.NotEmpty(result.Manifest.PrivatePermissions);
     }
 
     [Fact]
@@ -87,7 +89,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.True(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"self-service"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"self-service"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
@@ -100,7 +102,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 
@@ -112,7 +114,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
         using var request = await SignupApi.Request(client, "anna@firma.test", "Firma");
         await SignupApi.AssertDisabledAsync(request);
@@ -124,7 +126,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup();
         using var client = factory.CreateClient();
 
-        Assert.Equal("""{"signup":"self-service"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 }

@@ -59,7 +59,8 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         using (var preview = await TenancyApi.Preview(Client, token))
         {
             var body = await TenancyApi.ReadOkAsync(preview);
-            Assert.Equal(["email", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["email", "has_private_account", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.False(body.GetProperty("has_private_account").GetBoolean());   // spec 0010: an address without an account
             Assert.Equal(Address, body.GetProperty("email").GetString());
             Assert.Equal("Acme", body.GetProperty("org_name").GetString());
             Assert.Equal("user", body.GetProperty("role").GetString());
@@ -325,15 +326,12 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
-    public async Task Accepting_for_an_account_without_a_company_replaces_its_password_and_ends_every_session()   // criteria 5, 13
+    public async Task An_account_without_a_space_joins_with_the_password_it_has_and_its_sessions_end()   // spec 0010: no password is set for an existing account
     {
         var company = await CreateCompanyAsync("Acme");
-        var leaver = await AddMemberAsync(company, Address, "user", confirmed: false);
-
-        // Make the account a member with a session of its own, confirmed, then take the membership away.
-        await InDbAsync(db => db.Users.Where(u => u.Id == leaver).ExecuteUpdateAsync(set => set.SetProperty(u => u.EmailConfirmed, true), TestContext.Current.CancellationToken));
+        var leaver = await AddMemberAsync(company, Address, "user");
         var session = await SessionApi.LoginAsync(Client, Address, UserPassword);
-        await RemoveMembershipAsync(leaver);
+        await RemoveMembershipAsync(leaver);   // a state only a direct change of the database leaves; a start deletes such accounts
         var (_, token) = await MailedAsync(company);
 
         using (var accepted = await TenancyApi.Accept(Client, token, Password))
@@ -341,12 +339,11 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
             Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
         }
 
-        // The person is a member again, so only the end of the sessions can refuse this refresh.
         using var refreshed = await SessionApi.Refresh(Client, session.RefreshToken);
         await SessionApi.AssertInvalidGrantAsync(refreshed);
-        using var oldPassword = await LoginApi.Login(Client, Address, UserPassword);
-        Assert.Equal(HttpStatusCode.Unauthorized, oldPassword.StatusCode);
-        _ = await SessionApi.LoginAsync(Client, Address, Password);
+        using var sent = await LoginApi.Login(Client, Address, Password);
+        Assert.Equal(HttpStatusCode.Unauthorized, sent.StatusCode);   // the password of the acceptance is not used
+        _ = await SessionApi.LoginAsync(Client, Address, UserPassword);
         Assert.Single(await NonSeedMembershipsAsync());
     }
 
@@ -432,7 +429,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         var membership = Assert.Single(await NonSeedMembershipsAsync());
         Assert.Equal(steve.Id, membership.UserId);
         Assert.Equal("Steve@acme.test", (await UserAsync("steve@acme.test"))!.Email);
-        _ = await SessionApi.LoginAsync(Client, "Steve@acme.test", Password);
+        _ = await SessionApi.LoginAsync(Client, "Steve@acme.test", UserPassword);   // spec 0010: the account keeps its password
     }
 
     [Fact]
@@ -452,7 +449,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.True((await UserAsync(Address))!.EmailConfirmed);
         Assert.Empty(await InDbAsync(db => db.EmailTokens.ToListAsync(TestContext.Current.CancellationToken)));
         Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
-        _ = await SessionApi.LoginAsync(Client, Address, Password);   // first try
+        _ = await SessionApi.LoginAsync(Client, Address, UserPassword);   // first try; spec 0010: the account keeps its password
     }
 
     [Fact]
@@ -470,16 +467,9 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         _ = await SessionApi.LoginAsync(Client, Address, Password);   // first try
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Weak_password_names_the_broken_rules_changes_nothing_and_leaves_the_token_usable(bool accountExists)   // criterion 7
+    [Fact]
+    public async Task Weak_password_names_the_broken_rules_changes_nothing_and_leaves_the_token_usable()   // criterion 7; spec 0010: only where an account is made
     {
-        if (accountExists)
-        {
-            await CreateUserAsync(Address, confirmed: false, member: false);
-        }
-
         var company = await CreateCompanyAsync("Acme");
         var (invite, token) = await MailedAsync(company);
         var hash = (await InviteAsync(invite))!.TokenHash;
@@ -493,17 +483,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         var kept = Assert.IsType<Invite>(await InviteAsync(invite));
         Assert.Equal(hash, kept.TokenHash);
         Assert.Empty(await NonSeedMembershipsAsync());
-        var user = await UserAsync(Address);
-        if (accountExists)
-        {
-            Assert.False(user!.EmailConfirmed);   // untouched
-            using var unchanged = await LoginApi.Login(Client, Address, UserPassword);
-            Assert.Equal(HttpStatusCode.Forbidden, unchanged.StatusCode);   // the old password still works, and still needs verifying
-        }
-        else
-        {
-            Assert.Null(user);
-        }
+        Assert.Null(await UserAsync(Address));
 
         using var good = await TenancyApi.Accept(Client, token, Password);
         Assert.Equal(HttpStatusCode.NoContent, good.StatusCode);

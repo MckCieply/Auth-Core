@@ -52,6 +52,12 @@ default_roles:
   (else the first that holds `members:manage`). It also needs the address of your frontend's completion screen
   (`Auth:App:FrontendUrls:CompleteSignup`; [the Angular guide](angular.md), step 4, and [the deployment guide](../deployment/vps.md)). The default,
   `invite-only`, means the operator makes the companies.
+- `private` is optional (spec 0010). `private: {signup: self-service, permissions: [notes:read, notes:write]}` lets a private person sign up alone,
+  into a hidden space of their own, and gives the private role of every such space the listed permissions. They must be in the catalog;
+  `members:manage`, `roles:manage`, `org:manage`, `org:delete` and `*` are refused, and so is any other key in the block (the manifest is then
+  invalid: the last valid one stays active and `/auth/health` says `Degraded`). The permissions are read from the active manifest at every login
+  and refresh, so a change reaches every private account at its next refresh; a manifest that drops the block leaves the private accounts
+  signing in with `permissions: []`. It needs the same completion address as `signup`.
 - Auth-Core reads the file at startup (`Auth__Manifest__Path`; the overlay of step 6 mounts it). A broken file never stops
   the service: the last valid manifest stays active and `/auth/health` says `Degraded`.
 - The default roles are **copied** when a company is created. Changing the manifest later changes the catalog and the
@@ -92,7 +98,7 @@ following redirects, so a proxy or a redirect cannot stand in for it.
 
 ## 4. Guard your endpoints
 
-Two FastAPI dependencies, each giving a `Principal` (`sub`, `org_id`, `roles` as a tuple, `permissions` as a frozenset):
+Two FastAPI dependencies, each giving a `Principal` (`sub`, `org_id`, `roles` as a tuple, `permissions` as a frozenset, and `org_kind`, `"organization"` or `"personal"`):
 
 ```python
 from fastapi import Depends
@@ -123,6 +129,10 @@ A token is valid when it has exactly one `Authorization: Bearer <token>` header,
 instance (the header says `typ: at+jwt` and a `kid`), has the configured `iss` and `aud`, has not expired, and carries a
 `sub` and an `org_id` (non-empty strings) and `roles` and `permissions` (arrays of strings). No other algorithm is
 accepted. A clock skew of 5 minutes is allowed, the same as Auth-Core allows itself.
+
+`org_kind` (spec 0010) may be absent: a token issued before spec 0010 is a company member's and reads as `"organization"`. When it is
+there it must be `"organization"` or `"personal"`; anything else is a `401`. `Principal.org_kind` is in the package released with `v0.2.0`;
+`python-v0.1.1` has no `org_kind`.
 
 A token is trusted for its lifetime (10 minutes, plus the skew). A member who is demoted or removed keeps what the token
 says at your endpoints until it expires; the next refresh gives the new permissions. Auth-Core's own company API reads the
@@ -245,6 +255,39 @@ operator's part (create the company, invite its first admin) with the CLI, the r
 | `403 {"error":"permissions_changed"}` | Auth-Core's company API (`/auth/org/...`) | The token still claims a permission the database no longer grants. Refresh and retry once. |
 
 Your backend never answers `permissions_changed`: it does not read the database.
+
+## Private accounts and a person's data (spec 0010)
+
+A private account (`user.org_kind == "personal"`) has a space of its own, its `org_id`, which nobody else joins: filter by `org_id` as for a
+company, and give it what your manifest's `private.permissions` grant. Before such a person deletes their account (`DELETE /auth/account`,
+which your frontend calls), your frontend calls an endpoint of yours that deletes everything under the token's `org_id`: Auth-Core does not
+tell your backend. The sample's, reduced ([`app.py`](../../samples/notes-api/src/notes_api/app.py)):
+
+```python
+@app.delete("/api/me", status_code=204)
+def delete_my_data(user: Principal = Depends(auth.current_user)):
+    if user.org_kind != "personal":
+        return JSONResponse({"error": "forbidden"}, status_code=403)   # a company's data belongs to the company
+    with Session(engine) as session:
+        session.execute(delete(Note).where(Note.org_id == uuid.UUID(user.org_id)))
+        session.commit()
+    return Response(status_code=204)
+```
+
+No permission is needed: a person may always delete their own data. Answer `204` also when there is nothing to delete.
+
+- What your product's frontend shows is the same as for any other backend ([the Angular guide](angular.md), "Private accounts (spec 0010)" and the
+  table of screens): the sign-up choice "Organization / Private person" when `GET /auth/options` says both are on, and for a private person the
+  email alone, then the completion at the link with `kind` `private` and the password twice. An invitation to an address that already has a
+  private account shows a warning when the preview says `has_private_account`, with one button that sends `leave_private_account: true` and no
+  password; without it the acceptance answers `409 private_account_exists`.
+- An admin who removes a member, or deletes the company, deletes the person's account. A team screen of your product should say so: "This
+  person's account will be deleted."
+- A private account that accepts an invitation moves into the company; the data of its old space stays in your tables under an `org_id` no
+  token will carry again. Auth-Core has no deletion feed yet.
+- Personal data after deletion: Auth-Core keeps its audit rows, with the account's id, address and client addresses, for 90 days by default on the
+  legitimate interest of security, and backups until they are rotated ([threat model](../security/threat-model.md), "Account deletion and
+  personal data"). Your product deletes its own data.
 
 ## Check that it works
 

@@ -11,7 +11,20 @@ namespace Auth.IntegrationTests.Infrastructure;
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+    /// <summary>
+    /// Shared memory of the server. Docker gives a container 64 MB of <c>/dev/shm</c>, and the server's dynamic shared memory (statistics
+    /// for every database and relation) grows with each database a test creates and does not come back until the server stops: a suite
+    /// that creates over a thousand databases fills 64 MB and then fails with "could not resize shared memory segment".
+    /// </summary>
+    private const long SharedMemoryBytes = 512L * 1024 * 1024;
+
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
+        .WithCreateParameterModifier(parameters =>
+        {
+            parameters.HostConfig ??= new Docker.DotNet.Models.HostConfig();
+            parameters.HostConfig.ShmSize = SharedMemoryBytes;
+        })
+        .Build();
 
     public ValueTask InitializeAsync() => new(_container.StartAsync());
 

@@ -47,7 +47,7 @@ public sealed class DeleteOrgCommandTests(PostgresFixture postgres, KeyMaterialF
         var run = await OperatorCli.RunAsync(Factory, "delete-org", "--org", company.ToString(), "--confirm", "Acme sp. z o.o.");
 
         Assert.Equal(AdminCli.Done, run.Exit);
-        Assert.Equal("Company deleted; every session of its members has ended.", run.Out.Trim());
+        Assert.Equal("Company deleted; the accounts of its members are deleted.", run.Out.Trim());
         Assert.Equal("", run.Error);
         var left = await InDbAsync(db => db.Companies.AsNoTracking().Select(c => c.Id).ToListAsync(TestContext.Current.CancellationToken));
         Assert.DoesNotContain(company, left);

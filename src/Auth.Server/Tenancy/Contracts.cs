@@ -2,8 +2,11 @@ namespace Auth.Server.Tenancy;
 
 // The bodies of the company API (spec 0005 → Contract). Property names become snake_case on the wire.
 
-/// <summary>Response of <c>GET /auth/me</c>: the caller as the database says now.</summary>
-public sealed record MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string[] Roles, string[] Permissions);
+/// <summary>
+/// Response of <c>GET /auth/me</c>: the caller as the database says now. <c>org_kind</c> is <c>organization</c> or <c>personal</c> (spec
+/// 0010); a private account's space is named <c>private</c> and its role is <c>private</c>.
+/// </summary>
+public sealed record MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions);
 
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);
@@ -13,6 +16,9 @@ public sealed record RenameOrgRequest(string Name);
 
 /// <summary>Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password.</summary>
 public sealed record DeleteOrgRequest(string Name, string Password);
+
+/// <summary>Request of <c>DELETE /auth/account</c> (spec 0010): the caller's own password.</summary>
+public sealed record DeleteAccountRequest(string Password);
 
 /// <summary>A role as a list names it: its id and its name.</summary>
 public sealed record RoleRef(Guid Id, string Name);
@@ -29,11 +35,14 @@ public sealed record SendInviteRequest(string Email, Guid RoleId);
 /// <summary>Request of <c>POST /auth/invites/preview</c>.</summary>
 public sealed record PreviewInviteRequest(string Token);
 
-/// <summary>Response of <c>POST /auth/invites/preview</c>.</summary>
-public sealed record InvitePreviewResponse(string OrgName, string Email, string Role);
+/// <summary>Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a private account.</summary>
+public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount);
 
-/// <summary>Request of <c>POST /auth/invites/accept</c>.</summary>
-public sealed record AcceptInviteRequest(string Token, string Password);
+/// <summary>
+/// Request of <c>POST /auth/invites/accept</c>: the password of a new account (not used for an account that exists), and
+/// <c>leave_private_account</c>, a JSON boolean, which a private account needs to move (spec 0010).
+/// </summary>
+public sealed record AcceptInviteRequest(string Token, string? Password = null, bool? LeavePrivateAccount = null);
 
 /// <summary>One member of <c>GET /auth/org/members</c>. The time is ISO 8601 in UTC.</summary>
 public sealed record MemberItem(Guid UserId, string Email, RoleRef Role, DateTime JoinedAt);

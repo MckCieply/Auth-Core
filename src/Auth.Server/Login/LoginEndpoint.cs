@@ -98,15 +98,23 @@ public static class LoginEndpoint
         var principal = SessionPrincipal.Create(http, user, tenant, tokens.Value.Audience, clock);
 
         // The session and its row are one change: AtomicSignInResult issues the one inside a transaction that also holds the other.
-        return new AtomicSignInResult(principal, new AuditEntry
-        {
-            Kind = AuditKinds.LoginSucceeded,
-            ActorUserId = user.Id,
-            SubjectUserId = user.Id,
-            SubjectEmail = user.Email,
-            OrgId = tenant.CompanyId,
-            OrgName = tenant.CompanyName,
-        });
+        // An account that is deleted between the reads above and the sign-in is an unknown address, as for a request a moment later.
+        return new AtomicSignInResult(
+            principal,
+            new AuditEntry
+            {
+                Kind = AuditKinds.LoginSucceeded,
+                ActorUserId = user.Id,
+                SubjectUserId = user.Id,
+                SubjectEmail = user.Email,
+                OrgId = tenant.CompanyId,
+                OrgName = tenant.CompanyName,
+            },
+            whenGone: async () =>
+            {
+                await RecordFailureAsync(audit, "unknown_address", null, request.Username ?? string.Empty);
+                return new InvalidCredentialsResult();
+            });
     }
 
     /// <summary>

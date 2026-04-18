@@ -25,9 +25,10 @@ public sealed class PendingSignupTableTests(PostgresFixture postgres, KeyMateria
 
         Assert.Equal(
             [
-                "CompanyName:character varying:100:NO",
+                "CompanyName:character varying:100:YES",
                 "Email:character varying:256:NO",
                 "ExpiresAt:timestamp with time zone::NO",
+                "Kind:smallint::NO",
                 "NormalizedEmail:character varying:256:NO",
                 "RequestedAt:timestamp with time zone::NO",
                 "TokenExpiresAt:timestamp with time zone::YES",

@@ -20,6 +20,7 @@ public static class TenancyServices
         services.AddScoped<AuditLog>();
         services.AddScoped<CompanyService>();
         services.AddScoped<CompanyDeletionService>();
+        services.AddScoped<AccountDeletion>();
         services.AddScoped<MembershipReader>();
         services.AddScoped<CompanyGuard>();
         services.AddScoped<InvitationService>();

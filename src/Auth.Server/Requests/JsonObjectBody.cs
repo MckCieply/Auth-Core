@@ -66,27 +66,13 @@ public static class JsonObjectBody
     }
 
     /// <summary>
-    /// The values of the properties <paramref name="names"/>, in that order, or <see langword="null"/> when the
-    /// request is not acceptable: wrong content type, too large, not a JSON object, or a named property that is
-    /// missing, not a string, or blank.
+    /// The body as a JSON object whose members the caller reads one by one (<see cref="JsonFields"/>), or <see langword="null"/> when it is not
+    /// acceptable: wrong content type, too large, not JSON, not a JSON object, or a member whose name holds an unpaired surrogate escape
+    /// (a name that no lookup of a member could survive). This is the one place that judges a body, for every reader.
     /// </summary>
-    public static async Task<string[]?> ReadStringsAsync(HttpRequest request, string[] names, CancellationToken cancellationToken)
-    {
-        var values = await ReadStringsAsync(request, names, [], cancellationToken);
-        return values is null ? null : Array.ConvertAll(values, value => value ?? string.Empty);   // none of the named ones is missing
-    }
-
-    /// <summary>
-    /// Like the overload above, with <paramref name="optional"/> members after the <paramref name="required"/> ones: an optional member may
-    /// be missing (its value is <see langword="null"/>); when it is there it is held to the rule of every other member (a non-blank
-    /// string), otherwise the request is not acceptable.
-    /// </summary>
-    public static async Task<string?[]?> ReadStringsAsync(
-        HttpRequest request, string[] required, string[] optional, CancellationToken cancellationToken)
+    public static async Task<JsonFields?> ReadObjectAsync(HttpRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(required);
-        ArgumentNullException.ThrowIfNull(optional);
 
         if (!IsJson(request.ContentType) || request.ContentLength > MaxBytes)
         {
@@ -108,38 +94,66 @@ public static class JsonObjectBody
                 return null;
             }
 
-            var values = new string?[required.Length + optional.Length];
-            for (var i = 0; i < required.Length; i++)
+            foreach (var member in root.EnumerateObject())
             {
-                if (!TryGetRequiredString(root, required[i], out var value))
-                {
-                    return null;
-                }
-
-                values[i] = value;
+                _ = member.Name;   // throws on a name that holds an unpaired surrogate escape
             }
 
-            for (var i = 0; i < optional.Length; i++)
-            {
-                if (!root.TryGetProperty(optional[i], out _))
-                {
-                    continue;
-                }
-
-                if (!TryGetRequiredString(root, optional[i], out var value))
-                {
-                    return null;
-                }
-
-                values[required.Length + i] = value;
-            }
-
-            return values;
+            return new JsonFields(root.Clone());
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
-            // InvalidOperationException: GetString() on a string holding an unpaired surrogate escape (e.g. "\ud800").
             return null;
         }
+    }
+
+    /// <summary>
+    /// The values of the properties <paramref name="names"/>, in that order, or <see langword="null"/> when the
+    /// request is not acceptable: wrong content type, too large, not JSON, not a JSON object, a member whose name holds an
+    /// unpaired surrogate escape (wherever it stands in the body), or a named property that is missing, not a string, or blank.
+    /// </summary>
+    public static async Task<string[]?> ReadStringsAsync(HttpRequest request, string[] names, CancellationToken cancellationToken)
+    {
+        var values = await ReadStringsAsync(request, names, [], cancellationToken);
+        return values is null ? null : Array.ConvertAll(values, value => value ?? string.Empty);   // none of the named ones is missing
+    }
+
+    /// <summary>
+    /// Like the overload above, with <paramref name="optional"/> members after the <paramref name="required"/> ones: an optional member may
+    /// be missing (its value is <see langword="null"/>); when it is there it is held to the rule of every other member (a non-blank
+    /// string), otherwise the request is not acceptable.
+    /// </summary>
+    public static async Task<string?[]?> ReadStringsAsync(
+        HttpRequest request, string[] required, string[] optional, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(required);
+        ArgumentNullException.ThrowIfNull(optional);
+
+        if (await ReadObjectAsync(request, cancellationToken) is not { } fields)
+        {
+            return null;
+        }
+
+        var values = new string?[required.Length + optional.Length];
+        for (var i = 0; i < required.Length; i++)
+        {
+            if (!fields.TryString(required[i], out var value))
+            {
+                return null;
+            }
+
+            values[i] = value;
+        }
+
+        for (var i = 0; i < optional.Length; i++)
+        {
+            if (!fields.TryOptionalString(optional[i], out values[required.Length + i]))
+            {
+                return null;
+            }
+        }
+
+        return values;
     }
 }

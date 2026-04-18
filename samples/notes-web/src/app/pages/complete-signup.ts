@@ -24,18 +24,16 @@ import { takeTokenFromUrl } from './token-from-url';
             <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
               <label for="email">{{ common.email }}</label>
               <input id="email" type="email" [value]="signup.email" readonly autocomplete="username" />
-              <label for="company">{{ shared.companyName }}</label>
-              <input id="company" type="text" formControlName="company" maxlength="100" autocomplete="organization" />
-              @if (signup.has_account) {
-                <p class="status" data-testid="keeps-password">{{ t.keepsPassword(signup.email) }}</p>
-              } @else {
-                <p class="status">{{ t.setsPassword(signup.email) }}</p>
-                <label for="password">{{ common.newPassword }}</label>
-                <input id="password" type="password" formControlName="password" autocomplete="new-password" />
-                <label for="repeat">{{ common.repeatPassword }}</label>
-                <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              @if (signup.kind === 'organization') {
+                <label for="company">{{ shared.companyName }}</label>
+                <input id="company" type="text" formControlName="company" maxlength="100" autocomplete="organization" />
               }
-              <button type="submit" [disabled]="busy()">{{ t.submit }}</button>
+              <p class="status">{{ t.setsPassword(signup.email) }}</p>
+              <label for="password">{{ common.newPassword }}</label>
+              <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+              <label for="repeat">{{ common.repeatPassword }}</label>
+              <input id="repeat" type="password" formControlName="repeat" autocomplete="new-password" />
+              <button type="submit" [disabled]="busy()">{{ signup.kind === 'private' ? t.submitPrivate : t.submit }}</button>
             </form>
           }
           <app-password-rules [rules]="rules()" />
@@ -110,23 +108,24 @@ export class CompleteSignupPage implements OnInit {
       return;
     }
     const { company, password, repeat } = this.form.getRawValue();
+    const isPrivate = signup.kind === 'private';
     this.rules.set([]);
     this.error.set(null);
-    if (company.trim() === '') {
+    if (!isPrivate && company.trim() === '') {
       this.error.set(this.t.companyRequired);
       return;
     }
     if (this.form.invalid) {
       return;
     }
-    if (!signup.has_account && password !== repeat) {
+    if (password !== repeat) {
       this.error.set(this.common.passwordsDiffer);
       return;
     }
     this.busy.set(true);
     // The company name typed here is the one that counts (the name of the first request was only a suggestion); trimmed, because
-    // Auth-Core refuses white space at either end. An account that exists without a company has no password to choose: none is sent.
-    const result = await this.auth.completeSignup(this.token, signup.has_account ? null : password, company.trim());
+    // Auth-Core refuses white space at either end. A private person names no company (spec 0010).
+    const result = await this.auth.completeSignup(this.token, password, isPrivate ? null : company.trim());
     if (result.ok) {
       // Signed in (Auth-Core answered as it answers a login): the product opens at once, in place of this screen, so that Back does
       // not land on a link that is used up. The address is in no URL. The button stays off until the notes screen is open: the token
@@ -135,7 +134,7 @@ export class CompleteSignupPage implements OnInit {
       try {
         await this.router.navigateByUrl(DEFAULT_RETURN_URL, { replaceUrl: true });
       } catch {
-        // nothing to show: the company was made and the person is signed in
+        // nothing to show: the account was made and the person is signed in
       }
     } else if (result.failure.kind === 'weak_password') {
       this.rules.set(result.failure.rules);
@@ -146,17 +145,7 @@ export class CompleteSignupPage implements OnInit {
     } else if (result.failure.kind === 'signup_disabled') {
       this.phase.set('closed');
     } else if (result.failure.kind === 'invalid_request') {
-      if (signup.has_account) {
-        // The server may refuse because the account is gone (spec 0009, Amendment 3): ask again what this link is for. When the
-        // answer is now "no account", the screen switches to the form with the password fields; when it is still "an account
-        // without a company", the refusal is about the company name and the text says so. The name the person typed is kept.
-        await this.preview(this.token, true);
-        if (this.pending()?.has_account === true && this.phase() === 'form') {
-          this.error.set(this.t.invalidRequest);
-        }
-      } else {
-        this.error.set(this.t.invalidRequest);
-      }
+      this.error.set(isPrivate ? this.t.invalidRequestPrivate : this.t.invalidRequest);
     } else if (result.failure.kind === 'too_many_requests') {
       // The notice bar above the screen says when to try again: the interceptor put it there.
     } else {
@@ -165,22 +154,16 @@ export class CompleteSignupPage implements OnInit {
     this.busy.set(false);
   }
 
-  /** `keepCompany`: the company name the person typed stays (a second look at the same link, after a refusal). */
-  private async preview(token: string, keepCompany = false): Promise<void> {
+  private async preview(token: string): Promise<void> {
     const result = await this.account.previewSignup(token);
     if (result.ok) {
       this.pending.set(result.value);
-      if (!keepCompany) {
-        this.form.controls.company.setValue(result.value.company_name);
-      }
-      if (result.value.has_account) {
-        // No password is chosen here: the two controls must not hold the form invalid.
-        this.form.controls.password.disable();
-        this.form.controls.repeat.disable();
+      if (result.value.kind === 'private') {
+        // A private person names no company: the control must not hold the form invalid.
+        this.form.controls.company.disable();
       } else {
-        // The account may be gone since an earlier preview: the person now chooses a password.
-        this.form.controls.password.enable();
-        this.form.controls.repeat.enable();
+        this.form.controls.company.enable();
+        this.form.controls.company.setValue(result.value.company_name ?? '');
       }
       this.phase.set('form');
     } else if (result.failure.kind === 'invalid_token') {

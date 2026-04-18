@@ -37,7 +37,7 @@ public sealed class AccessTokenClaimFilter : IOpenIddictServerHandler<OpenIddict
             }
         }
 
-        // The company, role and permissions belong to the access token: a refresh reads them afresh, so a copy in the
+        // The company, its kind, role and permissions belong to the access token: a refresh reads them afresh, so a copy in the
         // refresh token would only be stale (spec 0005 → Access token).
         if (context.TokenType == TokenTypeIdentifiers.RefreshToken && context.SecurityTokenDescriptor?.Subject is { } refreshSubject)
         {

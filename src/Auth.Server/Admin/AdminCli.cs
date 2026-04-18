@@ -117,7 +117,7 @@ public static class AdminCli
                     return await RefusedAsync(removed, error);
                 }
 
-                await output.WriteLineAsync("Member removed; every session of the account has ended.");
+                await output.WriteLineAsync("Member removed; the account is deleted.");
                 return Done;
 
             case DeleteOrgCommand delete:
@@ -127,7 +127,7 @@ public static class AdminCli
                     return await RefusedAsync(deleted, error);
                 }
 
-                await output.WriteLineAsync("Company deleted; every session of its members has ended.");
+                await output.WriteLineAsync("Company deleted; the accounts of its members are deleted.");
                 return Done;
 
             default:

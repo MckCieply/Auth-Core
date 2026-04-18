@@ -6,7 +6,11 @@ All notable changes to Auth-Core. The format follows [Keep a Changelog](https://
 ## Unreleased
 
 Self-service sign-up ([spec 0009](docs/superpowers/specs/0009-self-service-signup.md)): a product can let a visitor start a company of their own. Off by default; an
-instance that does not turn it on behaves as `0.1.0`.
+instance that does not turn it on behaves as `0.1.0`, apart from what spec 0010 below changes (accounts are deleted instead of kept).
+
+Private accounts ([spec 0010](docs/superpowers/specs/0010-private-accounts.md)): a product can let a private person sign up alone, and a
+private person can delete their account. Off by default; an instance that does not turn it on sees `org_kind: "organization"` in its tokens and
+`GET /auth/me`, `"private_signup":"off"` in `GET /auth/options`, and accounts deleted instead of kept when they lose their company.
 
 ### Added
 
@@ -14,23 +18,50 @@ instance that does not turn it on behaves as `0.1.0`.
   `POST /auth/signup/complete` (the person chooses a password at the link of the mail, becomes the first admin of a new company, in one transaction, and is signed in:
   the answer is a login's, the access token and the refresh cookie, and the `login.succeeded` audit row is written in that transaction),
   and `GET /auth/options` (what a product's screens may offer). The first admin gets the first default role of the manifest that holds `*`, else the first that
-  holds `members:manage`. An address whose account belongs to a company gets a mail that says so, with no link; at the completion such an account answers `409 already_registered`, whatever the password (`weak_password` is for an address without an account). With sign-up off the three endpoints answer `403 signup_disabled`, and the sign-up mails still queued are dropped.
-- **A person without a company comes back by sign-up** (Amendment 3). Someone whose company was deleted, or who was removed from it, has an account and no access; if they sign up with their address they get the usual link, `POST /auth/signup/preview` says `has_account` `true`, and `POST /auth/signup/complete` needs only the token and a company name (the `password` member may be left out; if it is sent it must be a non-empty string, and it is not used): the account keeps its password, its email is confirmed, its earlier sessions and mail links end (defence in depth), the company is made with the account as its first admin, the person is signed in, and the audit row `signup.completed` carries `details.existing_account` `true`. An account that belongs to a company still gets the "you already have an account" mail.
+  holds `members:manage`. An address with an account (of either kind, spec 0010) gets a mail that says so, with no link; at the completion such an account answers `409 already_registered`, whatever the password (`weak_password` is for an address without an account). With sign-up off the three endpoints answer `403 signup_disabled`, and the sign-up mails still queued are dropped.
 - **The manifest key `signup`** (`invite-only`, the default, or `self-service`) and the optional setting `Auth:App:FrontendUrls:CompleteSignup`
   (`AUTH_FRONTEND_SIGNUP_URL` in `deploy/docker-compose.prod.yml`). Sign-up is on only with both; the key without the address leaves it off, logs a warning at start and makes
   `/auth/health` say `Degraded`.
 - **Pending sign-ups**, a table of their own (one per address, expiring after 24 hours, removed by the hourly clean-up), and the mail kind `signup`
   with its own mail limit (one request a minute and five an hour per address).
-- **Two audit kinds**, `signup.requested` and `signup.completed` (24 in all); `org.created` gains the value `signup` for `details.via`.
+- **Two audit kinds**, `signup.requested` and `signup.completed` (24 in all; 26 with the two of spec 0010 below); `org.created` gains the value `signup` for `details.via`.
 - **The sample** `samples/notes-web`: `/signup`, `/complete-signup` and a "Create an account" link on the sign-in screen when `GET /auth/options` says
   `self-service`, with unit tests and Playwright tests.
 - **`scripts/e2e-signup.sh`**: the live check of the sign-up flow against the development stack (the run sequences of `e2e-tenancy.sh` and `e2e-hardening.sh` name it).
+- **Private sign-up** (spec 0010). `POST /auth/signup` takes `kind` (`organization`, the default, or `private`, with no company name); the
+  preview says `kind`; a private completion makes the account and a hidden one-person space and signs the person in. The manifest block
+  `private` (`signup: self-service` and `permissions`) turns it on, with the same completion address; `GET /auth/options` says
+  `private_signup`.
+- **`org_kind`** in the access token and in `GET /auth/me`: `organization` or `personal`. The private role's permissions come from the
+  active manifest at every login and refresh. The company API answers a personal space `403 forbidden`, and the operator CLI hides personal
+  spaces.
+- **`DELETE /auth/account`**: a private person deletes their account with their password (counted in the login streak); the answer clears
+  the refresh cookie. The product deletes its own data first.
+- **An invitation to a private person** is a warning: the mail has a paragraph, the preview says `has_private_account`, and accepting needs
+  `leave_private_account: true` (else `409 private_account_exists`); the account keeps its password and its space is deleted.
+- **Two audit kinds**, `account.deleted` and `account.delete_refused` (26 in all); `signup.requested` and `signup.completed` gain
+  `details.kind`, `invite.accepted` gains `left_private_account` and `personal_org_id`.
+- **The Python package**: `Principal.org_kind` (`"organization"` when the claim is absent); it is released with `v0.2.0`.
+- **The samples**: the sign-up choice, the private completion, the account bar, "Delete account" (`DELETE /api/me` first), the invitation
+  warning and a small `/team` screen in `samples/notes-web`; `DELETE /api/me` in `samples/notes-api`; `scripts/e2e-private.sh` and
+  `e2e/10-private.spec.ts`.
 
 ### Changed
 
-- `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
-- The per-IP limits count `POST /auth/signup` against the mail policy and `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy.
+- `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service` and, since spec 0010, `private.signup: self-service`, so the shipped manifests turn both kinds of sign-up on; a deployment that wants company sign-up off writes `signup: invite-only` or drops the line, one that wants private sign-up off writes `private.signup: off` or drops the `private` block, and either one left on needs `AUTH_FRONTEND_SIGNUP_URL`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
+- The per-IP limits count `POST /auth/signup` against the mail policy, `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy, and `DELETE /auth/account` against the general policy. The OpenAPI description has 31 operations.
 - The guides, the threat model (residual risk 46: sign-up mails any well-formed address) and the audit runbook describe the feature.
+- **An account that loses its only space is deleted** (spec 0010): removing a member (`204` as before) and deleting a company (every member,
+  the admin included) delete the accounts, with `account.deleted` rows; a login is then the `401` of an unknown address, and the address can
+  be invited again or sign up. The CLI says so ("Member removed; the account is deleted.", "Company deleted; the accounts of its members are
+  deleted.").
+- **"You already have an account"** goes to any account under the address, of either kind, and gains a sentence: how to get a new account on
+  purpose. The comeback of an account without a company by sign-up (spec 0009, Amendment 3: `has_account`, the completion without a password,
+  `details.existing_account`) is removed before any release.
+- **Sign-in and refresh read the account again under a share lock,** in the transaction that writes the session, so an account that is being deleted never gets one: a login then answers the `401` of an unknown address and a refresh `401 invalid_grant`, and writes no token. A refresh now runs in one transaction with its token writes.
+- `POST /auth/invites/accept`: an account that exists keeps its password (a `password` sent is not used); a missing password with an unknown
+  token is now `400 invalid_token`. `POST /auth/signup/complete`: the company name is required for an organization and refused for a private
+  sign-up, judged after the token.
 
 ### Fixed
 
@@ -38,7 +69,10 @@ instance that does not turn it on behaves as `0.1.0`.
 
 ### Upgrading
 
-A new migration adds the table `PendingSignups`; the service applies it at start. Nothing else is required: without the manifest key and the address, sign-up is off and no
+Two migrations: the first adds the table `PendingSignups`; the second adds `Kind` to companies and pending sign-ups (every existing row is a
+company, or an organization sign-up). The service applies them at start. At the first start of this version every account without a
+membership (one an earlier version kept after a removal or a company deletion) is deleted, each with an `account.deleted` row whose
+`details.reason` is `upgrade`. This cannot be undone but by restoring a backup, so back up first; a start that fails on an account stops and logs its id (level Critical). Nothing else is required: without the manifest keys and the address, neither kind of sign-up is on and no
 setting is new and required.
 
 ## 0.1.0 - 2026-02-24

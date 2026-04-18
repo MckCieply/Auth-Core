@@ -8,7 +8,7 @@ import { SignupPage } from './signup';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const sent = 'Check your inbox. We sent a message to this address.';
-const closed = 'Sign-up is closed. Ask the company you want to join for an invitation.';
+const closed = 'Sign-up is closed. To join a company, ask it for an invitation.';
 
 async function open() {
   TestBed.configureTestingModule({
@@ -22,7 +22,10 @@ async function open() {
   history.replaceState(null, '', '/signup');
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl('/signup', SignupPage);
-  return { fixture: harness.fixture, ctrl: TestBed.inject(HttpTestingController) };
+  const ctrl = TestBed.inject(HttpTestingController);
+  ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off' }); // the form is drawn once the options are read
+  await settle(harness.fixture);
+  return { fixture: harness.fixture, ctrl };
 }
 
 type Opened = Awaited<ReturnType<typeof open>>;
