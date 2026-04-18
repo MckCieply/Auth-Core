@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Network;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -248,8 +250,65 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         }
     }
 
+    /// <summary>
+    /// Creates this host's database and migrates it, by a context of its own that logs nothing, if the server does not have the database
+    /// yet; a database that is there is left as it is (the restart and upgrade tests start hosts on a database in a state of their own). The
+    /// host's start-up migration then finds nothing to do. Left to itself it probes a database that is not there, and then a history table
+    /// that is not there, and EF logs each failed probe as an error line in every test. A failure of the creation or of a migration is not
+    /// caught: it fails the test that started the host. A test that blanks or breaks the connection string, or turns the start-up migration
+    /// off, gets the host as it is: the host reports its own error.
+    /// </summary>
+    private void EnsureDatabase()
+    {
+        if (_settings.GetValueOrDefault("Auth:Database:MigrateOnStartup") != "true"
+            || string.IsNullOrWhiteSpace(_settings.GetValueOrDefault("ConnectionStrings:Auth")))
+        {
+            return;
+        }
+
+        var connectionString = _settings["ConnectionStrings:Auth"]!;
+        NpgsqlConnectionStringBuilder maintenance;
+        try
+        {
+            maintenance = new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (ArgumentException)
+        {
+            return;   // not a connection string: the host fails on it, as it would without this step
+        }
+
+        var database = maintenance.Database;
+        if (string.IsNullOrWhiteSpace(database))
+        {
+            return;
+        }
+
+        maintenance.Database = "postgres";
+        maintenance.Pooling = false;
+        using var connection = new NpgsqlConnection(maintenance.ConnectionString);
+        connection.Open();
+        using var exists = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @name", connection);
+        exists.Parameters.AddWithValue("name", database);
+        if (exists.ExecuteScalar() is not null)
+        {
+            return;
+        }
+
+        // A database name cannot be a parameter: quote it as an identifier (the name is generated or chosen by the test).
+        using (var create = new NpgsqlCommand("CREATE DATABASE \"" + database.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"", connection))
+        {
+            create.ExecuteNonQuery();
+        }
+
+        var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connectionString).UseOpenIddict().Options;
+        using var db = new AuthDbContext(options);
+        db.Database.Migrate();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        EnsureDatabase();
+
         if (_environment is not null)
         {
             builder.UseEnvironment(_environment);
