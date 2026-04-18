@@ -53,7 +53,7 @@ write it in your calendar and rotate before it.
 
 Copy your product's `auth.yaml` to `/etc/auth-core/auth.yaml` and make it readable by the container's user (uid `1654`), for example `sudo chmod 0644 /etc/auth-core/auth.yaml`:
 a file that cannot be read does not stop the service, see "`Degraded`" in step 5. At least one default role must hold `members:manage` or `"*"`, so that the first admin of a
-company can manage it. (`deploy/auth.yaml` in the repository is a development example; it also says `signup: self-service`, which makes `/auth/health` say `Degraded` unless `AUTH_FRONTEND_SIGNUP_URL` is set, so do not copy that line without the address.) The built-in permissions are `members:manage`, `roles:manage`,
+company can manage it. (`deploy/auth.yaml` in the repository is a development example; it also says `signup: self-service` and, since spec 0010, `private.signup: self-service`; either one turns sign-up on and makes `/auth/health` say `Degraded` unless `AUTH_FRONTEND_SIGNUP_URL` is set, so do not copy those lines without the address; to keep sign-up off, write `signup: invite-only` (or drop the line) and `private.signup: off` (or drop the `private` block).) The built-in permissions are `members:manage`, `roles:manage`,
 `org:manage` and `org:delete`; a role with `"*"` holds all of them, **including the right to delete the company**.
 The optional key `signup: self-service` (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`) lets a visitor start a company of
 their own: see "Self-service sign-up" in step 7.

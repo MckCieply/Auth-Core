@@ -48,7 +48,7 @@ private person can delete their account. Off by default; an instance that does n
 
 ### Changed
 
-- `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
+- `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service` and, since spec 0010, `private.signup: self-service`, so the shipped manifests turn both kinds of sign-up on; a deployment that wants company sign-up off writes `signup: invite-only` or drops the line, one that wants private sign-up off writes `private.signup: off` or drops the `private` block, and either one left on needs `AUTH_FRONTEND_SIGNUP_URL`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
 - The per-IP limits count `POST /auth/signup` against the mail policy, `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy, and `DELETE /auth/account` against the general policy. The OpenAPI description has 31 operations.
 - The guides, the threat model (residual risk 46: sign-up mails any well-formed address) and the audit runbook describe the feature.
 - **An account that loses its only space is deleted** (spec 0010): removing a member (`204` as before) and deleting a company (every member,
