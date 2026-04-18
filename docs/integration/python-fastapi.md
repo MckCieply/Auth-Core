@@ -276,6 +276,11 @@ def delete_my_data(user: Principal = Depends(auth.current_user)):
 
 No permission is needed: a person may always delete their own data. Answer `204` also when there is nothing to delete.
 
+- What your product's frontend shows is the same as for any other backend ([the Angular guide](angular.md), "Private accounts (spec 0010)" and the
+  table of screens): the sign-up choice "Organization / Private person" when `GET /auth/options` says both are on, and for a private person the
+  email alone, then the completion at the link with `kind` `private` and the password twice. An invitation to an address that already has a
+  private account shows a warning when the preview says `has_private_account`, with one button that sends `leave_private_account: true` and no
+  password; without it the acceptance answers `409 private_account_exists`.
 - An admin who removes a member, or deletes the company, deletes the person's account. A team screen of your product should say so: "This
   person's account will be deleted."
 - A private account that accepts an invitation moves into the company; the data of its old space stays in your tables under an `org_id` no
