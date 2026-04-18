@@ -15,11 +15,13 @@ public sealed class HeldLock : IAsyncDisposable
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
 
     private readonly IServiceScope _scope;
+    private readonly AuthDbContext _db;
     private readonly IDbContextTransaction _transaction;
 
-    private HeldLock(IServiceScope scope, IDbContextTransaction transaction)
+    private HeldLock(IServiceScope scope, AuthDbContext db, IDbContextTransaction transaction)
     {
         _scope = scope;
+        _db = db;
         _transaction = transaction;
     }
 
@@ -32,7 +34,7 @@ public sealed class HeldLock : IAsyncDisposable
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({normalizedEmail}, 0))", TestContext.Current.CancellationToken);
-        return new HeldLock(scope, transaction);
+        return new HeldLock(scope, db, transaction);
     }
 
     /// <summary>A lock on the audit table that stops every write to it: a change that reaches its audit rows waits there, not committed.</summary>
@@ -44,8 +46,27 @@ public sealed class HeldLock : IAsyncDisposable
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
         await db.Database.ExecuteSqlRawAsync("LOCK TABLE audit_events IN SHARE MODE", TestContext.Current.CancellationToken);
-        return new HeldLock(scope, transaction);
+        return new HeldLock(scope, db, transaction);
     }
+
+    /// <summary>
+    /// A lock on the memberships table that stops every read of it, so that a request which has read an account waits before it reads the
+    /// account's space; <see cref="DeleteAccountAsync"/> then changes the rows in the same transaction, and they commit with the release.
+    /// </summary>
+    public static async Task<HeldLock> MembershipsAsync(AuthAppFactory factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlRawAsync("""LOCK TABLE "Memberships" IN ACCESS EXCLUSIVE MODE""", TestContext.Current.CancellationToken);
+        return new HeldLock(scope, db, transaction);
+    }
+
+    /// <summary>Deletes an account, with the rows that go with it by cascade, in the transaction that holds the lock.</summary>
+    public Task<int> DeleteAccountAsync(Guid userId) =>
+        _db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
 
     /// <summary>Waits until exactly this many backends of the factory's database are waiting for a lock.</summary>
     public static async Task WaitForWaitersAsync(AuthAppFactory factory, int count)

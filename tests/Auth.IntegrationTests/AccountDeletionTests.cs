@@ -219,6 +219,22 @@ public sealed class AccountDeletionTests : AuditTestBase
     }
 
     [Fact]
+    public async Task An_account_with_a_personal_space_and_a_company_is_recorded_with_the_company()
+    {
+        var (company, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var (user, space) = await CreatePrivateAccountAsync(Private);
+        await AddLaterMembershipAsync(user, company, "user");   // the personal membership is the older one
+
+        Assert.Equal(1, await DeleteAsync([user], AccountDeletionReason.MemberRemoved, actor: null));
+
+        var row = await SingleAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(company, row.OrgId);
+        Assert.Equal("Acme", row.OrgName);
+        Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
     public async Task The_operator_is_marked_cli_and_the_start_up_step_has_no_actor_and_no_space()
     {
         var (company, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");

@@ -96,7 +96,7 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
             from membership in db.Memberships.AsNoTracking()
             join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
             where found.Contains(membership.UserId)
-            orderby membership.JoinedAt
+            orderby company.Kind, membership.JoinedAt   // a company (1) before a personal space (2), as everywhere
             select new { membership.UserId, company.Id, company.Name, company.Kind })
             .ToListAsync(cancellationToken);
         var lost = spaces.GroupBy(s => s.UserId).ToDictionary(g => g.Key, g => g.First());

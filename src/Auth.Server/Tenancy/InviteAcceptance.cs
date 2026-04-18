@@ -123,6 +123,13 @@ public sealed class InviteAcceptance(
         }
 
         var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
+        if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
+        {
+            // The account was there when it was read and its space is not: a removal committed between the two reads, taking the account with
+            // its membership. The address now belongs to no account, which is the case of an invitation to a new address.
+            user = null;
+        }
+
         if (space is { Kind: CompanyKind.Organization })
         {
             return Refused(TenancyErrors.AlreadyMember);
@@ -211,6 +218,28 @@ public sealed class InviteAcceptance(
          orderby company.Kind, membership.JoinedAt   // Organization (1) before Personal (2)
          select new Space(company.Id, company.Kind))
         .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// Locks the row of an account that has no space, until the transaction ends, and reads it afresh; <see langword="false"/> when it is gone.
+    /// A removal of a member takes no address lock, so it can commit between the read of the account and the read of its space; an account
+    /// that really has no space is changed only by flows that hold the address lock, which this one holds. The lock is the last one of the
+    /// order (company, address, account row) and is taken by <c>UpdateSecurityStampAsync</c> a few statements later in any case.
+    /// </summary>
+    private async Task<bool> LockAccountAsync(ApplicationUser user, CancellationToken cancellationToken)
+    {
+        var locked = await db.Database
+            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "AspNetUsers" WHERE "Id" = {user.Id} FOR UPDATE""")
+            .ToListAsync(cancellationToken);
+        var entry = db.Entry(user);
+        if (locked.Count == 0)
+        {
+            entry.State = EntityState.Detached;
+            return false;
+        }
+
+        await entry.ReloadAsync(cancellationToken);   // what a sign-in or a password change wrote meanwhile
+        return true;
+    }
 
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 

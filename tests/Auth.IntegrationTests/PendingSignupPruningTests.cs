@@ -27,7 +27,8 @@ public sealed class PendingSignupPruningTests : MailTestBase
     private Task<int> AddAsync(string normalized) =>
         InDbAsync(async db =>
         {
-            await PendingSignups.UpsertAsync(db, normalized, normalized.ToLowerInvariant(), "Firma", StorableTime.Now(Clock), TestContext.Current.CancellationToken);
+            await PendingSignups.UpsertAsync(
+                db, normalized, normalized.ToLowerInvariant(), "Firma", SignupKind.Organization, StorableTime.Now(Clock), TestContext.Current.CancellationToken);
             return 0;
         });
 
@@ -90,7 +91,8 @@ public sealed class PendingSignupPruningServiceTests(PostgresFixture postgres, K
     {
         await InDbAsync(async db =>
         {
-            await PendingSignups.UpsertAsync(db, "ANNA@FIRMA.TEST", "anna@firma.test", "Firma", StorableTime.Now(Clock), TestContext.Current.CancellationToken);
+            await PendingSignups.UpsertAsync(
+                db, "ANNA@FIRMA.TEST", "anna@firma.test", "Firma", SignupKind.Organization, StorableTime.Now(Clock), TestContext.Current.CancellationToken);
             return 0;
         });
 

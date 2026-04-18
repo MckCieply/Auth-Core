@@ -26,7 +26,7 @@ public sealed class PendingSignupsTests : MailTestBase
         var now = StorableTime.Now(Clock);
         return InDbAsync(async db =>
         {
-            await PendingSignups.UpsertAsync(db, normalized, typed, company, now, TestContext.Current.CancellationToken);
+            await PendingSignups.UpsertAsync(db, normalized, typed, company, SignupKind.Organization, now, TestContext.Current.CancellationToken);
             return 0;
         });
     }
@@ -223,7 +223,7 @@ public sealed class PendingSignupsTests : MailTestBase
         // A request that waited on the row lock while the mail was sent carries a time from before the sending.
         await InDbAsync(async db =>
         {
-            await PendingSignups.UpsertAsync(db, Normalized, "Anna@Firma.test", "Second", earlier, TestContext.Current.CancellationToken);
+            await PendingSignups.UpsertAsync(db, Normalized, "Anna@Firma.test", "Second", SignupKind.Organization, earlier, TestContext.Current.CancellationToken);
             return 0;
         });
 

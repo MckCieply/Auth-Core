@@ -22,7 +22,7 @@ public sealed record TenantContext(
 /// </summary>
 public sealed class MembershipReader(AuthDbContext db, ManifestHolder manifest)
 {
-    /// <summary>The user's membership; <see langword="null"/> when they belong to no space. With several, the earliest.</summary>
+    /// <summary>The user's membership; <see langword="null"/> when they belong to no space. With several, a company before a personal space, then the earliest.</summary>
     public async Task<TenantContext?> ReadAsync(Guid userId, CancellationToken cancellationToken)
     {
         var row = await (
@@ -30,7 +30,7 @@ public sealed class MembershipReader(AuthDbContext db, ManifestHolder manifest)
             join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
             join role in db.CompanyRoles.AsNoTracking() on membership.RoleId equals role.Id
             where membership.UserId == userId
-            orderby membership.JoinedAt
+            orderby company.Kind, membership.JoinedAt   // a company (1) before a personal space (2)
             select new { CompanyId = company.Id, CompanyName = company.Name, company.Kind, RoleId = role.Id, RoleName = role.Name, role.Permissions })
             .FirstOrDefaultAsync(cancellationToken);
         if (row is null)

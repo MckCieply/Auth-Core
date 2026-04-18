@@ -189,6 +189,21 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
     }
 
     [Fact]
+    public async Task An_account_with_a_personal_space_and_a_company_is_a_company_member_at_sign_in_and_cannot_delete_itself()   // criterion 22
+    {
+        var (user, _, _) = await PrivateAsync();
+        await AddLaterMembershipAsync(user, await DevCompanyIdAsync(), "user");   // the personal membership is the older one
+        var session = await SessionApi.LoginAsync(Client, Private, UserPassword);
+        Assert.Equal("organization", AccessTokens.Text(session.AccessToken, "org_kind"));
+
+        using var response = await DeleteAsync(session.AccessToken);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        Assert.Equal(1, await UsersAsync(user));
+        Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
     public async Task A_token_that_says_personal_after_the_account_is_gone_is_permissions_changed()   // criterion 22
     {
         var (_, _, session) = await PrivateAsync();

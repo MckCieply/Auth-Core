@@ -144,6 +144,34 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
     }
 
     [Fact]
+    public async Task A_removal_that_commits_between_the_read_of_the_account_and_the_read_of_its_space_makes_a_new_account()   // criterion 27
+    {
+        var (acme, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
+        var globex = await CreateCompanyAsync("Globex");
+        var invite = await AddInviteAsync(globex, "worker@acme.test", "user");
+        await EnqueueInvitationAsync(invite, "worker@acme.test");
+        await DispatchAsync();
+        var token = TokenIn(Mail.Sent.Last(m => m.To == "worker@acme.test"));
+
+        Task<HttpResponseMessage> acceptance;
+        await using (var held = await HeldLock.MembershipsAsync(Factory))
+        {
+            acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
+            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the account is read; the read of its space waits for the memberships
+            await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
+            await held.ReleaseAsync();
+        }
+
+        using var accepted = await acceptance;
+        Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);   // never a 500: the address has no account now, and the password sent makes one
+        await AssertOneAccountWithOneSpaceAsync("WORKER@ACME.TEST");
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == globex, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.Invites.CountAsync(i => i.Id == invite, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
     public async Task An_acceptance_that_waits_for_the_address_while_a_removal_commits_makes_a_new_account()   // criterion 27
     {
         var (acme, _, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
