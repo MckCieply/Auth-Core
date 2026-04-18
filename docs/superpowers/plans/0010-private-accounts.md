@@ -5,9 +5,9 @@
 - **Plan:** 0010
 - **Date:** 2026-04-09
 - **Author:** Alex
-- **Spec:** [`docs/superpowers/specs/0010-private-accounts.md`](../specs/0010-private-accounts.md) (with its Amendment of 2026-04-09)
+- **Spec:** [`docs/superpowers/specs/0010-private-accounts.md`](../specs/0010-private-accounts.md) (with its Amendments of 2026-04-09 and 2026-04-13)
   — the plan argues from the spec; where they disagree, **the spec wins** and the disagreement is a finding (see
-  [`docs/workflow.md`](../../workflow.md)). The spec's sentence on the time of audit rows was amended in two places together with this plan (the owner's ruling); nothing else in the spec is changed. The choices the spec leaves open are in "Decisions taken in this
+  [`docs/workflow.md`](../../workflow.md)). The spec's sentence on the time of audit rows was amended in two places together with this plan (the owner's ruling); nothing else in the spec is changed by the plan. The Amendment of 2026-04-13 (the deletion order and the share lock of sign-in and refresh) was written while the deletion routine was built; where the plan's text of that routine differs, the spec and the code win. The choices the spec leaves open are in "Decisions taken in this
   plan" at the end; "Open questions for the owner" lists what the plan could not settle.
 - **Based on:** `272d9b4` (`main` at `6b53c97` with spec 0010 and its amendment on top of it). Every anchor of an edit below was checked against this base.
 
@@ -10438,7 +10438,7 @@ of them changes the contract it states, and each is covered by a test.
 2. **The stored manifest writes the block `private` only when it says something,** so the stored form of a manifest of slice 0009 is unchanged (Task 2).
 3. **Between Tasks 2 and 11 the endpoints still follow the organization switch**; each task leaves the tree green, and the kind reaches the
    request in Task 9, the mails in Task 10 and the preview and completion in Task 11.
-4. **The routine is set-based and lock-free:** the caller owns the transaction and the locks; company deletion hands it every member at once,
+4. **The routine is set-based:** the caller owns the transaction and the company and address locks, and the routine takes the row lock of the accounts it deletes (spec, Amendment of 2026-04-13); company deletion hands it every member at once,
    so a company of any size costs a fixed number of statements (Tasks 6 and 7).
 5. **One address-lock helper** (`AddressLock`) for the start-up step, the completion, the acceptance and the self-deletion (Task 8 on).
 6. **The CLI's success lines name the deletion of the accounts** (Task 7).

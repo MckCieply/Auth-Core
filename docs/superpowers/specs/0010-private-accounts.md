@@ -326,7 +326,8 @@ An account that loses its only space is deleted, and its address is free. This h
 - The admin who deletes a company is a member too: their account goes with the others.
 - A removed or deleted person's access token gets `403 permissions_changed` at once at `/auth/me` and at every company
   endpoint whose permission the token claims (one that needs no permission included). An endpoint that needs a
-  permission the token never claimed answers `403 forbidden`, as today (spec 0005). Their next refresh is `401 invalid_grant`; a login is the `401` of an unknown address (spec 0001). An invitation to
+  permission the token never claimed answers `403 forbidden`, as today (spec 0005). Their next refresh is `401
+  invalid_grant`; a login is the `401` of an unknown address (spec 0001). An invitation to
   the address later creates a new account; so does a sign-up.
 - `403 no_membership` at login (spec 0005) stays, as a safeguard for an account that should not exist.
 
@@ -736,3 +737,111 @@ Still open:
   password-free completion, `details.existing_account`, the dispatcher's branch for accounts without a company, the
   password replacement in `InviteAcceptance`, the sample's `keepsPassword` text, step 12 of `e2e-signup.sh` (it becomes:
   a removed member's address signs up as a new address), and the changelog item.
+
+## As built (owner, 2026-04-18)
+
+Recorded after implementation, the final review and local verification (plan 0010 with Tasks 1 to 18,
+[acceptance map](../plans/0010-acceptance-map.md)). What entered this stage stays in it; this section records
+it rather than rewriting the contract above. Where a sentence above and this section differ, this section is how
+the software behaves.
+
+**Contract as built.** As specified, with the Amendment of 2026-04-09, the one of 2026-04-13 (the deletion order and the
+share lock of sign-in and refresh, now in "Locks") and these readings:
+
+- **A sign-in or a refresh reads its account again under a share lock** (`FOR KEY SHARE`, held to the end of its
+  transaction) before it writes a session, and the deletion reads the accounts it deletes `FOR UPDATE`. A login that
+  races a deletion is answered, and recorded, as an unknown address; a refresh is `401 invalid_grant`; no session of a
+  deleted account is left behind. So `POST /auth/refresh` now writes its tokens in a transaction, through the result a
+  login uses. The owner closed this race rather than accept it; the cost is one lock per sign-in.
+- **The deletion order.** The routine deletes the queued mail requests of the addresses (not invitations) and then their
+  pending sign-ups, with no account row locked, because the mail sender locks a request and then the pending sign-up or
+  the account row and the other order can deadlock. It then reads the accounts `FOR UPDATE` in order of id, and deletes
+  the login streaks, the sessions (tokens before authorizations, deleted and not revoked), the accounts and the
+  personal spaces, and stages one `account.deleted` row per account. It refuses to run without the caller's
+  transaction, and throws, so that the caller rolls back, when it removes another number of accounts than it read. Any
+  number of accounts costs the same number of statements.
+- **`DELETE /auth/account` takes the address lock before it counts the attempt or checks the password.** The order as
+  built: the token's `org_kind` against the database, the body, the lock, the membership again, the lockout and the
+  counted attempt, the password, the deletion in the same transaction. An account that moved to a company, or was
+  deleted, while the request waited is `403 permissions_changed` with nothing counted. The password is checked without
+  side effects: the hash is read without tracking and verified with `VerifyHashedPassword`, so a hash in an older format
+  is accepted and not rewritten (no `UPDATE` on a row about to be deleted). The lock and the transaction are held across
+  one hash; the lockout and the `general` limit bound that cost. The login streak is written on a connection of its own,
+  so the transaction never holds a streak row while it waits for the address lock.
+- **A company membership wins over a personal one** when an account holds both, a state only a direct change of the
+  database leaves: `MembershipReader` (the token says `organization`, and `DELETE /auth/account` is `403 forbidden`),
+  `InviteAcceptance` (`409 already_member`, nothing moves) and `AccountDeletion` (the `account.deleted` row names the
+  company; the personal space goes with the account).
+- **An acceptance that meets a removal between its two reads** (it found the account, and the removal took the account
+  and its membership before the acceptance read the space) reads the account again `FOR UPDATE`; when the row is gone
+  it takes the path of an address with no account: a password is needed and a new account is made. It never answers
+  `500`.
+- **An account with no membership at all** (the same kind of state; the start-up step deletes it at the next start) joins
+  at an acceptance with the password it has, without `leave_private_account`. That is how "the path where an existing
+  account without a company sets a new password is gone" reads for the one case that can still occur. The account that
+  joins, and the one that moves, get a new security stamp, so a login that raced the acceptance cannot refresh into the
+  company.
+- **The start-up step** deletes each account without a membership in a transaction of its own, under the address lock,
+  and reads the membership again under it. When a deletion fails, the step logs the account's id at the level Critical
+  and throws: the service does not start, and the accounts it had already deleted stay deleted. Two replicas starting
+  together delete each account once.
+- **The sample waits at most 10 seconds for `GET /auth/options`.** A slower call reads as `invite-only` and
+  `private_signup` off: the sign-up screen then shows the organization form, and the sign-in screen offers no "Create an
+  account". A hung call never leaves the sign-up screen empty.
+- **The shipped manifests** (`deploy/auth.yaml`, `samples/notes-api/auth.yaml`) turn private sign-up on. A host that
+  copies them needs the completion address, or sign-up stays off and health says `Degraded`; the deployment guide and
+  the
+  changelog say so and say how to keep each kind off.
+- **The `signup.completed` row of a private sign-up** names the personal space (`org_id`) and `private` (`org_name`),
+  as its `login.succeeded` row does; there is no `org.*` row.
+- **"Settled in this spec"** (1 to 15) holds as written. The Python package keeps its version; its release is part of
+  `v0.2.0`.
+
+**Residual risks accepted** (threat model, risks 48 to 51):
+
+- **48**: a product's data in a personal space that moves to a company by invitation stays in the product's tables
+  (Decision 16).
+- **49**: an admin who removes a member, or deletes a company, deletes the person's account (Decision 9).
+- **50**: a deleted person's address and client addresses stay in the audit rows for their 90 days, and in backups
+  until they are rotated (Decision 10).
+- **51**: a wrong password, or a lockout, at `DELETE /auth/account` after the product has deleted its own data leaves an
+  account without its data. The person asked for the deletion and can try again (Decision 17). The list in the spec
+  names
+  48 to 50; the threat model names this one too, since an accepted risk belongs in its numbered list.
+
+**Plan departures** (the real files win over the plan's text, as its own notes say):
+
+- **Tasks 6 and 7, the deletion routine.** The plan calls it "set-based and lock-free". The routine built takes the row
+  lock of the accounts and deletes the mail requests and pending sign-ups before it; sign-in and refresh gained the
+  share
+  lock, and refresh its transaction (the Amendment of 2026-04-13; "Decisions taken in this plan", item 4, is edited to
+  say so).
+- **Task 13, `DELETE /auth/account`.** The plan took the address lock after the password check and used
+  `CheckPasswordAsync`; the code takes the lock first and verifies the hash without side effects (above).
+- **Task 15, the options call** gained its 10-second wait in a fix round.
+- **Task 17.** The Playwright test of the sign-up choice clicks the label of "Private person" and checks the size of
+  each radio button, where the plan called `.check()` on the radio; the closing sentence of the header of
+  `scripts/e2e-signup.sh` drops "and 24's other halves" (criterion 24 of spec 0009 is gone with step 12).
+- **Task 18, the documents.** The plan said the acceptance map was "checked, not written"; two names in it that no task
+  built were corrected to the real tests. The map of spec 0009 marks superseded every row that cited a deleted comeback
+  test, not only rows 8, 19 and 24 that were noted first. The threat model, `docs/operations/backup.md` (its list of
+  audit kinds), the changelog (the 0009 bullets) and the Angular guide (the 10-second wait) gained sentences the plan
+  did not list.
+- **Final review.** The organization-only `PendingSignups.UpsertAsync` that the plan kept in Task 9 has no caller left
+  and is gone. The acceptance map of spec 0005 (rows 5 and 13 and the seed row) names the tests that exist now and marks
+  the superseded behaviour.
+- **Risks in the plan's text.** Its lines that say "items 1 to 50" and "residual risks 48 to 50" are the spec's list;
+  the threat model says 1 to 51.
+- **Test infrastructure (a note, not contract).** The full .NET suite ran the test container's PostgreSQL out of
+  `/dev/shm` (64 MB), on `main` too: 5 of 1741 tests failed there, 65 to 70 of 1968 here. The test container now has
+  512 MB of shared memory, each test's database is created and migrated before its host starts and dropped when the test
+  ends, and the connect and command timeouts are 30 and 60 seconds. One test,
+  `PersistenceTests.A_host_started_on_an_empty_database_migrates_it_and_answers_health`, still starts a host on an empty
+  database. The whole suite passes in one run.
+
+**Verified** on 2026-04-18 (final review and the re-review of its fix wave; three verifiers, two rounds); the log is in
+the acceptance map. Live: all e2e scripts of specs 0001 to 0010 including `scripts/e2e-private.sh` (9 steps),
+`scripts/e2e-notes.sh` (7 of 7) and the production compose (`scripts/e2e-prod.sh`, 6 of 6), and the sample's Playwright
+tests (49 of 49 in Chromium and in WebKit, `10-private.spec.ts` among them). The whole .NET suite, 1968 tests, passes in
+one run; the Python package (224), the sample backend (103) and the sample frontend (591) pass. The secret scan is clean
+(the history and the files not committed yet).
