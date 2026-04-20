@@ -6,6 +6,7 @@ using Auth.Server.Admin;
 using Auth.Server.Api;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Health;
 using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
@@ -20,6 +21,12 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+
+// The container's health check runs the same binary too, and first: one request to the server's own health path, with no host.
+if (args is [HealthProbe.Argument])
+{
+    return await HealthProbe.RunAsync(Environment.GetEnvironmentVariable, Console.Error);
+}
 
 // The operator's commands run the same binary without the host: no listener, no background service, no key material.
 if (args is ["admin", .. var adminArguments])
