@@ -7,7 +7,7 @@
 #   1. docker compose refuses to render the production file without its secrets, and the service refuses to start with a key file that
 #      is not there and with a mail relay without TLS; the file does not render without the password of Auth-Core's database role.
 #   2. the image carries the OCI labels (source, version, licenses MIT, revision); the container runs with a read-only root file system,
-#      no capability and no privilege gain, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY,
+#      no capability and no privilege gain, has a memory ceiling and a health check that reports healthy, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY,
 #      the Content-Security-Policy, Referrer-Policy no-referrer, Cross-Origin-Resource-Policy same-origin, Cache-Control no-store,
 #      Pragma no-cache), no Server header and no Strict-Transport-Security (HSTS is the proxy's); no interactive reference; a login
 #      is answered (the database is reached and migrated: /auth/health does not say so); Auth-Core's database role is not a superuser,
@@ -308,6 +308,18 @@ security_opt="$(docker inspect -f '{{.HostConfig.SecurityOpt}}' "$auth_id" | tr 
 expect_eq "step 2: the root file system is read-only" "$read_only" "true"
 [[ "$cap_drop" == *ALL* ]] || fail "step 2: the container does not drop every capability"
 [[ "$security_opt" == *no-new-privileges* ]] || fail "step 2: the container may gain privileges"
+memory="$(docker inspect -f '{{.HostConfig.Memory}}' "$auth_id" | tr -d '')" || fail "step 2: docker inspect of the auth container failed"
+expect_eq "step 2: the memory ceiling is the default of AUTH_MEM_LIMIT (512m)" "$memory" "536870912"
+# The container's own health check (the binary asks /auth/health itself: the image has no shell and no curl). Its first run comes one interval
+# (30 s) after the start.
+health=""
+deadline=$((SECONDS + 150))
+while (( SECONDS < deadline )); do
+  health="$(docker inspect -f '{{.State.Health.Status}}' "$auth_id" | tr -d '')" || fail "step 2: docker inspect of the auth container failed"
+  [[ "$health" == "healthy" ]] && break
+  sleep 3
+done
+expect_eq "step 2: the health check of the auth container (dotnet Auth.Server.dll --health-probe) reports healthy" "$health" "healthy"
 direct /auth/health
 expect_status "step 2: /auth/health" 200 "Healthy"
 # The table of the spec (Security headers on every response), on a 200 of the live server.
@@ -337,7 +349,7 @@ while (( SECONDS < deadline )); do
 done
 [[ "$ready" == "1" ]] || { "${compose[@]}" logs --no-color --tail 30 auth >&2 || true; fail "step 2: a login was not answered with 401 within 120s (HTTP $HTTP_CODE): the database is not reached or not migrated"; }
 check_app_role "step 2"
-pass "step 2: the image has its labels; the container is read-only with no capability and no privilege gain, serves /auth/health and answers a login (as a role that is not a superuser and owns the database and its tables); the headers of the table, no Server header; no interactive reference"
+pass "step 2: the image has its labels; the container is read-only with no capability and no privilege gain, has a memory ceiling and a healthy health check, serves /auth/health and answers a login (as a role that is not a superuser and owns the database and its tables); the headers of the table, no Server header; no interactive reference"
 
 # --- Step 3: the first company from the CLI, the mail over STARTTLS ----------------------------------------------------------------------
 ADMIN_EMAIL="boss-$run@prodtest.example"
