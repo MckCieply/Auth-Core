@@ -14,6 +14,9 @@ private person can delete their account. Off by default; an instance that does n
 
 ### Added
 
+- **A health check for the `auth` container** in `deploy/docker-compose.prod.yml`: the image has no shell and no curl, so `Auth.Server.dll --health-probe` makes one request to `/auth/health` on the container's own loopback address (the port of `ASPNETCORE_HTTP_PORTS`) and exits 0 for a 2xx, 1 otherwise. Liveness only: `Degraded` passes, and the database is not asked. It runs before the host is built, so it needs no key and no setting.
+- **A memory ceiling for the `auth` container**: `mem_limit: ${AUTH_MEM_LIMIT:-512m}` (and the same `memswap_limit`, so there is no swap). The .NET garbage collector keeps its heap under 75% of it by itself.
+- **`scripts/test-linux.sh`**: the whole test suite in the official .NET 10 SDK container, with the Docker socket mounted for Testcontainers; part of the checklist before a merge to `main` (`docs/workflow.md`).
 - **Sign-up.** `POST /auth/signup` (an email address and a company name; the same `202` for every address), `POST /auth/signup/preview` and
   `POST /auth/signup/complete` (the person chooses a password at the link of the mail, becomes the first admin of a new company, in one transaction, and is signed in:
   the answer is a login's, the access token and the refresh cookie, and the `login.succeeded` audit row is written in that transaction),
@@ -48,6 +51,7 @@ private person can delete their account. Off by default; an instance that does n
 
 ### Changed
 
+- `Directory.Packages.props` pins `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` (transitive packages, brought in by MailKit and the test host) to 10.0.13: NuGet audit reports advisories for the versions they resolved to, and the build treats warnings as errors.
 - `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service` and, since spec 0010, `private.signup: self-service`, so the shipped manifests turn both kinds of sign-up on; a deployment that wants company sign-up off writes `signup: invite-only` or drops the line, one that wants private sign-up off writes `private.signup: off` or drops the `private` block, and either one left on needs `AUTH_FRONTEND_SIGNUP_URL`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
 - The per-IP limits count `POST /auth/signup` against the mail policy, `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy, and `DELETE /auth/account` against the general policy. The OpenAPI description has 31 operations.
 - The guides, the threat model (residual risk 46: sign-up mails any well-formed address) and the audit runbook describe the feature.

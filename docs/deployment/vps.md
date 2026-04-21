@@ -88,6 +88,8 @@ authentication.
 **Optional.** `AUTH_FRONTEND_SIGNUP_URL` is the https address of the screen of your frontend that finishes a self-service sign-up. Leave it blank and sign-up
 stays off (the default; nothing changes for you). See "Self-service sign-up" in step 7.
 
+`AUTH_MEM_LIMIT` is the memory ceiling of the `auth` container (`512m` when blank; Docker's units, `1g`). The .NET garbage collector reads the ceiling and keeps its heap under 75% of it, so no other setting is needed; the ceiling covers swap too (the file sets `memswap_limit` to the same value), and a container that goes over is killed (exit code 137) and restarted by Docker (`docker events --filter event=oom`, or the kernel log, shows the kill). Keep some room above what the service needs: the health check starts a second, short .NET process inside the same ceiling. Raise it if the kills happen. To change the 75% share, add `DOTNET_GCHeapHardLimitPercent` to the `environment:` of the `auth` service; it is an optional knob and the file does not set it. Its value is read as **hexadecimal**: `32` means 50%, `4B` means 75%.
+
 ### Who may tell Auth-Core the client address
 
 Auth-Core limits and records requests per client address. It believes `X-Forwarded-For` only from the proxies you name, and by default the compose file names two:
@@ -273,6 +275,7 @@ something is wrong". Then sign in through your frontend and call one product end
   (`429 too_many_attempts`).
 - **Backups.** A nightly dump and a restore that you have tried: [`docs/operations/backup.md`](../operations/backup.md).
 - **The audit log** is the table `audit_events`, kept 90 days by default (`AUTH_AUDIT_RETENTION_DAYS`) and read with SQL: the queries are in the backup runbook.
+- **The health check.** The `auth` container has one: `docker compose ps` shows `healthy` after 30 to 60 seconds. The image has no shell and no curl, so the check runs the binary with `--health-probe` (`dotnet Auth.Server.dll --health-probe`): one request to `/auth/health` on the container's own loopback address and port, exit code 0 for a `2xx` (`200`). It is liveness only: `Degraded` (see step 5) still passes, and a database that is down does not show in it (a login does; step 5). `unhealthy` therefore means the process does not answer; Docker only marks it, and `$C logs auth` says why.
 - **Keys** change only by a rotation that signs everyone out: [`docs/operations/key-rotation.md`](../operations/key-rotation.md).
 - **What can still go wrong** is listed in [`docs/security/threat-model.md`](../security/threat-model.md).
 
@@ -302,6 +305,8 @@ something is wrong". Then sign in through your frontend and call one product end
 | `password authentication failed for user "auth_app"` in the log of `auth`, or `role "auth_app" does not exist` | The volume was made without the role: the first start of `postgres` stopped in its script and was restarted, or the volume is older than this version. On a server whose database is empty: `down -v` and start again; otherwise restore the dump into a new volume as in [`backup.md`](../operations/backup.md) |
 | `/auth/health` says `Degraded` (still status 200), or a new company has the built-in roles instead of your product's | The manifest file was not used: `$C logs auth \| grep "was not used"` names the path and the reason (missing, not readable by uid `1654`, too large, not valid). Fix the file (`sudo chmod 0644 /etc/auth-core/auth.yaml` for the permission), then `$C restart auth` |
 | `/auth/health` says `Degraded` after you turned sign-up on | The manifest says `signup: self-service` but `AUTH_FRONTEND_SIGNUP_URL` is empty: `$C logs auth \| grep "sign-up is off"`. Set the address in `.env` and `$C up -d` |
+| The `auth` container is killed now and then (exit code 137) | It probably went over its memory ceiling (`docker events --filter event=oom` shows it): raise `AUTH_MEM_LIMIT` in `.env` and `$C up -d` |
+| `docker compose ps` shows the `auth` container `unhealthy` | The process does not answer on its port: `$C logs auth`, and run the probe by hand with `$C exec auth dotnet Auth.Server.dll --health-probe; echo $?` (0 is healthy; the reason is on stderr) |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |
 | "bind source path does not exist" | `AUTH_KEYS_DIR` or `AUTH_MANIFEST` names a path that is not there (compose never creates it), or `deploy/postgres-init/10-auth-app-role.sh` is missing (step 1) |
 | "Pool overlaps" | A subnet of the compose file clashes with a network of the host: see "The subnets" |

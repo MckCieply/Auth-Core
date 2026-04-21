@@ -52,6 +52,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # A ceiling for the whole container, so that one process cannot take the host's memory. The .NET GC reads it and keeps its heap under
+    # 75% of it by itself (DOTNET_GCHeapHardLimitPercent, which is optional and not set here). AUTH_MEM_LIMIT changes it, in the unit
+    # Docker takes (512m, 1g). The same value as memswap_limit leaves the container no swap, so that going over the ceiling ends in a kill
+    # (exit 137) and not in a process that swaps until it looks hung. The health check below runs a second, short .NET process inside this
+    # ceiling (some tens of MB for a second, every 30 s): do not set it tight.
+    mem_limit: ${AUTH_MEM_LIMIT:-512m}
+    memswap_limit: ${AUTH_MEM_LIMIT:-512m}
     # Not root, nothing writable but memory: the image runs as its own user, the root file system is read-only and /tmp is in memory. No
     # capability, and no way to gain one. (Data Protection keys are kept in memory too: nothing of Auth-Core uses them.)
     read_only: true
@@ -133,7 +140,17 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    # No health check: the image has no shell and no curl, and /auth/health does not reach the database anyway.
+    # The image has no shell and no curl, so the binary asks itself: --health-probe makes one GET of /auth/health on 127.0.0.1 (the port
+    # of ASPNETCORE_HTTP_PORTS, 8080 in the image) and exits 0 for a 2xx, 1 otherwise. That is liveness only: Degraded (a manifest or a
+    # sign-up address that is not usable) is still a 200 and passes, and a database that is down does not show here (/auth/health does not
+    # reach it). Docker only marks the container unhealthy; restart: unless-stopped acts on an exit, never on this. start_period covers the
+    # migration at start.
+    healthcheck:
+      test: ["CMD", "dotnet", "Auth.Server.dll", "--health-probe"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       - auth
       - proxy

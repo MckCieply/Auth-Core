@@ -163,6 +163,15 @@ Principles (adapted from `speech-to-mail`'s `spec-review.md` / `e2e-review.md`):
   pull request, no CI checks, no protected-branch required checks.
 - **Before merging to `main`:** build + tests pass locally **and** all verifiers
   return PASS. A merge happens only then; a red build is work, not "done".
+- **The Linux run is part of that checklist.** The service runs on Linux and the
+  suite is usually run on Windows, so before each merge to `main` run
+  `scripts/test-linux.sh`: the whole suite in the official .NET 10 SDK container,
+  with the Docker socket mounted so that Testcontainers can start PostgreSQL
+  (`host.docker.internal` is how the test container reaches them; the script
+  explains the rest). It must end with `PASS the test suite on Linux`. There is no
+  CI, so this script is the only place the suite runs on Linux. A change to one
+  test class may run just that class first (`scripts/test-linux.sh --filter-class
+  "*SomeTests"`), but the full run is the one that counts for the merge.
 - **Commit and merge summaries are brief/concise** (`output-format` brief) — what
   changed and why, in a few lines; no filler, no restated diff.
 - **Conventional Commits** — `type(scope): description` (e.g. `feat:`, `fix:`,
