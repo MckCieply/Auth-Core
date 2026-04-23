@@ -128,7 +128,12 @@ providers: [google, microsoft]
 
 - **The callback address** that the operator registers at the provider is the origin of the return address followed by
   `/auth/providers/{name}/callback`, for example `https://app.example.com/auth/providers/google/callback`. It is built
-  from configuration only, never from the request (`Host`, `X-Forwarded-Host`).
+  from configuration only, never from the request (`Host`, `X-Forwarded-Host`). OpenIddict compares the URL of a
+  callback request with the registered callback address, so Auth-Core reads the scheme and the host of a callback
+  request from the return address's origin (a step before authentication, for the two callback paths only), never from
+  the request; the client's own URI is that origin (Amendment A2).
+- **Logging.** The OpenIddict client's dispatcher logs at `Warning` (`appsettings.json`, as the server's dispatcher
+  does): at `Information` it writes the state and the PKCE verifier (Amendment A1).
 - **Missing keys never stop the start.** A provider listed by the manifest that is not offered (a key or the return
   address missing) makes the start log one warning naming the missing keys, never their values, and `/auth/health`
   reports `Degraded` while it lasts. A provider that is configured and not listed is not offered, and that is healthy.
@@ -159,7 +164,9 @@ No authentication. The browser navigates here (the product's button is a link, n
    and a `nonce`, the scopes `openid email profile`, the callback address above, and `prompt=select_account` (for
    `reauth`: Microsoft `prompt=login`, Google `max_age=0`, so that the provider asks for a fresh sign-in). OpenIddict
    keeps the state (purpose, provider, and for `invite` the SHA-256 hash of the invitation token, never the token)
-   and sets its request-forgery cookie, which binds the state to this browser. The state lives 10 minutes.
+   and sets its request-forgery cookie, which binds the state to this browser: OpenIddict's name
+   `OpenIddict.Client.State.<…>`, set by Auth-Core to `SameSite=Lax`, `Secure`, `HttpOnly`, `Path=/auth/providers`
+   (Amendment A4). The state lives 10 minutes.
 
 ### `GET /auth/providers/{name}/callback`
 
@@ -175,10 +182,10 @@ expiry). Then:
 
 | `error` | When |
 | --- | --- |
-| `cancelled` | the provider answered `access_denied` (the person cancelled or refused) |
+| `cancelled` | the provider answered `access_denied` (the person cancelled or refused), and the state and its request-forgery cookie are valid; without the cookie, or with another browser's, the answer is `invalid_state` (Amendment A3) |
 | `invalid_state` | no state, a state that is forged, expired or already used, or the request-forgery cookie is missing or another browser's |
 | `provider_unavailable` | the provider is no longer offered (the manifest changed during the round trip) |
-| `provider_error` | any other error: another error from the provider, the code could not be redeemed, the identity token is not valid, or a claim the identity needs is missing |
+| `provider_error` | any other error: another error from the provider, the code could not be redeemed, the identity token is not valid (for Microsoft also: its issuer is not that of its tenant, Amendment A6), or a claim the identity needs is missing |
 
 - Auth-Core never shows a page of its own and never passes on the provider's `error_description`. The answer carries
   `Cache-Control: no-store`. One log line at the level Information names the provider and the code.
@@ -188,13 +195,18 @@ expiry). Then:
 ### The provider identity and its address
 
 From the claims of the identity token the callback takes three things: the **identity key**, the **address** and
-whether the address is **verified**.
+whether the address is **verified**. The client does not call the provider's userinfo endpoint: every claim comes from
+the identity token (Amendment).
 
 | | Identity key (stored as `AspNetUserLogins.ProviderKey`) | Address | Verified when |
 | --- | --- | --- | --- |
 | Google | `sub` | `email` | `email_verified` is `true` |
 | Microsoft | `{tid}:{oid}`, both GUIDs in lower case | `email` (never `preferred_username`, `upn` or `unique_name`) | `tid` is the personal-accounts tenant `9188040d-6c67-4c5b-b112-36a304b66dad` and `email` is present, **or** `xms_edov` is `true` |
 
+- **The Microsoft issuer.** With the `common` tenant OpenIddict does not check the identity token's issuer, so for the
+  web-provider registration the callback requires `iss` = `https://login.microsoftonline.com/{tid}/v2.0` (`tid` in lower
+  case), else `provider_error`. Under the test issuer the plain OpenID Connect registration checks the issuer itself
+  (Amendment A6).
 - **The identity key is the person.** An identity whose key is a login of an account signs in to that account, whatever
   its address says now. The address is never used to find a linked account.
 - **A Microsoft work address is unverified unless the tenant proves the domain.** A work tenant can give a person any
@@ -550,17 +562,21 @@ The round trip
 7. A callback with a good code for each of the three fake people (Google; Microsoft personal; Microsoft work with an
    unverified address) answers `302` to the return address with `#ticket=` (43 characters) and the purpose, sets
    `auth_pt` with the attributes above, and stores the ticket's hash only (no column holds the ticket or the cookie in
-   clear). Guard: integration (`ProviderCallbackTests`).
+   clear); no state value and no `code_verifier` reaches the log (Amendment A1). Guard: integration
+   (`ProviderCallbackTests`).
 8. The callback answers `#error=cancelled` for `access_denied`; `#error=invalid_state` for a missing, forged, expired or
    replayed state and for a callback without the request-forgery cookie of the browser that started;
    `#error=provider_error` for a code the provider refuses, an identity token with a bad signature, another audience,
-   another nonce, or a missing `sub` (Google) or `tid`/`oid` (Microsoft); `#error=provider_unavailable` after the
+   another nonce, another issuer (Amendment A6), or a missing `sub` (Google) or `tid`/`oid` (Microsoft);
+   `#error=provider_unavailable` after the
    provider was dropped from the manifest during the round trip. None stores a ticket or sets `auth_pt`, and no answer
    holds the provider's `error_description`. Guard: integration, one test per code (`ProviderCallbackErrorTests`).
 9. The identity rules: a Google identity is keyed by `sub` and verified only with `email_verified` `true`; a Microsoft
    identity is keyed by `{tid}:{oid}` and never by its address; a personal Microsoft address is verified; a work address
    is verified only with `xms_edov` `true`; `preferred_username` and `upn` are never read as the address; an address
-   that breaks the invitation rule is unverified. Guard: unit (`ProviderIdentityTests`) for each row of the table.
+   that breaks the invitation rule is unverified; a Microsoft identity token of the web-provider registration whose
+   `iss` is not `https://login.microsoftonline.com/{tid}/v2.0` is refused (Amendment A6). Guard: unit
+   (`ProviderIdentityTests`) for each row of the table.
 
 Exchange
 
@@ -672,13 +688,15 @@ Samples and end to end
     person accepts with "Google" and lands in the company; a person cancels at the provider and sees the message; a
     private person without a password deletes the account with "Confirm with Google". Guard: Playwright.
 33. `scripts/e2e-providers.sh` passes against a fresh stack with the fake provider: options, start (`302`, the
-    parameters), a full round trip by the fake's non-interactive mode, each exchange answer, link, finish, an
-    invitation, reauth deletion, the `auth_pt` refusal, and the audit rows read from the database. Every earlier e2e
-    script passes. Guard: e2e script.
+    parameters), a full round trip by the fake's non-interactive mode, every exchange answer the development stack can
+    reach (Amendment A8: all but `no_account`, with `no_membership` and `already_member` set up by one SQL statement
+    each), link, finish, an invitation, reauth deletion, the `auth_pt` refusal, and the audit rows read from the
+    database. Every earlier e2e script passes. Guard: e2e script; `no_account` by integration (`ProviderExchangeTests`).
 34. The fake provider serves Google's and Microsoft's discovery, authorization, token, key-set endpoints, and issues
     identity tokens for the three people (and on demand for a missing claim, a wrong audience, a wrong nonce and a bad
-    signature); the integration tests run OpenIddict's real web-provider registrations against it, the end-to-end stack
-    through the test issuer. Guard: the tests above run against it.
+    signature); it sends `iss` on the Google callback and advertises `authorization_response_iss_parameter_supported`
+    for Google, as Google does (Amendment A5); the integration tests run OpenIddict's real web-provider registrations
+    against it, the end-to-end stack through the test issuer. Guard: the tests above run against it.
 35. The whole .NET suite passes in one run on Windows, and on Linux through `scripts/test-linux.sh` if that script is
     on `main` when this slice is implemented; the Python package's and the samples' suites pass unchanged except where
     this spec changes them. Guard: the suites.
@@ -830,6 +848,42 @@ Choices the decisions left open; the contract above reads this way.
 32. **The guide's file is `docs/deployment/provider-keys.md`** (setting up a deployment) and the runbook's
     `docs/operations/microsoft-secret.md` (beside `key-rotation.md`).
 
+### Amendment (2026-04-23, after the probe)
+
+A probe of OpenIddict 7.7.1 on this code answered the "To verify" items before the plan was written. Nothing of the
+contract was unbuildable; these items change or complete it, and each is named where the contract now says it.
+
+- **A1, logging.** The OpenIddict client's dispatcher logs at `Warning` (`appsettings.json`, like the server's line),
+  because at `Information` it writes the state and the PKCE verifier; a callback test asserts that no state value and no
+  `code_verifier` reach the captured log (Configuration; criterion 7).
+- **A2, the callback's origin.** OpenIddict compares the callback request URL with the registered callback address.
+  Auth-Core reads the scheme and the host of a callback request from the return address's origin (a step before
+  authentication, for the two callback paths only), never from the request, and the client's URI is that origin
+  (Configuration, the callback address).
+- **A3, `cancelled`.** Only when the provider answered `access_denied` and the state and its request-forgery cookie are
+  valid; without the cookie (or with another browser's) the answer is `invalid_state` (the callback's table).
+- **A4, the request-forgery cookie.** OpenIddict's name `OpenIddict.Client.State.<…>`, set by Auth-Core to `SameSite=Lax`,
+  `Secure`, `HttpOnly`, `Path=/auth/providers` (the start, step 3; it replaces the "To verify" item).
+- **A5, the fake and `iss`.** The fake provider sends `iss` on the Google callback and advertises
+  `authorization_response_iss_parameter_supported` for Google, as Google does (criterion 34).
+- **A6, the Microsoft issuer.** With the `common` tenant OpenIddict does not check the identity token's issuer; the
+  callback requires `iss` = `https://login.microsoftonline.com/{tid}/v2.0` (`tid` in lower case) for the web-provider
+  registration, else `provider_error`. Under the test issuer the plain OpenID Connect registration checks the issuer
+  itself (the identity rules, the callback's table, criteria 8 and 9).
+- **A7, state rows.** They are pruned by the existing `TokenPruner` with its lag, about 14 days after they end, not at
+  their expiry ("To verify").
+- **Q14, Microsoft personal accounts and `oid`.** No change: the key stays `{tid}:{oid}` and a missing `oid` is
+  `provider_error`; the owner's test with real keys settles it. No fallback key is written ("To verify").
+- **Userinfo is off.** The client does not call the provider's userinfo endpoint; the claims come from the identity
+  token alone (the identity rules).
+- **A8, criterion 33.** The live script drives every exchange answer the development stack can reach: besides the
+  sign-in, `next` `link` (verified and not), `next` `finish_signup`, `no_email` and `invalid_ticket`, also
+  `already_registered` (a look-alike address through the fake's free-address mode), `provider_already_linked`,
+  `private_account_exists`, `invalid_token` and `address_mismatch` for an invitation, and `no_membership` and
+  `already_member` through one SQL statement each over the database connection the script already uses. Only
+  `no_account` is left to the integration tests: it needs both sign-up switches off, and the stack has them on
+  (criterion 33).
+
 ## Verification notes (for the local verifiers)
 
 - Criteria 7, 8 and 10 to 24 need the fake provider in process: the test reads the `Location` of the start, asks the
@@ -859,12 +913,12 @@ Each item has the answer to take if the check confirms it, and what to do if it 
 - **Where the claims are.** `tid`, `oid`, `email`, `xms_edov` (Microsoft) and `sub`, `email`, `email_verified` (Google)
   are read from the identity token's principal, never from userinfo. `xms_edov` may come as a JSON boolean or as the
   string `"1"`/`"true"`; accept those and nothing else. `oid` must be present for personal Microsoft accounts in v2.0
-  tokens; if it is not, key personal accounts by `9188040d-6c67-4c5b-b112-36a304b66dad:{sub}` and record it as an
-  amendment.
-- **The request-forgery cookie** of OpenIddict's client: its name, `SameSite=Lax`, its path covering
-  `/auth/providers/`, and that it reaches the `GET` callback after a cross-site redirect in Chromium and WebKit.
+  tokens; a token without it is `provider_error`, and the owner's test with real keys settles whether personal accounts
+  send it (Amendment, Q14).
+- **The request-forgery cookie** of OpenIddict's client is settled (Amendment A4); that a `Lax` cookie reaches the `GET`
+  callback after a cross-site redirect in Chromium and WebKit is checked by criterion 32.
 - **State tokens** are stored in OpenIddict's token table, live 10 minutes (`SetStateTokenLifetime`), and are pruned by
-  the existing `TokenPruner`.
+  the existing `TokenPruner` with its lag, about 14 days after they end, not at their expiry (Amendment A7).
 - **The client's signing and encryption credentials** are the instance's key files (`KeyMaterial`), so a key change
   voids only the round trips in flight.
 - **A `200` that is not a token response** from a pass-through token endpoint (the exchange's `next`) is written as it
