@@ -447,6 +447,55 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.ToTable("PendingSignups");
                 });
 
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.ProviderTicket", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("BindingHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("EmailVerified")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdentityKey")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<byte[]>("InviteTokenHash")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<short>("Purpose")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte[]>("TicketHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TicketHash")
+                        .IsUnique();
+
+                    b.ToTable("ProviderTickets");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
                 {
                     b.Property<Guid>("Id")

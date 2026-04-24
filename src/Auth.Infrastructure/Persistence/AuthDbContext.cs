@@ -30,6 +30,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
 
     public DbSet<PendingSignup> PendingSignups => Set<PendingSignup>();
 
+    public DbSet<ProviderTicket> ProviderTickets => Set<ProviderTicket>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -139,6 +141,19 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             pending.HasIndex(p => p.TokenHash).IsUnique();
             // The clean-up selects by expiry.
             pending.HasIndex(p => p.ExpiresAt);
+        });
+
+        // Spec 0011. A ticket names no account until it is used: no foreign key.
+        builder.Entity<ProviderTicket>(ticket =>
+        {
+            ticket.HasKey(t => t.Id);
+            ticket.Property(t => t.Provider).HasMaxLength(20);
+            ticket.Property(t => t.IdentityKey).HasMaxLength(255);
+            ticket.Property(t => t.Email).HasColumnType("text");   // any `email` claim is kept (spec 0011 → the identity): no length limit
+            // A ticket is looked up by its hash, and one statement uses it up.
+            ticket.HasIndex(t => t.TicketHash).IsUnique();
+            // The clean-up selects by expiry.
+            ticket.HasIndex(t => t.ExpiresAt);
         });
 
         // Spec 0008 → Audit log. The names are the contract's (snake_case): the backup runbook queries them. No foreign keys on purpose.
