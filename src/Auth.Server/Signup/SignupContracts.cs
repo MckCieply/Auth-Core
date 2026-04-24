@@ -6,10 +6,10 @@ namespace Auth.Server.Signup;
 // these bodies by hand, so the types document the contract in OpenAPI; they do not enforce it.
 
 /// <summary>
-/// Response of <c>GET /auth/options</c>: <c>signup</c> (spec 0009) and <c>private_signup</c> (spec 0010), each following its switch. A client
-/// ignores members it does not know.
+/// Response of <c>GET /auth/options</c>: <c>signup</c> (spec 0009) and <c>private_signup</c> (spec 0010), each following its switch, and
+/// <c>providers</c> (spec 0011), the offered providers in the manifest's order, <c>[]</c> when none. A client ignores members it does not know.
 /// </summary>
-public sealed record OptionsResponse(string Signup, string PrivateSignup);
+public sealed record OptionsResponse(string Signup, string PrivateSignup, IReadOnlyList<string> Providers);
 
 /// <summary>
 /// Request of <c>POST /auth/signup</c>: <c>kind</c> is <c>organization</c> (the default) or <c>private</c> (spec 0010); <c>company_name</c> is

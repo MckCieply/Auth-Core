@@ -282,7 +282,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
-        Assert.Equal(["private_signup", "signup"], Properties("OptionsResponse"));
+        Assert.Equal(["private_signup", "providers", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));

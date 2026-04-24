@@ -3,6 +3,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
 using Auth.Server.Email;
 using Auth.Server.Network;
+using Auth.Server.Providers;
 using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Tenancy;
@@ -72,6 +73,15 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         // Blank, like the three above: the Development settings file the test host reads would otherwise turn the address on in every
         // test, and a variable of the machine would change what a test sees. A test that wants sign-up on uses WithSignup().
         _settings[MailSettingsLoader.CompleteSignupUrlKey] = "";
+        // Spec 0011: no provider setting unless a test asks for one (WithProviders): a variable of the machine cannot turn a provider on, or
+        // stop a host that is not about providers.
+        _settings[ProviderSettings.ReturnUrlKey] = "";
+        _settings[ProviderSettings.GoogleClientIdKey] = "";
+        _settings[ProviderSettings.GoogleClientSecretKey] = "";
+        _settings[ProviderSettings.MicrosoftClientIdKey] = "";
+        _settings[ProviderSettings.MicrosoftClientSecretKey] = "";
+        _settings[ProviderSettings.MicrosoftSecretExpiresOnKey] = "";
+        _settings[ProviderSettings.TestIssuerKey] = "";
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
@@ -131,6 +141,17 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public const string DefaultCompleteSignupUrl = "https://app.example.com/complete-signup";
     public const string DefaultFrom = "no-reply@example.com";
 
+    /// <summary>The return screen of the provider round trip (spec 0011) in a test host; its origin is the callback's.</summary>
+    public const string DefaultProviderReturnUrl = "https://app.example.com/provider-return";
+
+    public const string GoogleClientId = "google-client-id.apps.test";
+    public const string GoogleClientSecret = "google-client-secret-of-the-tests";
+    public const string MicrosoftClientId = "6f1a2b3c-0000-4000-8000-00000000c11e";
+    public const string MicrosoftClientSecret = "microsoft-client-secret-of-the-tests";
+
+    /// <summary>The line that lists both providers (spec 0011 → Manifest).</summary>
+    public const string ProvidersLine = "\nproviders: [google, microsoft]\n";
+
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
     public string SeedEmail => _settings[DevUserSeeder.EmailKey] ?? "";
 
@@ -178,6 +199,24 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         WithManifest((organization ? SelfServiceManifest : DefaultManifest) + PrivateBlock);
         return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
+
+    /// <summary>
+    /// Lists both providers in the manifest file as it stands and gives both their keys and the return address (spec 0011). Call it after
+    /// <see cref="WithManifest"/>, <see cref="WithSignup"/> or <see cref="WithPrivateSignup"/>, which write the file anew.
+    /// </summary>
+    public AuthAppFactory WithProviders()
+    {
+        File.AppendAllText(ManifestPath, ProvidersLine);
+        return WithProviderKeys();
+    }
+
+    /// <summary>Both providers' keys and the return address, without listing them in the manifest.</summary>
+    public AuthAppFactory WithProviderKeys() =>
+        WithSetting(ProviderSettings.ReturnUrlKey, DefaultProviderReturnUrl)
+            .WithSetting(ProviderSettings.GoogleClientIdKey, GoogleClientId)
+            .WithSetting(ProviderSettings.GoogleClientSecretKey, GoogleClientSecret)
+            .WithSetting(ProviderSettings.MicrosoftClientIdKey, MicrosoftClientId)
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, MicrosoftClientSecret);
 
     /// <summary>Removes the manifest file, as if the product had not shipped one.</summary>
     public AuthAppFactory WithoutManifestFile()

@@ -11,6 +11,7 @@ using Auth.Server.Keys;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Network;
+using Auth.Server.Providers;
 using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
@@ -43,6 +44,9 @@ var keys = KeyMaterialLoader.LoadAll(builder.Configuration);
 builder.Services.AddSingleton(keys);
 // Fail fast on missing or invalid mail settings too.
 builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, builder.Environment.IsDevelopment()));
+// Spec 0011: the providers' settings. A bad value stops the start naming its key; a missing one only leaves its provider unoffered.
+var providerSettings = ProviderSettings.Load(builder.Configuration, builder.Environment.IsDevelopment());
+builder.Services.AddSingleton(providerSettings);
 // Fail fast on a bad proxy list, a bad rate limit or a bad audit retention, naming the key (spec 0008).
 var proxies = ProxySettings.Load(builder.Configuration);
 builder.Services.AddSingleton(proxies);
@@ -53,7 +57,10 @@ builder.Services.AddSingleton<RateLimitAudit>();
 // JSON property names are snake_case (spec 0005 → General rules). The bodies written before are unaffected: their
 // property names already are.
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
-builder.Services.AddHealthChecks().AddCheck<ManifestHealthCheck>("manifest").AddCheck<SignupHealthCheck>("signup");
+builder.Services.AddHealthChecks()
+    .AddCheck<ManifestHealthCheck>("manifest")
+    .AddCheck<SignupHealthCheck>("signup")
+    .AddCheck<ProviderHealthCheck>("providers");
 // Nothing of Auth-Core uses Data Protection, and the production container's file system is read-only: keys stay in memory.
 builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
 builder.Services.AddAuthOpenApi();
@@ -72,6 +79,7 @@ builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<SignupGate>();
+builder.Services.AddSingleton<ProviderCatalog>();
 builder.Services.AddSingleton<AccountsWithoutSpaceCleanup>();
 builder.Services.AddScoped<SignupService>();
 builder.Services.AddSingleton<IMailTransport, SmtpMailTransport>();
@@ -98,6 +106,9 @@ await app.Services.GetRequiredService<ManifestActivator>().ActivateAsync(app.Lif
 
 // A manifest that asks for self-service sign-up without the completion address leaves it off: say so (spec 0009).
 app.Services.GetRequiredService<SignupGate>().WarnIfMissingAddress();
+
+// A provider the manifest lists without its keys or the return address is not offered: say so, naming the keys, never their values (spec 0011).
+app.Services.GetRequiredService<ProviderCatalog>().WarnAtStart();
 
 // No account is left without a space (spec 0010): the accounts an earlier version left without a company are deleted, once, before the
 // development seeder and the first request.
