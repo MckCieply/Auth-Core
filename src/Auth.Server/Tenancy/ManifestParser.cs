@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Auth.Server.Providers;
 using Auth.Server.Requests;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
@@ -156,7 +157,17 @@ public static class ManifestParser
         }
 
         List<string> privatePermissions = [.. privateListed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
-        return new ManifestParseResult(new Manifest(permissions, defaults, signup, privateSignup, privatePermissions), null);
+
+        // Spec 0011: the key `providers`. `providers:` with no value is none; every name must be one of the two exactly; duplicates fold and the
+        // first place is kept, because the order is the order of the buttons.
+        var providersListed = (document.Providers ?? []).Select(p => p ?? "").ToList();
+        if (providersListed.FirstOrDefault(p => !ProviderNames.IsName(p)) is { } refused)
+        {
+            return Fail($"providers holds '{refused}', which is not '{ProviderNames.Google}' or '{ProviderNames.Microsoft}'");
+        }
+
+        List<string> providers = [.. providersListed.Distinct(StringComparer.Ordinal)];
+        return new ManifestParseResult(new Manifest(permissions, defaults, signup, privateSignup, privatePermissions, providers), null);
     }
 
     private static ManifestParseResult Fail(string error) => new(null, Printable(error));
@@ -200,6 +211,9 @@ public static class ManifestParser
 
         // The block of spec 0010. Its own keys only: any other is an error, like a typo at the top level.
         public PrivateDocument? Private { get; set; }
+
+        // Spec 0011: the providers a product offers. A list of texts, so that any other value reaches the check above.
+        public List<string?>? Providers { get; set; }
 
         // Ordered: the roles keep the order of the file, which the development seeder reads.
         public OrderedDictionary<string, List<string?>?>? DefaultRoles { get; set; }
