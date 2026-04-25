@@ -23,7 +23,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "POST /auth/signup",
         "POST /auth/signup/preview",
         "POST /auth/signup/complete",
-        "GET /auth/providers/{name}/start",
+        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -168,6 +168,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
     [InlineData("POST /auth/signup/complete", "200,400,403,409,415,429")]
     [InlineData("GET /auth/providers/{name}/start", "302,400,404,429")]
+    [InlineData("GET /auth/providers/{name}/callback", "302,404,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -384,7 +385,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

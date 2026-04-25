@@ -51,6 +51,7 @@ public sealed class FakeOidcServer : IDisposable
     private readonly ConcurrentQueue<string> _identityTokens = new();
     private readonly FakeOidcOptions _options;
     private readonly TimeProvider _clock;
+    private int _userInfoRequests;
 
     public FakeOidcServer(FakeOidcOptions options, TimeProvider clock)
     {
@@ -72,12 +73,20 @@ public sealed class FakeOidcServer : IDisposable
     /// <summary>Every identity token the token endpoint issued, oldest first: a test searches the audit log and the logs for them.</summary>
     public IReadOnlyCollection<string> IssuedIdentityTokens => [.. _identityTokens];
 
+    /// <summary>How many times a client asked a userinfo endpoint (Google's, Microsoft's Graph, or any path ending in <c>/userinfo</c>): the client must never.</summary>
+    public int UserInfoRequests => Volatile.Read(ref _userInfoRequests);
+
     public async Task HandleAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (Route(context.Request) is not { } site)
         {
+            if (IsUserInfo(context.Request))
+            {
+                Interlocked.Increment(ref _userInfoRequests);
+            }
+
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
@@ -159,6 +168,10 @@ public sealed class FakeOidcServer : IDisposable
         return endpoint is { } found ? new Site(segments[0], false, found) : null;
     }
 
+    private static bool IsUserInfo(HttpRequest request) =>
+        Is(request.Host.Host, "openidconnect.googleapis.com") || Is(request.Host.Host, "graph.microsoft.com")
+        || (request.Path.Value ?? "").EndsWith("/userinfo", StringComparison.OrdinalIgnoreCase);
+
     private static bool Is(string host, string name) => string.Equals(host, name, StringComparison.OrdinalIgnoreCase);
 
     private static string RequestOrigin(HttpRequest request) => request.Scheme + "://" + request.Host.Value;
@@ -221,6 +234,8 @@ public sealed class FakeOidcServer : IDisposable
             ["authorization_endpoint"] = BrowserOf(site.Kind, request) + "/authorize",
             ["token_endpoint"] = issuer + "/token",
             ["jwks_uri"] = issuer + "/keys",
+            // Advertised, never served: a client that asks for it gets a 404 and is counted (UserInfoRequests).
+            ["userinfo_endpoint"] = issuer + "/userinfo",
             ["response_types_supported"] = CodeOnly,
             ["subject_types_supported"] = PublicSubjects,
             ["id_token_signing_alg_values_supported"] = Rs256,

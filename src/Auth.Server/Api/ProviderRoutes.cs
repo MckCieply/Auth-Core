@@ -34,6 +34,27 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
 
+        // GET only: the response mode is `query` (probe Q2); a form post would be a cross-site form, which the JSON-only rule refuses.
+        app.MapGet(ProviderPaths.Callback, ProviderCallbackEndpoint.HandleAsync)
+            .WithTags("Providers")
+            .WithDescription(
+                "Where the provider sends the browser back. OpenIddict checks the state (its signature, its age, its single use, the request-forgery "
+                + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token. The answer is always "
+                + "`302` to the product's return screen (`Auth:App:FrontendUrls:ProviderReturn`), never a page: on success "
+                + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
+                + "(`purpose` left out when the state could not be read) with the codes `cancelled`, `invalid_state`, `provider_unavailable` and "
+                + "`provider_error`, and nothing stored. The ticket lives 10 minutes (5 for `reauth`) and works only with the `auth_pt` of this browser. "
+                + "A name that is not a provider, or an instance without the return address, is `404 not_found`.")
+            .Produces(StatusCodes.Status302Found)
+            .SetsHeader(
+                StatusCodes.Status302Found, "Location",
+                "The return screen with the fragment: `ticket` and `purpose` on success, `error` and `purpose` on failure.")
+            .SetsHeader(
+                StatusCodes.Status302Found, "Set-Cookie",
+                $"`{ProviderBindingCookie.Name}` on success: binds the ticket to this browser; `HttpOnly`, `Secure`, `SameSite=Strict`, path "
+                + $"`{ProviderBindingCookie.Path}`, `Max-Age=600`. OpenIddict's request-forgery cookie is deleted.")
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
+
         return app;
     }
 }
