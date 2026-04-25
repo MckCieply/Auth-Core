@@ -1,6 +1,7 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
+using Auth.Server.Providers;
 using Auth.Server.Sessions;
 using Auth.Server.Signup;
 using OpenIddict.Server;
@@ -25,7 +26,9 @@ public static class OpenIddictSetup
     /// <c>Auth:Tokens:Issuer</c> is not an absolute URI or <c>Auth:Tokens:Audience</c> is blank, or (outside
     /// Development) either key is missing from configuration.
     /// </exception>
-    public static IServiceCollection AddAuthOpenIddict(this IServiceCollection services, IConfiguration configuration, KeyMaterial keys, bool isDevelopment)
+    /// <param name="providers">The provider settings of spec 0011: OpenIddict's client registers the providers they configure.</param>
+    public static IServiceCollection AddAuthOpenIddict(
+        this IServiceCollection services, IConfiguration configuration, KeyMaterial keys, ProviderSettings providers, bool isDevelopment)
     {
         if (!isDevelopment)
         {
@@ -120,7 +123,9 @@ public static class OpenIddictSetup
                     .DisableAccessTokenExtractionFromQueryString()
                     .DisableAccessTokenExtractionFromBodyForm();
                 options.AddAudiences(tokens.Audience);
-            });
+            })
+            // Spec 0011: the client of Google and Microsoft beside the server, in the same host (probe Q3).
+            .AddProviderClient(providers, keys);
 
         services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         services.AddAuthorization();

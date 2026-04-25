@@ -19,6 +19,9 @@ public sealed record JsonRequestMetadata(Type Body);
 /// <summary>A cookie an endpoint reads as its request, for the OpenAPI description only.</summary>
 public sealed record CookieRequestMetadata(string Name, string Description);
 
+/// <summary>A query parameter an endpoint reads itself, for the OpenAPI description only.</summary>
+public sealed record QueryParameterMetadata(string Name, string Description);
+
 /// <summary>A header an endpoint sets on the response of a status, for the OpenAPI description only.</summary>
 public sealed record ResponseHeaderMetadata(int Status, string Name, JsonSchemaType Type, string Description);
 
@@ -46,6 +49,22 @@ public static class EndpointMetadata
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.WithMetadata(new CookieRequestMetadata(RefreshCookie.Name, description));
+    }
+
+    /// <summary>Documents a query parameter the handler reads itself (it binds none).</summary>
+    public static RouteHandlerBuilder ReadsQuery(this RouteHandlerBuilder builder, string name, string description)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new QueryParameterMetadata(name, description));
+    }
+
+    /// <summary>Documents a header the handler sets on the response of <paramref name="status"/> (a <c>Location</c>, a cookie).</summary>
+    public static RouteHandlerBuilder SetsHeader(this RouteHandlerBuilder builder, int status, string name, string description)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new ResponseHeaderMetadata(status, name, JsonSchemaType.String, description));
     }
 
     /// <summary>Documents the <c>Set-Cookie</c> of the refresh cookie on the response of <paramref name="status"/>.</summary>

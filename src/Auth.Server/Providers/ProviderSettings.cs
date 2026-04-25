@@ -59,6 +59,14 @@ public sealed class ProviderSettings
     /// <summary>The keys of configuration a provider still needs before it can be offered, in the order of the contract; empty when none.</summary>
     public IReadOnlyList<string> MissingKeysOf(string provider) => _missing[provider];
 
+    /// <summary>The callback address the operator registers at the provider: the return address's origin and the callback path (Settled 2).</summary>
+    public Uri CallbackUriOf(string provider) =>
+        new(ReturnOrigin ?? throw new InvalidOperationException("The return address is not set."), ProviderPaths.CallbackPathOf(provider));
+
+    /// <summary>The issuer of a provider under the test issuer: <c>{TestIssuer}/google</c> or <c>{TestIssuer}/microsoft</c>.</summary>
+    public Uri TestIssuerOf(string provider) =>
+        new((TestIssuer ?? throw new InvalidOperationException("No test issuer is set.")).GetLeftPart(UriPartial.Path).TrimEnd('/') + "/" + provider);
+
     /// <summary>Reads and checks the settings. Errors name the key and never echo a value.</summary>
     /// <param name="isDevelopment">Development accepts an <c>http</c> return address and the test issuer.</param>
     /// <exception cref="InvalidOperationException">A value is set and invalid.</exception>

@@ -68,7 +68,7 @@ builder.Services.AddTenancy(builder.Configuration, builder.Environment.ContentRo
 builder.Services.AddAuthPersistence(builder.Configuration);
 // OpenIddict takes its clock from DI; tests replace this registration to move time.
 builder.Services.TryAddSingleton(TimeProvider.System);
-builder.Services.AddAuthOpenIddict(builder.Configuration, keys, builder.Environment.IsDevelopment());
+builder.Services.AddAuthOpenIddict(builder.Configuration, keys, providerSettings, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<TokenPruner>();
 builder.Services.AddSingleton<LockoutPruner>();
 builder.Services.AddSingleton<AuditPruner>();
@@ -126,12 +126,15 @@ app.UseRouting();
 app.UseClientAddress(proxies);
 app.UseMiddleware<RateLimitMiddleware>();
 app.UseJsonCharsetGuard();
+// Spec 0011, Amendment A2: a provider's callback is read with the scheme and host of the return address, before OpenIddict's client judges it.
+app.UseProviderCallbackOrigin(providerSettings);
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapAccountApi();
 app.MapTenancyApi();
 app.MapSignupApi();
+app.MapProviderApi();
 app.MapAuthOpenApi();
 
 app.Run();

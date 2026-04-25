@@ -82,7 +82,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(31, operations.Count);   // spec 0010: DELETE /auth/account
+        Assert.Equal(32, operations.Count);   // spec 0011: the start of a provider round trip
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));

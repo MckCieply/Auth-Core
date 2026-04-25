@@ -180,6 +180,20 @@ public static class OpenApiSetup
             });
         }
 
+        // The query parameters the handler reads itself (the start of a provider round trip, spec 0011).
+        foreach (var parameter in metadata.OfType<QueryParameterMetadata>())
+        {
+            operation.Parameters ??= [];
+            operation.Parameters.Add(new OpenApiParameter
+            {
+                Name = parameter.Name,
+                In = ParameterLocation.Query,
+                Required = false,
+                Description = parameter.Description,
+                Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+            });
+        }
+
         // The codes of each error status, from every place that declared the status, and two answers that come from the pipeline and
         // not from a handler (spec 0008): every endpoint can say 429 too_many_requests, and every one the charset guard covers can say
         // 415 unsupported_media_type (POST, PUT, PATCH and DELETE under /auth/ other than refresh and logout, whether or not the route

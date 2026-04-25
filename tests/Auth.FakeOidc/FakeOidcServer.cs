@@ -32,6 +32,9 @@ public sealed class FakeOidcServer : IDisposable
     private static readonly string[] CodeOnly = ["code"];
     private static readonly string[] ResponseTypes = ["code", "id_token", "code id_token"];
     private static readonly string[] ResponseModes = ["query", "fragment", "form_post"];
+    // Google lists these; without the list OpenIddict's web integration assumes only the implicit grant for Google and finds no flow.
+    private static readonly string[] GoogleGrantTypes =
+        ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code", "urn:ietf:params:oauth:grant-type:jwt-bearer"];
     private static readonly string[] PublicSubjects = ["public"];
     private static readonly string[] PairwiseSubjects = ["pairwise"];
     private static readonly string[] Rs256 = ["RS256"];
@@ -178,6 +181,7 @@ public sealed class FakeOidcServer : IDisposable
                 ["token_endpoint"] = "https://oauth2.googleapis.com/token",
                 ["userinfo_endpoint"] = "https://openidconnect.googleapis.com/v1/userinfo",
                 ["jwks_uri"] = "https://www.googleapis.com/oauth2/v3/certs",
+                ["grant_types_supported"] = GoogleGrantTypes,
                 ["response_types_supported"] = ResponseTypes,
                 ["response_modes_supported"] = ResponseModes,
                 ["subject_types_supported"] = PublicSubjects,
