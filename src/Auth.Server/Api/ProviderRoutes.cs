@@ -1,3 +1,4 @@
+using Auth.Server.Account;
 using Auth.Server.Providers;
 using Auth.Server.Tenancy;
 
@@ -54,6 +55,27 @@ public static class ProviderRoutes
                 $"`{ProviderBindingCookie.Name}` on success: binds the ticket to this browser; `HttpOnly`, `Secure`, `SameSite=Strict`, path "
                 + $"`{ProviderBindingCookie.Path}`, `Max-Age=600`. OpenIddict's request-forgery cookie is deleted.")
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
+
+        app.MapPost(ProviderPaths.Exchange, ProviderExchangeEndpoint.HandleAsync)
+            .WithTags("Providers")
+            .WithDescription(
+                "What a ticket of the callback leads to; the product's return screen calls it with the ticket of the fragment and the browser's "
+                + "`auth_pt` cookie. An identity that is a login of an account signs in: `200` as a login answers (the access token, the refresh "
+                + "cookie), the ticket used up and `auth_pt` cleared; an account with no membership is `403 no_membership`. Otherwise the ticket stays "
+                + "usable and the answer says what comes next: no address `403 no_email`; an address the provider did not verify "
+                + "`{\"next\":\"link\",\"email\",\"email_verified\":false}`, whether or not an account has it; an account with the address "
+                + "`{\"next\":\"link\",\"email\",\"email_verified\":true}`; an account under a look-alike spelling `409 already_registered`; no account "
+                + "`{\"next\":\"finish_signup\",\"email\",\"kinds\"}` while sign-up is on, else `403 no_account`. A ticket that is unknown, used, "
+                + "expired, of the purpose `reauth` or without its `auth_pt` is `400 invalid_ticket`.")
+            .ReadsJson<ProviderTicketRequest>()
+            .ReadsCookie(ProviderBindingCookie.Name, "The binding of the ticket, set by the callback that made it. Without it, or with another browser's, the ticket is unknown.")
+            .Produces<ProviderExchangeResponse>()
+            .SetsRefreshCookie(
+                StatusCodes.Status200OK,
+                AccountEndpoints.RefreshCookieSet + $" On a sign-in only; `{ProviderBindingCookie.Name}` is emptied then, with `Max-Age=0`.")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.NoEmail, TenancyErrors.NoAccount)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
 
         return app;
     }

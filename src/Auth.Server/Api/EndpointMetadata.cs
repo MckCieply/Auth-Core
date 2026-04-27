@@ -51,6 +51,14 @@ public static class EndpointMetadata
         return builder.WithMetadata(new CookieRequestMetadata(RefreshCookie.Name, description));
     }
 
+    /// <summary>Documents a cookie the handler reads beside its body (<c>auth_pt</c>, spec 0011).</summary>
+    public static RouteHandlerBuilder ReadsCookie(this RouteHandlerBuilder builder, string name, string description)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithMetadata(new CookieRequestMetadata(name, description));
+    }
+
     /// <summary>Documents a query parameter the handler reads itself (it binds none).</summary>
     public static RouteHandlerBuilder ReadsQuery(this RouteHandlerBuilder builder, string name, string description)
     {

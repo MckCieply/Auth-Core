@@ -1,5 +1,6 @@
 using System.Net;
 using Auth.FakeOidc;
+using Auth.Server.Providers;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -80,6 +81,14 @@ public abstract class ProviderTestBase : SignupTestBase
 
     /// <summary>The tickets in the table.</summary>
     protected Task<int> TicketCountAsync() => InDbAsync(db => db.ProviderTickets.CountAsync(TestContext.Current.CancellationToken));
+
+    /// <summary>Makes the identity a login of the account straight in the database, as a link leaves it.</summary>
+    protected Task LinkAsync(Guid userId, string provider, string key) =>
+        InDbAsync(async db =>
+        {
+            ProviderLogins.Add(db, userId, provider, key);
+            return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        });
 
     /// <summary>A whole round trip in one browser: the start, the provider, the callback; the ticket and its binding.</summary>
     protected async Task<ProviderApi.Ticket> TicketAsync(string provider, FakeSignIn person, string query = "")

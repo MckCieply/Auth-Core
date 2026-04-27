@@ -1,4 +1,5 @@
 using Auth.Server.Login;
+using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Microsoft.AspNetCore.Http;
 using OpenIddict.Abstractions;
@@ -44,6 +45,15 @@ public sealed class LoginScopeTests
     [InlineData("password", "/auth/SIGNUP/complete/", true)]
     [InlineData("password", "/auth/signup/complete//", false)]
     [InlineData("refresh_token", "/auth/signup/complete", false)]
+    [InlineData("password", "/auth/providers/exchange", true)]   // spec 0011: the sign-ins through a provider answer as a login
+    [InlineData("password", "/auth/providers/link", true)]
+    [InlineData("password", "/auth/providers/finish", true)]
+    [InlineData("password", "/AUTH/Providers/EXCHANGE", true)]
+    [InlineData("password", "/auth/providers/link/", true)]
+    [InlineData("password", "/auth/providers/exchange//", false)]
+    [InlineData("password", "/auth/providers/finish/extra", false)]
+    [InlineData("refresh_token", "/auth/providers/exchange", false)]
+    [InlineData("password", "/auth/providers/google/callback", false)]
     public void ShouldShape_requires_a_password_grant_on_the_login_or_completion_path(string grantType, string path, bool expected)
     {
         var request = new OpenIddictRequest { GrantType = grantType };
@@ -66,4 +76,18 @@ public sealed class LoginScopeTests
     [InlineData("/", false)]
     public void IsCompletePath_matches_the_completion_path_only(string path, bool expected) =>
         Assert.Equal(expected, SignupCompleteRequestHandler.IsCompletePath(new PathString(path)));
+
+    [Theory]
+    [InlineData("/auth/providers/exchange", true)]
+    [InlineData("/auth/providers/link", true)]
+    [InlineData("/auth/providers/finish", true)]
+    [InlineData("/AUTH/PROVIDERS/Finish", true)]
+    [InlineData("/auth/providers/exchange/", true)]
+    [InlineData("/auth/providers/exchange//", false)]
+    [InlineData("/auth/providers/exchange/extra", false)]
+    [InlineData("/auth/providers/google/start", false)]
+    [InlineData("/auth/providers", false)]
+    [InlineData("/auth/login", false)]
+    public void IsProviderTokenPath_matches_the_three_provider_token_paths_only(string path, bool expected) =>   // spec 0011
+        Assert.Equal(expected, ProviderRequestHandler.IsProviderTokenPath(new PathString(path)));
 }

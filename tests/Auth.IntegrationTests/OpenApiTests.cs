@@ -23,7 +23,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "POST /auth/signup",
         "POST /auth/signup/preview",
         "POST /auth/signup/complete",
-        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback",
+        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback", "POST /auth/providers/exchange",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -31,6 +31,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/org/invites", "POST /auth/org/invites", "POST /auth/org/invites/{id}/resend", "DELETE /auth/org/invites/{id}",
         "GET /auth/org/roles", "POST /auth/org/roles", "PUT /auth/org/roles/{id}", "DELETE /auth/org/roles/{id}",
     ];
+
+    // The endpoints that take a provider ticket and its auth_pt cookie (spec 0011).
+    private static readonly string[] TicketEndpoints = ["POST /auth/providers/exchange"];
 
     private static async Task<JsonObject> DescriptionAsync(AuthAppFactory factory)
     {
@@ -169,6 +172,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/complete", "200,400,403,409,415,429")]
     [InlineData("GET /auth/providers/{name}/start", "302,400,404,429")]
     [InlineData("GET /auth/providers/{name}/callback", "302,404,429")]
+    [InlineData("POST /auth/providers/exchange", "200,400,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -223,6 +227,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("already_registered", Description(operations["POST /auth/signup/complete"], "409"));
         Assert.Contains("invalid_token", Description(operations["POST /auth/signup/preview"], "400"));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/signup"], "429"));
+        Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "400")));
+        Assert.All(["no_account", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "403")));
+        Assert.Contains("already_registered", Description(operations["POST /auth/providers/exchange"], "409"));
     }
 
     [Theory]
@@ -258,6 +265,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
     [InlineData("DELETE /auth/account", "password")]
+    [InlineData("POST /auth/providers/exchange", "ticket")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "role_id")]
     [InlineData("POST /auth/org/roles", "name,permissions")]
@@ -292,6 +300,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));
         Assert.Equal(["error"], Properties("ErrorBody"));
+        Assert.Equal(["access_token", "email", "email_verified", "kinds", "next", "status"], Properties("ProviderExchangeResponse"));
     }
 
     [Fact]
@@ -347,6 +356,13 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
                 Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
                 Assert.Null(operation["requestBody"]);
             }
+            else if (TicketEndpoints.Contains(endpoint))
+            {
+                // Spec 0011: the endpoints that take a provider ticket read its binding cookie beside their body.
+                var cookie = Assert.Single(cookies)!;
+                Assert.Equal("auth_pt", cookie["name"]!.GetValue<string>());
+                Assert.NotNull(operation["requestBody"]);
+            }
             else
             {
                 Assert.Empty(cookies);
@@ -360,6 +376,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/refresh", "200")]
     [InlineData("POST /auth/logout", "204")]
     [InlineData("DELETE /auth/account", "204")]
+    [InlineData("POST /auth/providers/exchange", "200")]
     public async Task The_answers_that_set_or_clear_the_refresh_cookie_say_so(string endpoint, string status)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -385,7 +402,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

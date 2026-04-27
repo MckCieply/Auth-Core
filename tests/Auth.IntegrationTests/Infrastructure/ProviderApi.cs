@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Net.Http.Headers;
 
@@ -54,6 +55,42 @@ public static class ProviderApi
         return response.Headers.TryGetValues("Set-Cookie", out var values)
             ? SetCookieHeaderValue.ParseList([.. values]).SingleOrDefault(c => c.Name == BindingCookie)
             : null;
+    }
+
+    public const string ExchangePath = "/auth/providers/exchange";
+
+    /// <summary>A JSON body to a provider endpoint with the <c>auth_pt</c> cookie (none when <paramref name="binding"/> is null).</summary>
+    public static async Task<HttpResponseMessage> PostWithBinding(HttpClient client, string path, object body, string? binding)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };
+        if (binding is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", $"{BindingCookie}={binding}");
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    /// <summary><c>POST /auth/providers/exchange</c> with the ticket and the binding of its own round trip.</summary>
+    public static Task<HttpResponseMessage> Exchange(HttpClient client, Ticket ticket)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        return Exchange(client, ticket.Value, ticket.Binding);
+    }
+
+    public static Task<HttpResponseMessage> Exchange(HttpClient client, string ticket, string? binding) =>
+        PostWithBinding(client, ExchangePath, new { ticket }, binding);
+
+    /// <summary>A request that used the ticket up clears <c>auth_pt</c>: emptied, <c>Max-Age=0</c>, with its attributes.</summary>
+    public static void AssertBindingCleared(HttpResponseMessage response)
+    {
+        var cookie = BindingCookieOf(response) ?? throw new InvalidOperationException("The answer does not clear auth_pt.");
+        Assert.Equal("", cookie.Value.Value);
+        Assert.Equal(TimeSpan.Zero, cookie.MaxAge);
+        Assert.Equal("/auth", cookie.Path.Value);
     }
 
     /// <summary>The ticket and its binding of a successful callback.</summary>

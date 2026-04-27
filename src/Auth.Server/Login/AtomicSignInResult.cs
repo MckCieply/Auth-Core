@@ -25,8 +25,13 @@ namespace Auth.Server.Login;
 /// an error that leaves the account behind). The result owns that transaction from the first line of <see cref="ExecuteAsync"/> and disposes it as soon as it is committed or
 /// refused, before the held answer is written to the client.
 /// </summary>
+/// <param name="whenCommitted">
+/// Runs once the sign-in is committed, before the held answer is written: the answer has not started, so it may still set a header (a sign-in
+/// through a provider clears <c>auth_pt</c> there, spec 0011). It never runs for an answer that is rolled back.
+/// </param>
 public sealed class AtomicSignInResult(
-    ClaimsPrincipal principal, AuditEntry? entry, IDbContextTransaction? opened = null, Func<Task<IResult>>? whenGone = null) : IResult
+    ClaimsPrincipal principal, AuditEntry? entry, IDbContextTransaction? opened = null, Func<Task<IResult>>? whenGone = null,
+    Action<HttpContext>? whenCommitted = null) : IResult
 {
     /// <inheritdoc />
     public async Task ExecuteAsync(HttpContext httpContext)
@@ -69,11 +74,12 @@ public sealed class AtomicSignInResult(
 
                         await db.SaveChangesAsync(httpContext.RequestAborted);
                         await transaction.CommitAsync(httpContext.RequestAborted);
+                        whenCommitted?.Invoke(httpContext);
                     }
                     else if (opened is not null)
                     {
                         // An error of OpenIddict must not be the answer to a completion whose account would stay: roll it back, and say 500.
-                        throw new InvalidOperationException("OpenIddict refused the sign-in of a completed sign-up; the completion is rolled back.");
+                        throw new InvalidOperationException("OpenIddict refused a sign-in that completes a change; the change is rolled back.");
                     }
                 }
             }

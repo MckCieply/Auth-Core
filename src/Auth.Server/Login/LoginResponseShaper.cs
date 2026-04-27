@@ -1,3 +1,4 @@
+using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Http;
@@ -37,7 +38,8 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
     internal static bool ShouldShape(OpenIddictRequest? request, PathString path) =>
         request is not null
         && request.IsPasswordGrantType()
-        && (JsonLoginRequestHandler.IsLoginPath(path) || SignupCompleteRequestHandler.IsCompletePath(path));
+        && (JsonLoginRequestHandler.IsLoginPath(path) || SignupCompleteRequestHandler.IsCompletePath(path)
+            || ProviderRequestHandler.IsProviderTokenPath(path));   // spec 0011: the sign-ins through a provider answer as a login
 
     /// <inheritdoc />
     public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)
