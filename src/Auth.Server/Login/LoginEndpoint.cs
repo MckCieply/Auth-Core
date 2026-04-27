@@ -135,7 +135,7 @@ public static class LoginEndpoint
     /// identical. It carries the same cache headers OpenIddict puts on a token response, so it is not
     /// distinguishable from one by caching behaviour either.
     /// </summary>
-    private sealed class InvalidCredentialsResult : IResult
+    internal sealed class InvalidCredentialsResult : IResult
     {
         public Task ExecuteAsync(HttpContext httpContext)
         {

@@ -84,6 +84,29 @@ public static class ProviderApi
     public static Task<HttpResponseMessage> Exchange(HttpClient client, string ticket, string? binding) =>
         PostWithBinding(client, ExchangePath, new { ticket }, binding);
 
+    public const string LinkPath = "/auth/providers/link";
+
+    public static Task<HttpResponseMessage> Link(HttpClient client, Ticket ticket, string password)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        return PostWithBinding(client, LinkPath, new { ticket = ticket.Value, password }, ticket.Binding);
+    }
+
+    /// <summary>A body as it is (for the bodies a serializer would not write), with the binding cookie.</summary>
+    public static async Task<HttpResponseMessage> PostRawWithBinding(HttpClient client, string path, string body, string? binding)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+        if (binding is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", $"{BindingCookie}={binding}");
+        }
+
+        return await client.SendAsync(request);
+    }
+
     /// <summary>A request that used the ticket up clears <c>auth_pt</c>: emptied, <c>Max-Age=0</c>, with its attributes.</summary>
     public static void AssertBindingCleared(HttpResponseMessage response)
     {

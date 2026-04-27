@@ -1,7 +1,9 @@
 using System.Net;
 using Auth.FakeOidc;
+using Auth.Infrastructure.Identity;
 using Auth.Server.Providers;
 using Auth.Server.Tenancy;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -89,6 +91,17 @@ public abstract class ProviderTestBase : SignupTestBase
             ProviderLogins.Add(db, userId, provider, key);
             return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         });
+
+    /// <summary>An account with no password (as a finish leaves it), a member of the development company.</summary>
+    protected async Task<Guid> PasswordlessAccountAsync(string email)
+    {
+        var user = await CreateUserAsync(email, confirmed: true);
+        using var scope = Factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var found = await users.FindByIdAsync(user.Id.ToString());
+        Assert.True((await users.RemovePasswordAsync(found!)).Succeeded);
+        return user.Id;
+    }
 
     /// <summary>A whole round trip in one browser: the start, the provider, the callback; the ticket and its binding.</summary>
     protected async Task<ProviderApi.Ticket> TicketAsync(string provider, FakeSignIn person, string query = "")
