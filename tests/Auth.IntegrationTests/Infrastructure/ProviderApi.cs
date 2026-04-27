@@ -93,6 +93,27 @@ public static class ProviderApi
         return PostWithBinding(client, LinkPath, new { ticket = ticket.Value, password }, ticket.Binding);
     }
 
+    public const string FinishPath = "/auth/providers/finish";
+
+    /// <summary><c>POST /auth/providers/finish</c>; a member left null is left out of the body.</summary>
+    public static Task<HttpResponseMessage> Finish(HttpClient client, Ticket ticket, string? kind = null, string? companyName = null)
+    {
+        ArgumentNullException.ThrowIfNull(ticket);
+
+        var body = new Dictionary<string, object?> { ["ticket"] = ticket.Value };
+        if (kind is not null)
+        {
+            body["kind"] = kind;
+        }
+
+        if (companyName is not null)
+        {
+            body["company_name"] = companyName;
+        }
+
+        return PostWithBinding(client, FinishPath, body, ticket.Binding);
+    }
+
     /// <summary>A body as it is (for the bodies a serializer would not write), with the binding cookie.</summary>
     public static async Task<HttpResponseMessage> PostRawWithBinding(HttpClient client, string path, string body, string? binding)
     {

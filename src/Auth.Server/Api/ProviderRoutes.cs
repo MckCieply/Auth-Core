@@ -99,6 +99,27 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoEmail, TenancyErrors.EmailNotVerified, TenancyErrors.NoMembership)
             .ProducesTooManyAttempts();
 
+        app.MapPost(ProviderPaths.Finish, ProviderFinishEndpoint.HandleAsync)
+            .WithTags("Providers")
+            .WithDescription(
+                "A new person finishes creating their account with the verified address of a sign-in ticket, with no password and no mail, and is "
+                + "signed in at once: `200` as a login answers, `auth_pt` cleared. In one transaction the account (its email confirmed), the identity "
+                + "as its login, the space (`kind` `organization` with `company_name`: the company with a copy of the default roles and the first "
+                + "admin's role; `private`: the personal space; absent: an organization), the deletion of the address's pending sign-up and "
+                + "`signup.completed` are made. The checks: both sign-up switches off `403 signup_disabled` before the body is read; a bad body "
+                + "`400 invalid_request`; a ticket that is unknown, used, expired, not of the purpose `sign_in` or without its `auth_pt` "
+                + "`400 invalid_ticket`; no address or an unverified one `403 email_not_verified`; the switch of the kind off `403 signup_disabled`; an "
+                + "organization without, or a private finish with, `company_name` `400 invalid_request` (the ticket stays usable); any account under "
+                + "the address, or the identity linked meanwhile, `409 already_registered`.")
+            .ReadsJson<ProviderFinishRequest>()
+            .ReadsCookie(ProviderBindingCookie.Name, "The binding of the ticket, set by the callback that made it.")
+            .Produces<LoginResponse>()
+            .SetsRefreshCookie(
+                StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet + $" `{ProviderBindingCookie.Name}` is emptied, with `Max-Age=0`.")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.SignupDisabled, TenancyErrors.EmailNotVerified)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
+
         return app;
     }
 }
