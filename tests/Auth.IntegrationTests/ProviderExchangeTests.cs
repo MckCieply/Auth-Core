@@ -226,14 +226,4 @@ public sealed class ProviderExchangeTests(PostgresFixture postgres, KeyMaterialF
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_ticket");
         Assert.Equal(1, await TicketCountAsync());
     }
-
-    [Fact]
-    public async Task An_invitation_ticket_is_invalid_ticket_until_invitations_are_built()   // replaced when the invitation branch is built
-    {
-        var ticket = await TicketAsync("google", GooglePerson(), "?invite=" + "CCCCCCCCCC" + "CCCCCCCCCC" + "CCCCCCCCCC" + "CCCCCCCCCC" + "CCC");
-
-        using var response = await ProviderApi.Exchange(Client, ticket);
-
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_ticket");
-    }
 }

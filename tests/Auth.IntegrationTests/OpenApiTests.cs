@@ -232,6 +232,11 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "400")));
         Assert.All(["no_account", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "403")));
         Assert.Contains("already_registered", Description(operations["POST /auth/providers/exchange"], "409"));
+        Assert.Contains("invalid_token", Description(operations["POST /auth/providers/exchange"], "400"));
+        Assert.Contains("address_mismatch", Description(operations["POST /auth/providers/exchange"], "403"));
+        Assert.All(
+            ["already_member", "private_account_exists", "provider_already_linked"],
+            code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "409")));
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/providers/link"], "401"));
         Assert.All(["email_not_verified", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/link"], "403")));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/providers/link"], "429"));

@@ -15,7 +15,7 @@ namespace Auth.Server.Providers;
 /// <summary>
 /// <c>POST /auth/providers/exchange</c> (spec 0011): what a ticket leads to, in the order of the contract. A linked identity signs in (the ticket
 /// used up in the transaction of the sign-in); otherwise the answer says what comes next, as plain JSON, and the ticket stays usable for the link
-/// or the finish. A ticket of the purpose <c>reauth</c> is never good here.
+/// or the finish. An invitation ticket accepts its invitation and signs in; a ticket of the purpose <c>reauth</c> is never good here.
 /// </summary>
 public static class ProviderExchangeEndpoint
 {
@@ -23,8 +23,9 @@ public static class ProviderExchangeEndpoint
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, SignupGate gate,
-        IOptions<TokenOptions> tokens, TimeProvider clock)
+        InviteAcceptance acceptance, IOptions<TokenOptions> tokens, TimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(acceptance);
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(users);
@@ -48,9 +49,15 @@ public static class ProviderExchangeEndpoint
 
         ProviderBindingCookie.TryRead(http.Request, out var binding);
         var ticket = await ProviderTickets.FindAsync(db, ticketText, binding, StorableTime.Now(clock), http.RequestAborted);
-        if (ticket is not { Purpose: ProviderTicketPurpose.SignIn })
+        if (ticket is null || ticket.Purpose == ProviderTicketPurpose.Reauth)
         {
-            return ApiResults.Error(TenancyErrors.InvalidTicket);   // unknown, used, expired, without its binding; reauth (and, for now, invite)
+            return ApiResults.Error(TenancyErrors.InvalidTicket);   // unknown, used, expired, without its binding, or a re-authentication
+        }
+
+        // 4: an invitation, accepted with the provider's address in place of a password.
+        if (ticket.Purpose == ProviderTicketPurpose.Invite)
+        {
+            return await AcceptAsync(http, acceptance, memberships, tokens.Value, clock, ticket, ticketText, binding!);
         }
 
         // 3.1: the identity key is the person; the address is never used to find a linked account.
@@ -93,5 +100,35 @@ public static class ProviderExchangeEndpoint
         return kinds.Count == 0
             ? ApiResults.Error(TenancyErrors.NoAccount)
             : ApiResults.Ok(new ProviderFinishNext(ProviderNext.FinishSignup, email, kinds));
+    }
+
+    /// <summary>Step 4 of the exchange: the acceptance, then the sign-in in its transaction (an invitation through a provider signs in at once).</summary>
+    private static async Task<IResult> AcceptAsync(
+        HttpContext http, InviteAcceptance acceptance, MembershipReader memberships, TokenOptions tokens, TimeProvider clock,
+        ProviderTicket ticket, string ticketText, string binding)
+    {
+        var accepted = await acceptance.AcceptThroughProviderAsync(new ProviderInvite(ticket, ticketText, binding), http.RequestAborted);
+        if (!accepted.Succeeded)
+        {
+            return ApiResults.Error(accepted.Error!);
+        }
+
+        try
+        {
+            var account = accepted.Account!;
+            var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
+                ?? throw new InvalidOperationException("The account that was just made has no membership.");
+            if (tenant.CompanyId != accepted.CompanyId)
+            {
+                throw new InvalidOperationException("The membership read is not the company the acceptance joined.");
+            }
+
+            return ProviderSignIn.Session(http, account, tenant, ticket.Provider, accepted.Transaction!, tokens, clock);
+        }
+        catch
+        {
+            await accepted.Transaction!.DisposeAsync();
+            throw;
+        }
     }
 }

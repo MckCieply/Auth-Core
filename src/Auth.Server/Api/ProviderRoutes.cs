@@ -67,16 +67,23 @@ public static class ProviderRoutes
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":false}`, whether or not an account has it; an account with the address "
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":true}`; an account under a look-alike spelling `409 already_registered`; no account "
                 + "`{\"next\":\"finish_signup\",\"email\",\"kinds\"}` while sign-up is on, else `403 no_account`. A ticket that is unknown, used, "
-                + "expired, of the purpose `reauth` or without its `auth_pt` is `400 invalid_ticket`.")
+                + "expired, of the purpose `reauth` or without its `auth_pt` is `400 invalid_ticket`. A ticket of an invitation (`invite`) accepts it "
+                + "and signs in, with the account made without a password: the invitation unknown, used, expired, cancelled or replaced is "
+                + "`400 invalid_token`; the ticket's address missing, unverified or not the invited one `403 address_mismatch`; a company member's address "
+                + "`409 already_member`, a private account's `409 private_account_exists`, an identity linked already `409 provider_already_linked`; the "
+                + "invitation stays usable after each of them.")
             .ReadsJson<ProviderTicketRequest>()
             .ReadsCookie(ProviderBindingCookie.Name, "The binding of the ticket, set by the callback that made it. Without it, or with another browser's, the ticket is unknown.")
             .Produces<ProviderExchangeResponse>()
             .SetsRefreshCookie(
                 StatusCodes.Status200OK,
                 AccountEndpoints.RefreshCookieSet + $" On a sign-in only; `{ProviderBindingCookie.Name}` is emptied then, with `Max-Age=0`.")
-            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.NoEmail, TenancyErrors.NoAccount)
-            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered);
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket, TenancyErrors.InvalidToken)
+            .ProducesError(
+                StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.NoEmail, TenancyErrors.NoAccount, TenancyErrors.AddressMismatch)
+            .ProducesError(
+                StatusCodes.Status409Conflict, TenancyErrors.AlreadyRegistered, TenancyErrors.AlreadyMember, TenancyErrors.PrivateAccountExists,
+                TenancyErrors.ProviderAlreadyLinked);
 
         app.MapPost(ProviderPaths.Link, ProviderLinkEndpoint.HandleAsync)
             .WithTags("Providers")

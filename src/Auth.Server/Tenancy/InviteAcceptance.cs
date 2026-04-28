@@ -3,9 +3,11 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Providers;
 using Auth.Server.Requests;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using OpenIddict.Abstractions;
 
 namespace Auth.Server.Tenancy;
@@ -15,6 +17,18 @@ namespace Auth.Server.Tenancy;
 /// account (spec 0010), which accepting would move into the company.
 /// </summary>
 public sealed record InvitePreview(string OrgName, string Email, string Role, bool HasPrivateAccount);
+
+/// <summary>An acceptance through a provider (spec 0011): the ticket as read, and the ticket and its binding as sent.</summary>
+public sealed record ProviderInvite(ProviderTicket Ticket, string TicketText, string Binding);
+
+/// <summary>
+/// How <see cref="InviteAcceptance.AcceptThroughProviderAsync"/> ended: a refusal has its <see cref="Error"/>; success has the new account, its
+/// company and the transaction that still holds them, not committed (the sign-in is written in it).
+/// </summary>
+public sealed record ProviderAcceptance(string? Error, ApplicationUser? Account = null, Guid CompanyId = default, IDbContextTransaction? Transaction = null)
+{
+    public bool Succeeded => Error is null;
+}
 
 /// <summary>
 /// Previews and accepts an invitation by its link token (spec 0005 → Invitations — public, Effects; spec 0010 → Invitations). Accepting is how
@@ -240,6 +254,132 @@ public sealed class InviteAcceptance(
         await entry.ReloadAsync(cancellationToken);   // what a sign-in or a password change wrote meanwhile
         return true;
     }
+
+    /// <summary>
+    /// Accepts an invitation through a provider (spec 0011 → exchange, purpose <c>invite</c>; spec 0010's acceptance with the provider in place of
+    /// the password), in the order of the contract: the invitation found by the hash the ticket holds (unknown, used, expired, cancelled, replaced
+    /// or a look-alike: <c>invalid_token</c>); the ticket's address missing, unverified or not the invited one (<c>address_mismatch</c>,
+    /// Decision 9); a company member's address (<c>already_member</c>) or a private account's (<c>private_account_exists</c>: the move of spec 0010
+    /// is the screen's own button, Settled 15); the identity a login already (<c>provider_already_linked</c>). Every refusal changes nothing, the
+    /// invitation and the ticket included. Otherwise, under the company lock and then the address lock, the invitation and the ticket are used up,
+    /// the account is made with the invited address and no password, its email confirmed, the identity its login, a member with the invited role,
+    /// and <c>invite.accepted</c> names the role and the provider. Nothing is committed: the transaction is handed over, because the acceptance
+    /// signs the person in (Settled 16).
+    /// </summary>
+    public async Task<ProviderAcceptance> AcceptThroughProviderAsync(ProviderInvite request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var ticket = request.Ticket;
+        var hash = ticket.InviteTokenHash ?? throw new InvalidOperationException("An invitation ticket holds the hash of its invitation.");
+        var now = StorableTime.Now(clock);   // read again after each lock: a request that waited judges the ticket and the invitation by the time it gets in
+
+        // Leaving this method without handing the transaction over rolls everything back, the use of the invitation included.
+        var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var handedOver = false;
+        try
+        {
+            // The company first, as every change to a company's members does; then the invitation, as AcceptAsync does.
+            var companyId = await db.Invites.Where(i => i.TokenHash == hash && i.ExpiresAt > now)
+                .Select(i => (Guid?)i.CompanyId).FirstOrDefaultAsync(cancellationToken);
+            if (companyId is not { } company || !await CompanyLock.AcquireAsync(db, company, cancellationToken))
+            {
+                return ProviderRefused(TenancyErrors.InvalidToken);
+            }
+
+            now = StorableTime.Now(clock);
+
+            // ToListAsync, not SingleOrDefaultAsync: EF must send the statement as it is, not wrapped in a subquery.
+            var consumed = await db.Invites
+                .FromSql($"""DELETE FROM "Invites" WHERE "TokenHash" = {hash} AND "ExpiresAt" > {now} RETURNING *""")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            if (consumed.Count != 1 || EmailInput.MayStandForAnotherAddress(consumed[0].Email))
+            {
+                return ProviderRefused(TenancyErrors.InvalidToken);
+            }
+
+            var invite = consumed[0];
+
+            // The invitation is bound to the address it named: only a verified provider address spelled the same up to ASCII case accepts it.
+            if (ticket.Email is null || !ticket.EmailVerified || !EmailInput.IsSameAddress(ticket.Email, invite.Email))
+            {
+                return ProviderRefused(TenancyErrors.AddressMismatch);
+            }
+
+            await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
+            now = StorableTime.Now(clock);
+            var user = await users.FindByEmailAsync(invite.Email);
+            if (user is not null && !EmailInput.IsSameAddress(user.Email, invite.Email))
+            {
+                return ProviderRefused(TenancyErrors.InvalidToken);
+            }
+
+            var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
+            if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
+            {
+                user = null;   // removed between the two reads: the address belongs to no account now
+            }
+
+            if (space is { Kind: CompanyKind.Organization })
+            {
+                return ProviderRefused(TenancyErrors.AlreadyMember);
+            }
+
+            if (space is { Kind: CompanyKind.Personal })
+            {
+                return ProviderRefused(TenancyErrors.PrivateAccountExists);
+            }
+
+            if (user is not null)
+            {
+                return ProviderRefused(TenancyErrors.AlreadyMember);   // an account with no space: a provider never takes an account over
+            }
+
+            if (await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
+            {
+                return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);
+            }
+
+            if (await ProviderTickets.ConsumeAsync(db, request.TicketText, request.Binding, ProviderTicketPurpose.Invite, now, cancellationToken) is null)
+            {
+                return ProviderRefused(TenancyErrors.InvalidTicket);
+            }
+
+            // The provider proved the invited mailbox: the email is confirmed, and no password is set (spec 0011 → Accounts without a password).
+            var account = new ApplicationUser { UserName = invite.Email, Email = invite.Email, EmailConfirmed = true };
+            Ensure(await users.CreateAsync(account));
+            ProviderLogins.Add(db, account.Id, ticket.Provider, ticket.IdentityKey);
+            db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now });
+            audit.Stage(new AuditEntry
+            {
+                Kind = AuditKinds.InviteAccepted,
+                SubjectUserId = account.Id,
+                SubjectEmail = account.Email,
+                OrgId = invite.CompanyId,
+                OrgName = await audit.CompanyNameAsync(invite.CompanyId, cancellationToken),
+                TargetId = invite.Id,
+                Details = new Dictionary<string, object?>
+                {
+                    ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
+                    ["provider"] = ticket.Provider,
+                },
+            });
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            handedOver = true;
+            return new ProviderAcceptance(null, account, invite.CompanyId, transaction);
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    private static ProviderAcceptance ProviderRefused(string error) => new(error);
 
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 
