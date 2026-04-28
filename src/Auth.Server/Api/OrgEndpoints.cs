@@ -38,8 +38,11 @@ public static class OrgEndpoints
             return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
+        // Spec 0011: whether the account has a password, and the providers it signs in with, sorted ordinally.
+        var linked = (await users.GetLoginsAsync(user)).Select(l => l.LoginProvider).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
         return ApiResults.Ok(new MeResponse(
-            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions]));
+            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions],
+            user.PasswordHash is not null, [.. linked]));
     }
 
     public static async Task<IResult> GetAsync(HttpContext http, MembershipReader memberships)

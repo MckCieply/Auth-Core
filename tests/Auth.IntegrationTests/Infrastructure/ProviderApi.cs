@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Net.Http.Headers;
@@ -125,6 +126,31 @@ public static class ProviderApi
             request.Headers.TryAddWithoutValidation("Cookie", $"{BindingCookie}={binding}");
         }
 
+        return await client.SendAsync(request);
+    }
+
+    /// <summary><c>DELETE /auth/account</c> with the bearer token, a JSON body, and the binding cookie when given.</summary>
+    public static async Task<HttpResponseMessage> DeleteAccount(HttpClient client, string accessToken, object body, string? binding)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/auth/account") { Content = JsonContent.Create(body) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        if (binding is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", $"{BindingCookie}={binding}");
+        }
+
+        return await client.SendAsync(request);
+    }
+
+    /// <summary><c>DELETE /auth/account</c> with a body as it is.</summary>
+    public static async Task<HttpResponseMessage> DeleteAccountRaw(HttpClient client, string accessToken, string body)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/auth/account") { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return await client.SendAsync(request);
     }
 

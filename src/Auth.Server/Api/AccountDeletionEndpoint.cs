@@ -1,12 +1,15 @@
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Auth.Server.Lockout;
+using Auth.Server.Providers;
 using Auth.Server.Requests;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Server.Api;
@@ -15,10 +18,16 @@ namespace Auth.Server.Api;
 /// <c>DELETE /auth/account</c> (spec 0010): a private person deletes their own account. The checks run in this order: the token's
 /// <c>org_kind</c> against the database (a token that says <c>personal</c> while the database shows a company or nothing is
 /// <c>403 permissions_changed</c>, so that the frontend refreshes; a company member is <c>403 forbidden</c>: company accounts are managed by their
-/// admins), the body, the address lock, and then, under the lock, the membership again (an invitation may have moved the account meanwhile), the
-/// lockout of the caller's identifier and the password (the attempt counted first, as a login counts it; a correct one ends the streak; the password
-/// is evaluated once, as login and <c>DELETE /auth/org</c> evaluate it). The account is then deleted with everything it has
-/// (<see cref="AccountDeletion"/>, reason <c>self</c>) in the same transaction; the answer clears the refresh cookie as logout does.
+/// admins), the body (exactly one of <c>password</c> and <c>provider_ticket</c>, spec 0011), the address lock, and then, under the lock, the
+/// membership again (an invitation may have moved the account meanwhile) and the account's password hash again. The confirmation must then fit the
+/// account: a ticket for an account with a password is <c>403 password_required</c>, a password for an account without one is
+/// <c>403 reauth_required</c>; both are judged before anything is counted and write no row.
+/// A ticket takes its own branch from here (<see cref="DeleteWithTicketAsync"/>), before the lockout and never counted: a live <c>reauth</c> ticket of
+/// this browser whose identity is a login of this account is used up by the deletion, anything else is <c>403 reauth_failed</c> and rolls the
+/// transaction back. A password goes on to the lockout of the caller's identifier and the password (the attempt counted first, as a login counts it;
+/// a correct one ends the streak; the password is evaluated once, as login and <c>DELETE /auth/org</c> evaluate it). The account is then deleted
+/// with everything it has (<see cref="AccountDeletion"/>, reason <c>self</c>) in the same transaction; the answer clears the refresh cookie as
+/// logout does, and <c>auth_pt</c> beside it.
 /// <para>
 /// Why the lock comes before the counting and the hash. An account that moved into a company, or was deleted, while the request waited for the lock
 /// is refused as <c>permissions_changed</c> before any attempt is counted and before any password is evaluated; the password that is verified is the
@@ -38,12 +47,14 @@ public static class AccountDeletionEndpoint
 {
     public const string Path = "/auth/account";
 
-    private static readonly string[] Fields = ["password"];
+    private const string PasswordField = "password";
+    private const string TicketField = "provider_ticket";
 
     public static async Task<IResult> DeleteAsync(
         HttpContext http, MembershipReader memberships, UserManager<ApplicationUser> users, LoginStreakStore streaks, AuthDbContext db,
-        AccountDeletion deletion, AuditLog audit)
+        AccountDeletion deletion, AuditLog audit, TimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(memberships);
         ArgumentNullException.ThrowIfNull(users);
@@ -64,8 +75,20 @@ public static class AccountDeletionEndpoint
             return refused;
         }
 
-        var fields = await JsonObjectBody.ReadStringsAsync(http.Request, Fields, http.RequestAborted);
-        if (fields is null || fields[0].Contains('\0'))
+        // Spec 0011: exactly one of the two confirmations: a password that is a non-blank string with no NUL, or a provider ticket that is a string
+        // (a blank one is a ticket that is not live: reauth_failed). Which one the account needs is judged under the lock, below.
+        var body = await JsonObjectBody.ReadObjectAsync(http.Request, http.RequestAborted);
+        if (body is not { } fields || fields.Has(PasswordField) == fields.Has(TicketField))
+        {
+            return ApiResults.InvalidRequest();
+        }
+
+        string? password = null;
+        string? ticketText = null;
+        var readable = fields.Has(PasswordField)
+            ? fields.TryString(PasswordField, out password) && !password.Contains('\0')
+            : fields.TryAnyString(TicketField, out ticketText);
+        if (!readable)
         {
             return ApiResults.InvalidRequest();
         }
@@ -103,6 +126,22 @@ public static class AccountDeletionEndpoint
             return ApiResults.Error(TenancyErrors.PermissionsChanged);
         }
 
+        // Spec 0011: the confirmation must fit the account, judged under the lock and before anything is counted; nothing is written.
+        if (stored.PasswordHash is not null && ticketText is not null)
+        {
+            return ApiResults.Error(TenancyErrors.PasswordRequired);
+        }
+
+        if (stored.PasswordHash is null && password is not null)
+        {
+            return ApiResults.Error(TenancyErrors.ReauthRequired);
+        }
+
+        if (ticketText is not null)
+        {
+            return await DeleteWithTicketAsync(http, db, transaction, deletion, audit, clock, caller, email, userId, ticketText);
+        }
+
         var identifier = LoginIdentifier.HashOf(normalized);
         var decision = await streaks.RegisterAttemptAsync(identifier, http.RequestAborted);
         if (!decision.Allowed)
@@ -111,7 +150,7 @@ public static class AccountDeletionEndpoint
             return new TooManyAttemptsResult(decision.RetryAfter);
         }
 
-        if (!PasswordIsRight(users, stored.PasswordHash, fields[0]))
+        if (!PasswordIsRight(users, stored.PasswordHash, password!))
         {
             await RecordRefusalAsync(audit, caller, email, "wrong_password");
             return ApiResults.Error(TenancyErrors.WrongPassword);
@@ -126,6 +165,45 @@ public static class AccountDeletionEndpoint
         await transaction.CommitAsync(CancellationToken.None);
 
         RefreshCookie.Clear(http.Response);
+        ProviderBindingCookie.Clear(http.Response);
+        return ApiResults.NoContent();
+    }
+
+    /// <summary>
+    /// The provider confirmation of spec 0011, under the address lock of <paramref name="transaction"/>: a live <c>reauth</c> ticket of this browser
+    /// whose identity is a login of this account, used up by the deletion. Anything else is <c>403 reauth_failed</c> with
+    /// <c>account.delete_refused</c> (<c>reauth_failed</c>), and the transaction is rolled back, the ticket as it was. The lockout is not consulted:
+    /// 32 random bytes cannot be guessed. The deletion is that of spec 0010, with <c>provider.reauthenticated</c> in its transaction.
+    /// </summary>
+    private static async Task<IResult> DeleteWithTicketAsync(
+        HttpContext http, AuthDbContext db, IDbContextTransaction transaction, AccountDeletion deletion, AuditLog audit, TimeProvider clock,
+        TenantContext caller, string email, Guid userId, string ticketText)
+    {
+        var ticket = ProviderBindingCookie.TryRead(http.Request, out var binding)
+            ? await ProviderTickets.ConsumeAsync(db, ticketText, binding, ProviderTicketPurpose.Reauth, StorableTime.Now(clock), CancellationToken.None)
+            : null;
+        if (ticket is null || !await ProviderLogins.IsLoginOfAsync(db, userId, ticket.Provider, ticket.IdentityKey, CancellationToken.None))
+        {
+            await RecordRefusalAsync(audit, caller, email, "reauth_failed");
+            return ApiResults.Error(TenancyErrors.ReauthFailed);
+        }
+
+        audit.Stage(new AuditEntry
+        {
+            Kind = AuditKinds.ProviderReauthenticated,
+            ActorUserId = userId,
+            SubjectUserId = userId,
+            SubjectEmail = email,
+            OrgId = caller.CompanyId,
+            OrgName = caller.CompanyName,
+            Details = new Dictionary<string, object?> { ["provider"] = ticket.Provider },
+        });
+        await deletion.DeleteAsync(userId, AccountDeletionReason.Self, actor: null, CancellationToken.None);
+        await db.SaveChangesAsync(CancellationToken.None);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        RefreshCookie.Clear(http.Response);
+        ProviderBindingCookie.Clear(http.Response);
         return ApiResults.NoContent();
     }
 

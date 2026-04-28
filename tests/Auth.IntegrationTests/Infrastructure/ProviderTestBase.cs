@@ -81,6 +81,15 @@ public abstract class ProviderTestBase : SignupTestBase
 
     protected Task<HttpResponseMessage> CallbackAsync(string pathAndQuery, string? cookie) => ProviderApi.CallbackAsync(Browser, pathAndQuery, cookie);
 
+    /// <summary>A private account made through a provider as the finish makes it (no password), and its session.</summary>
+    protected async Task<(Guid UserId, SessionApi.Session Session)> PrivateThroughProviderAsync(string provider, FakeSignIn person)
+    {
+        var ticket = await TicketAsync(provider, person);
+        using var finished = await ProviderApi.Finish(Client, ticket, "private");
+        var session = await SessionApi.ReadSessionAsync(finished);
+        return (Guid.Parse(AccessTokens.Text(session.AccessToken, "sub")), session);
+    }
+
     /// <summary>The tickets in the table.</summary>
     protected Task<int> TicketCountAsync() => InDbAsync(db => db.ProviderTickets.CountAsync(TestContext.Current.CancellationToken));
 

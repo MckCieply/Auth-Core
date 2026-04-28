@@ -69,11 +69,13 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
         }
 
-        Assert.Equal(["password"], schema["properties"]!.AsObject().Select(p => p.Key));
+        Assert.Equal(["password", "provider_ticket"], schema["properties"]!.AsObject().Select(p => p.Key));
         Assert.Equal(["204", "400", "401", "403", "415", "429"], operation["responses"]!.AsObject().Select(r => r.Key).Order(StringComparer.Ordinal));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operation, "403")));
+        Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operation, "403")));   // spec 0011
         Assert.All(["too_many_attempts", "too_many_requests"], code => Assert.Contains(code, Description(operation, "429")));
         Assert.Contains("auth_rt", operation["responses"]!["204"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
+        Assert.Contains("auth_pt", operation["responses"]!["204"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());   // spec 0011
         Assert.NotNull(operation["security"]);
     }
 

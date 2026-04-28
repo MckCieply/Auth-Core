@@ -33,7 +33,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     ];
 
     // The endpoints that take a provider ticket and its auth_pt cookie (spec 0011).
-    private static readonly string[] TicketEndpoints = ["POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish"];
+    private static readonly string[] TicketEndpoints = ["POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish", "DELETE /auth/account"];
 
     private static async Task<JsonObject> DescriptionAsync(AuthAppFactory factory)
     {
@@ -214,6 +214,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
+        Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
@@ -277,7 +278,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
-    [InlineData("DELETE /auth/account", "password")]
+    [InlineData("DELETE /auth/account", "password,provider_ticket")]
     [InlineData("POST /auth/providers/exchange", "ticket")]
     [InlineData("POST /auth/providers/link", "password,ticket")]
     [InlineData("POST /auth/providers/finish", "company_name,kind,ticket")]
@@ -303,7 +304,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["email", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
