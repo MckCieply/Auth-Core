@@ -35,7 +35,8 @@ public static class RatePolicies
 
     /// <summary>
     /// The policy of a request, chosen by method and path (the path compared without regard to case or one trailing slash), or
-    /// <see langword="null"/> for a request outside <c>/auth/</c>. Only a <c>POST</c> to the specific paths is not "general".
+    /// <see langword="null"/> for a request outside <c>/auth/</c>. Only a <c>POST</c> to the specific paths, and a <c>GET</c> of the start or the
+    /// callback of a provider round trip (spec 0011), is not "general".
     /// </summary>
     public static RatePolicy? Classify(string method, PathString path)
     {
@@ -46,14 +47,24 @@ public static class RatePolicies
             return null;
         }
 
+        var text = path.Value ?? "";
+        var trimmed = text.Length > 1 && text[^1] == '/' ? text[..^1] : text;
+
+        // Spec 0011: the start and the callback of a provider round trip are steps of a sign-in, the only GETs that are not general.
+        if (HttpMethods.IsGet(method) && IsProviderRoundTrip(trimmed))
+        {
+            return RatePolicy.Login;
+        }
+
         if (!HttpMethods.IsPost(method))
         {
             return RatePolicy.General;
         }
 
-        var text = path.Value ?? "";
-        var trimmed = text.Length > 1 && text[^1] == '/' ? text[..^1] : text;
-        if (trimmed.Equals("/auth/login", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.Equals("/auth/login", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/providers/exchange", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/providers/link", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("/auth/providers/finish", StringComparison.OrdinalIgnoreCase))
         {
             return RatePolicy.Login;
         }
@@ -81,5 +92,17 @@ public static class RatePolicies
         }
 
         return RatePolicy.General;
+    }
+
+    /// <summary><c>/auth/providers/{any name}/start</c> or <c>/callback</c>, without regard to case: the name is judged later, by the endpoint.</summary>
+    private static bool IsProviderRoundTrip(string path)
+    {
+        var segments = path.Split('/');
+        return segments.Length == 5
+            && segments[0].Length == 0
+            && segments[1].Equals("auth", StringComparison.OrdinalIgnoreCase)
+            && segments[2].Equals("providers", StringComparison.OrdinalIgnoreCase)
+            && segments[3].Length > 0
+            && (segments[4].Equals("start", StringComparison.OrdinalIgnoreCase) || segments[4].Equals("callback", StringComparison.OrdinalIgnoreCase));
     }
 }

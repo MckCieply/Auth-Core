@@ -43,6 +43,9 @@ public sealed class JsonCharsetTests(PostgresFixture postgres, KeyMaterialFixtur
     [InlineData("POST", "/auth/org/roles")]
     [InlineData("PUT", "/auth/org/roles/" + SomeId)]
     [InlineData("DELETE", "/auth/org/roles/" + SomeId)]
+    [InlineData("POST", "/auth/providers/exchange")]   // spec 0011, criterion 29
+    [InlineData("POST", "/auth/providers/link")]
+    [InlineData("POST", "/auth/providers/finish")]
     public async Task A_body_declared_utf_16_is_a_415_on_every_endpoint_that_reads_one_and_before_authentication(string method, string path)   // criterion 6
     {
         using var response = await SendAsync(method, path, Utf16);   // no token: the 415 comes before the 401

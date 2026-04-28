@@ -80,6 +80,38 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
+    public async Task The_provider_operations_are_described_with_their_parameters_answers_and_cookies()   // spec 0011, criterion 29
+    {
+        var (_, operations) = await DescriptionAsync();
+
+        var start = operations["GET /auth/providers/{name}/start"];
+        var query = start["parameters"]!.AsArray().Where(p => p!["in"]!.GetValue<string>() == "query").Select(p => p!["name"]!.GetValue<string>());
+        Assert.Equal(["invite", "purpose"], query.Order(StringComparer.Ordinal));
+        Assert.NotNull(start["responses"]!["302"]!["headers"]!["Location"]);
+        Assert.Contains("OpenIddict.Client.State", start["responses"]!["302"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
+
+        var callback = operations["GET /auth/providers/{name}/callback"]["responses"]!["302"]!["headers"]!;
+        Assert.All(["ticket", "purpose", "error"], member => Assert.Contains(member, callback["Location"]!["description"]!.GetValue<string>()));
+        Assert.Contains("auth_pt", callback["Set-Cookie"]!["description"]!.GetValue<string>());
+
+        foreach (var endpoint in new[] { "POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish" })
+        {
+            var operation = operations[endpoint];
+            var cookie = Assert.Single(operation["parameters"]!.AsArray(), p => p!["in"]!.GetValue<string>() == "cookie")!;
+            Assert.Equal("auth_pt", cookie["name"]!.GetValue<string>());
+            var setCookie = operation["responses"]!["200"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>();
+            Assert.Contains("auth_rt", setCookie);
+            Assert.Contains("auth_pt", setCookie);
+            Assert.Contains("too_many_requests", Description(operation, "429"));
+            Assert.Contains("unsupported_media_type", Description(operation, "415"));
+        }
+
+        Assert.EndsWith(
+            "ProviderExchangeResponse",
+            operations["POST /auth/providers/exchange"]["responses"]!["200"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Every_operation_can_say_429_too_many_requests_with_retry_after_the_two_added_by_hand_included()   // spec 0008 → OpenAPI
     {
         var (_, operations) = await DescriptionAsync();
