@@ -107,7 +107,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
             [ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.MicrosoftClientIdKey, ProviderSettings.MicrosoftClientSecretKey],
             key => Assert.False(string.IsNullOrWhiteSpace(settings[key])));
         Assert.All(
-            ["scripts/e2e-web.sh", "scripts/e2e-notes.sh"],
+            ["scripts/e2e-web.sh", "scripts/e2e-notes.sh", "scripts/e2e-providers.sh"],
             script => Assert.Contains("tests/Auth.FakeOidc/compose.yml", ComposeCommand(script), StringComparison.Ordinal));
     }
 
