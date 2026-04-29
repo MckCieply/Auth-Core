@@ -24,23 +24,23 @@ describe('AccountApi: sign-up', () => {
       const request = ctrl.expectOne('/auth/options');
       expect(request.request.method).toBe('GET');
       request.flush({ signup: 'self-service' });
-      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off' });
+      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off', providers: [] });
     });
 
     it('ignores the members it does not know', async () => {
       const done = api.options();
-      ctrl.expectOne('/auth/options').flush({ signup: 'self-service', providers: ['google'] });
-      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off' });
+      ctrl.expectOne('/auth/options').flush({ signup: 'self-service', theme: 'dark' });
+      expect(await done).toEqual({ signup: 'self-service', private_signup: 'off', providers: [] });
     });
 
     it('reads private_signup: self-service, and anything else as off (spec 0010)', async () => {
       const done = api.options();
       ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'self-service' });
-      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'self-service' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'self-service', providers: [] });
 
       const other = api.options();
       ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'on' });
-      expect(await other).toEqual({ signup: 'self-service', private_signup: 'off' });
+      expect(await other).toEqual({ signup: 'self-service', private_signup: 'off', providers: [] });
     });
 
     it.each([[{ signup: 'invite-only' }], [{ signup: 'something-new' }], [{ signup: 1 }], [{}], [[]], ['<html>oops</html>'], [null]])(
@@ -48,14 +48,14 @@ describe('AccountApi: sign-up', () => {
       async (body) => {
         const done = api.options();
         ctrl.expectOne('/auth/options').flush(body);
-        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [] });
       },
     );
 
     it.each([500, 502, 429, 403])('a %s means invite-only', async (code) => {
       const done = api.options();
       ctrl.expectOne('/auth/options').flush('oops', status(code));
-      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [] });
     });
 
     it('an answer that does not come within ten seconds means invite-only, and the request is cancelled', async () => {
@@ -66,7 +66,7 @@ describe('AccountApi: sign-up', () => {
         vi.advanceTimersByTime(OPTIONS_TIMEOUT_MS - 1);
         expect(request.cancelled).toBe(false);
         vi.advanceTimersByTime(2);
-        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+        expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [] });
         expect(request.cancelled).toBe(true);
       } finally {
         vi.useRealTimers();
@@ -76,7 +76,7 @@ describe('AccountApi: sign-up', () => {
     it('no network means invite-only', async () => {
       const done = api.options();
       ctrl.expectOne('/auth/options').error(new ProgressEvent('error'));
-      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off' });
+      expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [] });
     });
   });
 

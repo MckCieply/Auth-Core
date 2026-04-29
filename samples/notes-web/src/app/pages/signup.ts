@@ -1,19 +1,21 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { AccountApi, SignupKind } from '../account-api';
+import { AccountApi, ProviderName, SignupKind } from '../account-api';
 import { texts } from '../texts';
+import { ProviderButtons } from './provider-buttons';
 import { requiredText } from './required-text';
 
 @Component({
   selector: 'app-signup',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, ProviderButtons],
   template: `
     <main>
       <h1>{{ t.title }}</h1>
       @if (closed()) {
         <p class="error" role="alert" data-testid="signup-closed">{{ t.closed }}</p>
       } @else if (ready()) {
+        <app-provider-buttons [providers]="providers()" action="signup" />
         <p>{{ kind() === 'private' ? t.introPrivate : t.intro }}</p>
         <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
           @if (choice()) {
@@ -79,6 +81,8 @@ export class SignupPage implements OnInit {
   protected readonly choice = signal(false);
   /** The form is drawn once GET /auth/options has answered, so that it never shows the wrong kind first. */
   protected readonly ready = signal(false);
+  /** The offered providers (spec 0011): "Sign up with ..." comes before the form. */
+  protected readonly providers = signal<ProviderName[]>([]);
 
   ngOnInit(): void {
     // With one kind on, the screen is that one. With both off, or when the call fails, it is the organization form: the request is then
@@ -87,6 +91,7 @@ export class SignupPage implements OnInit {
       const organization = options.signup === 'self-service';
       const privatePerson = options.private_signup === 'self-service';
       this.choice.set(organization && privatePerson);
+      this.providers.set(options.providers);
       if (privatePerson && !organization) {
         this.choose('private');
       }

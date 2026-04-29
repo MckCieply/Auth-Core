@@ -16,10 +16,43 @@ export interface InvitePreview {
   has_private_account: boolean;
 }
 
-/** What GET /auth/options answers, as far as the screens care: whether a visitor may start a company, or sign up alone (spec 0010). */
+/** The sign-in providers this app has buttons for (spec 0011). */
+export const PROVIDER_NAMES = ['google', 'microsoft'] as const;
+
+export type ProviderName = (typeof PROVIDER_NAMES)[number];
+
+export function isProviderName(value: unknown): value is ProviderName {
+  return value === 'google' || value === 'microsoft';
+}
+
+/** The names of a JSON value that this app knows, in their order, each once: anything else is dropped. */
+export function providerNamesOf(value: unknown): ProviderName[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isProviderName).filter((name, index, all) => all.indexOf(name) === index);
+}
+
+/**
+ * The address of a provider button: Auth-Core's start, plain, with the invitation token, or for the confirmation of a deletion (spec 0011).
+ * A link, not a call: the browser leaves the app for the provider and comes back to /provider-return.
+ */
+export function providerStartUrl(name: ProviderName, how: { invite: string } | { reauth: true } | null = null): string {
+  const start = `/auth/providers/${name}/start`;
+  if (how === null) {
+    return start;
+  }
+  return 'invite' in how ? `${start}?invite=${encodeURIComponent(how.invite)}` : `${start}?purpose=reauth`;
+}
+
+/**
+ * What GET /auth/options answers, as far as the screens care: whether a visitor may start a company, or sign up alone (spec 0010), and the
+ * providers that have a button, in Auth-Core's order (spec 0011).
+ */
 export interface SiteOptions {
   signup: 'self-service' | 'invite-only';
   private_signup: 'self-service' | 'off';
+  providers: ProviderName[];
 }
 
 /** A company of one's own, or a private account (spec 0010). */
@@ -84,8 +117,8 @@ export class AccountApi {
 
   /**
    * Whether the product's screens may offer sign-up. Each switch is read on its own (spec 0010). A call that fails, and an answer this
-   * app does not know, and one that takes longer than ten seconds, mean "invite-only" and "off": the link "Create an account" is then
-   * not offered, which is the safe side.
+   * app does not know, and one that takes longer than ten seconds, mean "invite-only", "off" and no provider: the link "Create an account"
+   * and the provider buttons are then not offered, which is the safe side.
    */
   async options(): Promise<SiteOptions> {
     try {
@@ -93,9 +126,10 @@ export class AccountApi {
       return {
         signup: isRecord(body) && body['signup'] === 'self-service' ? 'self-service' : 'invite-only',
         private_signup: isRecord(body) && body['private_signup'] === 'self-service' ? 'self-service' : 'off',
+        providers: isRecord(body) ? providerNamesOf(body['providers']) : [],
       };
     } catch {
-      return { signup: 'invite-only', private_signup: 'off' };
+      return { signup: 'invite-only', private_signup: 'off', providers: [] };
     }
   }
 

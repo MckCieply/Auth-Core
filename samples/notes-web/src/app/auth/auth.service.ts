@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom, timeout } from 'rxjs';
+import { ProviderName, providerNamesOf } from '../account-api';
 
 /** What GET /auth/me answers. The app never decodes the access token: it asks. */
 export interface Me {
@@ -12,6 +13,10 @@ export interface Me {
   org_kind: 'organization' | 'personal';
   roles: string[];
   permissions: string[];
+  /** Spec 0011: false for an account made through Google or Microsoft that has never set a password. */
+  has_password: boolean;
+  /** The providers that sign in to this account, sorted (spec 0011). */
+  linked_providers: ProviderName[];
 }
 
 /** What went wrong with a call to an account endpoint, as far as a screen cares. */
@@ -27,6 +32,14 @@ export type Failure =
   | { kind: 'wrong_password' }
   | { kind: 'private_account_exists' }
   | { kind: 'invalid_request' }
+  | { kind: 'invalid_ticket' }
+  | { kind: 'no_email' }
+  | { kind: 'no_account' }
+  | { kind: 'address_mismatch' }
+  | { kind: 'provider_already_linked' }
+  | { kind: 'reauth_failed' }
+  | { kind: 'password_required' }
+  | { kind: 'reauth_required' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
@@ -104,6 +117,38 @@ export function failureOf(error: unknown): Failure {
   if (error.status === 409 && code === 'private_account_exists') {
     return { kind: 'private_account_exists' };
   }
+  return providerFailureOf(error.status, code);
+}
+
+/** The answers of spec 0011, each with the status of the contract; anything else is "other". */
+function providerFailureOf(status: number, code: string | undefined): Failure {
+  if (status === 400 && code === 'invalid_ticket') {
+    return { kind: 'invalid_ticket' };
+  }
+  if (status === 409 && code === 'provider_already_linked') {
+    return { kind: 'provider_already_linked' };
+  }
+  if (status !== 403) {
+    return { kind: 'other' };
+  }
+  if (code === 'no_email') {
+    return { kind: 'no_email' };
+  }
+  if (code === 'no_account') {
+    return { kind: 'no_account' };
+  }
+  if (code === 'address_mismatch') {
+    return { kind: 'address_mismatch' };
+  }
+  if (code === 'reauth_failed') {
+    return { kind: 'reauth_failed' };
+  }
+  if (code === 'password_required') {
+    return { kind: 'password_required' };
+  }
+  if (code === 'reauth_required') {
+    return { kind: 'reauth_required' };
+  }
   return { kind: 'other' };
 }
 
@@ -149,6 +194,9 @@ function asMe(body: unknown): Me | null {
       org_kind: body['org_kind'] === 'personal' ? 'personal' : 'organization',
       roles: body['roles'],
       permissions: body['permissions'],
+      // Anything but false keeps the password screens of spec 0010: an Auth-Core before spec 0011 does not send the member.
+      has_password: body['has_password'] !== false,
+      linked_providers: providerNamesOf(body['linked_providers']),
     };
   }
   return null;

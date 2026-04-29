@@ -37,6 +37,17 @@ export const texts = {
     tryAgainIn: (seconds: number): string => `Try again in ${seconds} s.`,
   },
 
+  // The provider buttons (spec 0011). The names are the providers' own; the words around them say what the button does.
+  providers: {
+    names: { google: 'Google', microsoft: 'Microsoft' } as Record<string, string>,
+    either: 'Google or Microsoft',
+    continueWith: (name: string): string => `Continue with ${name}`,
+    signUpWith: (name: string): string => `Sign up with ${name}`,
+    acceptWith: (name: string): string => `Accept with ${name}`,
+    confirmWith: (name: string): string => `Confirm with ${name}`,
+    or: 'or',
+  },
+
   login: {
     title: 'Sign in',
     submit: 'Sign in',
