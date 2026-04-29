@@ -1,0 +1,38 @@
+# The fake OpenID provider of spec 0011 (tests/Auth.FakeOidc) on top of the development stack, for the end-to-end checks only. Use it
+# with the base file and the overlays of the samples:
+#
+#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f samples/notes-web/compose.yml \
+#     -f tests/Auth.FakeOidc/compose.yml --env-file .env up -d --build
+#
+# Relative paths in this file are resolved from deploy/ (the directory of the FIRST -f file), not from here.
+# Auth-Core trusts it as its test issuer (Development only; any other environment refuses to start with it): the two providers are
+# http://fake-oidc:8099/google and http://fake-oidc:8099/microsoft on the compose network, and a browser reaches the fake's sign-in page
+# at http://localhost:8099 (loopback only). The keys below are the fake's own: it accepts any secret, and no real provider knows them.
+services:
+  fake-oidc:
+    # Without its own image name Compose would name the build after the project.
+    image: auth-core-fake-oidc:local
+    build:
+      context: ..
+      dockerfile: tests/Auth.FakeOidc/Dockerfile
+    environment:
+      # The issuer in the fake's tokens and its token and key endpoints: the compose network, where Auth-Core reaches it.
+      FakeOidc__IssuerOrigin: http://fake-oidc:8099
+      # Its authorization endpoint: where the browser is sent.
+      FakeOidc__BrowserOrigin: http://localhost:8099
+    ports:
+      - "127.0.0.1:8099:8099"
+    # No healthcheck: the chiseled image has no shell or curl. The scripts poll the discovery document from the host.
+
+  auth:
+    depends_on:
+      fake-oidc:
+        condition: service_started
+    environment:
+      Auth__Providers__TestIssuer: http://fake-oidc:8099
+      Auth__Providers__Google__ClientId: fake-google-client.apps.test
+      Auth__Providers__Google__ClientSecret: fake-google-secret
+      Auth__Providers__Microsoft__ClientId: 6f1a2b3c-0000-4000-8000-0000000e2e01
+      Auth__Providers__Microsoft__ClientSecret: fake-microsoft-secret
+      # Where the round trip ends (the web sample's screen); the callback is this origin's /auth/providers/{name}/callback (spec 0011).
+      Auth__App__FrontendUrls__ProviderReturn: https://localhost:8443/provider-return

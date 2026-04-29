@@ -27,9 +27,11 @@
 #   cp .env.example .env                  # then set real local values (git-ignored); NOTES_DB_PASSWORD too
 #   scripts/dev-keys.sh                   # dev signing/encryption keys into .secrets/ (git-ignored)
 #   export COMPOSE_PROJECT_NAME=auth-core-notes   # the script's own project name (see below); set it for the down -v too
-#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
+#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f tests/Auth.FakeOidc/compose.yml --env-file .env down -v
 #   scripts/e2e-notes.sh                  # this script: brings the stack up (builds the images), then drives it
-#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env down -v
+#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f tests/Auth.FakeOidc/compose.yml --env-file .env down -v
+# The fake OpenID provider's overlay (spec 0011) is part of the stack: the sample's manifest lists Google and Microsoft, and without their
+# keys /auth/health would say "Degraded". Nothing here signs in through it (scripts/e2e-providers.sh does).
 # The script runs its stack as the compose project "auth-core-notes" (COMPOSE_PROJECT_NAME overrides it; "auth-core" is refused), not as "auth-core"
 # that deploy/docker-compose.yml names: its containers and volumes stay apart from a development stack of the same
 # clone, and the down -v above removes only them. (Host ports 8088, 8080 and 8025 are still shared: stop the other stack.)
@@ -37,7 +39,7 @@
 #
 # Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
 # The operator commands run as `docker compose run --rm -T --no-deps auth admin ...` (spec 0005). Needs: curl, python3
-# (standard library only), docker compose, and host ports 8088 (Caddy), 8080 (Auth-Core) and 8025 (Mailpit) free.
+# (standard library only), docker compose, and host ports 8088 (Caddy), 8080 (Auth-Core), 8025 (Mailpit) and 8099 (the fake provider) free.
 # Env: BASE_URL (default http://localhost:8088), MAILPIT_URL (default http://localhost:8025). The links in the mails start
 # with http://localhost:4200/invite (appsettings.Development.json). Takes about three minutes, most of it the first image
 # build and the wait for the server to pick up the invitation the CLI queued. Re-runnable on the same stack: every company
@@ -52,7 +54,8 @@ MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
 # deploy/docker-compose.yml names the project "auth-core", which every other stack of the clone uses; run apart from them
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-notes}"
 [[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
-compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" --env-file "$root/.env")
+compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$root/tests/Auth.FakeOidc/compose.yml"
+  --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
 AUTH_STOPPED=0

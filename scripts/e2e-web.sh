@@ -17,6 +17,8 @@
 # the completion finds an account) and prepares EXPIRED: it asks for a sign-up through the API, waits for the mail, and moves the end of the
 # link into the past with one UPDATE of "PendingSignups"."TokenExpiresAt" (the database, because the test cannot move the server's clock).
 # The tests of spec 0010 (e2e/10-private.spec.ts) make what they need themselves, through the API; nothing is seeded for them.
+# The stack includes the fake OpenID provider of spec 0011 (tests/Auth.FakeOidc/compose.yml, http://localhost:8099): the sample's manifest
+# lists Google and Microsoft, e2e/11-providers.spec.ts signs in through it, and Auth-Core trusts it as its test issuer.
 #
 # Full sequence, from the repo root:
 #   cp .env.example .env                  # then set real local values (git-ignored); NOTES_DB_PASSWORD and the unverified user too
@@ -24,7 +26,7 @@
 #   scripts/e2e-web.sh
 # Needs: node 24 (and `npm ci` in samples/notes-web, which the script runs when node_modules is missing), Playwright's
 # Chromium and WebKit (npx playwright install chromium webkit, once), curl, docker compose, and the host ports 8088, 8443,
-# 8080 and 8025 free. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD, AUTH_DEV_SEED_UNVERIFIED_EMAIL,
+# 8080, 8025 and 8099 free. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD, AUTH_DEV_SEED_UNVERIFIED_EMAIL,
 # AUTH_DEV_SEED_UNVERIFIED_PASSWORD and NOTES_DB_PASSWORD from the repo-root .env (parsed, never sourced).
 # Env: COMPOSE_PROJECT_NAME (default auth-core-web; a name must be auth-core-web or auth-core-web-<suffix> with a suffix of
 # a-z, 0-9 and -, because the script runs `down -v` on it: the development stack, "auth-core", and any other project are refused;
@@ -56,7 +58,8 @@ if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PRO
 fi
 # The limiter is off for this stack (see the header): the compose file reads the variable from the environment, which wins over .env.
 export AUTH_RATE_LIMIT_ENABLED=false
-compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml" --env-file "$root/.env")
+compose=(docker compose -f "$root/deploy/docker-compose.yml" -f "$root/samples/notes-api/compose.yml" -f "$web/compose.yml"
+  -f "$root/tests/Auth.FakeOidc/compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
 cleanup() {
@@ -72,7 +75,11 @@ pass() { echo "PASS $*"; }
 
 # Everything of a tool's output that is passed on goes through this: a mail link (token=...) and the value of a Playwright
 # fill("...") (a typed password) are hidden.
-hide() { sed -E -e 's/token=[A-Za-z0-9_-]+/token=<hidden>/g' -e 's/fill\("([^"\\]|\\.)*"\)/fill("<hidden>")/g'; }
+# A ticket (spec 0011) and an invitation token on a provider start are credentials too: Playwright can print the URL that holds them.
+hide() {
+  sed -E -e 's/token=[A-Za-z0-9_-]+/token=<hidden>/g' -e 's/ticket=[A-Za-z0-9_-]+/ticket=<hidden>/g' \
+    -e 's/invite=[A-Za-z0-9_-]+/invite=<hidden>/g' -e 's/fill\("([^"\\]|\\.)*"\)/fill("<hidden>")/g'
+}
 
 env_get() { # read KEY from .env without executing it; strips one pair of surrounding quotes
   local line
@@ -185,6 +192,8 @@ for project in $PROJECTS; do
   wait_ok "$HTTP_URL/auth/health" 120 || fail "$project: $HTTP_URL/auth/health did not return 200 within 120s"
   wait_ok "$HTTP_URL/api/health" 60 || fail "$project: $HTTP_URL/api/health did not return 200 within 60s"
   wait_ok "$MAILPIT_URL/readyz" 60 || fail "$project: $MAILPIT_URL/readyz did not return 200 within 60s"
+  wait_ok "http://localhost:8099/google/.well-known/openid-configuration" 60 \
+    || fail "$project: the fake provider (http://localhost:8099) did not answer within 60s"
   wait_ok "$HTTPS_URL/login" 60 -k || fail "$project: $HTTPS_URL/login (the app over HTTPS) did not return 200 within 60s"
   seed_stack
 

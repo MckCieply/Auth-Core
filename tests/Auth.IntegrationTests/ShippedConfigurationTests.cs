@@ -1,6 +1,8 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Email;
+using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Auth.Server.Tenancy;
 using Microsoft.Extensions.Configuration;
@@ -37,6 +39,36 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         return await response.Content.ReadAsStringAsync();
     }
 
+    /// <summary>
+    /// The settings the fake provider's overlay gives Auth-Core: the <c>Auth__...</c> lines of its <c>auth</c> service, as configuration keys.
+    /// </summary>
+    private static Dictionary<string, string> OverlaySettings()
+    {
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in File.ReadAllLines(RepositoryFile("tests/Auth.FakeOidc/compose.yml")))
+        {
+            var trimmed = line.Trim();
+            var colon = trimmed.IndexOf(": ", StringComparison.Ordinal);
+            if (trimmed.StartsWith("Auth__", StringComparison.Ordinal) && colon > 0)
+            {
+                settings[trimmed[..colon].Replace("__", ":", StringComparison.Ordinal)] = trimmed[(colon + 2)..];
+            }
+        }
+
+        return settings;
+    }
+
+    /// <summary>
+    /// The <c>compose=(...)</c> statement of an end-to-end script, the command that brings its stack up: the files it names are the stack,
+    /// the same path in a comment is not.
+    /// </summary>
+    private static string ComposeCommand(string script)
+    {
+        var match = Regex.Match(File.ReadAllText(RepositoryFile(script)), @"^compose=\([^)]*\)", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"{script} has no compose=(...) statement.");
+        return match.Value;
+    }
+
     [Theory]
     [InlineData("deploy/auth.yaml")]
     [InlineData("samples/notes-api/auth.yaml")]
@@ -49,6 +81,54 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         Assert.Equal("admin", result.Manifest.FirstAdminRole.Name);
         Assert.True(result.Manifest.PrivateSignup);
         Assert.NotEmpty(result.Manifest.PrivatePermissions);
+    }
+
+    [Fact]
+    public void The_notes_manifest_lists_both_providers_and_the_development_manifest_none()   // spec 0011 → Samples
+    {
+        var notes = ManifestParser.Parse(File.ReadAllText(RepositoryFile("samples/notes-api/auth.yaml")));
+        var development = ManifestParser.Parse(File.ReadAllText(RepositoryFile("deploy/auth.yaml")));
+
+        Assert.Null(notes.Error);
+        Assert.Equal(["google", "microsoft"], notes.Manifest!.Providers);
+        Assert.Null(development.Error);
+        Assert.Empty(development.Manifest!.Providers);
+        Assert.Contains("# providers: [google, microsoft]", File.ReadAllText(RepositoryFile("deploy/auth.yaml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_fake_overlay_names_the_test_issuer_both_keys_and_the_return_address_and_the_notes_stacks_use_it()   // spec 0011 → Samples
+    {
+        var settings = OverlaySettings();
+
+        Assert.Equal("http://fake-oidc:8099", settings[ProviderSettings.TestIssuerKey]);
+        Assert.Equal("https://localhost:8443/provider-return", settings[ProviderSettings.ReturnUrlKey]);
+        Assert.All(
+            [ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.MicrosoftClientIdKey, ProviderSettings.MicrosoftClientSecretKey],
+            key => Assert.False(string.IsNullOrWhiteSpace(settings[key])));
+        Assert.All(
+            ["scripts/e2e-web.sh", "scripts/e2e-notes.sh"],
+            script => Assert.Contains("tests/Auth.FakeOidc/compose.yml", ComposeCommand(script), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_development_host_with_the_notes_manifest_and_the_overlay_offers_both_providers_and_is_healthy()   // spec 0011 → Samples
+    {
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithSetting(ManifestSettings.PathKey, "../../samples/notes-api/auth.yaml")
+            .WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DevelopmentAddress());
+        foreach (var (key, value) in OverlaySettings())
+        {
+            factory.WithSetting(key, value);
+        }
+
+        using var client = factory.CreateClient();
+
+        Assert.Equal(["google", "microsoft"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
+        Assert.Equal(
+            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"]}""",
+            await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
     [Fact]

@@ -6,7 +6,8 @@
 # What it checks, in order (PRIV = the private person, INV = a second private person whom the development company invites, SEED = the
 # development seed user, the admin of the development company). Each step names the criteria it touches; the guarding tests are in
 # docs/superpowers/plans/0010-acceptance-map.md.
-#   1. health is Healthy; the mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service"}
+#   1. health is Healthy; the mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service",
+#      "providers":[]}
 #      (deploy/auth.yaml turns both on); the OpenAPI description names DELETE /auth/account - part of criteria 2 and 30.
 #   2. PRIV asks for a private sign-up -> 202 with an empty body; the mail "Complete your sign-up" has the private intro and the same link in
 #      its text and HTML parts; the preview -> 200 {"kind":"private","email":PRIV}; a weak password -> 400 weak_password; the password ->
@@ -284,7 +285,7 @@ wait_ok "$MAILPIT_URL/readyz" 60 || fail "step 1: $MAILPIT_URL/readyz did not re
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service"}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[]}'
 expect_no_store "step 1: the options"
 call GET /auth/openapi/v1.json
 expect_status "step 1: the OpenAPI description" 200
