@@ -187,6 +187,9 @@ export const texts = {
     // The account moved into a company while the person was deleting it (an invitation was accepted in another tab).
     movedToCompany: 'Your account now belongs to a company, so it cannot be deleted here.',
     passwordRequired: 'Enter your password.',
+    // Spec 0011: the provider confirmation of an account without a password did not hold (wrong account, too late, used).
+    reauthFailed:
+      'The confirmation did not work or took too long, so your account was not deleted. Your notes are already gone. Confirm again.',
     newNote: 'New note',
     add: 'Add note',
     empty: 'No notes yet.',

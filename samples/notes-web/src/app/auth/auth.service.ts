@@ -372,6 +372,20 @@ export class AuthService {
   }
 
   /**
+   * Spec 0011: the same deletion for an account without a password, confirmed by a provider round trip with purpose=reauth. The ticket is
+   * spent by this call; the auth_pt cookie goes with it by itself.
+   */
+  async deleteAccountWithTicket(ticket: string): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.delete('/auth/account', { body: { provider_ticket: ticket } }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    this.dropSession();
+    return { ok: true };
+  }
+
+  /**
    * Exchanges the refresh cookie for a new access token. Callers that ask while a refresh runs get that refresh:
    * there is never more than one request at a time. A refresh that started before the person signed out hands its callers
    * 'rejected' when it ends, whatever the cookie said: the session it was for is gone (the interceptor then leaves the page alone).

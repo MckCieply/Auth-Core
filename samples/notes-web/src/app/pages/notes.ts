@@ -4,8 +4,9 @@ import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, inj
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { AuthService, errorCode } from '../auth/auth.service';
+import { AuthService, LoginResult, errorCode } from '../auth/auth.service';
 import { texts } from '../texts';
+import { ProviderButtons } from './provider-buttons';
 
 interface Note {
   id: string;
@@ -43,6 +44,12 @@ function isAuthUnavailable(error: unknown): boolean {
   return error instanceof HttpErrorResponse && error.status === 503 && errorCode(error) === 'auth_unavailable';
 }
 
+/** The ticket of a confirmation that /provider-return handed on (spec 0011), or null. Only in memory: never in a URL or in storage. */
+function reauthTicketOf(router: Router): string | null {
+  const ticket: unknown = router.currentNavigation()?.extras.state?.['reauthTicket'];
+  return typeof ticket === 'string' && ticket !== '' ? ticket : null;
+}
+
 /** True for what the service sends as a note: the view shows the text and the time, and tracks the id. */
 function isNote(value: unknown): value is Note {
   if (typeof value !== 'object' || value === null) {
@@ -60,7 +67,7 @@ function isNote(value: unknown): value is Note {
 
 @Component({
   selector: 'app-notes',
-  imports: [ReactiveFormsModule, DatePipe, RouterLink],
+  imports: [ReactiveFormsModule, DatePipe, RouterLink, ProviderButtons],
   template: `
     <main class="wide">
       <header class="top">
@@ -116,12 +123,21 @@ function isNote(value: unknown): value is Note {
         <section data-testid="delete-section">
           <h2>{{ t.deleteAccount }}</h2>
           <p class="error" data-testid="delete-warning">{{ t.deleteWarning }}</p>
-          <form [formGroup]="deleteForm" (ngSubmit)="deleteAccount()" novalidate data-testid="delete-form">
-            <label for="delete-password">{{ password }}</label>
-            <input id="delete-password" type="password" formControlName="password" autocomplete="current-password" />
-            <button type="submit" data-testid="delete-confirm" [disabled]="deleteBusy()">{{ t.deleteConfirm }}</button>
+          @if (me()?.has_password !== false) {
+            <form [formGroup]="deleteForm" (ngSubmit)="deleteAccount()" novalidate data-testid="delete-form">
+              <label for="delete-password">{{ password }}</label>
+              <input id="delete-password" type="password" formControlName="password" autocomplete="current-password" />
+              <button type="submit" data-testid="delete-confirm" [disabled]="deleteBusy()">{{ t.deleteConfirm }}</button>
+              <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
+            </form>
+          } @else if (reauthTicket() === null) {
+            <!-- Spec 0011: no password to ask for; the provider confirms. Nothing is deleted before the person comes back. -->
+            <app-provider-buttons [providers]="me()?.linked_providers ?? []" action="confirm" [reauth]="true" [separator]="false" />
             <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
-          </form>
+          } @else {
+            <button type="button" data-testid="delete-confirm" [disabled]="deleteBusy()" (click)="deleteWithTicket()">{{ t.deleteConfirm }}</button>
+            <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
+          }
           @if (deleteError(); as text) {
             <p class="error" role="alert" data-testid="delete-error">{{ text }}</p>
           }
@@ -153,6 +169,8 @@ export class NotesPage implements OnInit {
   protected readonly notesGone = signal(false);
   // The account turned out to belong to a company while it was being deleted: the page says so, once.
   protected readonly moved = signal(false);
+  // Spec 0011: the ticket of a provider confirmation. Its arrival opens the section ready to confirm.
+  protected readonly reauthTicket = signal<string | null>(reauthTicketOf(this.router));
   protected readonly form = inject(NonNullableFormBuilder).group({
     text: ['', [Validators.required, Validators.maxLength(MAX_NOTE_CHARACTERS)]],
   });
@@ -172,6 +190,11 @@ export class NotesPage implements OnInit {
       void this.auth.loadMe();
     }
     void this.load();
+    if (this.reauthTicket() !== null) {
+      this.deleting.set(true);
+      this.focusDeleteSection();
+      void this.keepTicketOutOfHistory();
+    }
   }
 
   protected async add(): Promise<void> {
@@ -223,13 +246,38 @@ export class NotesPage implements OnInit {
     this.moved.set(false);
     this.deleting.set(true);
     // The form opens below the notes, far from the button: the keyboard and a screen reader follow it there.
-    afterNextRender(() => this.host.nativeElement.querySelector<HTMLInputElement>('#delete-password')?.focus(), { injector: this.injector });
+    this.focusDeleteSection();
   }
 
   /** The person keeps the account, so the notes can be added again (the ones that were deleted stay deleted). */
   protected cancelDelete(): void {
     this.deleting.set(false);
     this.notesGone.set(false);
+    this.reauthTicket.set(null);
+  }
+
+  /** Spec 0011: "Delete my account" after a provider confirmation. The notes first, then the account, as with a password. */
+  protected async deleteWithTicket(): Promise<void> {
+    const ticket = this.reauthTicket();
+    if (this.deleteBusy() || ticket === null) {
+      return;
+    }
+    if (!(await this.deleteNotes())) {
+      return;
+    }
+    const result = await this.auth.deleteAccountWithTicket(ticket);
+    if (result.ok) {
+      await this.leave();
+      return;
+    }
+    if (result.failure.kind === 'reauth_failed') {
+      // The ticket is used up or was never good: the person confirms again.
+      this.reauthTicket.set(null);
+      this.deleteError.set(this.t.reauthFailed);
+      this.deleteBusy.set(false);
+      return;
+    }
+    await this.refused(result);
   }
 
   /**
@@ -245,6 +293,22 @@ export class NotesPage implements OnInit {
       this.deleteError.set(this.t.passwordRequired);
       return;
     }
+    if (!(await this.deleteNotes())) {
+      return;
+    }
+    const result = await this.auth.deleteAccount(password);
+    if (result.ok) {
+      await this.leave();
+      return;
+    }
+    await this.refused(result);
+  }
+
+  /**
+   * DELETE /api/me, the first half of every deletion (spec 0010, Decision 8). True when the notes are gone; false when nothing was deleted
+   * (the person may try again, and the section says so).
+   */
+  private async deleteNotes(): Promise<boolean> {
     this.deleteBusy.set(true);
     this.deleteError.set(null);
     try {
@@ -253,7 +317,7 @@ export class NotesPage implements OnInit {
       // auth_unavailable: the bar says it. Nothing was deleted: the person may try again.
       this.deleteError.set(isAuthUnavailable(error) ? null : this.somethingWrong);
       this.deleteBusy.set(false);
-      return;
+      return false;
     }
     // The notes are gone: the page shows it, whatever the account call answers.
     this.added = [];
@@ -262,16 +326,26 @@ export class NotesPage implements OnInit {
     this.authUnavailable.set(false);
     this.loaded.set(true);
     this.notesGone.set(true);
-    const result = await this.auth.deleteAccount(password);
-    if (result.ok) {
-      try {
-        await this.router.navigateByUrl('/login', { state: { notice: 'deleted' } });
-      } catch {
-        // nothing to show: the account is gone and so is the session
-      }
-      return;
+    return true;
+  }
+
+  private async leave(): Promise<void> {
+    try {
+      await this.router.navigateByUrl('/login', { state: { notice: 'deleted' } });
+    } catch {
+      // nothing to show: the account is gone and so is the session
     }
-    if (result.failure.kind === 'wrong_password') {
+  }
+
+  /** The refusals both deletions share, after the notes are gone. */
+  private async refused(result: LoginResult & { ok: false }): Promise<void> {
+    if (result.failure.kind === 'password_required' || result.failure.kind === 'reauth_required') {
+      // Spec 0011: the account is not what this screen thought (a password was set, or it has none): draw the section that fits it now.
+      this.reauthTicket.set(null);
+      this.deleteForm.reset();
+      await this.auth.loadMe();
+      this.deleteError.set(this.t.notesGone);
+    } else if (result.failure.kind === 'wrong_password') {
       this.deleteError.set(this.t.wrongPassword);
     } else if (result.failure.kind === 'too_many_attempts') {
       this.deleteError.set(`${texts.login.tooManyAttempts(result.failure.retryAfterSeconds)} ${this.t.notesGone}`);
@@ -327,6 +401,38 @@ export class NotesPage implements OnInit {
       this.notes.set(this.added);
       this.loadFailed.set(true);
       this.authUnavailable.set(isAuthUnavailable(error));
+    }
+  }
+
+  /**
+   * The keyboard and a screen reader follow the section that opens below the notes: to the password field, else the first "Confirm with ..."
+   * link (spec 0011), else "Delete my account" (back from the provider with the ticket).
+   */
+  private focusDeleteSection(): void {
+    afterNextRender(
+      () => {
+        const root = this.host.nativeElement;
+        const target =
+          root.querySelector<HTMLElement>('#delete-password') ??
+          root.querySelector<HTMLElement>('[data-testid="delete-section"] a') ??
+          root.querySelector<HTMLElement>('[data-testid="delete-confirm"]');
+        target?.focus();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * The ticket came in the history entry of this screen (the navigation state of /provider-return). It lives on in this component's memory
+   * only: the entry is replaced, same address, with no state, so a reload or a step back does not find it in `history.state`.
+   */
+  private async keepTicketOutOfHistory(): Promise<void> {
+    // After the navigation that is building this screen.
+    await Promise.resolve();
+    try {
+      await this.router.navigateByUrl(this.router.url, { replaceUrl: true, onSameUrlNavigation: 'reload' });
+    } catch {
+      // the entry keeps the state; the ticket is still only good for a few minutes and once
     }
   }
 }
