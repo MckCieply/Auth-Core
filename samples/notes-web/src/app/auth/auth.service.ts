@@ -55,6 +55,14 @@ export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden' | 'wait';
 
 export type LoginResult = { ok: true } | { ok: false; failure: Failure };
 
+/** The next screen of a provider round trip, from POST /auth/providers/exchange (spec 0011). */
+export type ProviderNext =
+  | { next: 'link'; email: string; emailVerified: boolean }
+  | { next: 'finish_signup'; email: string; kinds: ('organization' | 'private')[] };
+
+/** `next: null`: the exchange signed the person in. */
+export type ExchangeResult = { ok: true; next: ProviderNext | null } | { ok: false; failure: Failure };
+
 const REFRESH_TIMEOUT_MS = 10_000;
 const DEFAULT_WAIT_SECONDS = 60;
 
@@ -175,6 +183,22 @@ function isStrings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+/** A `next` answer of the exchange in the contract's shape, or null. `kinds` keeps the known kinds, organization first. */
+function asNext(body: unknown): ProviderNext | null {
+  if (!isRecord(body) || typeof body['email'] !== 'string') {
+    return null;
+  }
+  if (body['next'] === 'link' && typeof body['email_verified'] === 'boolean') {
+    return { next: 'link', email: body['email'], emailVerified: body['email_verified'] };
+  }
+  const kinds: unknown = body['kinds'];
+  if (body['next'] === 'finish_signup' && Array.isArray(kinds)) {
+    const known = (['organization', 'private'] as const).filter((kind) => kinds.includes(kind));
+    return known.length === 0 ? null : { next: 'finish_signup', email: body['email'], kinds: known };
+  }
+  return null;
+}
+
 /** The answer of GET /auth/me if it has the shape of the contract, else null: a page of HTML from a proxy is not a person. */
 function asMe(body: unknown): Me | null {
   if (
@@ -258,6 +282,48 @@ export class AuthService {
     const request = companyName === null ? { token, password } : { token, password, company_name: companyName };
     try {
       body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/signup/complete', request));
+    } catch (error) {
+      return { ok: false, failure: formFailureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /**
+   * POST /auth/providers/exchange (spec 0011): the ticket of the return screen. Either the person is signed in, as at a login, or the answer
+   * names the next screen. The auth_pt cookie goes with the request by itself (same origin); no access token is needed.
+   */
+  async exchangeTicket(ticket: string): Promise<ExchangeResult> {
+    let body: unknown;
+    try {
+      body = await firstValueFrom(this.http.post<unknown>('/auth/providers/exchange', { ticket }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    if (isRecord(body) && 'next' in body) {
+      const next = asNext(body);
+      return next === null ? { ok: false, failure: { kind: 'other' } } : { ok: true, next };
+    }
+    const signedIn = await this.startSession(isRecord(body) ? body : null);
+    return signedIn.ok ? { ok: true, next: null } : signedIn;
+  }
+
+  /** POST /auth/providers/link: the password of the account once, then the provider alone signs in (spec 0011). */
+  async linkProvider(ticket: string, password: string): Promise<LoginResult> {
+    let body: LoginBody | null;
+    try {
+      body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/providers/link', { ticket, password }));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    return this.startSession(body);
+  }
+
+  /** POST /auth/providers/finish: a new account with the provider's address and no password (spec 0011). */
+  async finishWithProvider(ticket: string, kind: 'organization' | 'private', companyName: string | null): Promise<LoginResult> {
+    let body: LoginBody | null;
+    const request = companyName === null ? { ticket, kind } : { ticket, kind, company_name: companyName };
+    try {
+      body = await firstValueFrom(this.http.post<LoginBody | null>('/auth/providers/finish', request));
     } catch (error) {
       return { ok: false, failure: formFailureOf(error) };
     }

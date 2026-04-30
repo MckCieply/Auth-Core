@@ -6,6 +6,9 @@ import { ForgotPage } from './pages/forgot';
 import { InvitePage } from './pages/invite';
 import { LoginPage } from './pages/login';
 import { NotesPage } from './pages/notes';
+import { ProviderFinishPage } from './pages/provider-finish';
+import { ProviderLinkPage } from './pages/provider-link';
+import { ProviderReturnPage } from './pages/provider-return';
 import { ResetPage } from './pages/reset';
 import { SignupPage } from './pages/signup';
 import { TeamPage } from './pages/team';
@@ -27,6 +30,10 @@ export const routes: Routes = [
   { path: 'invite', component: InvitePage, title: texts.invite.title },
   { path: 'signup', component: SignupPage, title: texts.signup.title },
   { path: 'complete-signup', component: CompleteSignupPage, title: texts.completeSignup.title },
+  // Spec 0011: no guard. The return screen needs only its fragment, the other two their navigation state.
+  { path: 'provider-return', component: ProviderReturnPage, title: texts.providerReturn.title },
+  { path: 'provider-link', component: ProviderLinkPage, title: texts.providerLink.title },
+  { path: 'provider-finish', component: ProviderFinishPage, title: texts.providerFinish.title },
   { path: 'notes', component: NotesPage, canActivate: [authGuard], title: texts.notes.title },
   { path: 'team', component: TeamPage, canActivate: [authGuard], title: texts.team.title },
   { path: '**', redirectTo: toNotes },
