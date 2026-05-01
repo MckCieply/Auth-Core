@@ -147,6 +147,22 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         Assert.Contains("AUTH_FRONTEND_SIGNUP_URL=", example);   // a line of its own, blank: the example is a complete list of the variables
     }
 
+    [Theory]
+    [InlineData("Auth__App__FrontendUrls__ProviderReturn", "AUTH_FRONTEND_PROVIDER_URL")]
+    [InlineData("Auth__Providers__Google__ClientId", "AUTH_GOOGLE_CLIENT_ID")]
+    [InlineData("Auth__Providers__Google__ClientSecret", "AUTH_GOOGLE_CLIENT_SECRET")]
+    [InlineData("Auth__Providers__Microsoft__ClientId", "AUTH_MICROSOFT_CLIENT_ID")]
+    [InlineData("Auth__Providers__Microsoft__ClientSecret", "AUTH_MICROSOFT_CLIENT_SECRET")]
+    [InlineData("Auth__Providers__Microsoft__ClientSecretExpiresOn", "AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES")]
+    public void The_production_compose_file_passes_each_provider_variable_as_optional_and_the_example_lists_it(string setting, string variable)   // spec 0011 → Documents
+    {
+        var compose = File.ReadAllText(RepositoryFile("deploy/docker-compose.prod.yml"));
+        var example = File.ReadAllLines(RepositoryFile("deploy/.env.prod.example"));
+
+        Assert.Contains($"{setting}: ${{{variable}:-}}", compose, StringComparison.Ordinal);
+        Assert.Contains($"{variable}=", example);   // a line of its own, blank
+    }
+
     [Fact]
     public void The_sample_overlay_and_the_production_test_set_the_address_so_that_their_stacks_stay_healthy()
     {
@@ -208,5 +224,39 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
 
         Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task A_production_host_with_the_six_provider_variables_blank_is_healthy_and_offers_no_provider()   // spec 0011, criteria 3 and 30
+    {
+        await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup()
+            .WithSetting(ProviderSettings.ReturnUrlKey, "")
+            .WithSetting(ProviderSettings.GoogleClientIdKey, "")
+            .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientIdKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "");
+        using var client = factory.CreateClient();
+
+        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task A_production_host_whose_manifest_lists_both_providers_with_the_six_variables_blank_offers_none_and_is_degraded()   // spec 0011 → Configuration: blank is not configured
+    {
+        await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production")
+            .WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.ProvidersLine)
+            .WithSetting(ProviderSettings.ReturnUrlKey, "")
+            .WithSetting(ProviderSettings.GoogleClientIdKey, "")
+            .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientIdKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "");
+        using var client = factory.CreateClient();
+
+        Assert.Empty(factory.Services.GetRequiredService<ProviderCatalog>().Offered);
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 }

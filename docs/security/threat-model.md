@@ -5,7 +5,7 @@ Auth-Core is a self-hosted authentication service: one instance per product, beh
 with STRIDE for each element of the deployment. For every element it lists the threat, what stops it and where that is built, and the risk
 that is accepted. The last section collects the risks that a spec accepted, with the decision that accepted each; the tables also name
 risks of the trusted base (the host, the database, the relay) that no decision covers; they stay in the tables. It describes version
-0.1.0 ([spec 0008](../superpowers/specs/0008-hardening-and-release.md)) and the self-service sign-up that an instance may turn on ([spec 0009](../superpowers/specs/0009-self-service-signup.md)), with the private accounts and their deletion ([spec 0010](../superpowers/specs/0010-private-accounts.md)).
+0.1.0 ([spec 0008](../superpowers/specs/0008-hardening-and-release.md)) and the self-service sign-up that an instance may turn on ([spec 0009](../superpowers/specs/0009-self-service-signup.md)), with the private accounts and their deletion ([spec 0010](../superpowers/specs/0010-private-accounts.md)) and sign-in with Google and Microsoft ([spec 0011](../superpowers/specs/0011-google-and-microsoft-sign-in.md)).
 
 ## What is protected, and from whom
 
@@ -32,10 +32,12 @@ beyond the listed effects, a nation-state, side channels of the hardware.
                            client address)             │  └──smtp+TLS──> SMTP relay
  Product backend ──https GET /auth/.well-known/jwks.json──┘
  Operator ──docker compose run auth admin ...──> Auth-Core's database       Key files (read-only mount)
+ Auth-Core ──https (discovery, keys, token endpoint)──> Google, Microsoft     Browser ──https round trip──> Google, Microsoft (spec 0011)
 ```
 
 The boundaries: internet to proxy (TLS), proxy to Auth-Core (a trusted network, the client address is believed from there only), Auth-Core
-to PostgreSQL and to the relay (private network; TLS to the relay), the host's file system to the container (keys, manifest; read-only).
+to PostgreSQL and to the relay (private network; TLS to the relay), the host's file system to the container (keys, manifest; read-only), and,
+with providers on, Auth-Core to Google and Microsoft (outbound HTTPS, the client secret) and the browser's round trip through them (spec 0011).
 
 ## Browser and single-page application
 
@@ -154,6 +156,34 @@ Not applicable: R (what a product's backend does is the product's to record; Aut
 
 Not applicable: R (every command is recorded with "via": "cli"), D (the CLI is run by the operator, one command at a time; nobody else can reach it, and a failing command costs one run).
 
+## Sign-in with Google and Microsoft
+
+Spec 0011. The browser follows a link to `GET /auth/providers/{name}/start`; Auth-Core answers `302` to the provider with the authorization
+code flow, PKCE (`S256`), a state and a nonce, and sets a request-forgery cookie (`SameSite=Lax`, `Path=/auth/providers`) that binds the
+state to that browser. The provider sends the browser to `GET /auth/providers/{name}/callback`; Auth-Core redeems the code with the PKCE
+verifier and its client secret over HTTPS, validates the identity token (signature, issuer, audience, nonce, expiry), reads the identity
+(Google `sub`; Microsoft `{tid}:{oid}`) from that token alone (it never calls the provider's userinfo endpoint), and answers `302` to the
+product's return screen with a ticket in the **fragment** and the cookie `auth_pt` (`HttpOnly; Secure; SameSite=Strict; Path=/auth`), or with
+`#error=cancelled`, `invalid_state`, `provider_unavailable` or `provider_error` and nothing stored. The screen spends the ticket at
+`POST /auth/providers/exchange`, `link` or `finish`, or at `DELETE /auth/account` (`provider_ticket`). A ticket is 32 random bytes, stored as
+a hash with the hash of its `auth_pt`, used once, and lives 10 minutes (5 for `reauth`). The return address, and so the callback address,
+comes from configuration only.
+
+| | Threat | Mitigation | Residual |
+| --- | --- | --- | --- |
+| S | An attacker's code or state is fed into a victim's browser (login CSRF), or a state is replayed | The state is single use, lives 10 minutes and needs the request-forgery cookie of the browser that started; PKCE; the nonce (`ProviderCallbackErrorTests`) | |
+| S | Someone signs in as an account by owning a provider account with its address (a work tenant can set any `email`: "nOAuth") | The identity key is `sub` or `tid:oid`, never the address; a Microsoft work address is unverified unless `xms_edov` is true; an unverified address never links without the password and never skips the mail; linking an account with the address always asks for its password once (`ProviderIdentityTests`, `ProviderLinkTests`) | Whoever controls a linked provider account controls the product account (risk 52) |
+| S | A ticket is pushed into someone else's browser (a link to the return screen with the attacker's ticket) | Every use needs the `auth_pt` of the browser the callback answered; a second round trip in a browser makes the first ticket unusable (`ProviderTicketTests`) | |
+| T | The browser is sent to an address an attacker chose | The return and callback addresses come from configuration only, never from `Host` or `X-Forwarded-Host` (`ProviderStartTests.The_callback_address_comes_from_the_return_address_whatever_the_host_headers_say`, `ProviderCallbackTests.A_callback_that_reaches_the_service_under_another_host_and_scheme_still_makes_a_ticket`) | |
+| R | A person denies a provider sign-in, a link or a deletion | `login.succeeded` and `login.failed` name the provider; `provider.linked`, `signup.completed`, `invite.accepted` and `provider.reauthenticated` record the flows (`AuditProviderFlowsTests`) | |
+| I | The state, the PKCE verifier, the code or a ticket in a log, a URL or the audit log | The client's dispatcher logs at `Warning` (`ProviderCallbackTests.No_state_value_and_no_code_verifier_reaches_the_log`); tickets and bindings are stored as hashes only; the ticket travels in the fragment, which no server receives; no audit row holds any of them (`AuditProviderFlowsTests`) | The code and an invitation token are in request lines (risk 55); a ticket is in the address bar until the screen removes it (risk 56) |
+| I | The exchange or the link used to learn which addresses have accounts | An unverified address gets the same `next: link` whether or not an account has it; a wrong password and an unknown address get the same `401` after the same hash work (`ProviderExchangeTests`, `ProviderLinkTests`, `ProviderLinkTimingTests`) | A verified address that has an account is answered `next: link`: only the owner of that mailbox at the provider learns it |
+| D | Passwords guessed through the link screen | The link counts in the login streak of the address and its lockout; the five provider paths count against the `login` limit (`ProviderLinkLockoutTests`, `RateLimitMiddlewareTests`) | |
+| D | The provider is down, the keys are revoked, or the Microsoft secret lapses | Health says `Degraded` for missing keys and from 30 days before the secret's date; "forgot password" sets a password (`ProviderSettingsTests`, `ProviderPasswordResetTests`; [`microsoft-secret.md`](../operations/microsoft-secret.md)) | People without a password depend on the provider (risks 53, 54) |
+| E | A live access token used to delete a private account without a password | The deletion needs a `reauth` ticket of an identity linked to this account, used once within 5 minutes; Auth-Core asks for a fresh sign-in (`prompt=login` at Microsoft, `max_age=0` at Google) (`AccountDeletionProviderTests`) | The provider decides how fresh "fresh" is (risk 57) |
+
+The providers themselves learn of each sign-in (risk 58).
+
 ## Account deletion and personal data
 
 Spec 0010 deletes an account in four places: a private person deletes their own (`DELETE /auth/account`), an admin removes a member, a
@@ -180,6 +210,10 @@ company. One routine does it, in the transaction of the change (`AccountDeletion
   calls the product's own "delete my data" endpoint first and `DELETE /auth/account` after it (the sample's `DELETE /api/me`;
   [Angular guide](../integration/angular.md), [Python guide](../integration/python-fastapi.md)). A wrong password after the data is gone
   leaves the account without its data; the person asked for the deletion (spec 0010, Decision 17; risk 51).
+- **Without a password (spec 0011):** a private person who signed up with a provider has no password, so the deletion is confirmed with a
+  ticket of the provider's re-authentication: the person comes back from `GET /auth/providers/{name}/start?purpose=reauth` with a ticket that
+  is used once, within 5 minutes, and bound to the browser. The section "Sign-in with Google and Microsoft" has the threat and risk 57 its
+  limit (`AccountDeletionProviderTests`).
 - **The invitation move:** a private account that accepts an invitation with `leave_private_account: true` keeps its address and password
   and becomes a member; its personal space is deleted in Auth-Core, and the product's rows under that space's `org_id` stay (risk 48).
   At an acceptance, an account that holds both a personal and a company membership (only a direct change of the database makes one) is
@@ -187,7 +221,7 @@ company. One routine does it, in the transaction of the change (`AccountDeletion
 
 ## Residual risks
 
-Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 51 are the risks accepted by specs 0002 to 0010 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's).
+Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 58 are the risks accepted by specs 0002 to 0011 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's; 52 to 58 are spec 0011's).
 
 1. **A key change signs everyone out.** No previous keys are kept for verification or decryption; rotation is a runbook (spec 0008, Decision 7).
 2. **A distributed guesser below the per-IP limits** on many addresses is stopped only by the per-identifier lockout, which an attacker can use to keep a chosen account locked, at one request per cooldown (spec 0003, Decision 8 and Deferred / follow-ups; spec 0008, Residual risks).
@@ -242,6 +276,13 @@ Accepted, with the decision that accepted each. None of them is hidden by a miti
 49. **An admin who removes a member, or deletes a company, now deletes the person's account.** The person can be invited again or sign up, as a new account (spec 0010, Decision 9).
 50. **A deleted person's personal data outlives the account for a while.** Audit rows keep the address and the client addresses for 90 days by default; backups keep everything until they are rotated; a restore brings deleted accounts back (spec 0010, Decision 10).
 51. **A wrong password after the product has deleted its data leaves an account without its data.** The product's frontend deletes its data first and calls `DELETE /auth/account` after it, so a wrong password (or a lockout) at the second step leaves the account in place with no product data. The person can try the deletion again, and had asked for it (spec 0010, Decision 17).
+52. **A provider account is the product account.** Whoever takes over a linked Google or Microsoft account signs in to the product without its password. Whoever administers a Microsoft tenant or a Google Workspace domain controls the provider accounts of its people, and so their product accounts (spec 0011).
+53. **A person without a password depends on the provider.** A provider outage, the product's keys revoked or lapsed, the provider no longer offered, or the provider account lost (a person who leaves a company loses its Microsoft account) locks them out until "forgot password" sets a password, which needs the mailbox (spec 0011).
+54. **The Microsoft client secret lapses** after at most 24 months, and every Microsoft sign-in fails until it is rotated. The date setting and the runbook ([`microsoft-secret.md`](../operations/microsoft-secret.md)) are the warning; nothing rotates it (spec 0011).
+55. **Codes and invitation tokens in request lines.** The invitation token travels in the query of the start address, and the provider's code and state in that of the callback. A proxy or web server that logs query strings keeps them. The code is single use and needs the PKCE verifier; the invitation token works until it is used (7 days) (spec 0011).
+56. **A ticket is in the address bar** until the return screen removes it, readable by a browser extension or by script in the page. It is single use, bound to the browser's `auth_pt` cookie and lives 10 minutes (5 for `reauth`) (spec 0011).
+57. **Re-authentication is as strong as the provider makes it.** A person still signed in at the provider may confirm with one click; whoever holds a live access token in that browser can then delete a private account without a password. Auth-Core asks for a fresh sign-in (`prompt=login` at Microsoft, `max_age=0` at Google) but does not check that one happened (spec 0011).
+58. **The provider learns about sign-ins.** Google and Microsoft see when a person signs in to the product, from which address, and the product's name (spec 0011).
 
 ### Accepted earlier and closed by spec 0008
 

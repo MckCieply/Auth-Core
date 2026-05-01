@@ -36,6 +36,8 @@ DOCUMENTS = [
     "docs/security/threat-model.md",
     "docs/operations/backup.md",
     "docs/operations/key-rotation.md",
+    "docs/operations/microsoft-secret.md",
+    "docs/deployment/provider-keys.md",
     "clients/python/README.md",
 ]
 ROOTS = ("src/", "tests/", "docs/", "deploy/", "scripts/", "samples/", "clients/")

@@ -173,8 +173,8 @@ body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted ev
 What `details` holds, where it is set: `"via": "cli"` for the operator CLI, and `"via": "seed"` on the `org.created` row of the
 development seeder (Development only), and `"via": "signup"` on the `org.created` row of a company a visitor started, and `kind` (`organization` or `private`) on `signup.requested` and `signup.completed` (spec 0010); `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
 `org.renamed`; `role` on `invite.sent`, `invite.resent`, `invite.accepted` and `invite.cancelled`, and `left_private_account` and `personal_org_id` on the `invite.accepted` row of a private account that moved; `name` and `permissions` on
-`role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed`, `org.delete_refused`, `account.delete_refused` (`wrong_password`, `locked`) and
-`account.deleted` (`self`, `member_removed`, `org_deleted`, `upgrade`); `retry_after_seconds` on `login.locked`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
+`role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed`, `org.delete_refused`, `account.delete_refused` (`wrong_password`, `locked`, `reauth_failed`) and
+`account.deleted` (`self`, `member_removed`, `org_deleted`, `upgrade`); `retry_after_seconds` on `login.locked`; `provider` (`google` or `microsoft`, spec 0011) on `login.succeeded` of a provider sign-in, on `login.failed` and `login.locked` of a failed link, on `signup.completed`, `invite.accepted`, `provider.linked` and `provider.reauthenticated`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
 and `roles` on `org.deleted`.
 
 Two things to know when a row seems to be missing:
@@ -246,8 +246,10 @@ The kinds are: `login.succeeded`, `login.failed` (reason: `wrong_password`, `unk
 `refresh.reuse_detected`, `password.reset_requested`, `password.reset`, `email.verified`, `invite.sent`, `invite.resent`, `invite.accepted`,
 `invite.cancelled`, `member.removed`, `member.role_changed`, `role.created`, `role.updated`, `role.deleted`, `org.created`, `org.renamed`,
 `org.deleted`, `org.delete_refused` (reason: `wrong_password`, `locked`), `account.deleted` (reason: `self`, `member_removed`, `org_deleted`, `upgrade`),
-`account.delete_refused` (reason: `wrong_password`, `locked`), `rate_limit.hit` (at most one per address and policy per minute), `signup.requested`
-(an accepted request: the address as typed) and `signup.completed` (the account, the company or, for a private person, the personal space, and the address).
+`account.delete_refused` (reason: `wrong_password`, `locked`, `reauth_failed`: a provider confirmation that did not hold), `rate_limit.hit` (at most one per address and policy per minute), `signup.requested`
+(an accepted request: the address as typed), `signup.completed` (the account, the company or, for a private person, the personal space, and the address),
+`provider.linked` (an existing account connected a Google or Microsoft identity with its password; `details.provider`) and `provider.reauthenticated` (a private
+account without a password confirmed its deletion with the provider; `details.provider`, written with `account.deleted`). That makes 28 kinds.
 
 The address typed into a failed or locked login is kept as typed, and a person may have pasted a password into that field: treat the
 audit log, and a dump that holds it, as private.

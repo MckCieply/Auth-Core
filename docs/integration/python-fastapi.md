@@ -256,6 +256,9 @@ operator's part (create the company, invite its first admin) with the CLI, the r
 
 Your backend never answers `permissions_changed`: it does not read the database.
 
+A person who signs in with Google or Microsoft (spec 0011) gets exactly the access token a password sign-in gives: nothing changes for your
+backend or for this package.
+
 ## Private accounts and a person's data (spec 0010)
 
 A private account (`user.org_kind == "personal"`) has a space of its own, its `org_id`, which nobody else joins: filter by `org_id` as for a

@@ -96,6 +96,17 @@ services:
       # Optional (spec 0009): the screen of the frontend that finishes a self-service sign-up. Blank keeps sign-up off; it is on only with this and
       # `signup: self-service` in the manifest (a manifest that asks for it without this makes /auth/health say Degraded).
       Auth__App__FrontendUrls__CompleteSignup: ${AUTH_FRONTEND_SIGNUP_URL:-}
+      # Optional (spec 0011): sign-in with Google and Microsoft. The manifest lists the providers (`providers: [google, microsoft]`); each needs
+      # its two keys and the return address below. A listed provider without them is not offered and /auth/health says Degraded; all blank keeps
+      # them off. Register <origin of the return address>/auth/providers/google/callback (and .../microsoft/callback) at the provider:
+      # docs/deployment/provider-keys.md.
+      Auth__App__FrontendUrls__ProviderReturn: ${AUTH_FRONTEND_PROVIDER_URL:-}
+      Auth__Providers__Google__ClientId: ${AUTH_GOOGLE_CLIENT_ID:-}
+      Auth__Providers__Google__ClientSecret: ${AUTH_GOOGLE_CLIENT_SECRET:-}
+      Auth__Providers__Microsoft__ClientId: ${AUTH_MICROSOFT_CLIENT_ID:-}
+      Auth__Providers__Microsoft__ClientSecret: ${AUTH_MICROSOFT_CLIENT_SECRET:-}
+      # The day the Microsoft secret lapses (yyyy-mm-dd): /auth/health says Degraded from 30 days before (docs/operations/microsoft-secret.md).
+      Auth__Providers__Microsoft__ClientSecretExpiresOn: ${AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES:-}
       # The sender and the SMTP relay. The relay must offer TLS: "none" is refused outside Development.
       Auth__Email__From: ${AUTH_EMAIL_FROM:?set AUTH_EMAIL_FROM in .env}
       Auth__Email__Smtp__Host: ${AUTH_SMTP_HOST:?set AUTH_SMTP_HOST in .env}
