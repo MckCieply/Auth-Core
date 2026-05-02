@@ -28,6 +28,8 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     private readonly List<Action<IServiceCollection>> _serviceOverrides = [];
     private readonly string _manifestDirectory;
     private readonly string? _dropConnectionString;
+    private const int EnsureDatabaseAttempts = 3;
+    private const int EnsureDatabaseConnectTimeoutSeconds = 15;
 
     /// <param name="postgres">The shared Postgres server.</param>
     /// <param name="keys">Throwaway signing/encryption key material the host loads from disk.</param>
@@ -332,9 +334,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     /// Creates this host's database and migrates it, by a context of its own that logs nothing, if the server does not have the database
     /// yet; a database that is there is left as it is (the restart and upgrade tests start hosts on a database in a state of their own). The
     /// host's start-up migration then finds nothing to do. Left to itself it probes a database that is not there, and then a history table
-    /// that is not there, and EF logs each failed probe as an error line in every test. A failure of the creation or of a migration is not
-    /// caught: it fails the test that started the host. A test that blanks or breaks the connection string, or turns the start-up migration
-    /// off, gets the host as it is: the host reports its own error.
+    /// that is not there, and EF logs each failed probe as an error line in every test. A connection attempt through Docker's gateway
+    /// sometimes hangs on a busy machine, so a connection timeout repeats the work (three attempts in all, each connection waiting 15
+    /// seconds at most); a database that an attempt created is still migrated by the next one. Any other failure of the creation or of a
+    /// migration is not caught: it fails the test that started the host. A test that blanks or breaks the connection string, or turns the
+    /// start-up migration off, gets the host as it is: the host reports its own error.
     /// </summary>
     private void EnsureDatabase()
     {
@@ -361,26 +365,69 @@ public class AuthAppFactory : WebApplicationFactory<Program>
             return;
         }
 
+        // The host keeps its own connection string; only these two connections wait less than Npgsql's 30 seconds.
+        var migration = new NpgsqlConnectionStringBuilder(connectionString) { Timeout = EnsureDatabaseConnectTimeoutSeconds };
         maintenance.Database = "postgres";
         maintenance.Pooling = false;
-        using var connection = new NpgsqlConnection(maintenance.ConnectionString);
+        maintenance.Timeout = EnsureDatabaseConnectTimeoutSeconds;
+
+        var created = false;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                EnsureDatabaseOnce(maintenance.ConnectionString, migration.ConnectionString, database, ref created);
+                return;
+            }
+            catch (Exception ex) when (attempt < EnsureDatabaseAttempts && IsConnectionTimeout(ex))
+            {
+                // A connection attempt that hung: try again; the last attempt's failure is not caught here.
+            }
+        }
+    }
+
+    /// <summary>
+    /// One attempt of <see cref="EnsureDatabase"/>. <paramref name="created"/> is set before the creation is sent, so an attempt that
+    /// timed out around it (the database may or may not be there now) leaves the next attempt to migrate a database that exists.
+    /// </summary>
+    private static void EnsureDatabaseOnce(string maintenanceConnectionString, string migrationConnectionString, string database, ref bool created)
+    {
+        using var connection = new NpgsqlConnection(maintenanceConnectionString);
         connection.Open();
         using var exists = new NpgsqlCommand("SELECT 1 FROM pg_database WHERE datname = @name", connection);
         exists.Parameters.AddWithValue("name", database);
         if (exists.ExecuteScalar() is not null)
         {
-            return;
+            if (!created)
+            {
+                return;
+            }
         }
-
-        // A database name cannot be a parameter: quote it as an identifier (the name is generated or chosen by the test).
-        using (var create = new NpgsqlCommand("CREATE DATABASE \"" + database.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"", connection))
+        else
         {
+            created = true;
+
+            // A database name cannot be a parameter: quote it as an identifier (the name is generated or chosen by the test).
+            using var create = new NpgsqlCommand("CREATE DATABASE \"" + database.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"", connection);
             create.ExecuteNonQuery();
         }
 
-        var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(connectionString).UseOpenIddict().Options;
+        var options = new DbContextOptionsBuilder<AuthDbContext>().UseNpgsql(migrationConnectionString).UseOpenIddict().Options;
         using var db = new AuthDbContext(options);
         db.Database.Migrate();
+    }
+
+    /// <summary>
+    /// Whether a failure is a connection attempt that hung or failed to connect: a timeout, or an <see cref="NpgsqlException"/> that
+    /// holds one or says that the connection attempt failed. Anything else (a wrong password, a bad migration) is a real failure.
+    /// </summary>
+    public static bool IsConnectionTimeout(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception is TimeoutException
+            || (exception is NpgsqlException
+                && (exception.InnerException is TimeoutException
+                    || exception.Message.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase)));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
