@@ -20,6 +20,7 @@ async function open(state: Record<string, unknown> | null) {
         { path: 'start', component: Elsewhere },
         { path: 'provider-finish', component: ProviderFinishPage },
         { path: 'login', component: Elsewhere },
+        { path: 'signup', component: Elsewhere },
         { path: 'notes', component: Elsewhere },
       ]),
       provideHttpClient(),
@@ -33,6 +34,7 @@ async function open(state: Record<string, unknown> | null) {
   const entries = history.length;
   await router.navigateByUrl('/provider-finish', state === null ? {} : { state });
   await settle(harness.fixture);
+  await settle(harness.fixture); // the navigation that takes the ticket out of the history entry lands here
   return { harness, router, ctrl: TestBed.inject(HttpTestingController), entries };
 }
 
@@ -157,6 +159,40 @@ describe('ProviderFinishPage (spec 0011)', () => {
     await finishWith(opened, name);
     opened.ctrl.expectNone('/auth/providers/finish');
     expect(pageText(opened.harness.fixture)).toContain('Enter the name of your company.');
+  });
+
+  it('after the screen has read the ticket the history entry holds no ticket (state replaced, address kept, no new entry)', async () => {
+    const opened = await open(both);
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    expect(history.state).not.toHaveProperty('ticket');
+    expect(history.state).not.toHaveProperty('kinds');
+    expect(window.location.pathname).toBe('/provider-finish');
+    expect(history.length).toBe(opened.entries + 1);
+    // The ticket lives on in the screen's memory: the form still sends it.
+    await finishWith(opened, 'Firma');
+    expect(opened.ctrl.expectOne('/auth/providers/finish').request.body).toEqual({ ticket: 't-1', kind: 'organization', company_name: 'Firma' });
+  });
+
+  it('leaving through "Back to sign-in" and stepping back does not bring the ticket back: the screen goes to /login', async () => {
+    const opened = await open(both);
+    await finishWith(opened, 'Firma');
+    opened.ctrl.expectOne('/auth/providers/finish').flush({ error: 'invalid_ticket' }, status(400));
+    await settle(opened.harness.fixture);
+    clickOn(opened.harness.fixture, 'a[href="/login"]');
+    await settle(opened.harness.fixture);
+    expect(opened.router.url).toBe('/login');
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    opened.router.setUpLocationChangeListener(); // the harness does not listen to the browser's Back, the application does
+    await new Promise<void>((resolve) => {
+      window.addEventListener('popstate', () => resolve(), { once: true });
+      history.back();
+    });
+    await settle(opened.harness.fixture);
+    await settle(opened.harness.fixture);
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    expect(opened.router.url).toBe('/login');
+    expect(has(opened.harness.fixture, '#company')).toBe(false); // the entry has no state: no ticket, no form
+    opened.ctrl.expectNone('/auth/providers/finish');
   });
 
   it('the ticket is shown nowhere and kept in no address and no storage', async () => {

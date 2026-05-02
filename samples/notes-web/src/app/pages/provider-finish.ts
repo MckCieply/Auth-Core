@@ -6,6 +6,7 @@ import { DEFAULT_RETURN_URL } from '../auth/auth.guard';
 import { AuthService } from '../auth/auth.service';
 import { texts } from '../texts';
 import { requiredText } from './required-text';
+import { keepTicketOutOfHistory } from './ticket-history';
 
 interface FinishState {
   ticket: string;
@@ -95,6 +96,8 @@ export class ProviderFinishPage implements OnInit {
   ngOnInit(): void {
     if (this.finish === null) {
       void this.router.navigateByUrl('/login', { replaceUrl: true }).catch(() => undefined);
+    } else {
+      void keepTicketOutOfHistory(this.router); // the ticket stays in this component's memory only
     }
   }
 

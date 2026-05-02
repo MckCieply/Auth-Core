@@ -4,7 +4,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { has, pageText, privateMe, realLocation, settle, submitForm, typeInto } from '../../testing/helpers';
+import { clickOn, has, pageText, privateMe, realLocation, settle, submitForm, typeInto } from '../../testing/helpers';
 import { AuthService } from '../auth/auth.service';
 import { ProviderLinkPage } from './provider-link';
 
@@ -20,6 +20,8 @@ async function open(state: Record<string, unknown> | null) {
         { path: 'start', component: Elsewhere },
         { path: 'provider-link', component: ProviderLinkPage },
         { path: 'login', component: Elsewhere },
+        { path: 'forgot', component: Elsewhere },
+        { path: 'signup', component: Elsewhere },
         { path: 'notes', component: Elsewhere },
       ]),
       provideHttpClient(),
@@ -34,6 +36,7 @@ async function open(state: Record<string, unknown> | null) {
   const entries = history.length;
   await router.navigateByUrl('/provider-link', state === null ? {} : { state });
   await settle(harness.fixture);
+  await settle(harness.fixture); // the navigation that takes the ticket out of the history entry lands here
   return { harness, router, ctrl: TestBed.inject(HttpTestingController), entries };
 }
 
@@ -88,6 +91,37 @@ describe('ProviderLinkPage (spec 0011)', () => {
   it.each(['github', 'constructor', '__proto__', 42, undefined])('a provider in the state that is not one (%j) reads as "Google or Microsoft"', async (provider) => {
     const { harness } = await open({ ...verified, provider });
     expect(pageText(harness.fixture)).toContain('to connect Google or Microsoft');
+  });
+
+  it('after the screen has read the ticket the history entry holds no ticket (state replaced, address kept, no new entry)', async () => {
+    const opened = await open(verified);
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    expect(history.state).not.toHaveProperty('ticket');
+    expect(history.state).not.toHaveProperty('email');
+    expect(window.location.pathname).toBe('/provider-link');
+    expect(history.length).toBe(opened.entries + 1);
+    // The ticket lives on in the screen's memory: the form still sends it.
+    await link(opened, 'Pw-1 x');
+    expect(opened.ctrl.expectOne('/auth/providers/link').request.body).toEqual({ ticket: 't-1', password: 'Pw-1 x' });
+  });
+
+  it.each(['/forgot', '/signup'])('leaving through %s and stepping back does not bring the ticket back: the screen goes to /login', async (target) => {
+    const opened = await open({ ...verified, emailVerified: target === '/forgot' });
+    clickOn(opened.harness.fixture, `a[href="${target}"]`);
+    await settle(opened.harness.fixture);
+    expect(opened.router.url).toBe(target);
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    opened.router.setUpLocationChangeListener(); // the harness does not listen to the browser's Back, the application does
+    await new Promise<void>((resolve) => {
+      window.addEventListener('popstate', () => resolve(), { once: true });
+      history.back();
+    });
+    await settle(opened.harness.fixture);
+    await settle(opened.harness.fixture);
+    expect(JSON.stringify(history.state)).not.toContain('t-1');
+    expect(opened.router.url).toBe('/login'); // the entry has no state: no ticket, no form
+    expect(has(opened.harness.fixture, '#password')).toBe(false);
+    opened.ctrl.expectNone('/auth/providers/link');
   });
 
   it('the ticket is shown nowhere and kept in no address and no storage', async () => {

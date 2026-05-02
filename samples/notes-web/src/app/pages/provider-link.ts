@@ -6,6 +6,7 @@ import { DEFAULT_RETURN_URL } from '../auth/auth.guard';
 import { AuthService } from '../auth/auth.service';
 import { texts } from '../texts';
 import { providerTitle } from './provider-buttons';
+import { keepTicketOutOfHistory } from './ticket-history';
 
 interface LinkState {
   ticket: string;
@@ -82,6 +83,8 @@ export class ProviderLinkPage implements OnInit {
   ngOnInit(): void {
     if (this.link === null) {
       void this.router.navigateByUrl('/login', { replaceUrl: true }).catch(() => undefined);
+    } else {
+      void keepTicketOutOfHistory(this.router); // the ticket stays in this component's memory only
     }
   }
 

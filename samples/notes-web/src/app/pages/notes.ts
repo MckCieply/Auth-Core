@@ -7,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import { AuthService, LoginResult, errorCode } from '../auth/auth.service';
 import { texts } from '../texts';
 import { ProviderButtons } from './provider-buttons';
+import { keepTicketOutOfHistory } from './ticket-history';
 
 interface Note {
   id: string;
@@ -193,7 +194,7 @@ export class NotesPage implements OnInit {
     if (this.reauthTicket() !== null) {
       this.deleting.set(true);
       this.focusDeleteSection();
-      void this.keepTicketOutOfHistory();
+      void keepTicketOutOfHistory(this.router);
     }
   }
 
@@ -420,19 +421,5 @@ export class NotesPage implements OnInit {
       },
       { injector: this.injector },
     );
-  }
-
-  /**
-   * The ticket came in the history entry of this screen (the navigation state of /provider-return). It lives on in this component's memory
-   * only: the entry is replaced, same address, with no state, so a reload or a step back does not find it in `history.state`.
-   */
-  private async keepTicketOutOfHistory(): Promise<void> {
-    // After the navigation that is building this screen.
-    await Promise.resolve();
-    try {
-      await this.router.navigateByUrl(this.router.url, { replaceUrl: true, onSameUrlNavigation: 'reload' });
-    } catch {
-      // the entry keeps the state; the ticket is still only good for a few minutes and once
-    }
   }
 }
