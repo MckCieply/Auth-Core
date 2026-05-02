@@ -41,7 +41,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
 
         Assert.Equal(["name", "password"], schema["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));
         Assert.Equal(["204", "400", "401", "403", "415", "429"], operation["responses"]!.AsObject().Select(r => r.Key).Order(StringComparer.Ordinal));
-        Assert.All(["forbidden", "permissions_changed", "permission_not_held", "wrong_password"], code => Assert.Contains(code, Description(operation, "403")));
+        Assert.All(["forbidden", "permissions_changed", "permission_not_held", "wrong_password", "reauth_required"], code => Assert.Contains(code, Description(operation, "403")));
         Assert.Contains("invalid_request", Description(operation, "400"));
         Assert.All(["too_many_attempts", "too_many_requests"], code => Assert.Contains(code, Description(operation, "429")));
         Assert.NotNull(operation["security"]);

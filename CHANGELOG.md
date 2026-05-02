@@ -71,7 +71,9 @@ and two new members in `GET /auth/me`, and nothing else changes.
 - The per-IP limits count the start and the callback of a provider round trip (the two `GET`s) and `POST /auth/providers/exchange`, `link` and
   `finish` against the login policy. The OpenAPI description has 36 operations.
 - **An account without a password** (made through a provider) can set one with "forgot password" and then signs in with either; a password
-  login for an account without one is the `401` of an unknown address.
+  login for an account without one is the `401` of an unknown address. `DELETE /auth/org` keeps its password confirmation: an admin without a
+  password gets `403 reauth_required` for any password (nothing is counted, no row is written, the company stays) and sets one with "forgot
+  password" first; a provider confirmation for deleting a company is left to a later spec.
 - **An account that loses its only space is deleted** (spec 0010): removing a member (`204` as before) and deleting a company (every member,
   the admin included) delete the accounts, with `account.deleted` rows; a login is then the `401` of an unknown address, and the address can
   be invited again or sign up. The CLI says so ("Member removed; the account is deleted.", "Company deleted; the accounts of its members are

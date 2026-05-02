@@ -87,11 +87,13 @@ public static class TenancyEndpoints
                 + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
                 + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
                 + "login the `401` of an unknown address. "
-                + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`.")
+                + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`. "
+                + "An admin whose account has no password (made through Google or Microsoft) gets `403 reauth_required` for any password: nothing is counted or written and "
+                + "the company stays; they set a password with \"Forgot your password?\" first.")
             .ReadsJson<DeleteOrgRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 

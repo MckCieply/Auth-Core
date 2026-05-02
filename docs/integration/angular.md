@@ -268,6 +268,10 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
   confirm again; `password_required` and `reauth_required` mean the account changed: ask `GET /auth/me` again and redraw
   ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
 - A person who signed up with a provider has no password; "Forgot your password?" sets one.
+- **Deleting a company needs a password too.** `DELETE /auth/org` keeps the password confirmation. An admin whose account has no password (an
+  organization made through a provider, or an invitation accepted through one) gets `403 reauth_required` for any password; nothing is counted
+  and nothing is deleted. Tell such an admin to set a password with "Forgot your password?" first, and then delete the company (spec 0011,
+  Amendment A9). A provider confirmation for deleting a company is left to a later spec.
 
 ## The limits and an outage (spec 0008)
 
