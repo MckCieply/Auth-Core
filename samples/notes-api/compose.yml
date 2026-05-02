@@ -1,9 +1,10 @@
 # The "notes" sample and a Caddy proxy on top of the development stack. Use it with the base file:
 #
-#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env up -d --build
+#   docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f tests/Auth.FakeOidc/compose.yml \
+#     --env-file .env up -d --build
 #
-# The sample's manifest lists Google and Microsoft (spec 0011): add -f tests/Auth.FakeOidc/compose.yml for the fake provider's keys. Without it
-# the sample's health says Degraded and the start logs that Google and Microsoft have no keys; nothing else changes.
+# The sample's manifest lists Google and Microsoft (spec 0011), and the last file is the fake provider that supplies their keys. Without it
+# the sample's health says Degraded and the start logs a warning that names the Google and Microsoft keys; nothing else changes.
 #
 # Relative paths in this file are resolved from deploy/ (the directory of the FIRST -f file), not from here.
 # Needs NOTES_DB_PASSWORD in .env (see .env.example). The browser's origin is http://localhost:8088:

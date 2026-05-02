@@ -26,8 +26,12 @@ With the development stack and the notes sample (see the top-level README for `.
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f samples/notes-web/compose.yml \
-  --env-file .env up -d --build
+  -f tests/Auth.FakeOidc/compose.yml --env-file .env up -d --build
 ```
+
+The last file is the fake Google and Microsoft of the end-to-end checks (development only): the sample's manifest lists both providers, and
+the fake supplies their keys, so the sign-in buttons work and `/auth/health` says `Healthy`. Without it the stack starts the same, but the
+health says `Degraded` and the start logs a warning that names the missing Google and Microsoft keys.
 
 Open `http://localhost:8088` and sign in as the development user of your `.env`. The same app is on
 `https://localhost:8443` with a certificate from Caddy's own authority: a browser warns, because it does not trust it. WebKit
