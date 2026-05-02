@@ -1053,6 +1053,24 @@ written. Three more were added in verification:
 - **Spec 0012:** an unlink screen for provider logins; and whether a password reset removes the logins or a link sends a mail
   (risk 59, D29). Also the provider confirmation for deleting a company (A9).
 
+**Before the production deploy** (checked by the owner; none of these is code of this slice):
+
+1. Register the return address and the callback addresses with Google and Microsoft and run the live test with real keys
+   (`docs/deployment/provider-keys.md`); confirm that a personal Microsoft account sends `oid` (D22).
+2. Set the six variables (`AUTH_FRONTEND_PROVIDER_URL`, `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`,
+   `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES`) in the deployment that runs
+   Auth-Core (Toviq's compose, M14 to M18), list `providers` in the product's manifest only then, and check that `/auth/health`
+   is `Healthy` and `GET /auth/options` offers both.
+3. Put the Microsoft secret's expiry in the calendar (`docs/operations/microsoft-secret.md`); health turns `Degraded` 30 days
+   before it.
+4. Keep `/auth/providers/*/start` and `/callback` out of the reverse proxy's access log, as `/reset` and `/invite` are (risk 55).
+5. Run `scripts/test-linux.sh` green once Docker is sound (see below).
+
+**The Linux run** was red at the merge: in four runs 2 to 7 tests of 2611 failed, always with a connection timeout to
+Testcontainers' PostgreSQL through Docker Desktop's host gateway (`192.168.65.254`), each time in other tests; `main` showed the
+same failure on the same day, and the Windows run passed 2611 of 2611. The owner accepted it as a fault of the machine's Docker
+(D33); the test host's database set-up now retries such a timeout (D32).
+
 **Verified** on 2026-05-02 (final review and the re-review of its fix wave; three verifiers, two rounds). Live:
 `scripts/e2e-providers.sh` (12 of 12), `scripts/e2e-notes.sh` (7 of 7), `scripts/e2e-private.sh` (9 of 9), the other e2e scripts
 of specs 0001 to 0010, and the sample's Playwright tests (55 of 55 in Chromium and in WebKit, `11-providers.spec.ts` among
