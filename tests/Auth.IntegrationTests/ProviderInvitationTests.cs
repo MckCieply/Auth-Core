@@ -91,7 +91,18 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     {
         await using var held = await HeldLock.AddressAsync(Factory, Normalized);
         var exchange = ProviderApi.Exchange(Client, ticket);
-        await HeldLock.WaitForWaitersAsync(Factory, 1);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);
+        await change();
+        await held.ReleaseAsync();
+        return await exchange;
+    }
+
+    /// <summary>Sends the exchange while the company's lock is held, waits until it is queued behind it, runs <paramref name="change"/>, releases.</summary>
+    private async Task<HttpResponseMessage> ExchangeWhileCompanyLockedAsync(ProviderApi.Ticket ticket, Guid company, Func<Task> change)
+    {
+        await using var held = await HeldLock.CompanyAsync(Factory, company);
+        var exchange = ProviderApi.Exchange(Client, ticket);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);
         await change();
         await held.ReleaseAsync();
         return await exchange;
@@ -559,7 +570,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task Two_exchanges_of_one_invitation_ticket_make_one_account_one_session_and_one_invite_accepted()   // spec 0011 → exchange: parallel requests with one ticket, one gets it
+    public async Task Two_exchanges_of_one_invitation_ticket_give_one_session_and_one_400_invalid_ticket()   // spec 0011 → exchange: parallel requests with one ticket, one gets it; the ticket is used up first under the company lock
     {
         var (_, _, token) = await InvitationAsync();
         var ticket = await InviteTicketAsync(token, Jan());
@@ -568,16 +579,17 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             one = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the company locked and the invitation used up, waiting for the address
+            await HeldLock.WaitForWaitersAsync(Factory, 1, one);   // the company locked, the ticket and the invitation used up, waiting for the address
             two = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);   // waiting for the company
+            await HeldLock.WaitForWaitersAsync(Factory, 2, one, two);   // waiting for the company
             await held.ReleaseAsync();
         }
 
         using var first = await one;
         using var second = await two;
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        await TenancyApi.AssertErrorAsync(second, HttpStatusCode.BadRequest, "invalid_token");   // the invitation is gone
+        await TenancyApi.AssertErrorAsync(second, HttpStatusCode.BadRequest, "invalid_ticket");   // the ticket is judged before the invitation, which is gone as well
+        Assert.False(second.Headers.Contains("Set-Cookie"));
         Assert.Equal(1, await AccountsAsync());
         Assert.Equal(1, await LoginsAsync());
         Assert.Equal(0, await TicketCountAsync());
@@ -596,9 +608,9 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             one = ProviderApi.Exchange(Client, google);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, one);
             two = ProviderApi.Exchange(Client, microsoft);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, one, two);
             await held.ReleaseAsync();
         }
 
@@ -621,9 +633,9 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the invitation used up, waiting for the address
+            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // the invitation used up, waiting for the address
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);   // waiting for the company
+            await HeldLock.WaitForWaitersAsync(Factory, 2, acceptance, exchange);   // waiting for the company
             await held.ReleaseAsync();
         }
 
@@ -649,9 +661,9 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the company locked, waiting for the address
+            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the company locked, waiting for the address
             cancelling = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/invites/{other}", adminToken);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);   // another invitation of the company cannot be cancelled meanwhile: it waits for the company
+            await HeldLock.WaitForWaitersAsync(Factory, 2, exchange, cancelling);   // another invitation of the company cannot be cancelled meanwhile: it waits for the company
             Assert.NotNull(await InviteAsync(other));
             await held.ReleaseAsync();
         }
@@ -675,9 +687,9 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AuditTableAsync(Factory))
         {
             cancelling = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/invites/{invite}", adminToken);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the invitation deleted, not committed: the cancel waits at its audit row
+            await HeldLock.WaitForWaitersAsync(Factory, 1, cancelling);   // the invitation deleted, not committed: the cancel waits at its audit row
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);   // waiting for the company
+            await HeldLock.WaitForWaitersAsync(Factory, 2, cancelling, exchange);   // waiting for the company
             await held.ReleaseAsync();
         }
 
@@ -701,9 +713,9 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             completion = SignupApi.Complete(Client, signupToken, Password, "Firma");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, completion);
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, completion, exchange);
             await held.ReleaseAsync();
         }
 
@@ -739,12 +751,12 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task A_ticket_that_expired_while_the_exchange_waited_for_the_address_lock_is_400_invalid_ticket_and_makes_nothing()   // spec 0011 → exchange, step 2: the clock is read after the locks
+    public async Task A_ticket_that_expired_while_the_exchange_waited_for_the_company_lock_is_400_invalid_ticket_and_makes_nothing()   // spec 0011 → exchange, step 2: the clock is read after the lock
     {
-        var (_, invite, token) = await InvitationAsync();
+        var (company, invite, token) = await InvitationAsync();
         var ticket = await InviteTicketAsync(token, Jan());
 
-        using var response = await ExchangeWhileLockedAsync(ticket, () => { Clock.Advance(TimeSpan.FromMinutes(11)); return Task.CompletedTask; });
+        using var response = await ExchangeWhileCompanyLockedAsync(ticket, company, () => { Clock.Advance(TimeSpan.FromMinutes(11)); return Task.CompletedTask; });
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_ticket");
         Assert.False(response.Headers.Contains("Set-Cookie"));
@@ -793,13 +805,13 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task A_ticket_used_up_while_the_exchange_waits_for_the_address_is_400_invalid_ticket_and_the_invitation_stays()   // spec 0011 → exchange: the ticket is used up in the transaction of the acceptance
+    public async Task A_ticket_used_up_while_the_exchange_waits_for_the_company_lock_is_400_invalid_ticket_and_the_invitation_stays()   // spec 0011 → exchange: the ticket is used up in the transaction of the acceptance
     {
-        var (_, invite, token) = await InvitationAsync();
+        var (company, invite, token) = await InvitationAsync();
         var ticket = await InviteTicketAsync(token, Jan());
 
-        using var response = await ExchangeWhileLockedAsync(
-            ticket, () => InDbAsync(db => db.ProviderTickets.ExecuteDeleteAsync(TestContext.Current.CancellationToken)));
+        using var response = await ExchangeWhileCompanyLockedAsync(
+            ticket, company, () => InDbAsync(db => db.ProviderTickets.ExecuteDeleteAsync(TestContext.Current.CancellationToken)));
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.BadRequest, "invalid_ticket");
         Assert.False(response.Headers.Contains("Set-Cookie"));
@@ -821,7 +833,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.MembershipsAsync(Factory))
         {
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the account is read; the read of its space waits for the memberships
+            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the account is read; the read of its space waits for the memberships
             await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
             await held.ReleaseAsync();
         }

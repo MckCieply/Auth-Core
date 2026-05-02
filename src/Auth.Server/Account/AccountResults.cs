@@ -1,3 +1,4 @@
+using Auth.Server.Tenancy;
 using Microsoft.Net.Http.Headers;
 
 namespace Auth.Server.Account;
@@ -11,8 +12,8 @@ public static class AccountResults
     public const string InvalidRequestError = "invalid_request";
     public const string InvalidTokenError = "invalid_token";
     public const string WeakPasswordError = "weak_password";
-    public const string EmailNotVerifiedError = "email_not_verified";
-    public const string NoMembershipError = "no_membership";
+    public const string EmailNotVerifiedError = TenancyErrors.EmailNotVerified;
+    public const string NoMembershipError = TenancyErrors.NoMembership;
 
     /// <summary>202: the request was taken. Says nothing about whether a mail will follow.</summary>
     public static IResult Accepted() => new NoStoreResult(StatusCodes.Status202Accepted, null);

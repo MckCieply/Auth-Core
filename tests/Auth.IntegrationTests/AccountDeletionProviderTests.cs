@@ -40,7 +40,7 @@ public sealed class AccountDeletionProviderTests : ProviderTestBase
     {
         await using var held = await HeldLock.AddressAsync(Factory, Normalized);
         var pending = ProviderApi.DeleteAccount(Client, accessToken, new { provider_ticket = ticket.Value }, ticket.Binding);
-        await HeldLock.WaitForWaitersAsync(Factory, 1);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, pending);
         await change();
         await held.ReleaseAsync();
         return await pending;
@@ -365,7 +365,7 @@ public sealed class AccountDeletionProviderTests : ProviderTestBase
         {
             first = ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = reauth.Value }, reauth.Binding);
             second = ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = reauth.Value }, reauth.Binding);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, first, second);
             await held.ReleaseAsync();
         }
 
@@ -484,7 +484,7 @@ public sealed class AccountDeletionProviderTests : ProviderTestBase
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             pending = ProviderApi.DeleteAccount(Client, session.AccessToken, new { password = UserPassword }, null);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, pending);
             await InDbAsync(db => db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(
                 s => s.SetProperty(u => u.PasswordHash, (string?)null), TestContext.Current.CancellationToken));
             await held.ReleaseAsync();

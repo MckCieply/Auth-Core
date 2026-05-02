@@ -22,7 +22,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
     {
         await using var held = await HeldLock.AddressAsync(Factory, OlaNormalized);
         var link = ProviderApi.Link(Client, ticket, UserPassword);
-        await HeldLock.WaitForWaitersAsync(Factory, 1);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, link);
         await change(held);
         await held.ReleaseAsync();
         return await link;
@@ -104,7 +104,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         {
             first = ProviderApi.Link(Client, ticket, UserPassword);
             second = ProviderApi.Link(Client, ticket, UserPassword);
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, first, second);
             await held.ReleaseAsync();
         }
 

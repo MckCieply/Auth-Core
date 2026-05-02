@@ -1,6 +1,7 @@
 using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -62,7 +63,7 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
                     "accept" => TenancyApi.AcceptLeaving(Client, inviteToken, "Invited-Passw0rd"),
                     _ => SignupApi.CompletePrivate(Client, signupToken, Password),
                 };
-                await HeldLock.WaitForWaitersAsync(Factory, ++waiting);
+                await HeldLock.WaitForWaitersAsync(Factory, ++waiting, [.. started.Values]);
             }
 
             await held.ReleaseAsync();
@@ -125,7 +126,7 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         await using (var held = await HeldLock.AuditTableAsync(Factory))
         {
             var removal = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the account's rows are deleted, not committed: the removal waits at its audit rows
+            await HeldLock.WaitForWaitersAsync(Factory, 1, removal);   // the account's rows are deleted, not committed: the removal waits at its audit rows
 
             using (var early = await TenancyApi.Accept(Client, token, "Invited-Passw0rd"))
             {
@@ -158,7 +159,7 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         await using (var held = await HeldLock.MembershipsAsync(Factory))
         {
             acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the account is read; the read of its space waits for the memberships
+            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // the account is read; the read of its space waits for the memberships
             await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
             await held.ReleaseAsync();
         }
@@ -186,7 +187,7 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         await using (var held = await HeldLock.AddressAsync(Factory, "WORKER@ACME.TEST"))
         {
             acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // the invitation used up, waiting for the address
+            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // the invitation used up, waiting for the address
             using (var removed = await TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken))
             {
                 Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);   // a removal takes no address lock
@@ -199,5 +200,30 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
         await AssertOneAccountWithOneSpaceAsync("WORKER@ACME.TEST");
         Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task An_invitation_that_expires_while_the_acceptance_waits_for_the_company_lock_is_400_invalid_token_and_makes_nothing()   // the clock is read after the company lock
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var invite = await AddInviteAsync(company, "worker@acme.test", "user");
+        await EnqueueInvitationAsync(invite, "worker@acme.test");
+        await DispatchAsync();
+        var token = TokenIn(Mail.Sent.Last(m => m.To == "worker@acme.test"));
+
+        Task<HttpResponseMessage> acceptance;
+        await using (var held = await HeldLock.CompanyAsync(Factory, company))
+        {
+            acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
+            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // found the invitation live, waiting for the company
+            Clock.Advance(InviteTokens.Lifetime);                         // it is a week and a second old when the lock is granted
+            await held.ReleaseAsync();
+        }
+
+        using var refused = await acceptance;
+        await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.BadRequest, "invalid_token");
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.NormalizedEmail == "WORKER@ACME.TEST", TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(i => i.Id == invite, TestContext.Current.CancellationToken)));   // expired, not pruned: the refusal changed nothing
     }
 }

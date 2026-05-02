@@ -118,13 +118,13 @@ public static class ProviderLinkEndpoint
         if (!account.EmailConfirmed && !ticket.EmailVerified)
         {
             await RecordFailureAsync(audit, "unconfirmed_address", account, email, ticket.Provider);
-            return AccountResults.EmailNotVerified();
+            return ApiResults.Error(TenancyErrors.EmailNotVerified);
         }
 
         if (await memberships.ReadAsync(account.Id, http.RequestAborted) is null)
         {
             await RecordFailureAsync(audit, "no_company", account, email, ticket.Provider);
-            return AccountResults.NoMembership();
+            return ApiResults.Error(TenancyErrors.NoMembership);
         }
 
         return await LinkAndSignInAsync(http, db, users, memberships, audit, tokens.Value, clock, account, ticket, ticketText, binding!);
@@ -154,7 +154,7 @@ public static class ProviderLinkEndpoint
             }
 
             // The account's row under a share lock to the end: one removed meanwhile is linked to nothing (the answer of an unknown address).
-            if (!await AccountIsThereAsync(db, account.Id))
+            if (!await AtomicSignInResult.AccountExistsAsync(db, account.Id, CancellationToken.None))
             {
                 await transaction.DisposeAsync();
                 return new LoginEndpoint.InvalidCredentialsResult();
@@ -165,7 +165,7 @@ public static class ProviderLinkEndpoint
             {
                 await transaction.DisposeAsync();
                 await RecordFailureAsync(audit, "no_company", account, account.Email!, ticket.Provider);
-                return AccountResults.NoMembership();
+                return ApiResults.Error(TenancyErrors.NoMembership);
             }
 
             ProviderLogins.Add(db, account.Id, ticket.Provider, ticket.IdentityKey);
@@ -188,14 +188,6 @@ public static class ProviderLinkEndpoint
             await transaction.DisposeAsync();
             throw;
         }
-    }
-
-    private static async Task<bool> AccountIsThereAsync(AuthDbContext db, Guid userId)
-    {
-        var found = await db.Database
-            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "AspNetUsers" WHERE "Id" = {userId} FOR KEY SHARE""")
-            .ToListAsync(CancellationToken.None);
-        return found.Count == 1;
     }
 
     private static Task<IResult> InvalidCredentialsAsync() => Task.FromResult<IResult>(new LoginEndpoint.InvalidCredentialsResult());

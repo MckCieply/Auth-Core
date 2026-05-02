@@ -51,7 +51,7 @@ public sealed class AtomicSignInResult(
             try
             {
                 transaction ??= await db.Database.BeginTransactionAsync(httpContext.RequestAborted);
-                if (!await AccountExistsAsync(db, principal, httpContext.RequestAborted))
+                if (!await AccountExistsAsync(db, AccountIdOf(principal), httpContext.RequestAborted))
                 {
                     if (whenGone is null)
                     {
@@ -118,14 +118,17 @@ public sealed class AtomicSignInResult(
         }
     }
 
-    /// <summary>Whether the account of the principal is there, read with a share lock held to the end of the transaction.</summary>
-    private static async Task<bool> AccountExistsAsync(AuthDbContext db, ClaimsPrincipal principal, CancellationToken cancellationToken)
-    {
-        if (!Guid.TryParse(principal.GetClaim(OpenIddictConstants.Claims.Subject), out var userId))
-        {
-            throw new InvalidOperationException("The principal to sign in has no account id.");
-        }
+    private static Guid AccountIdOf(ClaimsPrincipal principal) =>
+        Guid.TryParse(principal.GetClaim(OpenIddictConstants.Claims.Subject), out var userId)
+            ? userId
+            : throw new InvalidOperationException("The principal to sign in has no account id.");
 
+    /// <summary>
+    /// Whether the account is there, read with a share lock (<c>FOR KEY SHARE</c>) held to the end of the transaction: an account deletion locks
+    /// the row for update, so nothing is signed in or linked to an account that is being deleted. The sign-in and the link of a provider both use it.
+    /// </summary>
+    internal static async Task<bool> AccountExistsAsync(AuthDbContext db, Guid userId, CancellationToken cancellationToken)
+    {
         var found = await db.Database
             .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "AspNetUsers" WHERE "Id" = {userId} FOR KEY SHARE""")
             .ToListAsync(cancellationToken);

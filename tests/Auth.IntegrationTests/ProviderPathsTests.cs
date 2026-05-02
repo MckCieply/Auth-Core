@@ -23,7 +23,6 @@ public sealed class ProviderPathsTests
     [Fact]
     public void The_paths_are_those_of_the_contract()
     {
-        Assert.Equal("/auth/providers/google/start", ProviderPaths.StartPathOf("google"));
         Assert.Equal("/auth/providers/microsoft/callback", ProviderPaths.CallbackPathOf("microsoft"));
         Assert.Equal(["/auth/providers/exchange", "/auth/providers/link", "/auth/providers/finish"], ProviderPaths.TokenPaths);
     }

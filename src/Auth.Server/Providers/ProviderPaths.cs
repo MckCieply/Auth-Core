@@ -4,8 +4,10 @@ namespace Auth.Server.Providers;
 public static class ProviderPaths
 {
     public const string Prefix = "/auth/providers";
-    public const string Start = "/auth/providers/{name}/start";
-    public const string Callback = "/auth/providers/{name}/callback";
+    public const string StartSegment = "start";
+    public const string CallbackSegment = "callback";
+    public const string Start = Prefix + "/{name}/" + StartSegment;
+    public const string Callback = Prefix + "/{name}/" + CallbackSegment;
     public const string Exchange = "/auth/providers/exchange";
     public const string Link = "/auth/providers/link";
     public const string Finish = "/auth/providers/finish";
@@ -13,9 +15,7 @@ public static class ProviderPaths
     /// <summary>The three POSTs that are token-endpoint requests of OpenIddict, as the sign-up completion is.</summary>
     public static IReadOnlyList<string> TokenPaths { get; } = [Exchange, Link, Finish];
 
-    public static string StartPathOf(string provider) => Prefix + "/" + provider + "/start";
-
-    public static string CallbackPathOf(string provider) => Prefix + "/" + provider + "/callback";
+    public static string CallbackPathOf(string provider) => Prefix + "/" + provider + "/" + CallbackSegment;
 
     /// <summary>The callback of a provider, case-insensitive and with an optional trailing slash: the paths OpenIddict's redirection endpoint answers.</summary>
     public static bool IsCallbackPath(PathString path) =>

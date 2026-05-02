@@ -92,57 +92,20 @@ public sealed class InviteAcceptance(
         ArgumentNullException.ThrowIfNull(token);
 
         var hash = EmailTokens.HashOf(token);
-        var now = StorableTime.Now(clock);
 
         // Leaving this method without a commit rolls everything back, the use of the invitation included.
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        // The company first, as every change to a company's members does; then the invitation. Of parallel accepts with
-        // one token the lock lets one in at a time, and the later one finds the invitation gone.
-        var companyId = await db.Invites.Where(i => i.TokenHash == hash && i.ExpiresAt > now)
-            .Select(i => (Guid?)i.CompanyId).FirstOrDefaultAsync(cancellationToken);
-        if (companyId is not { } company || !await CompanyLock.AcquireAsync(db, company, cancellationToken))
+        var locked = await LockInvitationAsync(hash, useTicket: null, judgeInvite: null, cancellationToken);
+        if (locked.Error is { } refusal)
         {
-            return Refused(TenancyErrors.InvalidToken);
+            return Refused(refusal);
         }
 
-        // ToListAsync, not SingleOrDefaultAsync: EF must send the statement as it is, not wrapped in a subquery.
-        var consumed = await db.Invites
-            .FromSql($"""DELETE FROM "Invites" WHERE "TokenHash" = {hash} AND "ExpiresAt" > {now} RETURNING *""")
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-        if (consumed.Count != 1)
-        {
-            return Refused(TenancyErrors.InvalidToken);
-        }
-
-        var invite = consumed[0];
-
-        // Sending refuses such an address (defence in depth; the check that decides is the one on the account below).
-        if (EmailInput.MayStandForAnotherAddress(invite.Email))
-        {
-            return Refused(TenancyErrors.InvalidToken);
-        }
-
-        // One address at a time, after the company lock (spec 0010 → Locks): two invitations accepted at once, a self-deletion and a sign-up
-        // completion of the address wait for each other here.
-        await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
-
-        // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
-        // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.
-        var user = await users.FindByEmailAsync(invite.Email);
-        if (user is not null && !EmailInput.IsSameAddress(user.Email, invite.Email))
-        {
-            return Refused(TenancyErrors.InvalidToken);
-        }
-
-        var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
-        if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
-        {
-            // The account was there when it was read and its space is not: a removal committed between the two reads, taking the account with
-            // its membership. The address now belongs to no account, which is the case of an invitation to a new address.
-            user = null;
-        }
+        var invite = locked.Invite!;
+        var user = locked.User;
+        var space = locked.Space;
+        var now = locked.Now;
 
         if (space is { Kind: CompanyKind.Organization })
         {
@@ -222,6 +185,86 @@ public sealed class InviteAcceptance(
     }
 
     /// <summary>
+    /// What <see cref="LockInvitationAsync"/> found under its locks: the invitation it used up, the account of the invited address (or
+    /// <see langword="null"/>) and that account's space, and the time the invitation and the ticket were judged by; or the refusal.
+    /// </summary>
+    private sealed record LockedInvitation(string? Error, Invite? Invite = null, ApplicationUser? User = null, Space? Space = null, DateTimeOffset Now = default);
+
+    /// <summary>
+    /// The locks and reads that both acceptances share, in the order of spec 0010 → Locks: the company lock; the clock, read once the lock is
+    /// held (a request that waited judges the invitation, and a ticket, by the time it gets in); then <paramref name="useTicket"/> (a provider
+    /// acceptance uses its ticket up here, so that of parallel requests with one ticket the later finds it gone); the invitation, used up in
+    /// one statement; <paramref name="judgeInvite"/> (a refusal of the invitation as it was read, before any address lock); the address lock;
+    /// the account of the address, which must be spelled the same up to ASCII case (<see cref="EmailInput.IsSameAddress"/>); and its space,
+    /// with the account's row locked when it has none. A refusal is the <see cref="LockedInvitation.Error"/>; the caller rolls the transaction
+    /// back by leaving without a commit.
+    /// </summary>
+    private async Task<LockedInvitation> LockInvitationAsync(
+        byte[] hash, Func<DateTimeOffset, Task<bool>>? useTicket, Func<Invite, string?>? judgeInvite, CancellationToken cancellationToken)
+    {
+        // The company first, as every change to a company's members does; then the invitation. Of parallel accepts with
+        // one token the lock lets one in at a time, and the later one finds the invitation gone.
+        var found = StorableTime.Now(clock);
+        var companyId = await db.Invites.Where(i => i.TokenHash == hash && i.ExpiresAt > found)
+            .Select(i => (Guid?)i.CompanyId).FirstOrDefaultAsync(cancellationToken);
+        if (companyId is not { } company || !await CompanyLock.AcquireAsync(db, company, cancellationToken))
+        {
+            return new LockedInvitation(TenancyErrors.InvalidToken);
+        }
+
+        var now = StorableTime.Now(clock);
+        if (useTicket is not null && !await useTicket(now))
+        {
+            return new LockedInvitation(TenancyErrors.InvalidTicket);
+        }
+
+        // ToListAsync, not SingleOrDefaultAsync: EF must send the statement as it is, not wrapped in a subquery.
+        var consumed = await db.Invites
+            .FromSql($"""DELETE FROM "Invites" WHERE "TokenHash" = {hash} AND "ExpiresAt" > {now} RETURNING *""")
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        if (consumed.Count != 1)
+        {
+            return new LockedInvitation(TenancyErrors.InvalidToken);
+        }
+
+        var invite = consumed[0];
+
+        // Sending refuses such an address (defence in depth; the check that decides is the one on the account below).
+        if (EmailInput.MayStandForAnotherAddress(invite.Email))
+        {
+            return new LockedInvitation(TenancyErrors.InvalidToken);
+        }
+
+        if (judgeInvite?.Invoke(invite) is { } refusal)
+        {
+            return new LockedInvitation(refusal);
+        }
+
+        // One address at a time, after the company lock (spec 0010 → Locks): two invitations accepted at once, a self-deletion and a sign-up
+        // completion of the address wait for each other here.
+        await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
+
+        // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
+        // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.
+        var user = await users.FindByEmailAsync(invite.Email);
+        if (user is not null && !EmailInput.IsSameAddress(user.Email, invite.Email))
+        {
+            return new LockedInvitation(TenancyErrors.InvalidToken);
+        }
+
+        var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
+        if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
+        {
+            // The account was there when it was read and its space is not: a removal committed between the two reads, taking the account with
+            // its membership. The address now belongs to no account, which is the case of an invitation to a new address.
+            user = null;
+        }
+
+        return new LockedInvitation(null, invite, user, space, now);
+    }
+
+    /// <summary>
     /// The space of the account and its kind; <see langword="null"/> when it has none. A company wins over a personal space, should an account
     /// ever hold both (only a direct change of the database leaves that), so that it is refused as any member of a company is.
     /// </summary>
@@ -261,8 +304,9 @@ public sealed class InviteAcceptance(
     /// or a look-alike: <c>invalid_token</c>); the ticket's address missing, unverified or not the invited one (<c>address_mismatch</c>,
     /// Decision 9); a company member's address (<c>already_member</c>) or a private account's (<c>private_account_exists</c>: the move of spec 0010
     /// is the screen's own button, Settled 15); the identity a login already (<c>provider_already_linked</c>). Every refusal changes nothing, the
-    /// invitation and the ticket included. Otherwise, under the company lock and then the address lock, the invitation and the ticket are used up,
-    /// the account is made with the invited address and no password, its email confirmed, the identity its login, a member with the invited role,
+    /// invitation and the ticket included. Otherwise, under the company lock and then the address lock, the ticket is used up first (right after the
+    /// company lock, so that of parallel requests with one ticket the later is <c>invalid_ticket</c>, and a ticket that expired while it waited is
+    /// refused), then the invitation, the account is made with the invited address and no password, its email confirmed, the identity its login, a member with the invited role,
     /// and <c>invite.accepted</c> names the role and the provider. Nothing is committed: the transaction is handed over, because the acceptance
     /// signs the person in (Settled 16).
     /// </summary>
@@ -272,54 +316,30 @@ public sealed class InviteAcceptance(
 
         var ticket = request.Ticket;
         var hash = ticket.InviteTokenHash ?? throw new InvalidOperationException("An invitation ticket holds the hash of its invitation.");
-        var now = StorableTime.Now(clock);   // read again after each lock: a request that waited judges the ticket and the invitation by the time it gets in
 
-        // Leaving this method without handing the transaction over rolls everything back, the use of the invitation included.
+        // Leaving this method without handing the transaction over rolls everything back, the use of the invitation and of the ticket included.
         var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var handedOver = false;
         try
         {
-            // The company first, as every change to a company's members does; then the invitation, as AcceptAsync does.
-            var companyId = await db.Invites.Where(i => i.TokenHash == hash && i.ExpiresAt > now)
-                .Select(i => (Guid?)i.CompanyId).FirstOrDefaultAsync(cancellationToken);
-            if (companyId is not { } company || !await CompanyLock.AcquireAsync(db, company, cancellationToken))
+            // The ticket is used up right after the company lock, as the link, the finish and the deletion use theirs; then the invitation,
+            // which is bound to the address it named: only a verified provider address spelled the same up to ASCII case accepts it.
+            var locked = await LockInvitationAsync(
+                hash,
+                async now => await ProviderTickets.ConsumeAsync(db, request.TicketText, request.Binding, ProviderTicketPurpose.Invite, now, cancellationToken) is not null,
+                invited => ticket.Email is null || !ticket.EmailVerified || !EmailInput.IsSameAddress(ticket.Email, invited.Email)
+                    ? TenancyErrors.AddressMismatch
+                    : null,
+                cancellationToken);
+            if (locked.Error is { } refusal)
             {
-                return ProviderRefused(TenancyErrors.InvalidToken);
+                return ProviderRefused(refusal);
             }
 
-            now = StorableTime.Now(clock);
-
-            // ToListAsync, not SingleOrDefaultAsync: EF must send the statement as it is, not wrapped in a subquery.
-            var consumed = await db.Invites
-                .FromSql($"""DELETE FROM "Invites" WHERE "TokenHash" = {hash} AND "ExpiresAt" > {now} RETURNING *""")
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
-            if (consumed.Count != 1 || EmailInput.MayStandForAnotherAddress(consumed[0].Email))
-            {
-                return ProviderRefused(TenancyErrors.InvalidToken);
-            }
-
-            var invite = consumed[0];
-
-            // The invitation is bound to the address it named: only a verified provider address spelled the same up to ASCII case accepts it.
-            if (ticket.Email is null || !ticket.EmailVerified || !EmailInput.IsSameAddress(ticket.Email, invite.Email))
-            {
-                return ProviderRefused(TenancyErrors.AddressMismatch);
-            }
-
-            await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
-            now = StorableTime.Now(clock);
-            var user = await users.FindByEmailAsync(invite.Email);
-            if (user is not null && !EmailInput.IsSameAddress(user.Email, invite.Email))
-            {
-                return ProviderRefused(TenancyErrors.InvalidToken);
-            }
-
-            var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
-            if (user is not null && space is null && !await LockAccountAsync(user, cancellationToken))
-            {
-                user = null;   // removed between the two reads: the address belongs to no account now
-            }
+            var invite = locked.Invite!;
+            var user = locked.User;
+            var space = locked.Space;
+            var now = locked.Now;
 
             if (space is { Kind: CompanyKind.Organization })
             {
@@ -339,11 +359,6 @@ public sealed class InviteAcceptance(
             if (await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
             {
                 return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);
-            }
-
-            if (await ProviderTickets.ConsumeAsync(db, request.TicketText, request.Binding, ProviderTicketPurpose.Invite, now, cancellationToken) is null)
-            {
-                return ProviderRefused(TenancyErrors.InvalidTicket);
             }
 
             // The provider proved the invited mailbox: the email is confirmed, and no password is set (spec 0011 → Accounts without a password).

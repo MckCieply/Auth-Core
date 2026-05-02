@@ -1,3 +1,5 @@
+using Auth.Server.Providers;
+
 namespace Auth.Server.RateLimiting;
 
 /// <summary>The five limits of spec 0008 → Per-IP rate limiting. A request counts against exactly one.</summary>
@@ -62,9 +64,7 @@ public static class RatePolicies
         }
 
         if (trimmed.Equals("/auth/login", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("/auth/providers/exchange", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("/auth/providers/link", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("/auth/providers/finish", StringComparison.OrdinalIgnoreCase))
+            || ProviderPaths.TokenPaths.Any(tokenPath => trimmed.Equals(tokenPath, StringComparison.OrdinalIgnoreCase)))
         {
             return RatePolicy.Login;
         }
@@ -97,12 +97,15 @@ public static class RatePolicies
     /// <summary><c>/auth/providers/{any name}/start</c> or <c>/callback</c>, without regard to case: the name is judged later, by the endpoint.</summary>
     private static bool IsProviderRoundTrip(string path)
     {
-        var segments = path.Split('/');
-        return segments.Length == 5
-            && segments[0].Length == 0
-            && segments[1].Equals("auth", StringComparison.OrdinalIgnoreCase)
-            && segments[2].Equals("providers", StringComparison.OrdinalIgnoreCase)
-            && segments[3].Length > 0
-            && (segments[4].Equals("start", StringComparison.OrdinalIgnoreCase) || segments[4].Equals("callback", StringComparison.OrdinalIgnoreCase));
+        if (!path.StartsWith(ProviderPaths.Prefix + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var segments = path[(ProviderPaths.Prefix.Length + 1)..].Split('/');
+        return segments.Length == 2
+            && segments[0].Length > 0
+            && (segments[1].Equals(ProviderPaths.StartSegment, StringComparison.OrdinalIgnoreCase)
+                || segments[1].Equals(ProviderPaths.CallbackSegment, StringComparison.OrdinalIgnoreCase));
     }
 }

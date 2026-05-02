@@ -28,7 +28,7 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
     {
         await using var held = await HeldLock.AddressAsync(Factory, Normalized);
         var finish = ProviderApi.Finish(Client, ticket, "private");
-        await HeldLock.WaitForWaitersAsync(Factory, 1);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, finish);
         await change();
         await held.ReleaseAsync();
         return await finish;
@@ -49,11 +49,11 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             finish = ProviderApi.Finish(Client, ticket, "private");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, finish);
             completion = SignupApi.Complete(Client, signupToken, Password, "Firma");
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, finish, completion);
             acceptance = TenancyApi.Accept(Client, inviteToken, "Invited-Passw0rd");
-            await HeldLock.WaitForWaitersAsync(Factory, 3);
+            await HeldLock.WaitForWaitersAsync(Factory, 3, finish, completion, acceptance);
             await held.ReleaseAsync();
         }
 
@@ -96,9 +96,9 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             made = ahead();
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, made);
             finish = ProviderApi.Finish(Client, ticket, "private");
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, made, finish);
             await held.ReleaseAsync();
         }
 
@@ -126,9 +126,9 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         await using (var held = await HeldLock.AddressAsync(Factory, Normalized))
         {
             one = ProviderApi.Finish(Client, first, "private");
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, one);
             two = ProviderApi.Finish(Client, second, "organization", "Firma");
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, one, two);
             await held.ReleaseAsync();
         }
 
@@ -153,7 +153,7 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         {
             first = ProviderApi.Finish(Client, ticket, "private");
             second = ProviderApi.Finish(Client, ticket, "private");
-            await HeldLock.WaitForWaitersAsync(Factory, 2);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, first, second);
             await held.ReleaseAsync();
         }
 
