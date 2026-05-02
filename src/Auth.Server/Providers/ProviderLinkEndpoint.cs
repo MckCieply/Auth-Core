@@ -153,8 +153,13 @@ public static class ProviderLinkEndpoint
                 return await ProviderSignIn.LinkedAsync(http, db, users, memberships, tokens, clock, linked, ticket, ticketText, binding);
             }
 
-            // The account's row under a share lock to the end: one removed meanwhile is linked to nothing (the answer of an unknown address).
-            if (!await AtomicSignInResult.AccountExistsAsync(db, account.Id, CancellationToken.None))
+            // The account's row under a share lock to the end: one removed meanwhile is linked to nothing (the answer of an unknown address), and a
+            // password reset meanwhile (a reset takes no address lock, but its update waits for this share lock) leaves a hash other than the one
+            // that was judged: the login's own answer, the ticket kept, as DELETE /auth/account answers a password changed while it waited.
+            var hashes = await db.Database
+                .SqlQuery<string?>($"""SELECT "PasswordHash" AS "Value" FROM "AspNetUsers" WHERE "Id" = {account.Id} FOR SHARE""")
+                .ToListAsync(CancellationToken.None);
+            if (hashes.Count != 1 || !string.Equals(hashes[0], account.PasswordHash, StringComparison.Ordinal))
             {
                 await transaction.DisposeAsync();
                 return new LoginEndpoint.InvalidCredentialsResult();

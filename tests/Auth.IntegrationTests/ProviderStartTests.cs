@@ -77,14 +77,21 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Theory]
-    [InlineData("microsoft", "prompt", "login", "max_age")]
-    [InlineData("google", "max_age", "0", "prompt")]
-    public async Task Reauth_asks_microsoft_for_a_login_and_google_for_a_fresh_sign_in(string provider, string parameter, string value, string absent)   // criterion 5, Settled 26
+    [InlineData("microsoft", "login", false)]
+    [InlineData("google", "select_account", true)]
+    public async Task Reauth_asks_microsoft_for_a_login_and_google_for_a_fresh_sign_in(string provider, string prompt, bool maxAge)   // criterion 5, Settled 26, Decision 31
     {
         var start = await StartAsync(provider, "?purpose=reauth");
 
-        Assert.Equal(value, start.Query[parameter]);
-        Assert.False(start.Query.ContainsKey(absent));
+        Assert.Equal(prompt, start.Query["prompt"]);
+        if (maxAge)
+        {
+            Assert.Equal("0", start.Query["max_age"]);
+        }
+        else
+        {
+            Assert.False(start.Query.ContainsKey("max_age"));
+        }
     }
 
     [Fact]

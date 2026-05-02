@@ -69,21 +69,19 @@ public static class ProviderStartEndpoint
             properties.Items[ProviderStateItems.InviteHash] = inviteHash;
         }
 
-        if (purpose == ProviderTicketPurpose.Reauth)
+        if (purpose == ProviderTicketPurpose.Reauth && name == ProviderNames.Microsoft)
         {
             // A fresh sign-in at the provider (Settled 26); Auth-Core does not check that one happened (residual risk 57).
-            if (name == ProviderNames.Microsoft)
-            {
-                properties.Parameters["prompt"] = "login";
-            }
-            else
-            {
-                properties.Parameters["max_age"] = 0;
-            }
+            properties.Parameters["prompt"] = "login";
         }
         else
         {
             properties.Parameters["prompt"] = "select_account";
+            if (purpose == ProviderTicketPurpose.Reauth)
+            {
+                // Google: the account choice stays (Decision 31) and the sign-in must be fresh.
+                properties.Parameters["max_age"] = 0;
+            }
         }
 
         return Results.Challenge(properties, [OpenIddictClientAspNetCoreDefaults.AuthenticationScheme]);

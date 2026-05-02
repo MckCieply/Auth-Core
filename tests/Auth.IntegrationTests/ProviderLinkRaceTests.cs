@@ -1,7 +1,9 @@
 using System.Net;
 using Auth.FakeOidc;
+using Auth.Infrastructure.Identity;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -73,6 +75,27 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(0, await LoginCountAsync());
         Assert.Equal(1, await TicketCountAsync());
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+    }
+
+    [Fact]
+    public async Task A_password_reset_while_the_link_waited_links_nothing_and_answers_401_and_the_ticket_stays()   // spec 0011 → link, step 8 (the password judged is the one stored)
+    {
+        var user = await CreateUserAsync(Ola, confirmed: false);
+        var ticket = await TicketAsync("google", GooglePerson());
+        var changed = new PasswordHasher<ApplicationUser>().HashPassword(new ApplicationUser(), "Changed-Passw0rd");
+
+        // A reset takes no address lock: it commits while the link, which judged the old password, waits for it.
+        using var response = await LinkWhileLockedAsync(ticket, _ => InDbAsync(db => db.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(
+            s => s.SetProperty(u => u.PasswordHash, changed), TestContext.Current.CancellationToken)));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("""{"error":"invalid_credentials"}""", await response.Content.ReadAsStringAsync());
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Equal(0, await LoginCountAsync());
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.False(await InDbAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.EmailConfirmed).SingleAsync(TestContext.Current.CancellationToken)));
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
     }
 
     [Fact]

@@ -579,7 +579,7 @@ call GET "/auth/providers/google/start?purpose=reauth"
 expect_status "step 8: the reauth start" 302
 header location > "$tmp/reauth.url"
 expect_eq "step 8: Google is asked for a fresh sign-in" "$(url_param "$tmp/reauth.url" query max_age)" "0"
-expect_eq "step 8: and not for an account choice" "$(url_param "$tmp/reauth.url" query prompt)" ""
+expect_eq "step 8: and the account choice stays" "$(url_param "$tmp/reauth.url" query prompt)" "select_account"
 for member in state nonce code_challenge; do keep_secret "$(url_param "$tmp/reauth.url" query "$member")"; done
 keep_secret "$(pair_of "$(set_cookie_line 'OpenIddict\.Client\.State[^=]*')" | cut -d= -f2-)"
 round_trip reauth google "?purpose=reauth" "person=custom&email=$(enc "$NEW_EMAIL")&verified=true"
