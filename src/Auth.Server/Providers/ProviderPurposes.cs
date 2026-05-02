@@ -33,7 +33,7 @@ public static class ProviderPurposes
 
 /// <summary>
 /// What Auth-Core puts into the state of a round trip, beside OpenIddict's own: it travels encrypted (the client's credentials are the instance's
-/// key files) and comes back at the callback whenever the state could be read (probe Q11). Never the invitation token, only its hash.
+/// key files) and comes back at the callback whenever the state could be read. Never the invitation token, only its hash.
 /// </summary>
 public static class ProviderStateItems
 {

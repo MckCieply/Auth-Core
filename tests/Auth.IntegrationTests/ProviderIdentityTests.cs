@@ -222,7 +222,7 @@ public sealed class ProviderIdentityTests
     [InlineData("\"xms_edov\":\"True\"", false)]
     [InlineData("\"xms_edov\":[true,true]", false)]
     [InlineData("\"other\":1", false)]
-    public async Task A_microsoft_token_read_from_a_real_jwt_is_verified_by_a_json_boolean_xms_edov(string member, bool verified)   // criterion 9, Q8
+    public async Task A_microsoft_token_read_from_a_real_jwt_is_verified_by_a_json_boolean_xms_edov(string member, bool verified)   // criterion 9
     {
         var principal = await FromRealTokenAsync(WorkPayload(member));
 
@@ -238,7 +238,7 @@ public sealed class ProviderIdentityTests
     [InlineData("\"email_verified\":\"True\"", false)]
     [InlineData("\"email_verified\":[true,true]", false)]
     [InlineData("\"other\":1", false)]
-    public async Task A_google_token_read_from_a_real_jwt_is_verified_by_a_json_boolean_email_verified(string member, bool verified)   // criterion 9, Q8
+    public async Task A_google_token_read_from_a_real_jwt_is_verified_by_a_json_boolean_email_verified(string member, bool verified)   // criterion 9
     {
         var principal = await FromRealTokenAsync($$"""{"sub":"100000000000000000001","email":"ola@gmail.test",{{member}}}""");
 
@@ -248,7 +248,7 @@ public sealed class ProviderIdentityTests
     }
 
     [Fact]
-    public async Task A_personal_microsoft_token_read_from_a_real_jwt_is_verified_and_a_doubled_email_there_is_no_address()   // criterion 9, Q8
+    public async Task A_personal_microsoft_token_read_from_a_real_jwt_is_verified_and_a_doubled_email_there_is_no_address()   // criterion 9
     {
         var single = await FromRealTokenAsync(
             $$"""{"iss":"https://login.microsoftonline.com/{{Personal}}/v2.0","tid":"{{Personal}}","oid":"{{ObjectId}}","email":"ola@outlook.test"}""");

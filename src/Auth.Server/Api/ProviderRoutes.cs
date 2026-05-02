@@ -36,7 +36,7 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
 
-        // GET only: the response mode is `query` (probe Q2); a form post would be a cross-site form, which the JSON-only rule refuses.
+        // GET only: both providers answer in the response mode `query` (the default of the code flow, which is not even sent); a form post would be a cross-site form, which the JSON-only rule refuses.
         app.MapGet(ProviderPaths.Callback, ProviderCallbackEndpoint.HandleAsync)
             .WithTags("Providers")
             .WithDescription(

@@ -128,7 +128,7 @@ public static class OpenIddictSetup
                     .DisableAccessTokenExtractionFromBodyForm();
                 options.AddAudiences(tokens.Audience);
             })
-            // Spec 0011: the client of Google and Microsoft beside the server, in the same host (probe Q3).
+            // Spec 0011: the client of Google and Microsoft beside the server, in the same host.
             .AddProviderClient(providers, keys);
 
         services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);

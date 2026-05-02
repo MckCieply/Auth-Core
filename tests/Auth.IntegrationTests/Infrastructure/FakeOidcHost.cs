@@ -54,7 +54,7 @@ public sealed class FakeOidcHost : IAsyncDisposable
 }
 
 /// <summary>
-/// Sends every request of OpenIddict's named HTTP clients, whose names start with the name of their assembly, to the fake (probe Q6). The
+/// Sends every request of OpenIddict's named HTTP clients, whose names start with the name of their assembly, to the fake. The
 /// primary handler must stay an <c>HttpClientHandler</c>, so the fake is put in as an additional handler that never calls the inner one.
 /// </summary>
 internal sealed class FakeOidcRouting(HttpMessageHandler fake) : IPostConfigureOptions<HttpClientFactoryOptions>

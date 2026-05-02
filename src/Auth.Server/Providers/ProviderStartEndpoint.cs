@@ -23,7 +23,7 @@ public static class ProviderStartEndpoint
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        // OpenIddict has no registration for a provider that is not configured, and must never be asked for one (probe Q4).
+        // OpenIddict has no registration for a provider that is not configured, and must never be asked for one.
         if (!ProviderNames.IsName(name) || !catalog.IsOffered(name))
         {
             return ApiResults.NotFound();
@@ -59,7 +59,7 @@ public static class ProviderStartEndpoint
             purpose = ProviderTicketPurpose.Reauth;
         }
 
-        // RedirectUri is set on purpose: left out, OpenIddict keeps the address of this request, the invitation token included, in the state (T6).
+        // RedirectUri is set on purpose: left out, OpenIddict keeps the address of this request, the invitation token included, in the state.
         var properties = new AuthenticationProperties { RedirectUri = "/" };
         properties.Items[ClientProperties.ProviderName] = name;
         properties.Items[ProviderStateItems.Purpose] = ProviderPurposes.NameOf(purpose);

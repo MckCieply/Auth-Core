@@ -5,11 +5,11 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 namespace Auth.Server.Providers;
 
 /// <summary>
-/// OpenIddict's client beside the server in the one host (spec 0011, Decision 2; probe Q3): the authorization code flow with PKCE, the two
+/// OpenIddict's client beside the server in the one host (spec 0011, Decision 2): the authorization code flow with PKCE, the two
 /// callback paths as its redirection endpoint in pass-through mode for successes and errors alike (so that Auth-Core always answers the callback
-/// itself, probe Q1), the state for 10 minutes, protected by the instance's own key files (probe Q10), the request-forgery cookie
+/// itself), the state for 10 minutes, protected by the instance's own key files (the client needs signing and encryption credentials), the request-forgery cookie
 /// <c>SameSite=Lax</c> on <c>/auth/providers</c> (Amendment A4), userinfo off (the claims come from the identity token alone), and the client's URI
-/// the return address's origin (Amendment A2, T4). A provider is registered only when its two keys and the return address are set: the web
+/// the return address's origin (Amendment A2; without it a callback that reaches the server under another scheme or host than the start fails as an invalid state). A provider is registered only when its two keys and the return address are set: the web
 /// providers of Google and Microsoft (tenant <c>common</c>), or, with the test issuer (Development), plain OpenID Connect registrations of it.
 /// </summary>
 public static class ProviderClientSetup
@@ -100,7 +100,7 @@ public static class ProviderClientSetup
     }
 
     /// <summary>
-    /// Turns userinfo off before OpenIddict decides to call it (probe Q5, T7): the identity rules read the identity token only, and a userinfo
+    /// Turns userinfo off before OpenIddict decides to call it (it is on by default): the identity rules read the identity token only, and a userinfo
     /// answer must never shadow one of its claims.
     /// </summary>
     public sealed class UserInfoOff : IOpenIddictClientHandler<OpenIddictClientEvents.ProcessAuthenticationContext>

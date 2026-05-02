@@ -20,10 +20,10 @@ public static class ProviderCallbackErrors
 
 /// <summary>
 /// <c>GET /auth/providers/{name}/callback</c> (spec 0011). By the time it runs, OpenIddict's client has judged the request in the authentication
-/// step (probe T3): the state (its signature, its age, its single use, the request-forgery cookie of the browser that started), the code (redeemed
+/// step, which runs before this endpoint: the state (its signature, its age, its single use, the request-forgery cookie of the browser that started), the code (redeemed
 /// with the PKCE verifier), the identity token (signature, issuer, audience, nonce, expiry). This reads the outcome and always answers a redirect to
 /// the product's return screen, never a page of its own and never the provider's <c>error_description</c>: a ticket and <c>auth_pt</c> on success,
-/// one of four codes otherwise, and nothing stored then. Neither the outcome's items (they hold the raw tokens, T11) nor the query is logged.
+/// one of four codes otherwise, and nothing stored then. Neither the outcome's items (they hold the raw tokens) nor the query is logged.
 /// </summary>
 public static partial class ProviderCallbackEndpoint
 {
@@ -55,7 +55,7 @@ public static partial class ProviderCallbackEndpoint
         var items = result.Properties?.Items;
         var purposeName = items is not null && items.TryGetValue(ProviderStateItems.Purpose, out var stated) ? stated : null;
 
-        // OpenIddict presets a 400 on a failure (T10): the answer is always this redirect, whatever it set.
+        // OpenIddict presets a 400 on a failure: the answer is always this redirect, whatever it set.
         if (!result.Succeeded)
         {
             return Refuse(logger, returnUrl, name, CodeOf(items, purposeName), purposeName, ErrorOf(items));
@@ -94,7 +94,7 @@ public static partial class ProviderCallbackEndpoint
     }
 
     /// <summary>
-    /// The code of a failed outcome (probe Q1): <c>invalid_state</c> when the state could not be read, or the request-forgery cookie is missing or
+    /// The code of a failed outcome: <c>invalid_state</c> when the state could not be read, or the request-forgery cookie is missing or
     /// another browser's (ID2129: no cookie; ID2163: a malformed one; ID2164: a cookie whose value is not the state's, such as another browser's;
     /// the cookie is judged before the provider's answer, Amendment A3); <c>cancelled</c> for
     /// <c>access_denied</c>; <c>provider_error</c> for everything else. Never by the error alone: <c>invalid_request</c> and <c>invalid_token</c>

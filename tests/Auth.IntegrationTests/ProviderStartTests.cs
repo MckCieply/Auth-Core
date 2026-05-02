@@ -48,7 +48,7 @@ public sealed class ProviderStartTests : ProviderTestBase
         Assert.Equal($"https://app.example.com/auth/providers/{provider}/callback", start.Query["redirect_uri"]);
         Assert.Equal("select_account", start.Query["prompt"]);
         Assert.False(start.Query.ContainsKey("max_age"));
-        Assert.False(start.Query.ContainsKey("response_mode"));   // query, the default of the code flow (probe Q2)
+        Assert.False(start.Query.ContainsKey("response_mode"));   // query, the default of the code flow
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Fact]
-    public async Task The_state_of_an_invitation_start_holds_the_hash_of_the_token_and_never_the_token_or_the_address_of_the_request()   // T6, spec 0011 → start, step 3
+    public async Task The_state_of_an_invitation_start_holds_the_hash_of_the_token_and_never_the_token_or_the_address_of_the_request()   // spec 0011 → start, step 3
     {
         await StartAsync("google", "?invite=" + Invite43);
 

@@ -128,7 +128,7 @@ public sealed class FakeOidcTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task The_test_issuer_names_the_browser_origin_for_the_authorization_and_its_own_for_the_rest()   // criterion 34, probe Q7
+    public async Task The_test_issuer_names_the_browser_origin_for_the_authorization_and_its_own_for_the_rest()   // criterion 34
     {
         await using var container = new FakeOidcHost(
             _clock, new FakeOidcOptions { IssuerOrigin = new Uri("http://fake-oidc:8099"), BrowserOrigin = new Uri("http://localhost:8099") });
@@ -461,7 +461,7 @@ public sealed class FakeOidcTests : IAsyncDisposable
     [Theory]
     [InlineData(FakeKinds.Google)]
     [InlineData(FakeKinds.Microsoft)]
-    public async Task The_test_issuer_serves_authorization_token_and_keys_under_its_own_paths(string kind)   // criterion 34, probe Q7
+    public async Task The_test_issuer_serves_authorization_token_and_keys_under_its_own_paths(string kind)   // criterion 34
     {
         var google = kind == FakeKinds.Google;
         var issuer = "http://issuer.test/" + kind;
