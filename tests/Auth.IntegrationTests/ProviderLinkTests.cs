@@ -122,13 +122,24 @@ public sealed class ProviderLinkTests(PostgresFixture postgres, KeyMaterialFixtu
     public async Task An_account_without_a_password_answers_as_an_unknown_address()   // criterion 16, Settled 14
     {
         await PasswordlessAccountAsync(Ola);
+        await CreateUserAsync("other@gmail.test", confirmed: true);
         var ticket = await TicketAsync("google", GooglePerson());
+        var other = await TicketAsync("google", GooglePerson(email: "other@gmail.test", subject: "400000000000000000005"));
 
         using var response = await ProviderApi.Link(Client, ticket, UserPassword);
+        using var wrong = await ProviderApi.Link(Client, other, "Wrong-Passw0rd");
 
+        // The same answer as a wrong password: status, header names and body; and the attempt counts in the streak of the address.
+        Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("""{"error":"invalid_credentials"}""", await wrong.Content.ReadAsStringAsync());
         Assert.Equal("""{"error":"invalid_credentials"}""", await response.Content.ReadAsStringAsync());
-        Assert.Equal("unknown_address", AuditApi.Text(await SingleAsync(AuditKinds.LoginFailed), "reason"));
+        Assert.Equal(LoginApi.HeaderNames(wrong), LoginApi.HeaderNames(response));
+        Assert.Equal(1, await AttemptsOfAsync("OLA@GMAIL.TEST"));
+        Assert.Equal(1, await AttemptsOfAsync("OTHER@GMAIL.TEST"));
+        var failures = await AuditAsync(AuditKinds.LoginFailed);
+        Assert.Contains(failures, r => AuditApi.Text(r, "reason") == "unknown_address" && r.SubjectUserId is null && r.SubjectEmail == Ola);
+        Assert.Empty(await LoginsAsync());
     }
 
     [Fact]
