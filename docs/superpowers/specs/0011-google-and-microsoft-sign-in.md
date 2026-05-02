@@ -162,7 +162,8 @@ No authentication. The browser navigates here (the product's button is a link, n
    invalid_request`. Other parameters are ignored. The start reads no account and no invitation.
 3. Otherwise `302` to the provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`
    and a `nonce`, the scopes `openid email profile`, the callback address above, and `prompt=select_account` (for
-   `reauth`: Microsoft `prompt=login`, Google `max_age=0`, so that the provider asks for a fresh sign-in). OpenIddict
+   `reauth`: Microsoft `prompt=login` in its place; Google keeps `select_account` and adds `max_age=0`; so that the provider asks for a
+   fresh sign-in). OpenIddict
    keeps the state (purpose, provider, and for `invite` the SHA-256 hash of the invitation token, never the token)
    and sets its request-forgery cookie, which binds the state to this browser: OpenIddict's name
    `OpenIddict.Client.State.<…>`, set by Auth-Core to `SameSite=Lax`, `Secure`, `HttpOnly`, `Path=/auth/providers`
@@ -555,7 +556,7 @@ The round trip
 5. `start` for an offered provider answers `302` to the provider's authorization endpoint with `response_type=code`,
    `code_challenge_method=S256`, a `state`, a `nonce`, the scopes `openid email profile` and the callback address built
    from the return address's origin (a request with another `Host` or `X-Forwarded-Host` gets the same one). `reauth`
-   adds `prompt=login` (Microsoft) or `max_age=0` (Google). Guard: integration (`ProviderStartTests`).
+   sends `prompt=login` instead of `select_account` (Microsoft) or adds `max_age=0` to `select_account` (Google). Guard: integration (`ProviderStartTests`).
 6. `start` with an unknown name or a provider that is not offered is `404 not_found`; a malformed `invite`, another
    `purpose`, both, or a repeated parameter is `400 invalid_request`; the start reads no account and no invitation
    (statement capture). Guard: integration (`ProviderStartTests`).
@@ -945,3 +946,114 @@ Each item has the answer to take if the check confirms it, and what to do if it 
   a test pins it for an account with two logins.
 - **`scripts/test-linux.sh`** arrives from a parallel branch; criterion 35 uses it only if it is on `main` when this
   slice is implemented.
+
+## As built (owner, 2026-05-02)
+
+Recorded after implementation, the final review and local verification (plan 0011,
+[acceptance map](../plans/0011-acceptance-map.md)). What entered this stage stays in it; this section records
+it rather than rewriting the contract above. Where a sentence above and this section differ, this section is how
+the software behaves.
+
+**What shipped.**
+
+- **Auth-Core.** The manifest key `providers`; `GET /auth/providers/{name}/start` and `/callback` (OpenIddict's client with
+  its Google and Microsoft web providers, PKCE, a state bound to the browser by its request-forgery cookie, a nonce, the
+  Microsoft issuer check of Amendment A6), `POST /auth/providers/exchange`, `/link` and `/finish`; single-use tickets
+  stored as hashes (`ProviderTickets`, one migration) and the browser-binding cookie `auth_pt`; `DELETE /auth/account` with
+  `provider_ticket`; `GET /auth/options` `providers`; `GET /auth/me` `has_password` and `linked_providers`; the audit kinds
+  `provider.linked` and `provider.reauthenticated` (28 kinds in all) and `details.provider` on the sign-in, sign-up and
+  invitation rows; the optional variables for the keys, the return address and the date of the Microsoft secret; health
+  `Degraded` for a listed provider that is not offered and from 30 days before the secret lapses.
+- **The sample.** In `samples/notes-web`: the "Continue with ..." links on the sign-in, sign-up and invitation screens, and the
+  screens `/provider-return`, `/provider-link` and `/provider-finish`; "Delete account" for an account without a
+  password confirms with "Confirm with ...". Tickets live in memory and in the router's navigation state only; the return
+  screen removes the fragment first, and the screens that hold a ticket keep it out of the history entry. `sessionStorage`
+  holds the provider's name and the reauth flag (below), never a ticket, an address or the kinds. Playwright:
+  `e2e/11-providers.spec.ts`.
+- **The fake provider.** `tests/Auth.FakeOidc`: a fake OpenID provider that answers as Google and Microsoft by host name behind
+  OpenIddict's HTTP client in the tests, and runs as a container on port 8099 (`tests/Auth.FakeOidc/compose.yml`) in the
+  development stack.
+- **Scripts and documents.** `scripts/e2e-providers.sh` (12 steps against the web stack with the fake); the guide
+  `docs/deployment/provider-keys.md`, the runbook `docs/operations/microsoft-secret.md`, the integration guides, the deployment
+  guide, the threat model, the changelog and the root README.
+
+**Contract as built.** As specified, with the Amendment of 2026-04-23 (A1 to A8, Q14, userinfo off), Amendment A9 and these
+readings:
+
+- **Amendment A9 (D28).** `DELETE /auth/org` for a company admin without a password is `403 reauth_required`: not counted, no
+  row written, the company stays. It was `403 wrong_password` for a password the admin never had, counted toward the lockout.
+  The guides tell such an admin to set a password with "Forgot your password?" first; a provider confirmation for deleting a
+  company is left to a later spec.
+- **D26.** Linking a provider to an unconfirmed account whose ticket address is verified confirms the address with no
+  `email.verified` row; `provider.linked` (with the address) and `login.succeeded` are the rows, as the audit table says.
+- **D27.** The root README names the manifest key `providers` and says Auth-Core needs no external identity provider while
+  Google and Microsoft sign-in is optional.
+- **D28.** See Amendment A9 above.
+- **D29.** A provider login survives a password reset, and a link sends no mail. This is written down as residual risk 59
+  of the threat model with no change of behaviour: Decision 15, criterion 25 and Settled 28 are the owner's.
+- **D30.** The sample hands a `reauth` ticket to the delete section only when this tab followed "Confirm with ..." in it: a
+  one-shot flag in `sessionStorage` (`notes-web.reauth`) holds the time it was set, and no ticket, address or kind.
+  `/provider-return` reads and clears it on every return that gets past the removal of the fragment; a flag older than
+  10 minutes, or one that is not a time, is no flag. Without a flag a `reauth` return goes to `/login` and sends nothing, so a
+  crafted link `#ticket=...&purpose=reauth` cannot open "Delete account" ready to confirm. The spec gave no case for that link.
+- **D31.** A Google `reauth` start sends `prompt=select_account` and `max_age=0` (Google has no `prompt=login`); a Microsoft
+  `reauth` start sends `prompt=login` in place of `select_account`. The account chooser stays for Google so that a person
+  with several Google accounts can pick the linked one; any other pick gives a ticket that is not a login of the account, and
+  the deletion refuses it (`reauth_failed`). Step 3 of the start and criterion 5 now say so; they had read as if Google
+  dropped `select_account`.
+- **A membership removed while a link waited** is `403 no_membership` with `login.failed` (`no_company`) and the ticket kept,
+  as step 7 answers for an account that has none.
+- **The link judges the password it stores.** Inside its transaction, after the address lock, the ticket and the "linked
+  meanwhile" check, the link reads the account's hash again under `FOR SHARE` and compares it with the hash that was judged. A
+  different hash (a reset while the link waited) is the login's `401 invalid_credentials` with `login.failed`
+  (`wrong_password`), as `DELETE /auth/account` judges the hash it reads under its lock; a removed password or a deleted account
+  is the same `401` with no row, as the deletion answers those with no row. The ticket is kept and nothing else is written. A
+  reset takes no address lock, but its update waits for the share lock.
+- **The clock is read after the locks.** The link and the invitation acceptance (by password and by provider) read the time for
+  expiry only after the address and company locks are held, so a ticket or an invitation that ran out while the request
+  waited is refused.
+- **The invitation ticket is judged first under the company lock.** In an acceptance through a provider the order is: the
+  company lock, the clock, the ticket (`invalid_ticket`), the invitation, the address mismatch check, the address lock, the
+  account and its space. Both acceptances share one routine for these steps.
+- **`/provider-return` sends nothing when it cannot remove the fragment.** The ticket may still be in the address bar, so the
+  screen shows `provider_error` and neither calls the exchange nor hands the ticket on.
+- **One `500` stays.** Two links of one identity with different addresses, started together, can end in `500` with everything
+  rolled back and the ticket kept; a retry works.
+- **The fake Google's discovery document** gained `grant_types_supported`.
+
+**Residual risks accepted** (threat model, risks 52 to 61; the threat model lists 1 to 61). The spec's list (52 to 58) holds as
+written. Three more were added in verification:
+
+- **59**: a provider login outlives the password and the mailbox. Someone who knew the password can link an identity of their
+  own (a Microsoft work tenant can claim any address as unverified), and a stale "verified" flag at a provider can create the
+  account of an address nobody has used; neither login ends with a password reset (D29).
+- **60**: cookie tossing from a sibling host. `auth_pt` and the request-forgery cookie carry no `__Host-` prefix, because their
+  paths rule it out; a host under the same registrable domain that an attacker controls can plant a binding and sign a
+  visitor in to the attacker's account. The defence is a domain without untrusted sibling hosts.
+- **61**: every provider start writes an OpenIddict state row that `TokenPruner` removes about 14 days later (Amendment A7); the
+  `login` limit bounds one client, not a distributed one.
+
+**Plan departures** (the real files win over the plan's text, as its own notes say):
+
+- The sample's tickets stay out of the history entry on every screen that holds one (`ticket-history.ts`); the plan had this only
+  for the notes screen.
+- The final review moved the shared steps of the two acceptances into one routine, one `FOR KEY SHARE` helper for the sign-in and
+  the link, and one source for the `email_not_verified` and `no_membership` answers; no answer changed.
+- The run commands of the sample and the guides carry `-f tests/Auth.FakeOidc/compose.yml` and say what happens without it
+  (health `Degraded`, a warning that names the keys).
+- Comments cite no plan task and no probe item; the facts stand in their place.
+
+**Open items for the owner.**
+
+- **The live test with real Google and Microsoft keys** (Decision 16). No real key was used in this slice; the guide
+  `docs/deployment/provider-keys.md` says how to get them.
+- **Microsoft personal accounts and `oid`** (Q14, D22). The key is `{tid}:{oid}` and a token without `oid` is `provider_error`;
+  the live test settles whether personal accounts send it. If they do not, personal Microsoft accounts cannot sign in until a
+  one-line change and an amendment.
+- **Spec 0012:** an unlink screen for provider logins; and whether a password reset removes the logins or a link sends a mail
+  (risk 59, D29). Also the provider confirmation for deleting a company (A9).
+
+**Verified** on 2026-05-02 (final review and the re-review of its fix wave; three verifiers, two rounds). Live:
+`scripts/e2e-providers.sh` (12 of 12), `scripts/e2e-notes.sh` (7 of 7), `scripts/e2e-private.sh` (9 of 9), the other e2e scripts
+of specs 0001 to 0010, and the sample's Playwright tests (55 of 55 in Chromium and in WebKit, `11-providers.spec.ts` among
+them). The sample's frontend tests pass (912).
