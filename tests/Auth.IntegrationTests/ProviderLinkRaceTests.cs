@@ -96,6 +96,10 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.False(await InDbAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.EmailConfirmed).SingleAsync(TestContext.Current.CancellationToken)));
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
         Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+        var row = await SingleAsync(AuditKinds.LoginFailed);   // as DELETE /auth/account writes the old password judged against the new hash
+        Assert.Equal("wrong_password", AuditApi.Text(row, "reason"));
+        Assert.Equal("google", AuditApi.Text(row, "provider"));
+        Assert.Equal(user.Id, row.SubjectUserId);
     }
 
     [Fact]

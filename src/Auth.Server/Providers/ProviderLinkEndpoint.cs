@@ -155,13 +155,20 @@ public static class ProviderLinkEndpoint
 
             // The account's row under a share lock to the end: one removed meanwhile is linked to nothing (the answer of an unknown address), and a
             // password reset meanwhile (a reset takes no address lock, but its update waits for this share lock) leaves a hash other than the one
-            // that was judged: the login's own answer, the ticket kept, as DELETE /auth/account answers a password changed while it waited.
+            // that was judged: the login's own answer, the ticket kept. DELETE /auth/account judges the password it reads under its lock, so a
+            // reset meanwhile makes the old password a wrong one there, and a wrong password is written (wrong_password); the same here. A
+            // password removed or an account deleted meanwhile is written nowhere there (reauth_required, permissions_changed), nor here.
             var hashes = await db.Database
                 .SqlQuery<string?>($"""SELECT "PasswordHash" AS "Value" FROM "AspNetUsers" WHERE "Id" = {account.Id} FOR SHARE""")
                 .ToListAsync(CancellationToken.None);
             if (hashes.Count != 1 || !string.Equals(hashes[0], account.PasswordHash, StringComparison.Ordinal))
             {
                 await transaction.DisposeAsync();
+                if (hashes is [not null])
+                {
+                    await RecordFailureAsync(audit, "wrong_password", account, account.Email!, ticket.Provider);
+                }
+
                 return new LoginEndpoint.InvalidCredentialsResult();
             }
 

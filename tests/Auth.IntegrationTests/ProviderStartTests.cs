@@ -79,7 +79,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     [Theory]
     [InlineData("microsoft", "login", false)]
     [InlineData("google", "select_account", true)]
-    public async Task Reauth_asks_microsoft_for_a_login_and_google_for_a_fresh_sign_in(string provider, string prompt, bool maxAge)   // criterion 5, Settled 26, Decision 31
+    public async Task Reauth_asks_microsoft_for_a_login_and_google_for_a_fresh_sign_in(string provider, string prompt, bool maxAge)   // criterion 5, Settled 26: Google reauth sends prompt=select_account and max_age=0
     {
         var start = await StartAsync(provider, "?purpose=reauth");
 

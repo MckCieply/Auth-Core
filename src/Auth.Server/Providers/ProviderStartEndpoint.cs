@@ -79,7 +79,7 @@ public static class ProviderStartEndpoint
             properties.Parameters["prompt"] = "select_account";
             if (purpose == ProviderTicketPurpose.Reauth)
             {
-                // Google: the account choice stays (Decision 31) and the sign-in must be fresh.
+                // Google: the account chooser stays, and max_age=0 asks for a fresh sign-in (Google has no prompt=login).
                 properties.Parameters["max_age"] = 0;
             }
         }
