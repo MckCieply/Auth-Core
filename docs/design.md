@@ -376,7 +376,7 @@ lists the providers and the environment holds their keys; the round trip comes b
 single-use ticket in the fragment, bound to the browser by the cookie `auth_pt`. An identity that is linked signs in; an existing account
 links with its password once; a new person finishes an account without a password, and "forgot password" sets one; an invitation can be
 accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
-registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 58).
+registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
 per user, and any provider beyond the three.
