@@ -18,7 +18,8 @@ public static class SignupRoutes
             .WithTags("Sign-up")
             .WithDescription(
                 "What a product's screens may offer. `signup` is `self-service` while organization sign-up is on and `invite-only` otherwise; "
-                + "`private_signup` is `self-service` while private sign-up is on and `off` otherwise. A client ignores members it does not know.")
+                + "`private_signup` is `self-service` while private sign-up is on and `off` otherwise; `providers` lists the providers a screen may "
+                + "offer as buttons (`google`, `microsoft`), in the manifest's order, `[]` when none. A client ignores members it does not know.")
             .Produces<OptionsResponse>();
 
         app.MapPost(SignupRequestEndpoint.Path, SignupRequestEndpoint.HandleAsync)

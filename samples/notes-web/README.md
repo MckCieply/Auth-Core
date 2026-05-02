@@ -26,8 +26,12 @@ With the development stack and the notes sample (see the top-level README for `.
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f samples/notes-web/compose.yml \
-  --env-file .env up -d --build
+  -f tests/Auth.FakeOidc/compose.yml --env-file .env up -d --build
 ```
+
+The last file is the fake Google and Microsoft of the end-to-end checks (development only): the sample's manifest lists both providers, and
+the fake supplies their keys, so the sign-in buttons work and `/auth/health` says `Healthy`. Without it the stack starts the same, but the
+health says `Degraded` and the start logs a warning that names the missing Google and Microsoft keys.
 
 Open `http://localhost:8088` and sign in as the development user of your `.env`. The same app is on
 `https://localhost:8443` with a certificate from Caddy's own authority: a browser warns, because it does not trust it. WebKit
@@ -103,3 +107,9 @@ the sign-in pieces should install a fixed release of its own.
 - Other open tabs keep their token in memory until it expires (up to 10 minutes) after a sign-out in one tab; tabs are not
   synchronised.
 - There is no PWA, and the only screen for company admins is `/team` (the members, and "Remove" with the confirmation that the account will be deleted); see the deferred list of the spec. Sign-up (`/signup` and `/complete-signup`) works only while Auth-Core has it on: the manifest says `signup: self-service` and the completion address is set; finishing a sign-up signs the person in and opens the notes. With private sign-up on (spec 0010) the sign-up screen offers "Organization / Private person", and a private account gets "Delete account" on the notes screen (`DELETE /api/me` first, then `DELETE /auth/account`).
+- With providers on (spec 0011; the notes manifest lists Google and Microsoft) the sign-in, sign-up and invitation screens start with
+  "Continue with ..." links, the round trip comes back to `/provider-return`, and `/provider-link` and `/provider-finish` follow; an account
+  without a password confirms "Delete account" with its provider (the tab remembers, in `sessionStorage`, only the provider's name and a
+  one-shot flag, the time it started that confirmation; a `reauth` return without the flag, or with one older than 10 minutes, goes to the sign-in screen). `scripts/e2e-web.sh` runs the stack with the fake provider of
+  `tests/Auth.FakeOidc` (http://localhost:8099). Started by hand without `-f tests/Auth.FakeOidc/compose.yml`, the sample's health says
+  `Degraded` and the start logs that Google and Microsoft have no keys; nothing else changes.

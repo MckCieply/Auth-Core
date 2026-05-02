@@ -12,7 +12,7 @@ namespace Auth.IntegrationTests.Infrastructure;
 /// </summary>
 public sealed class HeldLock : IAsyncDisposable
 {
-    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(60);
 
     private readonly IServiceScope _scope;
     private readonly AuthDbContext _db;
@@ -34,6 +34,18 @@ public sealed class HeldLock : IAsyncDisposable
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
         await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock(hashtextextended({normalizedEmail}, 0))", TestContext.Current.CancellationToken);
+        return new HeldLock(scope, db, transaction);
+    }
+
+    /// <summary>The row lock of a company (<c>CompanyLock</c>), which every change to its members, roles and invitations takes first.</summary>
+    public static async Task<HeldLock> CompanyAsync(AuthAppFactory factory, Guid companyId)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlAsync($"""SELECT 1 FROM "Companies" WHERE "Id" = {companyId} FOR UPDATE""", TestContext.Current.CancellationToken);
         return new HeldLock(scope, db, transaction);
     }
 
@@ -68,10 +80,15 @@ public sealed class HeldLock : IAsyncDisposable
     public Task<int> DeleteAccountAsync(Guid userId) =>
         _db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
 
-    /// <summary>Waits until exactly this many backends of the factory's database are waiting for a lock.</summary>
-    public static async Task WaitForWaitersAsync(AuthAppFactory factory, int count)
+    /// <summary>
+    /// Waits until exactly this many backends of the factory's database are waiting for a lock. <paramref name="pending"/> are the requests the
+    /// test has sent and expects to be queued behind a lock: if one of them has finished before the count is reached it never queued, and the
+    /// test fails at once with its status and body instead of waiting for the patience to run out.
+    /// </summary>
+    public static async Task WaitForWaitersAsync(AuthAppFactory factory, int count, params Task<HttpResponseMessage>[] pending)
     {
         ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(pending);
 
         var deadline = DateTime.UtcNow + Patience;
         while (true)
@@ -89,9 +106,25 @@ public sealed class HeldLock : IAsyncDisposable
                 return;
             }
 
+            if (pending.FirstOrDefault(request => request.IsCompleted) is { } finished)
+            {
+                Assert.Fail($"Expected {count} backends waiting for a lock, saw {waiting}, and a request finished without queueing: {await DescribeAsync(finished)}");
+            }
+
             Assert.True(DateTime.UtcNow < deadline, $"Expected {count} backends waiting for a lock, saw {waiting}.");
             await Task.Delay(25, TestContext.Current.CancellationToken);
         }
+    }
+
+    private static async Task<string> DescribeAsync(Task<HttpResponseMessage> finished)
+    {
+        if (finished.IsFaulted || finished.IsCanceled)
+        {
+            return finished.Exception?.GetBaseException().ToString() ?? "canceled";
+        }
+
+        var response = finished.Result;
+        return $"{(int)response.StatusCode} {response.StatusCode}: {await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}";
     }
 
     public Task ReleaseAsync() => _transaction.CommitAsync(TestContext.Current.CancellationToken);

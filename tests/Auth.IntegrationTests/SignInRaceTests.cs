@@ -1,10 +1,8 @@
-using System.Data.Common;
 using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.EntityFrameworkCore.Models;
 
@@ -66,27 +64,5 @@ public sealed class SignInRaceTests : AuditTestBase
         Assert.True(_race.Fired);
         await SessionApi.AssertInvalidGrantAsync(refresh);
         Assert.Equal(before, await SessionRowsAsync(worker));
-    }
-
-    /// <summary>Runs a step once, just before the first command that reads a row under a share lock.</summary>
-    private sealed class ShareLockInterceptor : DbCommandInterceptor
-    {
-        public Func<Task>? Before { get; set; }
-
-        public bool Fired { get; private set; }
-
-        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
-            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
-        {
-            var step = Before;
-            if (step is not null && command.CommandText.Contains("FOR KEY SHARE", StringComparison.Ordinal))
-            {
-                Before = null;
-                Fired = true;
-                await step();
-            }
-
-            return result;
-        }
     }
 }

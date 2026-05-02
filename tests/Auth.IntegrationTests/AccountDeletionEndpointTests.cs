@@ -150,7 +150,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
         await using (var held = await HeldLock.AddressAsync(Factory, "OLA@POCZTA.TEST"))
         {
             pending = DeleteAsync(session.AccessToken);   // the password it was sent with is the old one
-            await HeldLock.WaitForWaitersAsync(Factory, 1);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, pending);
             await InDbAsync(db => db.Users.Where(u => u.Id == user).ExecuteUpdateAsync(
                 s => s.SetProperty(u => u.PasswordHash, changed), TestContext.Current.CancellationToken));
             await held.ReleaseAsync();
@@ -310,7 +310,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
         await using (var held = await HeldLock.AddressAsync(Factory, "OLA@POCZTA.TEST"))
         {
             pending = DeleteAsync(session.AccessToken);
-            await HeldLock.WaitForWaitersAsync(Factory, 1);   // checked, waiting for the address
+            await HeldLock.WaitForWaitersAsync(Factory, 1, pending);   // checked, waiting for the address
 
             // Meanwhile the account moves into a company (as an invitation would, which takes the address lock too).
             await InDbAsync(async db =>

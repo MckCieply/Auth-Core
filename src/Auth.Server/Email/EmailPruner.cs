@@ -7,8 +7,8 @@ namespace Auth.Server.Email;
 /// One pruning pass over the tables of spec 0004: link tokens that have expired, and mail-limit rows without an
 /// accepted request for <see cref="MailLimitPolicy.Window"/>, which the rules already treat as absent. Anyone can
 /// create a limit row by submitting an address, so rows must expire. Expired invitations (spec 0005) and expired pending
-/// sign-ups (spec 0009) go in methods of their own, <see cref="PruneInvitesAsync"/> and <see cref="PrunePendingSignupsAsync"/>, which
-/// <see cref="EmailPruningService"/> runs in the same pass.
+/// sign-ups (spec 0009) go in methods of their own, <see cref="PruneInvitesAsync"/> and <see cref="PrunePendingSignupsAsync"/>, and so do the expired
+/// provider tickets (spec 0011), <see cref="PruneProviderTicketsAsync"/>; <see cref="EmailPruningService"/> runs them all in the same pass.
 /// </summary>
 public sealed partial class EmailPruner(IServiceScopeFactory scopes, TimeProvider clock, ILogger<EmailPruner> logger)
 {
@@ -58,6 +58,22 @@ public sealed partial class EmailPruner(IServiceScopeFactory scopes, TimeProvide
         LogPrunedPendingSignups(logger, pending);
         return pending;
     }
+
+    /// <summary>Removes the provider tickets whose minutes are over (spec 0011): they are refused already, so this only keeps the table small.</summary>
+    public async Task<int> PruneProviderTicketsAsync(CancellationToken cancellationToken)
+    {
+        var now = clock.GetUtcNow();
+
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var tickets = await db.ProviderTickets.Where(t => t.ExpiresAt <= now).ExecuteDeleteAsync(cancellationToken);
+
+        LogPrunedProviderTickets(logger, tickets);
+        return tickets;
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Pruned {Tickets} expired provider tickets.")]
+    private static partial void LogPrunedProviderTickets(ILogger logger, int tickets);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Pruned {Tokens} link token and {Limits} mail limit entries.")]
     private static partial void LogPruned(ILogger logger, int tokens, int limits);

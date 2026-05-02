@@ -21,10 +21,10 @@ public sealed class PrivateSignupGateTests(PostgresFixture postgres, KeyMaterial
     }
 
     [Theory]
-    [InlineData(false, false, """{"signup":"invite-only","private_signup":"off"}""")]
-    [InlineData(true, false, """{"signup":"self-service","private_signup":"off"}""")]
-    [InlineData(false, true, """{"signup":"invite-only","private_signup":"self-service"}""")]
-    [InlineData(true, true, """{"signup":"self-service","private_signup":"self-service"}""")]
+    [InlineData(false, false, """{"signup":"invite-only","private_signup":"off","providers":[]}""")]
+    [InlineData(true, false, """{"signup":"self-service","private_signup":"off","providers":[]}""")]
+    [InlineData(false, true, """{"signup":"invite-only","private_signup":"self-service","providers":[]}""")]
+    [InlineData(true, true, """{"signup":"self-service","private_signup":"self-service","providers":[]}""")]
     public async Task The_four_combinations_of_the_two_switches_give_their_own_options(bool organization, bool @private, string expected)   // criterion 2
     {
         var manifest = (organization ? AuthAppFactory.SelfServiceManifest : AuthAppFactory.DefaultManifest) + (@private ? AuthAppFactory.PrivateBlock : "");
@@ -50,7 +50,7 @@ public sealed class PrivateSignupGateTests(PostgresFixture postgres, KeyMaterial
             .WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.PrivateBlock)
             .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
 
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(factory, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(factory, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
         var warning = Assert.Single(
             logs.Entries,
@@ -67,7 +67,7 @@ public sealed class PrivateSignupGateTests(PostgresFixture postgres, KeyMaterial
             .WithManifest(AuthAppFactory.SelfServiceManifest + AuthAppFactory.PrivateBlock)
             .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
 
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(factory, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(factory, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
         var warnings = logs.Entries
             .Where(e => e.Level == LogLevel.Warning && e.Message.Contains(MailSettingsLoader.CompleteSignupUrlKey, StringComparison.Ordinal))

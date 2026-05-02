@@ -4,9 +4,11 @@ namespace Auth.Server.Tenancy;
 
 /// <summary>
 /// Response of <c>GET /auth/me</c>: the caller as the database says now. <c>org_kind</c> is <c>organization</c> or <c>personal</c> (spec
-/// 0010); a private account's space is named <c>private</c> and its role is <c>private</c>.
+/// 0010); a private account's space is named <c>private</c> and its role is <c>private</c>. <c>has_password</c>: the account has a password;
+/// <c>linked_providers</c>: the providers of its logins, sorted ordinally (spec 0011).
 /// </summary>
-public sealed record MeResponse(Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions);
+public sealed record MeResponse(
+    Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions, bool HasPassword, string[] LinkedProviders);
 
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);
@@ -17,8 +19,11 @@ public sealed record RenameOrgRequest(string Name);
 /// <summary>Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password.</summary>
 public sealed record DeleteOrgRequest(string Name, string Password);
 
-/// <summary>Request of <c>DELETE /auth/account</c> (spec 0010): the caller's own password.</summary>
-public sealed record DeleteAccountRequest(string Password);
+/// <summary>
+/// Request of <c>DELETE /auth/account</c>: exactly one of the caller's own password (spec 0010) and a re-authentication ticket of a provider
+/// (spec 0011); the account decides which it needs.
+/// </summary>
+public sealed record DeleteAccountRequest(string? Password = null, string? ProviderTicket = null);
 
 /// <summary>A role as a list names it: its id and its name.</summary>
 public sealed record RoleRef(Guid Id, string Name);

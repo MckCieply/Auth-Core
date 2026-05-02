@@ -1,10 +1,11 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { AccountApi } from '../account-api';
+import { AccountApi, ProviderName } from '../account-api';
 import { safeReturnUrl } from '../auth/auth.guard';
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
+import { ProviderButtons } from './provider-buttons';
 import { requiredText } from './required-text';
 
 /** The email an invitation screen passed on in the navigation state (it is never in the URL). */
@@ -20,13 +21,14 @@ function startNotice(router: Router): string | null {
 
 @Component({
   selector: 'app-login',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, ProviderButtons],
   template: `
     <main>
       <h1>{{ t.title }}</h1>
       @if (notice(); as text) {
         <p class="status" role="status" data-testid="login-notice">{{ text }}</p>
       }
+      <app-provider-buttons [providers]="providers()" />
       <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
         <label for="email">{{ common.email }}</label>
         <input id="email" type="email" formControlName="email" autocomplete="username" autocapitalize="none" />
@@ -70,11 +72,14 @@ export class LoginPage implements OnInit {
   protected readonly notice = signal<string | null>(startNotice(this.router));
   /** True while GET /auth/options says a visitor may sign up, either kind (spec 0010): then the screen offers "Create an account". */
   protected readonly signupOpen = signal(false);
+  /** The offered providers (spec 0011): their buttons come first. */
+  protected readonly providers = signal<ProviderName[]>([]);
 
   ngOnInit(): void {
-    void this.account
-      .options()
-      .then((options) => this.signupOpen.set(options.signup === 'self-service' || options.private_signup === 'self-service'));
+    void this.account.options().then((options) => {
+      this.signupOpen.set(options.signup === 'self-service' || options.private_signup === 'self-service');
+      this.providers.set(options.providers);
+    });
   }
 
   protected async submit(): Promise<void> {

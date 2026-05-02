@@ -37,6 +37,17 @@ export const texts = {
     tryAgainIn: (seconds: number): string => `Try again in ${seconds} s.`,
   },
 
+  // The provider buttons (spec 0011). The names are the providers' own; the words around them say what the button does.
+  providers: {
+    names: { google: 'Google', microsoft: 'Microsoft' } as Record<string, string>,
+    either: 'Google or Microsoft',
+    continueWith: (name: string): string => `Continue with ${name}`,
+    signUpWith: (name: string): string => `Sign up with ${name}`,
+    acceptWith: (name: string): string => `Accept with ${name}`,
+    confirmWith: (name: string): string => `Confirm with ${name}`,
+    or: 'or',
+  },
+
   login: {
     title: 'Sign in',
     submit: 'Sign in',
@@ -122,6 +133,44 @@ export const texts = {
     invalidRequestPrivate: 'Check the password.',
   },
 
+  // Spec 0011: the screen a provider round trip comes back to. The ticket is never shown.
+  providerReturn: {
+    title: 'Signing in',
+    working: 'Signing you in...',
+    errors: {
+      cancelled: 'Sign-in was cancelled.',
+      invalid_state: 'The sign-in took too long or was started in another browser. Try again.',
+      provider_unavailable: 'This way to sign in is not available.',
+      provider_error: 'Google or Microsoft could not sign you in. Try again.',
+    } as Record<string, string>,
+    invalidTicket: 'This sign-in took too long. Start again.',
+    noAccount: 'You have no account. Ask your company for an invitation.',
+    noEmail: 'Your Microsoft or Google account has no email address we can use. Sign in with your password.',
+    alreadyRegistered: 'An account with this address exists. Sign in with your password.',
+    addressMismatch: 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.',
+    alreadyMember: 'This account already belongs to a company.',
+    privateAccountExists: 'You have a private account with this address. Open the invitation link again to move it into the company.',
+    providerAlreadyLinked: 'This Google or Microsoft account already signs in to another account.',
+    invalidToken: 'This invitation has expired or was already used. Ask for a new one.',
+  },
+
+  providerLink: {
+    title: 'Connect your account',
+    intro: (email: string, provider = 'Google'): string =>
+      `An account with ${email} exists. Enter its password once to connect ${provider}. After that ${provider} alone signs you in.`,
+    introUnverified: (email: string, provider = 'Microsoft'): string =>
+      `If you have an account with ${email}, enter its password once to connect ${provider}. If you do not, create an account with your email address.`,
+    createAccount: 'Create an account',
+    submit: 'Connect and sign in',
+    wrongPassword: "Wrong password. No password yet? Use 'Forgot your password?' to set one.",
+  },
+
+  providerFinish: {
+    title: 'Finish creating your account',
+    submit: 'Create account',
+    alreadyRegistered: 'An account with this address already exists. Sign in with your password.',
+  },
+
   notes: {
     title: 'Notes',
     signOut: 'Sign out',
@@ -138,6 +187,9 @@ export const texts = {
     // The account moved into a company while the person was deleting it (an invitation was accepted in another tab).
     movedToCompany: 'Your account now belongs to a company, so it cannot be deleted here.',
     passwordRequired: 'Enter your password.',
+    // Spec 0011: the provider confirmation of an account without a password did not hold (wrong account, too late, used).
+    reauthFailed:
+      'The confirmation did not work or took too long, so your account was not deleted. Your notes are already gone. Confirm again.',
     newNote: 'New note',
     add: 'Add note',
     empty: 'No notes yet.',

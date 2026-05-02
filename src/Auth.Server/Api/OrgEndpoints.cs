@@ -38,8 +38,11 @@ public static class OrgEndpoints
             return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
+        // Spec 0011: whether the account has a password, and the providers it signs in with, sorted ordinally.
+        var linked = (await users.GetLoginsAsync(user)).Select(l => l.LoginProvider).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
         return ApiResults.Ok(new MeResponse(
-            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions]));
+            caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions],
+            user.PasswordHash is not null, [.. linked]));
     }
 
     public static async Task<IResult> GetAsync(HttpContext http, MembershipReader memberships)
@@ -78,8 +81,10 @@ public static class OrgEndpoints
 
     /// <summary>
     /// <c>DELETE /auth/org</c> (spec 0008 → Company deletion). The checks run in this order: the permission <c>org:delete</c> (read from
-    /// the database), the body, the lockout of the caller's identifier, the password, the company's name, safety rule 1. The attempt
-    /// is counted first, as login counts it, and a correct password ends the streak: the password is evaluated once.
+    /// the database), the body, an account that has no password (<c>403 reauth_required</c> for any password: spec 0011, Amendment A9; nothing is
+    /// counted, no row is written, nothing is deleted, as <c>DELETE /auth/account</c> judges it), the lockout of the caller's identifier, the
+    /// password, the company's name, safety rule 1. The attempt is counted first, as login counts it, and a correct password ends the streak: the
+    /// password is evaluated once.
     /// </summary>
     public static async Task<IResult> DeleteAsync(
         HttpContext http, MembershipReader memberships, UserManager<ApplicationUser> users, LoginStreakStore streaks,
@@ -108,6 +113,13 @@ public static class OrgEndpoints
         if (user?.Email is null)
         {
             return ApiResults.Error(TenancyErrors.Forbidden);
+        }
+
+        // Spec 0011, Amendment A9: an admin made through a provider has no password to confirm with. Judged before anything is counted, as
+        // DELETE /auth/account judges the same case, and nothing is written; the guides send such an admin to "Forgot your password?" first.
+        if (user.PasswordHash is null)
+        {
+            return ApiResults.Error(TenancyErrors.ReauthRequired);
         }
 
         var identifier = LoginIdentifier.HashOf(users.NormalizeEmail(user.Email));

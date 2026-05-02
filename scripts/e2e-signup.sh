@@ -7,7 +7,7 @@
 # finishes, INVITED = an address that is invited and also signs up, EXPIRED = an address whose link is made to have expired). Each step
 # names the criteria it touches; the ones it touches only in part are marked "part of", and the guarding tests are in the acceptance map.
 #   1. health answers 200 "Healthy" (the development settings name the completion address and deploy/auth.yaml says self-service); the
-#      mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service"}, never stored; the OpenAPI description names the four
+#      mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service","providers":[]}, never stored; the OpenAPI description names the four
 #      paths - part of criteria 1 (the other answers of options) and 20 (the answers and bodies of the operations).
 #   2. POST /auth/signup for NEW -> 202 with an empty body, never stored, no cookie; the same request at once -> 429 too_many_attempts
 #      with Retry-After - part of criteria 3 (the mail is step 4) and 6 (the hourly limit and the independence of the kinds).
@@ -324,7 +324,7 @@ wait_mailpit || fail "step 1: $MAILPIT_URL/readyz did not return 200 within 60s 
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service"}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[]}'
 expect_no_store "step 1: the options"
 expect_no_cookie "step 1: the options"
 call GET /auth/openapi/v1.json

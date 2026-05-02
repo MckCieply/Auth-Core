@@ -7,11 +7,15 @@
 #                role that holds "*" (admin). The overlay of the web sample sets the address of the completion screen.
 # private        a private person may sign up alone (spec 0010) and gets notes:read and notes:write in a space nobody else can join;
 #                DELETE /api/me deletes that space's notes before the account is deleted.
+# providers      the sign-in providers of spec 0011, in the order of the buttons. Their keys come from the environment: the end-to-end
+#                stack takes them from the fake provider's overlay (tests/Auth.FakeOidc/compose.yml); a listed provider without its
+#                keys is not offered and /auth/health says "Degraded".
 permissions: [notes:read, notes:write]
 signup: self-service
 private:
   signup: self-service
   permissions: [notes:read, notes:write]
+providers: [google, microsoft]
 default_roles:
   admin:  ["*"]
   user:   [notes:read, notes:write]

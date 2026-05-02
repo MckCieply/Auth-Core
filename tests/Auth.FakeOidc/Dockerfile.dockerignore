@@ -1,0 +1,9 @@
+# The build context of tests/Auth.FakeOidc/Dockerfile (BuildKit reads this file instead of the root .dockerignore): the three build
+# files of the root and this folder, nothing else.
+*
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!tests/Auth.FakeOidc/
+tests/Auth.FakeOidc/bin/
+tests/Auth.FakeOidc/obj/

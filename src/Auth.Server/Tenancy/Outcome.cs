@@ -26,14 +26,28 @@ public static class TenancyErrors
     public const string AlreadyRegistered = "already_registered";
     public const string PrivateAccountExists = "private_account_exists";
 
+    // Spec 0011.
+    public const string InvalidTicket = "invalid_ticket";
+    public const string NoEmail = "no_email";
+    public const string NoAccount = "no_account";
+    public const string AddressMismatch = "address_mismatch";
+    public const string ProviderAlreadyLinked = "provider_already_linked";
+    public const string PasswordRequired = "password_required";
+    public const string ReauthRequired = "reauth_required";
+    public const string ReauthFailed = "reauth_failed";
+    public const string EmailNotVerified = "email_not_verified";
+    public const string NoMembership = "no_membership";
+
     public static int StatusOf(string error) => error switch
     {
-        InvalidRequest or InvalidToken or WeakPassword or UnknownPermission => StatusCodes.Status400BadRequest,
-        Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled => StatusCodes.Status403Forbidden,
+        InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
+        Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled
+            or NoEmail or NoAccount or AddressMismatch or PasswordRequired or ReauthRequired or ReauthFailed or EmailNotVerified or NoMembership
+            => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
-            or PrivateAccountExists => StatusCodes.Status409Conflict,
+            or PrivateAccountExists or ProviderAlreadyLinked => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };

@@ -352,8 +352,8 @@ a provider to it.
 | ----- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 0009 (done) | Self-service sign-up: request, mail, completion, expiry, manifest switch; sample screens           | A visitor creates a company by mail and signs in                 |
 | 0010 (done) | Private accounts: sign-up as a private person, the `org_kind` claim, deleting one's own account, accounts never left without a space; sample screens | A private person signs up, works alone and deletes their account |
-| 0011  | Google and Microsoft: the provider round trip, sign-in, linking with the password, sign-up and invitations through a provider; sample buttons and screens | "Continue with Google" works end to end against a test provider |
-| 0012  | GitHub; listing, linking and unlinking providers; accounts without a password; sample settings screen    | A person manages their linked logins                             |
+| 0011  | Google and Microsoft: the provider round trip, sign-in, linking with the password, sign-up and invitations through a provider, accounts without a password ("forgot password" sets one), deletion confirmed with the provider; sample buttons and screens | "Continue with Google" works end to end against a test provider |
+| 0012  | GitHub; listing, linking and unlinking providers; the full settings of an account without a password; sample settings screen | A person manages their linked logins                             |
 | 0013  | Threat model, guides and runbooks for the new flows; release                                             | `v0.2.0` tagged                                                  |
 
 *As built (spec 0009):* built as described above. Sign-up needs the manifest key and `AUTH_FRONTEND_SIGNUP_URL`; without the
@@ -370,6 +370,13 @@ same completion address as company sign-up; `GET /auth/options` tells a product'
 routine deletes an account, whoever causes it, and a sign-in cannot write a session for an account that is being deleted. The
 product deletes its own data before it calls `DELETE /auth/account`; what remains (a wrong password after that, the data of a
 space that moved to a company, the audit rows and the backups) is in the threat model (risks 48 to 51).
+
+*As built (spec 0011):* "Continue with Google" and "Continue with Microsoft" through OpenIddict's client at the version of the server. The manifest
+lists the providers and the environment holds their keys; the round trip comes back to Auth-Core, which hands the product's return screen a
+single-use ticket in the fragment, bound to the browser by the cookie `auth_pt`. An identity that is linked signs in; an existing account
+links with its password once; a new person finishes an account without a password, and "forgot password" sets one; an invitation can be
+accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
+registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
 per user, and any provider beyond the three.

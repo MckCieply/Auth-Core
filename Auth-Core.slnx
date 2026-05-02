@@ -4,6 +4,7 @@
     <Project Path="src/Auth.Server/Auth.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Auth.FakeOidc/Auth.FakeOidc.csproj" />
     <Project Path="tests/Auth.IntegrationTests/Auth.IntegrationTests.csproj" />
   </Folder>
 </Solution>

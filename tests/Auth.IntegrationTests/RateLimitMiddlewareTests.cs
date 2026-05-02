@@ -105,6 +105,11 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
     [InlineData("POST", "/auth/email/verify", 3)]
     [InlineData("POST", "/auth/invites/preview", 3)]
     [InlineData("POST", "/auth/invites/accept", 3)]
+    [InlineData("GET", "/auth/providers/google/start", 3)]   // spec 0011 → Limits
+    [InlineData("GET", "/auth/providers/google/callback", 3)]
+    [InlineData("POST", "/auth/providers/exchange", 3)]
+    [InlineData("POST", "/auth/providers/link", 3)]
+    [InlineData("POST", "/auth/providers/finish", 3)]
     [InlineData("GET", "/auth/health", 5)]
     [InlineData("GET", "/auth/.well-known/jwks.json", 5)]
     [InlineData("POST", "/auth/logout", 5)]
@@ -197,6 +202,29 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
         using var health = await Send(HttpMethod.Get, "/auth/health");
         Assert.Equal(HttpStatusCode.Unauthorized, refresh.StatusCode);
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_provider_steps_and_the_login_share_one_limit()   // spec 0011 → Limits: one login bucket per address
+    {
+        using (var start = await Send(HttpMethod.Get, "/auth/providers/google/start"))
+        {
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, start.StatusCode);
+        }
+
+        using (var exchange = await Send(HttpMethod.Post, "/auth/providers/exchange"))
+        {
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, exchange.StatusCode);
+        }
+
+        using (var login = await UnknownLogin(1))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+        }
+
+        using var refused = await UnknownLogin(2);
+
+        await RateLimitApi.AssertTooManyRequestsAsync(refused);
     }
 
     [Fact]

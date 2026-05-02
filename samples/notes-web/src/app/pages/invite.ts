@@ -1,14 +1,15 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { AccountApi, InvitePreview, Outcome } from '../account-api';
+import { AccountApi, InvitePreview, Outcome, ProviderName } from '../account-api';
 import { texts } from '../texts';
 import { PasswordRules } from './password-rules';
+import { ProviderButtons } from './provider-buttons';
 import { takeTokenFromUrl } from './token-from-url';
 
 @Component({
   selector: 'app-invite',
-  imports: [ReactiveFormsModule, PasswordRules],
+  imports: [ReactiveFormsModule, PasswordRules, ProviderButtons],
   template: `
     <main>
       <h1>{{ t.title }}</h1>
@@ -29,6 +30,8 @@ import { takeTokenFromUrl } from './token-from-url';
               <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
               <button type="button" data-testid="move" [disabled]="busy()" (click)="move()">{{ t.move }}</button>
             } @else {
+              <!-- Spec 0011: the invitation can be accepted with a provider; the token rides on the start, never in this page's URL. -->
+              <app-provider-buttons [providers]="providers()" action="accept" [invite]="token" />
               <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
                 <label for="email">{{ common.email }}</label>
                 <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
@@ -69,7 +72,7 @@ export class InvitePage implements OnInit {
   private readonly account = inject(AccountApi);
   private readonly router = inject(Router);
   // Read once, here, and gone from the address bar from now on.
-  private readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
+  protected readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
 
   protected readonly form = inject(NonNullableFormBuilder).group({
     password: ['', Validators.required],
@@ -82,9 +85,12 @@ export class InvitePage implements OnInit {
   protected readonly busy = signal(false);
   protected readonly rules = signal<string[]>([]);
   protected readonly error = signal<string | null>(null);
+  /** The offered providers (spec 0011): "Accept with ..." for an address without a private account. */
+  protected readonly providers = signal<ProviderName[]>([]);
 
   ngOnInit(): void {
     if (this.token !== null) {
+      void this.account.options().then((options) => this.providers.set(options.providers));
       void this.preview(this.token);
     }
   }

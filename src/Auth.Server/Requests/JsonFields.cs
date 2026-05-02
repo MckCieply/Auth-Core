@@ -48,6 +48,29 @@ public readonly record struct JsonFields(JsonElement Root)
         return !Has(name) || TryString(name, out value);
     }
 
+    /// <summary>
+    /// The member as any JSON string, a blank one included (spec 0011: a ticket that is a string is judged as a ticket, and a blank one is
+    /// unknown); <see langword="false"/> when it is missing, not a string, or holds an unpaired surrogate escape.
+    /// </summary>
+    public bool TryAnyString(string name, [NotNullWhen(true)] out string? value)
+    {
+        value = null;
+        if (!Root.TryGetProperty(name, out var element) || element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = element.GetString()!;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;   // a string holding an unpaired surrogate escape
+        }
+    }
+
     public JsonBoolean Boolean(string name) =>
         !Root.TryGetProperty(name, out var element)
             ? JsonBoolean.Absent

@@ -12,6 +12,10 @@ Private accounts ([spec 0010](docs/superpowers/specs/0010-private-accounts.md)):
 private person can delete their account. Off by default; an instance that does not turn it on sees `org_kind: "organization"` in its tokens and
 `GET /auth/me`, `"private_signup":"off"` in `GET /auth/options`, and accounts deleted instead of kept when they lose their company.
 
+Sign-in with Google and Microsoft ([spec 0011](docs/superpowers/specs/0011-google-and-microsoft-sign-in.md)): a product can offer "Continue with
+Google" and "Continue with Microsoft". Off by default; an instance that does not list providers sees `"providers":[]` in `GET /auth/options`
+and two new members in `GET /auth/me`, and nothing else changes.
+
 ### Added
 
 - **A health check for the `auth` container** in `deploy/docker-compose.prod.yml`: the image has no shell and no curl, so `Auth.Server.dll --health-probe` makes one request to `/auth/health` on the container's own loopback address (the port of `ASPNETCORE_HTTP_PORTS`) and exits 0 for a 2xx, 1 otherwise. Liveness only: `Degraded` passes, and the database is not asked. It runs before the host is built, so it needs no key and no setting.
@@ -48,6 +52,15 @@ private person can delete their account. Off by default; an instance that does n
 - **The samples**: the sign-up choice, the private completion, the account bar, "Delete account" (`DELETE /api/me` first), the invitation
   warning and a small `/team` screen in `samples/notes-web`; `DELETE /api/me` in `samples/notes-api`; `scripts/e2e-private.sh` and
   `e2e/10-private.spec.ts`.
+- **Google and Microsoft sign-in.** The manifest key `providers`; `GET /auth/providers/{name}/start` and `GET /auth/providers/{name}/callback`
+  (the round trip, with PKCE, a state bound to the browser and a nonce), `POST /auth/providers/exchange`, `POST /auth/providers/link` and
+  `POST /auth/providers/finish`; single-use tickets stored as hashes (the table `ProviderTickets`) and the browser-binding cookie `auth_pt`;
+  `DELETE /auth/account` with `provider_ticket`; `GET /auth/options` `providers`; `GET /auth/me` `has_password` and `linked_providers`; the
+  audit kinds `provider.linked` and `provider.reauthenticated` (28 in all) and `details.provider` on the sign-in, sign-up and invitation rows;
+  the optional variables `AUTH_FRONTEND_PROVIDER_URL`, `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_ID`,
+  `AUTH_MICROSOFT_CLIENT_SECRET` and `AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES`; the guide `docs/deployment/provider-keys.md` and the runbook
+  `docs/operations/microsoft-secret.md`; the sample's buttons and its `/provider-return`, `/provider-link` and `/provider-finish` screens;
+  the fake provider `tests/Auth.FakeOidc` and `scripts/e2e-providers.sh`.
 
 ### Changed
 
@@ -55,6 +68,12 @@ private person can delete their account. Off by default; an instance that does n
 - `deploy/auth.yaml` and `samples/notes-api/auth.yaml` say `signup: self-service` and, since spec 0010, `private.signup: self-service`, so the shipped manifests turn both kinds of sign-up on; a deployment that wants company sign-up off writes `signup: invite-only` or drops the line, one that wants private sign-up off writes `private.signup: off` or drops the `private` block, and either one left on needs `AUTH_FRONTEND_SIGNUP_URL`; the development settings, the sample overlay and `scripts/e2e-prod.sh` name a completion address.
 - The per-IP limits count `POST /auth/signup` against the mail policy, `/auth/signup/preview` and `/auth/signup/complete` against the invitation policy, and `DELETE /auth/account` against the general policy. The OpenAPI description has 31 operations.
 - The guides, the threat model (residual risk 46: sign-up mails any well-formed address) and the audit runbook describe the feature.
+- The per-IP limits count the start and the callback of a provider round trip (the two `GET`s) and `POST /auth/providers/exchange`, `link` and
+  `finish` against the login policy. The OpenAPI description has 36 operations.
+- **An account without a password** (made through a provider) can set one with "forgot password" and then signs in with either; a password
+  login for an account without one is the `401` of an unknown address. `DELETE /auth/org` keeps its password confirmation: an admin without a
+  password gets `403 reauth_required` for any password (nothing is counted, no row is written, the company stays) and sets one with "forgot
+  password" first; a provider confirmation for deleting a company is left to a later spec.
 - **An account that loses its only space is deleted** (spec 0010): removing a member (`204` as before) and deleting a company (every member,
   the admin included) delete the accounts, with `account.deleted` rows; a login is then the `401` of an unknown address, and the address can
   be invited again or sign up. The CLI says so ("Member removed; the account is deleted.", "Company deleted; the accounts of its members are
@@ -73,8 +92,8 @@ private person can delete their account. Off by default; an instance that does n
 
 ### Upgrading
 
-Two migrations: the first adds the table `PendingSignups`; the second adds `Kind` to companies and pending sign-ups (every existing row is a
-company, or an organization sign-up). The service applies them at start. At the first start of this version every account without a
+Three migrations: the first adds the table `PendingSignups`; the second adds `Kind` to companies and pending sign-ups (every existing row is a
+company, or an organization sign-up); the third adds the table `ProviderTickets`. The service applies them at start. At the first start of this version every account without a
 membership (one an earlier version kept after a removal or a company deletion) is deleted, each with an `account.deleted` row whose
 `details.reason` is `upgrade`. This cannot be undone but by restoring a backup, so back up first; a start that fails on an account stops and logs its id (level Critical). Nothing else is required: without the manifest keys and the address, neither kind of sign-up is on and no
 setting is new and required.

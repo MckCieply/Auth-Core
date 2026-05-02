@@ -2,6 +2,7 @@ using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Auth.Server.Lockout;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -21,6 +22,18 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
 
     private Task<int> StreaksAsync() =>
         InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken));
+
+    private Task<int> AttemptsAsync() =>
+        InDbAsync(db => db.LoginStreaks.Where(s => s.IdentifierHash == LoginIdentifier.HashOf("BOSS@ACME.TEST"))
+            .Select(s => s.AttemptCount).SingleOrDefaultAsync(TestContext.Current.CancellationToken));
+
+    private Task<int> AuditRowsAsync() =>
+        InDbAsync(db => db.AuditEvents.CountAsync(TestContext.Current.CancellationToken));
+
+    /// <summary>The account of an admin made through a provider: no password.</summary>
+    private Task<int> RemovePasswordAsync(Guid user) =>
+        InDbAsync(db => db.Users.Where(u => u.Id == user).ExecuteUpdateAsync(
+            s => s.SetProperty(u => u.PasswordHash, (string?)null), TestContext.Current.CancellationToken));
 
     [Fact]
     public async Task The_admin_with_the_name_and_the_password_deletes_the_company_204()   // criterion 10
@@ -183,6 +196,65 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
         Assert.Equal("Acme", row.OrgName);
         Assert.Equal("wrong_password", AuditApi.Text(row, "reason"));
         await AssertNoSecretsAsync("Wrong-Password-1", UserPassword);
+    }
+
+    [Theory]
+    [InlineData("Wrong-Password-1")]
+    [InlineData(UserPassword)]   // the password the account had before it was removed
+    public async Task An_admin_without_a_password_is_403_reauth_required_for_any_password_and_nothing_is_counted_written_or_deleted(string password)   // spec 0011, Amendment A9
+    {
+        var (company, admin, token) = await CompanyWithAdminAsync();
+        await AddMemberAsync(company, "worker@acme.test", "user");
+        await RemovePasswordAsync(admin);
+        var rows = await AuditRowsAsync();
+
+        using var response = await DeleteAsync(token, password: password);
+        using var again = await DeleteAsync(token, name: "Not the name", password: password);   // the confirmation is judged before the name, as before the lockout
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "reauth_required");
+        SecurityHeadersApi.AssertSecurityHeaders(response);
+        await TenancyApi.AssertErrorAsync(again, HttpStatusCode.Forbidden, "reauth_required");
+        Assert.Equal(0, await StreaksAsync());   // nothing is counted
+        Assert.Equal(rows, await AuditRowsAsync());   // no row, org.delete_refused included
+        Assert.Equal(1, await CompaniesAsync(company));   // the company stays
+        Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == company, TestContext.Current.CancellationToken)));
+        await AssertNoSecretsAsync(password);
+    }
+
+    [Fact]
+    public async Task An_admin_without_a_password_is_403_reauth_required_before_the_lockout_and_leaves_the_streak_as_it_was()   // spec 0011, Amendment A9: judged before anything is counted
+    {
+        var (company, admin, token) = await CompanyWithAdminAsync();
+        await LockoutApi.FailAsync(Client, Clock, Boss, 10);   // the identifier is locked
+        await RemovePasswordAsync(admin);
+        var attempts = await AttemptsAsync();
+        var rows = await AuditRowsAsync();
+        Clock.Advance(LockoutApi.HumanPace);
+
+        using var response = await DeleteAsync(token);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "reauth_required");   // not 429
+        Assert.Equal(attempts, await AttemptsAsync());
+        Assert.Equal(rows, await AuditRowsAsync());
+        Assert.Equal(1, await CompaniesAsync(company));
+    }
+
+    [Fact]
+    public async Task An_admin_with_a_password_is_judged_as_before_a_wrong_password_is_counted_and_recorded_and_the_right_one_deletes()   // spec 0011, Amendment A9: unchanged for a password
+    {
+        var (company, admin, token) = await CompanyWithAdminAsync();
+
+        using var wrong = await DeleteAsync(token, password: "Wrong-Password-1");
+
+        await TenancyApi.AssertErrorAsync(wrong, HttpStatusCode.Forbidden, "wrong_password");
+        Assert.Equal(1, await AttemptsAsync());   // counted
+        Assert.Equal("wrong_password", AuditApi.Text(await SingleAsync(AuditKinds.OrgDeleteRefused), "reason"));
+        Assert.Equal(admin, (await SingleAsync(AuditKinds.OrgDeleteRefused)).ActorUserId);
+        Clock.Advance(LockoutApi.HumanPace);
+        using var right = await DeleteAsync(token);
+        await TenancyApi.AssertEmptyAsync(right, HttpStatusCode.NoContent);
+        Assert.Equal(0, await CompaniesAsync(company));
+        Assert.Equal(0, await StreaksAsync());   // the right password ended the streak
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Keys;
 using Auth.Server.Login;
+using Auth.Server.Providers;
 using Auth.Server.Sessions;
 using Auth.Server.Signup;
 using OpenIddict.Server;
@@ -25,7 +26,9 @@ public static class OpenIddictSetup
     /// <c>Auth:Tokens:Issuer</c> is not an absolute URI or <c>Auth:Tokens:Audience</c> is blank, or (outside
     /// Development) either key is missing from configuration.
     /// </exception>
-    public static IServiceCollection AddAuthOpenIddict(this IServiceCollection services, IConfiguration configuration, KeyMaterial keys, bool isDevelopment)
+    /// <param name="providers">The provider settings of spec 0011: OpenIddict's client registers the providers they configure.</param>
+    public static IServiceCollection AddAuthOpenIddict(
+        this IServiceCollection services, IConfiguration configuration, KeyMaterial keys, ProviderSettings providers, bool isDevelopment)
     {
         if (!isDevelopment)
         {
@@ -61,7 +64,10 @@ public static class OpenIddictSetup
                     .SetTokenEndpointUris(
                         JsonLoginRequestHandler.LoginPath.TrimStart('/'),
                         RefreshRequestHandler.RefreshPath.TrimStart('/'),
-                        SignupCompleteEndpoint.Path.TrimStart('/'))
+                        SignupCompleteEndpoint.Path.TrimStart('/'),
+                        ProviderPaths.Exchange.TrimStart('/'),
+                        ProviderPaths.Link.TrimStart('/'),
+                        ProviderPaths.Finish.TrimStart('/'))
                     .SetJsonWebKeySetEndpointUris("auth/.well-known/jwks.json")
                     // No discovery document: it is built from the Host header and is not part of the contract.
                     .SetConfigurationEndpointUris(Array.Empty<Uri>());
@@ -85,6 +91,7 @@ public static class OpenIddictSetup
                     .AddEventHandler(JsonLoginRequestHandler.Descriptor)
                     .AddEventHandler(RefreshRequestHandler.Descriptor)
                     .AddEventHandler(SignupCompleteRequestHandler.Descriptor)
+                    .AddEventHandler(ProviderRequestHandler.Descriptor)
                     .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
 
                 // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an
@@ -120,7 +127,9 @@ public static class OpenIddictSetup
                     .DisableAccessTokenExtractionFromQueryString()
                     .DisableAccessTokenExtractionFromBodyForm();
                 options.AddAudiences(tokens.Audience);
-            });
+            })
+            // Spec 0011: the client of Google and Microsoft beside the server, in the same host.
+            .AddProviderClient(providers, keys);
 
         services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
         services.AddAuthorization();

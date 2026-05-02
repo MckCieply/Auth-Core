@@ -11,7 +11,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0010, as "METHOD path".
+    // Every endpoint of specs 0001–0011, as "METHOD path".
     private static readonly string[] Endpoints =
     [
         "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
@@ -23,6 +23,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "POST /auth/signup",
         "POST /auth/signup/preview",
         "POST /auth/signup/complete",
+        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback", "POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -30,6 +31,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/org/invites", "POST /auth/org/invites", "POST /auth/org/invites/{id}/resend", "DELETE /auth/org/invites/{id}",
         "GET /auth/org/roles", "POST /auth/org/roles", "PUT /auth/org/roles/{id}", "DELETE /auth/org/roles/{id}",
     ];
+
+    // The endpoints that take a provider ticket and its auth_pt cookie (spec 0011).
+    private static readonly string[] TicketEndpoints = ["POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish", "DELETE /auth/account"];
 
     private static async Task<JsonObject> DescriptionAsync(AuthAppFactory factory)
     {
@@ -166,6 +170,11 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
     [InlineData("POST /auth/signup/preview", "200,400,403,415,429")]
     [InlineData("POST /auth/signup/complete", "200,400,403,409,415,429")]
+    [InlineData("GET /auth/providers/{name}/start", "302,400,404,429")]
+    [InlineData("GET /auth/providers/{name}/callback", "302,404,429")]
+    [InlineData("POST /auth/providers/exchange", "200,400,403,409,415,429")]
+    [InlineData("POST /auth/providers/link", "200,400,401,403,415,429")]
+    [InlineData("POST /auth/providers/finish", "200,400,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -205,6 +214,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
+        Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
@@ -220,6 +230,20 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("already_registered", Description(operations["POST /auth/signup/complete"], "409"));
         Assert.Contains("invalid_token", Description(operations["POST /auth/signup/preview"], "400"));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/signup"], "429"));
+        Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "400")));
+        Assert.All(["no_account", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "403")));
+        Assert.Contains("already_registered", Description(operations["POST /auth/providers/exchange"], "409"));
+        Assert.Contains("invalid_token", Description(operations["POST /auth/providers/exchange"], "400"));
+        Assert.Contains("address_mismatch", Description(operations["POST /auth/providers/exchange"], "403"));
+        Assert.All(
+            ["already_member", "private_account_exists", "provider_already_linked"],
+            code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "409")));
+        Assert.Contains("invalid_credentials", Description(operations["POST /auth/providers/link"], "401"));
+        Assert.All(["email_not_verified", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/link"], "403")));
+        Assert.Contains("too_many_attempts", Description(operations["POST /auth/providers/link"], "429"));
+        Assert.All(["email_not_verified", "signup_disabled"], code => Assert.Contains(code, Description(operations["POST /auth/providers/finish"], "403")));
+        Assert.Contains("already_registered", Description(operations["POST /auth/providers/finish"], "409"));
+        Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/finish"], "400")));
     }
 
     [Theory]
@@ -254,7 +278,10 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]
     [InlineData("DELETE /auth/org", "name,password")]
-    [InlineData("DELETE /auth/account", "password")]
+    [InlineData("DELETE /auth/account", "password,provider_ticket")]
+    [InlineData("POST /auth/providers/exchange", "ticket")]
+    [InlineData("POST /auth/providers/link", "password,ticket")]
+    [InlineData("POST /auth/providers/finish", "company_name,kind,ticket")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "role_id")]
     [InlineData("POST /auth/org/roles", "name,permissions")]
@@ -277,18 +304,19 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["email", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
-        Assert.Equal(["private_signup", "signup"], Properties("OptionsResponse"));
+        Assert.Equal(["private_signup", "providers", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));
         Assert.Equal(["error"], Properties("ErrorBody"));
+        Assert.Equal(["access_token", "email", "email_verified", "kinds", "next", "status"], Properties("ProviderExchangeResponse"));
     }
 
     [Fact]
@@ -344,6 +372,13 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
                 Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
                 Assert.Null(operation["requestBody"]);
             }
+            else if (TicketEndpoints.Contains(endpoint))
+            {
+                // Spec 0011: the endpoints that take a provider ticket read its binding cookie beside their body.
+                var cookie = Assert.Single(cookies)!;
+                Assert.Equal("auth_pt", cookie["name"]!.GetValue<string>());
+                Assert.NotNull(operation["requestBody"]);
+            }
             else
             {
                 Assert.Empty(cookies);
@@ -357,6 +392,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/refresh", "200")]
     [InlineData("POST /auth/logout", "204")]
     [InlineData("DELETE /auth/account", "204")]
+    [InlineData("POST /auth/providers/exchange", "200")]
+    [InlineData("POST /auth/providers/link", "200")]
+    [InlineData("POST /auth/providers/finish", "200")]
     public async Task The_answers_that_set_or_clear_the_refresh_cookie_say_so(string endpoint, string status)   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -382,7 +420,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

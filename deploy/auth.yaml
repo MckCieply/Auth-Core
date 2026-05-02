@@ -12,6 +12,10 @@
 # private        the block of spec 0010. "signup: self-service" lets a private person sign up alone, into a hidden one-person space
 #                nobody else can join; it needs the same completion address. "permissions" is what the private role grants:
 #                permissions of the catalog, never the four built-in ones or "*". Without the block private sign-up is off.
+# providers      the sign-in providers of spec 0011 (google, microsoft), offered in the order of the list. Each needs its keys and the
+#                return address in the environment (docs/deployment/provider-keys.md); a listed provider without them is not offered
+#                and /auth/health says "Degraded". Off here, so that the development stack needs no keys; the line to turn them on:
+# providers: [google, microsoft]
 #
 # A broken file never stops the service: the last valid manifest stays active and /auth/health says "Degraded".
 permissions: [documents:read, documents:write, documents:approve]

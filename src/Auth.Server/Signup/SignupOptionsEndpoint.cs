@@ -1,4 +1,5 @@
 using Auth.Server.Api;
+using Auth.Server.Providers;
 
 namespace Auth.Server.Signup;
 
@@ -10,10 +11,11 @@ public static class SignupOptionsEndpoint
 {
     public const string Path = "/auth/options";
 
-    public static IResult Handle(SignupGate gate)
+    public static IResult Handle(SignupGate gate, ProviderCatalog providers)
     {
         ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(providers);
 
-        return ApiResults.Ok(new OptionsResponse(gate.ModeName, gate.PrivateModeName));
+        return ApiResults.Ok(new OptionsResponse(gate.ModeName, gate.PrivateModeName, providers.Offered));
     }
 }

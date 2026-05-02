@@ -61,9 +61,10 @@ public sealed class Manifest
     /// <param name="privatePermissions">
     /// What the private role grants: catalog permissions, none built in, sorted, distinct. None when absent.
     /// </param>
+    /// <param name="providers">The providers the product lists (spec 0011): provider names, the order of the file, distinct. None when absent.</param>
     public Manifest(
         IReadOnlyList<string> permissions, IReadOnlyList<DefaultRole> defaultRoles, SignupMode signup = SignupMode.InviteOnly,
-        bool privateSignup = false, IReadOnlyList<string>? privatePermissions = null)
+        bool privateSignup = false, IReadOnlyList<string>? privatePermissions = null, IReadOnlyList<string>? providers = null)
     {
         ArgumentNullException.ThrowIfNull(permissions);
         ArgumentNullException.ThrowIfNull(defaultRoles);
@@ -73,6 +74,7 @@ public sealed class Manifest
         Signup = signup;
         PrivateSignup = privateSignup;
         PrivatePermissions = privatePermissions ?? [];
+        Providers = providers ?? [];
         Catalog = new PermissionCatalog(permissions);
     }
 
@@ -99,6 +101,12 @@ public sealed class Manifest
     /// </summary>
     public IReadOnlyList<string> PrivatePermissions { get; }
 
+    /// <summary>
+    /// The providers the product lists (spec 0011 → Manifest), in the order of its buttons. Listing is not offering: a provider is offered only
+    /// with its keys and the return address too (<c>ProviderCatalog</c>).
+    /// </summary>
+    public IReadOnlyList<string> Providers { get; }
+
     public PermissionCatalog Catalog { get; }
 
     /// <summary>
@@ -119,7 +127,9 @@ public sealed class Manifest
             SignupModes.NameOf(Signup),
             PrivateSignup || PrivatePermissions.Count > 0
                 ? new StoredPrivate(PrivateSignup ? SignupModes.SelfServiceName : SignupModes.OffName, [.. PrivatePermissions])
-                : null),
+                : null,
+            // Written only when there is one, so that the stored form of a manifest without providers is the one of slice 0010.
+            Providers.Count > 0 ? [.. Providers] : null),
         StoredJson);
 
     /// <summary>
@@ -146,7 +156,8 @@ public sealed class Manifest
                 [.. stored.DefaultRoles.Select(r => new DefaultRole(r.Name, r.Permissions))],
                 signup,
                 privateSignup,
-                stored.Private?.Permissions ?? []);
+                stored.Private?.Permissions ?? [],
+                stored.Providers ?? []);   // a form stored before spec 0011 has no providers: none is listed
         }
         catch (JsonException)
         {
@@ -159,5 +170,5 @@ public sealed class Manifest
     private sealed record StoredPrivate(string? Signup, string[]? Permissions);
 
     private sealed record StoredManifest(
-        string[] Permissions, StoredRole[] DefaultRoles, string? Signup = null, StoredPrivate? Private = null);
+        string[] Permissions, StoredRole[] DefaultRoles, string? Signup = null, StoredPrivate? Private = null, string[]? Providers = null);
 }

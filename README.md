@@ -27,7 +27,7 @@ Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
   detection; the access token (10 minutes) lives in the frontend's memory only. Lockout with growing cooldowns, per-IP rate limits, security
   headers and an audit log are on from the start.
 - **No call per request.** A backend verifies tokens locally, so Auth-Core is not in the path of every API call.
-- **Your data, your server.** No external identity provider and no per-user fees. It runs on a small VPS with Docker.
+- **Your data, your server.** Auth-Core needs no external identity provider and has no per-user fees; sign-in with Google and Microsoft is optional. It runs on a small VPS with Docker.
 - **Ready to run.** A production compose file (read-only service, no capabilities, its own database role), a deployment guide, backup and
   key-rotation runbooks and a STRIDE threat model.
 
@@ -55,6 +55,7 @@ default_roles:
 needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
 The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
+`providers: [google, microsoft]` is optional too (no key, no provider): it offers "Continue with Google" and "Continue with Microsoft", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token (spec 0011).
 
 ### 2. Run it on your server
 

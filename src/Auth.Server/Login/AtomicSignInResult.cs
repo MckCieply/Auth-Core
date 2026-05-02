@@ -25,8 +25,13 @@ namespace Auth.Server.Login;
 /// an error that leaves the account behind). The result owns that transaction from the first line of <see cref="ExecuteAsync"/> and disposes it as soon as it is committed or
 /// refused, before the held answer is written to the client.
 /// </summary>
+/// <param name="whenCommitted">
+/// Runs once the sign-in is committed, before the held answer is written: the answer has not started, so it may still set a header (a sign-in
+/// through a provider clears <c>auth_pt</c> there, spec 0011). It never runs for an answer that is rolled back.
+/// </param>
 public sealed class AtomicSignInResult(
-    ClaimsPrincipal principal, AuditEntry? entry, IDbContextTransaction? opened = null, Func<Task<IResult>>? whenGone = null) : IResult
+    ClaimsPrincipal principal, AuditEntry? entry, IDbContextTransaction? opened = null, Func<Task<IResult>>? whenGone = null,
+    Action<HttpContext>? whenCommitted = null) : IResult
 {
     /// <inheritdoc />
     public async Task ExecuteAsync(HttpContext httpContext)
@@ -46,7 +51,7 @@ public sealed class AtomicSignInResult(
             try
             {
                 transaction ??= await db.Database.BeginTransactionAsync(httpContext.RequestAborted);
-                if (!await AccountExistsAsync(db, principal, httpContext.RequestAborted))
+                if (!await AccountExistsAsync(db, AccountIdOf(principal), httpContext.RequestAborted))
                 {
                     if (whenGone is null)
                     {
@@ -69,11 +74,12 @@ public sealed class AtomicSignInResult(
 
                         await db.SaveChangesAsync(httpContext.RequestAborted);
                         await transaction.CommitAsync(httpContext.RequestAborted);
+                        whenCommitted?.Invoke(httpContext);
                     }
                     else if (opened is not null)
                     {
                         // An error of OpenIddict must not be the answer to a completion whose account would stay: roll it back, and say 500.
-                        throw new InvalidOperationException("OpenIddict refused the sign-in of a completed sign-up; the completion is rolled back.");
+                        throw new InvalidOperationException("OpenIddict refused a sign-in that completes a change; the change is rolled back.");
                     }
                 }
             }
@@ -112,14 +118,17 @@ public sealed class AtomicSignInResult(
         }
     }
 
-    /// <summary>Whether the account of the principal is there, read with a share lock held to the end of the transaction.</summary>
-    private static async Task<bool> AccountExistsAsync(AuthDbContext db, ClaimsPrincipal principal, CancellationToken cancellationToken)
-    {
-        if (!Guid.TryParse(principal.GetClaim(OpenIddictConstants.Claims.Subject), out var userId))
-        {
-            throw new InvalidOperationException("The principal to sign in has no account id.");
-        }
+    private static Guid AccountIdOf(ClaimsPrincipal principal) =>
+        Guid.TryParse(principal.GetClaim(OpenIddictConstants.Claims.Subject), out var userId)
+            ? userId
+            : throw new InvalidOperationException("The principal to sign in has no account id.");
 
+    /// <summary>
+    /// Whether the account is there, read with a share lock (<c>FOR KEY SHARE</c>) held to the end of the transaction: an account deletion locks
+    /// the row for update, so nothing is signed in or linked to an account that is being deleted. The sign-in and the link of a provider both use it.
+    /// </summary>
+    internal static async Task<bool> AccountExistsAsync(AuthDbContext db, Guid userId, CancellationToken cancellationToken)
+    {
         var found = await db.Database
             .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "AspNetUsers" WHERE "Id" = {userId} FOR KEY SHARE""")
             .ToListAsync(cancellationToken);

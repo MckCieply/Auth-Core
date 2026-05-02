@@ -135,7 +135,9 @@ Three rules the sample follows, and you should too:
 
 **Mind the logs.** The address bar and the referrer are covered, but the request itself, `GET /reset?token=...`, still reaches your
 proxy and your web server, and most of them write the whole line to an access log, token included. Keep the proxy's and the server's
-access logs off for `/reset`, `/verify`, `/invite` and `/complete-signup`, or have them scrub `token=` (the query string) from what they write, and keep any log
+access logs off for `/reset`, `/verify`, `/invite`, `/complete-signup`, `/auth/providers/*/start` and `/auth/providers/*/callback` (spec 0011: the start's query holds an invitation
+token as `invite=`, the callback's holds `code=` and `state=`), or have them scrub the query string from what they write (`token=` on the first four paths, the
+whole query on the provider paths), and keep any log
 that does hold one as private as a password. A token is single-use and expires, but one that is still valid in a log is a way into
 someone's account. (The sample's Caddy writes no access log.)
 
@@ -231,9 +233,53 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
   address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
   rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.
 
+## Google and Microsoft (spec 0011)
+
+When `GET /auth/options` lists `providers` (`["google","microsoft"]`, in the manifest's order), draw one button per name, first on the
+sign-in, sign-up and invitation screens, then "or" and the form. **A button is a link, not a call**: `<a href="/auth/providers/google/start">`
+(on `/invite` with `?invite=<the token>`, for an address without a private account only). The browser leaves for the provider and comes back
+to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src/app/pages/provider-buttons.ts)).
+
+- **The return screen** (the sample's `/provider-return`, the address of `Auth:App:FrontendUrls:ProviderReturn`) reads the fragment once,
+  `#ticket=...&purpose=...` or `#error=...&purpose=...`, and removes it from the address bar with a navigation that replaces the history
+  entry **before** it calls anything; when it cannot remove it, it sends nothing and says that the sign-in failed
+  ([`pages/provider-return.ts`](../../samples/notes-web/src/app/pages/provider-return.ts)). The errors are `cancelled`, `invalid_state`,
+  `provider_unavailable` and `provider_error`: each gets a sentence and the way back to the sign-in screen, and a value you do not know is
+  read as `provider_error`. Keep the ticket in memory and in the router's navigation state only: never in a URL, `localStorage` or
+  `sessionStorage`. The router keeps that state in the browser's history entry of the next screen, so a screen that has spent the ticket, or
+  no longer needs it, replaces its entry without the state (the sample's notes screen does for a `reauth` ticket). The sample keeps one
+  thing in `sessionStorage`: the name of the provider the person chose (the fragment does not carry it), for the sentence of the link
+  screen; and, only after "Confirm with {provider}" in the delete section, a one-shot flag (`notes-web.reauth`, the time it was set) that the
+  return screen reads and clears: it hands a `reauth` ticket to the notes screen only when the flag is there and not older than 10 minutes (the life of
+  the state of the round trip), and otherwise goes to the sign-in screen and sends nothing, so that a forged link `#ticket=...&purpose=reauth`
+  cannot open the delete section, also after a confirmation that was abandoned. Never the ticket, the address or the kinds.
+- **The exchange.** `POST /auth/providers/exchange` `{"ticket"}` answers as a login does (the token and the refresh cookie), or
+  `{"next":"link","email","email_verified"}` (open the link screen), or `{"next":"finish_signup","email","kinds"}` (open the finish
+  screen), or an error that the sample words one by one: `invalid_ticket` (too late, used, or another browser: start again), `no_email`,
+  `no_account`, `already_registered`, `no_membership`, and for an invitation `invalid_token`, `address_mismatch`, `already_member`,
+  `private_account_exists` and `provider_already_linked`. A `429` keeps the ticket and shows "Try again". The cookie `auth_pt` goes along by
+  itself; the call needs no access token, so leave the provider paths out of the interceptor's token paths.
+- **The link screen** asks the password of the existing account once (`POST /auth/providers/link`); when `email_verified` is `false` it
+  says so and adds a link to sign-up above the same password form, because the provider did not prove the address and the person may have
+  no account ([`pages/provider-link.ts`](../../samples/notes-web/src/app/pages/provider-link.ts)). A wrong password is `401` and the ticket stays
+  usable for a retry; after ten failed attempts at the sign-in and the link together the address answers `429 too_many_attempts`. **The finish screen** shows the
+  address read-only, the choice when `kinds` holds both, the company name for an organization, and no password
+  (`POST /auth/providers/finish`, [`pages/provider-finish.ts`](../../samples/notes-web/src/app/pages/provider-finish.ts)).
+- **"Delete account" without a password.** `GET /auth/me` says `has_password` and `linked_providers`. For `has_password: false` show one
+  "Confirm with {provider}" link per linked provider to `start?purpose=reauth` (and remember in the tab that you started one, for 10 minutes: see the flag
+  above); back with the ticket (purpose `reauth`) and that memory, delete your data
+  and then call `DELETE /auth/account` with `{"provider_ticket"}` (the ticket is good for 5 minutes and once). `reauth_failed` means
+  confirm again; `password_required` and `reauth_required` mean the account changed: ask `GET /auth/me` again and redraw
+  ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
+- A person who signed up with a provider has no password; "Forgot your password?" sets one.
+- **Deleting a company needs a password too.** `DELETE /auth/org` keeps the password confirmation. An admin whose account has no password (an
+  organization made through a provider, or an invitation accepted through one) gets `403 reauth_required` for any password; nothing is counted
+  and nothing is deleted. Tell such an admin to set a password with "Forgot your password?" first, and then delete the company (spec 0011,
+  Amendment A9). A provider confirmation for deleting a company is left to a later spec.
+
 ## The limits and an outage (spec 0008)
 
-Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for invitation and sign-up link requests and 300 others a minute) and
+Auth-Core limits requests per address (30 sign-ins, 60 refreshes, 10 requests for a mail, 20 for invitation and sign-up link requests and 300 others a minute; the start and the callback of a provider round trip, and its exchange, link and finish, count as sign-ins) and
 answers `429 {"error":"too_many_requests","retry_after_seconds":n}` with `Retry-After` when a limit is reached. The sample's interceptor
 shows "Try again in N s." for such an answer from any endpoint of your origin and **does not sign the person out**: only a `401 invalid_grant`
 from the refresh ends the session. During a database outage a refresh answers `503 temporarily_unavailable` with `Retry-After: 5` instead of

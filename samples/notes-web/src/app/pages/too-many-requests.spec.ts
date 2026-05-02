@@ -131,6 +131,7 @@ describe('the mail and link screens when the address has made too many requests'
 
   it('InvitePage: keeps the form, leaves the words to the notice bar', async () => {
     const opened = await open(InvitePage, '/invite?token=tok-i');
+    opened.ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [] }); // spec 0011: the invitation screen asks the options beside the preview
     opened.ctrl.expectOne('/auth/invites/preview').flush({ org_name: 'Acme', email: 'new@acme.example', role: 'viewer' });
     await settle(opened.fixture);
     typeInto(opened.fixture, '#password', 'Joined-Passw0rd');
@@ -148,6 +149,7 @@ describe('the mail and link screens when the address has made too many requests'
 
   it('InvitePage: a limited preview shows only "Try again" (no error text), and it asks again with the token', async () => {
     const opened = await open(InvitePage, '/invite?token=tok-i');
+    opened.ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [] }); // spec 0011: the invitation screen asks the options beside the preview
     await expectPreviewLimited(opened, '/auth/invites/preview', {
       org_name: 'Acme',
       email: 'new@acme.example',

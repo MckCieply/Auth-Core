@@ -3,6 +3,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Account;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Providers;
 using Auth.Server.Requests;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
@@ -16,6 +17,9 @@ namespace Auth.Server.Signup;
 /// organization, the company name of the request.
 /// </summary>
 public sealed record SignupPreview(SignupKind Kind, string Email, string? CompanyName);
+
+/// <summary>A finish through a provider: the ticket as read, the ticket and its binding as sent, and what the body asked for.</summary>
+public sealed record ProviderFinish(ProviderTicket Ticket, string TicketText, string Binding, SignupKind Kind, string? CompanyName);
 
 /// <summary>
 /// Previews and completes a sign-up by its link token (specs 0009 and 0010). Completing is one transaction: it uses the pending sign-up up, makes
@@ -138,6 +142,76 @@ public sealed class SignupService(
             await db.SaveChangesAsync(CancellationToken.None);
 
             // Not committed: the sign-in is written next, inside this transaction, by whoever receives it, and it commits.
+            handedOver = true;
+            return new SignupCompletion(Account: account, CompanyId: spaceId, Transaction: transaction);
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finishes a sign-up through a provider; the endpoint has judged the body, the ticket, the address and the switch of the kind. Under the
+    /// address lock the ticket is used up; any account under the address (of either kind, under any spelling the normaliser folds together), or
+    /// the identity a login by now, is <c>already_registered</c> and nothing changes, the ticket included. Otherwise the account is made with the
+    /// provider's address and no password, its email confirmed (the provider verified it), the identity becomes its login, the space is made as
+    /// at a completion, the pending sign-up of the address is deleted and <c>signup.completed</c> is written with the kind and the provider. As in
+    /// <see cref="CompleteAsync"/>, nothing is committed: the transaction is handed over, because the sign-in is part of the finish.
+    /// </summary>
+    public async Task<SignupCompletion> FinishThroughProviderAsync(ProviderFinish finish, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(finish);
+
+        var ticket = finish.Ticket;
+        var email = ticket.Email ?? throw new InvalidOperationException("A finish needs the address of its ticket.");
+        var normalized = users.NormalizeEmail(email);
+
+        // Leaving this method without handing the transaction over rolls everything back, the use of the ticket included.
+        var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var handedOver = false;
+        try
+        {
+            // The lock of the completion and of the acceptance: of those running at once for one address, one makes the account.
+            await AddressLock.AcquireAsync(db, normalized, cancellationToken);
+
+            // Read after the wait: a ticket that expired while this request queued is expired.
+            var now = StorableTime.Now(clock);
+            if (await ProviderTickets.ConsumeAsync(db, finish.TicketText, finish.Binding, ProviderTicketPurpose.SignIn, now, cancellationToken) is null)
+            {
+                return Refused(TenancyErrors.InvalidTicket);   // used up while this request waited for the lock
+            }
+
+            if (await SignupAccounts.FindAsync(db, normalized, cancellationToken) is not null
+                || await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
+            {
+                return Refused(TenancyErrors.AlreadyRegistered);
+            }
+
+            var account = new ApplicationUser { UserName = email, Email = email, EmailConfirmed = true };
+            AccountSessions.Ensure(await users.CreateAsync(account), "Could not set up the account");
+            ProviderLogins.Add(db, account.Id, ticket.Provider, ticket.IdentityKey);
+
+            var (spaceId, spaceName) = finish.Kind == SignupKind.Private
+                ? (PersonalSpaces.Add(db, account.Id, now), PersonalSpaces.Name)
+                : await CreateCompanyAsync(
+                    account, finish.CompanyName ?? throw new InvalidOperationException("An organization finish has a company name."), now, cancellationToken);
+
+            await db.PendingSignups.Where(p => p.NormalizedEmail == normalized).ExecuteDeleteAsync(cancellationToken);
+            audit.Stage(new AuditEntry
+            {
+                Kind = AuditKinds.SignupCompleted,
+                SubjectUserId = account.Id,
+                SubjectEmail = account.Email,
+                OrgId = spaceId,
+                OrgName = spaceName,
+                Details = new Dictionary<string, object?> { ["kind"] = SignupKinds.NameOf(finish.Kind), ["provider"] = ticket.Provider },
+            });
+            await db.SaveChangesAsync(CancellationToken.None);
+
             handedOver = true;
             return new SignupCompletion(Account: account, CompanyId: spaceId, Transaction: transaction);
         }

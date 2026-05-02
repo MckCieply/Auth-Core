@@ -8,6 +8,9 @@ import { routes } from './app.routes';
 import { AuthService } from './auth/auth.service';
 import { LoginPage } from './pages/login';
 import { NotesPage } from './pages/notes';
+import { ProviderFinishPage } from './pages/provider-finish';
+import { ProviderLinkPage } from './pages/provider-link';
+import { ProviderReturnPage } from './pages/provider-return';
 
 describe('routes', () => {
   beforeEach(() => {
@@ -64,6 +67,39 @@ describe('routes', () => {
     const harness = await RouterTestingHarness.create();
     await harness.navigateByUrl(url);
     expect(TestBed.inject(Router).url).toBe(url);
+  });
+
+  it.each(['/provider-return', '/provider-link', '/provider-finish'])(
+    '%s needs no token, and without a fragment or a navigation state it opens /login (spec 0011)',
+    async (url) => {
+      const harness = await RouterTestingHarness.create();
+      await harness.navigateByUrl(url);
+      await settle(harness.fixture);
+      await settle(harness.fixture);
+      expect(TestBed.inject(Router).url).toBe('/login');
+    },
+  );
+
+  it.each([
+    ['provider-return', ProviderReturnPage, 'Signing in'],
+    ['provider-link', ProviderLinkPage, 'Connect your account'],
+    ['provider-finish', ProviderFinishPage, 'Finish creating your account'],
+  ])('the route %s is open to anyone, shows its screen and has its title (spec 0011)', (path, page, title) => {
+    const route = routes.find((candidate) => candidate.path === path);
+    expect(route?.component).toBe(page);
+    expect(route?.title).toBe(title);
+    expect(route?.canActivate).toBeUndefined();
+    expect(route?.redirectTo).toBeUndefined();
+  });
+
+  it('an anonymous person who follows a provider round trip to /provider-return#error=... sees the message, not /login', async () => {
+    const harness = await RouterTestingHarness.create();
+    await harness.navigateByUrl('/provider-return#error=cancelled&purpose=sign_in');
+    await settle(harness.fixture);
+    await settle(harness.fixture);
+    expect(TestBed.inject(Router).url).toBe('/provider-return');
+    expect(harness.routeDebugElement?.componentInstance).toBeInstanceOf(ProviderReturnPage);
+    expect((harness.fixture.nativeElement as HTMLElement).textContent).toContain('Sign-in was cancelled.');
   });
 
   it('an anonymous person who asks for /team lands on /login?returnUrl=%2Fteam', async () => {

@@ -17,6 +17,8 @@ export const adminMe: Me = {
   org_kind: 'organization',
   roles: ['admin'],
   permissions: ['notes:read', 'notes:write'],
+  has_password: true,
+  linked_providers: [],
 };
 
 /** A private account (spec 0010): its space is named "private", its role is "private". */
@@ -28,6 +30,17 @@ export const privateMe: Me = {
   org_kind: 'personal',
   roles: ['private'],
   permissions: ['notes:read', 'notes:write'],
+  has_password: true,
+  linked_providers: [],
+};
+
+/** A private account made through Google (spec 0011): no password, Google signs it in. */
+export const providerMe: Me = {
+  ...privateMe,
+  sub: '55555555-5555-5555-5555-555555555555',
+  email: 'ola@gmail.example',
+  has_password: false,
+  linked_providers: ['google'],
 };
 
 export const viewerMe: Me = {
@@ -72,6 +85,20 @@ function find<T extends Element>(fixture: ComponentFixture<unknown>, selector: s
 /** All the text on the page, white space collapsed. */
 export function pageText(fixture: ComponentFixture<unknown>): string {
   return (root(fixture).textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The text of a node with every piece of text apart from the next by one space, as a person sees separate lines and buttons: Angular drops
+ * the white space between tags, so `textContent` would run "Sign up with Google" and "Sign up with Microsoft" together.
+ */
+export function spacedText(from: Node | ComponentFixture<unknown>): string {
+  const node = from instanceof Node ? from : (from.nativeElement as Node);
+  const pieces: string[] = [];
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+    pieces.push(text.textContent ?? '');
+  }
+  return pieces.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 /** Types into an input or a text area the way a person does: the value, then the event the form listens for. */

@@ -20,6 +20,15 @@ public sealed class RatePolicyTests
     [InlineData("GET", "/auth/me", RatePolicy.General)]
     [InlineData("PATCH", "/auth/org", RatePolicy.General)]
     [InlineData("DELETE", "/auth/account", RatePolicy.General)]   // spec 0010 → Limits, as DELETE /auth/org
+    [InlineData("GET", "/auth/providers/google/start", RatePolicy.Login)]   // spec 0011 → Limits: each is a step of a sign-in
+    [InlineData("GET", "/auth/providers/microsoft/callback", RatePolicy.Login)]
+    [InlineData("GET", "/auth/providers/github/start", RatePolicy.Login)]   // by path, before the name is judged
+    [InlineData("POST", "/auth/providers/exchange", RatePolicy.Login)]
+    [InlineData("POST", "/auth/providers/link", RatePolicy.Login)]
+    [InlineData("POST", "/auth/providers/finish", RatePolicy.Login)]
+    [InlineData("GET", "/auth/providers/google/start/more", RatePolicy.General)]
+    [InlineData("GET", "/auth/providers", RatePolicy.General)]
+    [InlineData("GET", "/auth/options", RatePolicy.General)]
     [InlineData("POST", "/auth/org/invites", RatePolicy.General)]
     [InlineData("GET", "/auth/nothing/here", RatePolicy.General)]
     [InlineData("GET", "/auth", RatePolicy.General)]
@@ -32,6 +41,9 @@ public sealed class RatePolicyTests
     [InlineData("HEAD", "/auth/refresh")]
     [InlineData("PUT", "/auth/password/forgot")]
     [InlineData("DELETE", "/auth/invites/accept")]
+    [InlineData("POST", "/auth/providers/google/start")]   // spec 0011: the round trip's policy is for the GET
+    [InlineData("HEAD", "/auth/providers/google/callback")]
+    [InlineData("GET", "/auth/providers/exchange")]
     public void The_method_matters(string method, string path) =>
         Assert.Equal(RatePolicy.General, RatePolicies.Classify(method, new PathString(path)));
 
@@ -41,6 +53,13 @@ public sealed class RatePolicyTests
     [InlineData("/Auth/LOGIN/")]
     public void The_path_is_compared_without_regard_to_case_or_a_trailing_slash(string path) =>
         Assert.Equal(RatePolicy.Login, RatePolicies.Classify("POST", new PathString(path)));
+
+    [Theory]
+    [InlineData("GET", "/AUTH/Providers/Google/START")]
+    [InlineData("GET", "/auth/providers/google/callback/")]
+    [InlineData("POST", "/auth/providers/Exchange/")]
+    public void The_provider_paths_are_compared_without_regard_to_case_or_a_trailing_slash(string method, string path) =>   // spec 0011 → Limits
+        Assert.Equal(RatePolicy.Login, RatePolicies.Classify(method, new PathString(path)));
 
     [Theory]
     [InlineData("GET", "/")]

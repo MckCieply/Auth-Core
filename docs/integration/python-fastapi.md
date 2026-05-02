@@ -203,8 +203,12 @@ The sample does this with a compose overlay on top of the repository's developme
 [`samples/notes-api/Caddyfile`](../../samples/notes-api/Caddyfile):
 
 ```
-docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml --env-file .env up -d --build
+docker compose -f deploy/docker-compose.yml -f samples/notes-api/compose.yml -f tests/Auth.FakeOidc/compose.yml --env-file .env up -d --build
 ```
+
+The last file is the fake Google and Microsoft of the repository's end-to-end checks (development only). The sample's manifest lists both
+providers, and the fake supplies their keys so that `/auth/health` says `Healthy`. Without it the stack starts the same, but the health says
+`Degraded` and the start logs a warning that names the missing Google and Microsoft keys.
 
 What the overlay does, and what yours must do:
 
@@ -255,6 +259,9 @@ operator's part (create the company, invite its first admin) with the CLI, the r
 | `403 {"error":"permissions_changed"}` | Auth-Core's company API (`/auth/org/...`) | The token still claims a permission the database no longer grants. Refresh and retry once. |
 
 Your backend never answers `permissions_changed`: it does not read the database.
+
+A person who signs in with Google or Microsoft (spec 0011) gets exactly the access token a password sign-in gives: nothing changes for your
+backend or for this package.
 
 ## Private accounts and a person's data (spec 0010)
 

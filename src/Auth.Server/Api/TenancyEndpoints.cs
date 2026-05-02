@@ -1,3 +1,4 @@
+using Auth.Server.Providers;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 
@@ -26,17 +27,27 @@ public static class TenancyEndpoints
             .WithTags("Account")
             .WithDescription(
                 "Deletes the caller's own private account with everything Auth-Core holds of it: the personal space, the sessions, the mail links, "
-                + "the queued mails, the pending sign-up and the login streak; the audit rows stay for their retention. Needs the caller's password. "
+                + "the queued mails, the pending sign-up and the login streak; the audit rows stay for their retention. Needs the caller's "
+                + "confirmation: the password, or for an account without one a provider ticket (below). "
                 + "The product deletes its own data under the token's `org_id` first: Auth-Core does not tell it. A token that says `org_kind` "
                 + "`personal` while the account has moved to a company or is gone is `403 permissions_changed`; a company member is `403 forbidden` "
                 + "(company accounts are managed by their admins). A wrong password counts in the login streak as a failed login does; while the "
-                + "identifier is locked the answer is `429 too_many_attempts`.")
+                + "identifier is locked the answer is `429 too_many_attempts`. The body holds exactly one of `password` and `provider_ticket` (spec "
+                + "0011; both or neither is `400 invalid_request`): an account with a password needs it (`403 password_required` for a ticket), an "
+                + "account without one confirms with a provider, by a ticket of a round trip with `purpose=reauth` and the browser's `auth_pt` cookie "
+                + "(`403 reauth_required` for a password); a ticket that is unknown, used, expired (5 minutes), of another purpose, without its "
+                + "`auth_pt` or of an identity that is not a login of this account is `403 reauth_failed`. `password_required` and `reauth_required` are judged "
+                + "before anything is counted and write no row.")
             .ReadsJson<DeleteAccountRequest>()
+            .ReadsCookie(ProviderBindingCookie.Name, "With `provider_ticket`: the binding of the ticket, set by the callback that made it.")
             .Produces(StatusCodes.Status204NoContent)
             .SetsRefreshCookie(
-                StatusCodes.Status204NoContent, $"`{RefreshCookie.Name}` emptied, with `Max-Age=0`: the browser drops the cookie, as at a logout.")
+                StatusCodes.Status204NoContent,
+                $"`{RefreshCookie.Name}` emptied, with `Max-Age=0`: the browser drops the cookie, as at a logout; `{ProviderBindingCookie.Name}` emptied too.")
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword)
+            .ProducesError(
+                StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PasswordRequired, TenancyErrors.ReauthRequired,
+                TenancyErrors.ReauthFailed)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 
@@ -76,11 +87,13 @@ public static class TenancyEndpoints
                 + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
                 + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
                 + "login the `401` of an unknown address. "
-                + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`.")
+                + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`. "
+                + "An admin whose account has no password (made through Google or Microsoft) gets `403 reauth_required` for any password: nothing is counted or written and "
+                + "the company stays; they set a password with \"Forgot your password?\" first.")
             .ReadsJson<DeleteOrgRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 

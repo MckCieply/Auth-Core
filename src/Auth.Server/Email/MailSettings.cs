@@ -168,7 +168,7 @@ public static class MailSettingsLoader
     }
 
     /// <summary>Not set (missing, empty or only white space): <see langword="null"/>. Set: the rules of every frontend address.</summary>
-    private static Uri? OptionalFrontendUrl(IConfiguration configuration, string key, bool isDevelopment) =>
+    internal static Uri? OptionalFrontendUrl(IConfiguration configuration, string key, bool isDevelopment) =>
         string.IsNullOrWhiteSpace(configuration[key]) ? null : FrontendUrl(configuration, key, isDevelopment);
 
     private static string Required(IConfiguration configuration, string key)

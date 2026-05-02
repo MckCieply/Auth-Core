@@ -23,7 +23,11 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
         using var response = await TenancyApi.Get(Client, OrgEndpoints.MePath, token);
 
         var me = await TenancyApi.ReadOkAsync(response);
-        Assert.Equal(["email", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], me.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"],
+            me.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.True(me.GetProperty("has_password").GetBoolean());
+        Assert.Equal(0, me.GetProperty("linked_providers").GetArrayLength());
         Assert.Equal("organization", me.GetProperty("org_kind").GetString());
         Assert.Equal((await Factory.SeedUserIdAsync()).ToString(), me.GetProperty("sub").GetString());
         Assert.Equal(Factory.SeedEmail, me.GetProperty("email").GetString());

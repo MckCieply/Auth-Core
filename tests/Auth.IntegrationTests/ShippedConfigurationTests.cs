@@ -1,6 +1,8 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Email;
+using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Auth.Server.Tenancy;
 using Microsoft.Extensions.Configuration;
@@ -37,6 +39,36 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         return await response.Content.ReadAsStringAsync();
     }
 
+    /// <summary>
+    /// The settings the fake provider's overlay gives Auth-Core: the <c>Auth__...</c> lines of its <c>auth</c> service, as configuration keys.
+    /// </summary>
+    private static Dictionary<string, string> OverlaySettings()
+    {
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in File.ReadAllLines(RepositoryFile("tests/Auth.FakeOidc/compose.yml")))
+        {
+            var trimmed = line.Trim();
+            var colon = trimmed.IndexOf(": ", StringComparison.Ordinal);
+            if (trimmed.StartsWith("Auth__", StringComparison.Ordinal) && colon > 0)
+            {
+                settings[trimmed[..colon].Replace("__", ":", StringComparison.Ordinal)] = trimmed[(colon + 2)..];
+            }
+        }
+
+        return settings;
+    }
+
+    /// <summary>
+    /// The <c>compose=(...)</c> statement of an end-to-end script, the command that brings its stack up: the files it names are the stack,
+    /// the same path in a comment is not.
+    /// </summary>
+    private static string ComposeCommand(string script)
+    {
+        var match = Regex.Match(File.ReadAllText(RepositoryFile(script)), @"^compose=\([^)]*\)", RegexOptions.Multiline | RegexOptions.CultureInvariant);
+        Assert.True(match.Success, $"{script} has no compose=(...) statement.");
+        return match.Value;
+    }
+
     [Theory]
     [InlineData("deploy/auth.yaml")]
     [InlineData("samples/notes-api/auth.yaml")]
@@ -49,6 +81,54 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         Assert.Equal("admin", result.Manifest.FirstAdminRole.Name);
         Assert.True(result.Manifest.PrivateSignup);
         Assert.NotEmpty(result.Manifest.PrivatePermissions);
+    }
+
+    [Fact]
+    public void The_notes_manifest_lists_both_providers_and_the_development_manifest_none()   // spec 0011 → Samples
+    {
+        var notes = ManifestParser.Parse(File.ReadAllText(RepositoryFile("samples/notes-api/auth.yaml")));
+        var development = ManifestParser.Parse(File.ReadAllText(RepositoryFile("deploy/auth.yaml")));
+
+        Assert.Null(notes.Error);
+        Assert.Equal(["google", "microsoft"], notes.Manifest!.Providers);
+        Assert.Null(development.Error);
+        Assert.Empty(development.Manifest!.Providers);
+        Assert.Contains("# providers: [google, microsoft]", File.ReadAllText(RepositoryFile("deploy/auth.yaml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_fake_overlay_names_the_test_issuer_both_keys_and_the_return_address_and_the_notes_stacks_use_it()   // spec 0011 → Samples
+    {
+        var settings = OverlaySettings();
+
+        Assert.Equal("http://fake-oidc:8099", settings[ProviderSettings.TestIssuerKey]);
+        Assert.Equal("https://localhost:8443/provider-return", settings[ProviderSettings.ReturnUrlKey]);
+        Assert.All(
+            [ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.MicrosoftClientIdKey, ProviderSettings.MicrosoftClientSecretKey],
+            key => Assert.False(string.IsNullOrWhiteSpace(settings[key])));
+        Assert.All(
+            ["scripts/e2e-web.sh", "scripts/e2e-notes.sh", "scripts/e2e-providers.sh"],
+            script => Assert.Contains("tests/Auth.FakeOidc/compose.yml", ComposeCommand(script), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_development_host_with_the_notes_manifest_and_the_overlay_offers_both_providers_and_is_healthy()   // spec 0011 → Samples
+    {
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithSetting(ManifestSettings.PathKey, "../../samples/notes-api/auth.yaml")
+            .WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DevelopmentAddress());
+        foreach (var (key, value) in OverlaySettings())
+        {
+            factory.WithSetting(key, value);
+        }
+
+        using var client = factory.CreateClient();
+
+        Assert.Equal(["google", "microsoft"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
+        Assert.Equal(
+            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"]}""",
+            await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
     [Fact]
@@ -65,6 +145,22 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
 
         Assert.Contains("Auth__App__FrontendUrls__CompleteSignup: ${AUTH_FRONTEND_SIGNUP_URL:-}", compose, StringComparison.Ordinal);
         Assert.Contains("AUTH_FRONTEND_SIGNUP_URL=", example);   // a line of its own, blank: the example is a complete list of the variables
+    }
+
+    [Theory]
+    [InlineData("Auth__App__FrontendUrls__ProviderReturn", "AUTH_FRONTEND_PROVIDER_URL")]
+    [InlineData("Auth__Providers__Google__ClientId", "AUTH_GOOGLE_CLIENT_ID")]
+    [InlineData("Auth__Providers__Google__ClientSecret", "AUTH_GOOGLE_CLIENT_SECRET")]
+    [InlineData("Auth__Providers__Microsoft__ClientId", "AUTH_MICROSOFT_CLIENT_ID")]
+    [InlineData("Auth__Providers__Microsoft__ClientSecret", "AUTH_MICROSOFT_CLIENT_SECRET")]
+    [InlineData("Auth__Providers__Microsoft__ClientSecretExpiresOn", "AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES")]
+    public void The_production_compose_file_passes_each_provider_variable_as_optional_and_the_example_lists_it(string setting, string variable)   // spec 0011 → Documents
+    {
+        var compose = File.ReadAllText(RepositoryFile("deploy/docker-compose.prod.yml"));
+        var example = File.ReadAllLines(RepositoryFile("deploy/.env.prod.example"));
+
+        Assert.Contains($"{setting}: ${{{variable}:-}}", compose, StringComparison.Ordinal);
+        Assert.Contains($"{variable}=", example);   // a line of its own, blank
     }
 
     [Fact]
@@ -89,7 +185,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.True(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"self-service","private_signup":"self-service"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"self-service","providers":[]}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
@@ -102,7 +198,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 
@@ -114,7 +210,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
         using var request = await SignupApi.Request(client, "anna@firma.test", "Firma");
         await SignupApi.AssertDisabledAsync(request);
@@ -126,7 +222,41 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup();
         using var client = factory.CreateClient();
 
-        Assert.Equal("""{"signup":"self-service","private_signup":"off"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task A_production_host_with_the_six_provider_variables_blank_is_healthy_and_offers_no_provider()   // spec 0011, criteria 3 and 30
+    {
+        await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup()
+            .WithSetting(ProviderSettings.ReturnUrlKey, "")
+            .WithSetting(ProviderSettings.GoogleClientIdKey, "")
+            .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientIdKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "");
+        using var client = factory.CreateClient();
+
+        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task A_production_host_whose_manifest_lists_both_providers_with_the_six_variables_blank_offers_none_and_is_degraded()   // spec 0011 → Configuration: blank is not configured
+    {
+        await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production")
+            .WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.ProvidersLine)
+            .WithSetting(ProviderSettings.ReturnUrlKey, "")
+            .WithSetting(ProviderSettings.GoogleClientIdKey, "")
+            .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientIdKey, "")
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, "")
+            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "");
+        using var client = factory.CreateClient();
+
+        Assert.Empty(factory.Services.GetRequiredService<ProviderCatalog>().Offered);
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 }
