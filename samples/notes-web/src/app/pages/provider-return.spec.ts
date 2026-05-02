@@ -257,7 +257,37 @@ describe('ProviderReturnPage (spec 0011)', () => {
     }
   });
 
-  it('a flag with another value than 1 is no flag', async () => {
+  it('a flag older than 10 minutes is no flag: /login, nothing handed on, no call, and the flag is cleared', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+      armReauth();
+      vi.setSystemTime(new Date('2026-05-02T12:10:00.001Z'));
+      const opened = await open(`ticket=${TICKET}&purpose=reauth`);
+      opened.ctrl.expectNone('/auth/providers/exchange');
+      expect(opened.router.url).toBe('/login');
+      expect(Landing.state).toBeUndefined();
+      expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a flag just inside 10 minutes still hands the ticket on', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+      armReauth();
+      vi.setSystemTime(new Date('2026-05-02T12:09:59Z'));
+      const opened = await open(`ticket=${TICKET}&purpose=reauth`);
+      expect(opened.router.url).toBe('/notes');
+      expect(Landing.state).toEqual({ reauthTicket: TICKET });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a flag that is not a time (the old value 1, a text) is no flag', async () => {
     sessionStorage.setItem('notes-web.reauth', 'yes');
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     expect(opened.router.url).toBe('/login');

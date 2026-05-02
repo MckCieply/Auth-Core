@@ -4,6 +4,8 @@ import { texts } from '../texts';
 
 const PROVIDER_KEY = 'notes-web.provider';
 const REAUTH_KEY = 'notes-web.reauth';
+/** As long as the provider round trip may last: the state Auth-Core keeps for it lives 10 minutes. */
+const REAUTH_LIFETIME_MS = 10 * 60 * 1000;
 
 /**
  * Keeps the provider the person chose, the name only, for the return screen ("connect Google"): the fragment that comes back does not
@@ -28,24 +30,32 @@ export function rememberedProvider(): ProviderName | null {
 }
 
 /**
- * A one-shot flag, set when the person follows "Confirm with ..." in the delete section: this tab started a re-authentication. It is the
- * flag only (the value `1`), never a ticket. Without it /provider-return hands no `reauth` ticket on, so a forged link cannot open the
- * delete section. Storage that is off changes nothing here but that a confirmation is then not handed on.
+ * A one-shot flag, set when the person follows "Confirm with ..." in the delete section: this tab started a re-authentication. It holds the
+ * time it was set (milliseconds, digits only) and nothing else, never a ticket, an address or a kind. Without a flag that is at most 10
+ * minutes old /provider-return hands no `reauth` ticket on, so a forged link cannot open the delete section, and a confirmation that was
+ * abandoned cannot arm a link later. Storage that is off changes nothing here but that a confirmation is then not handed on.
  */
 export function armReauth(): void {
   try {
-    sessionStorage.setItem(REAUTH_KEY, '1');
+    sessionStorage.setItem(REAUTH_KEY, String(Date.now()));
   } catch {
     // the confirmation then ends at the sign-in screen
   }
 }
 
-/** Reads the flag and clears it: true once per `armReauth`. Storage that throws counts as no flag. */
+/**
+ * Reads the flag and clears it, whether it is fresh or not: true once per `armReauth`, and only within 10 minutes of it. A value that is not a
+ * time in the past (another text, a time ahead of this clock) is no flag. Storage that throws counts as no flag.
+ */
 export function takeReauth(): boolean {
   try {
-    const armed = sessionStorage.getItem(REAUTH_KEY) === '1';
+    const value = sessionStorage.getItem(REAUTH_KEY);
     sessionStorage.removeItem(REAUTH_KEY);
-    return armed;
+    if (value === null || !/^\d{1,15}$/.test(value)) {
+      return false;
+    }
+    const age = Date.now() - Number(value);
+    return age >= 0 && age <= REAUTH_LIFETIME_MS;
   } catch {
     return false;
   }

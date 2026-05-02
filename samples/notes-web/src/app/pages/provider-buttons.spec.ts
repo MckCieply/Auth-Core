@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { ProviderName } from '../account-api';
 import { has, spacedText } from '../../testing/helpers';
-import { ProviderButtons, rememberProvider, rememberedProvider, takeReauth } from './provider-buttons';
+import { ProviderButtons, armReauth, rememberProvider, rememberedProvider, takeReauth } from './provider-buttons';
 
 @Component({
   imports: [ProviderButtons],
@@ -35,7 +35,10 @@ function hrefs(fixture: ReturnType<typeof draw>): (string | null)[] {
 }
 
 describe('ProviderButtons (spec 0011)', () => {
-  afterEach(() => sessionStorage.clear());
+  afterEach(() => {
+    vi.useRealTimers();
+    sessionStorage.clear();
+  });
 
   it('draws one link per provider, in the given order, to the start, with "or" after them', () => {
     const fixture = draw((host) => host.providers.set(['microsoft', 'google']));
@@ -81,7 +84,9 @@ describe('ProviderButtons (spec 0011)', () => {
     expect(Object.keys(sessionStorage)).toEqual(['notes-web.provider']);
   });
 
-  it('a confirmation sets the one-shot reauth flag (the value 1, never a ticket) besides the name; a plain button does not', () => {
+  it('a confirmation sets the one-shot reauth flag (the time it was set, never a ticket) besides the name; a plain button does not', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
     const plain = draw();
     const plainLink = (plain.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
     plainLink.addEventListener('click', (event) => event.preventDefault());
@@ -97,10 +102,44 @@ describe('ProviderButtons (spec 0011)', () => {
     const link = (confirm.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
     link.addEventListener('click', (event) => event.preventDefault());
     link.click();
-    expect(Object.fromEntries(Object.entries(sessionStorage))).toEqual({ 'notes-web.provider': 'google', 'notes-web.reauth': '1' });
+    expect(Object.fromEntries(Object.entries(sessionStorage))).toEqual({
+      'notes-web.provider': 'google',
+      'notes-web.reauth': String(Date.parse('2026-05-02T12:00:00Z')),
+    });
     expect(localStorage.length).toBe(0);
     expect(takeReauth()).toBe(true);
     expect(takeReauth()).toBe(false);
+  });
+
+  describe('the reauth flag lives 10 minutes', () => {
+    const MINUTE = 60 * 1000;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
+    });
+
+    it('a fresh flag works, once', () => {
+      armReauth();
+      vi.setSystemTime(Date.now() + 9 * MINUTE + 59_000);
+      expect(takeReauth()).toBe(true);
+      expect(takeReauth()).toBe(false);
+    });
+
+    it('a flag older than 10 minutes is no flag, and reading it clears it', () => {
+      armReauth();
+      vi.setSystemTime(Date.now() + 10 * MINUTE + 1);
+      expect(takeReauth()).toBe(false);
+      expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
+    });
+
+    it('a time ahead of this clock, a text and an old-style 1 are no flag', () => {
+      for (const value of [String(Date.now() + MINUTE), 'yes', '1', '', '12:00', '-5']) {
+        sessionStorage.setItem('notes-web.reauth', value);
+        expect(takeReauth(), value).toBe(false);
+        expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
+      }
+    });
   });
 
   it('a confirmation survives storage that throws on write: the link is still followed, and nothing is armed', () => {

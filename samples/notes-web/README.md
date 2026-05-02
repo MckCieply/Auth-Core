@@ -110,6 +110,6 @@ the sign-in pieces should install a fixed release of its own.
 - With providers on (spec 0011; the notes manifest lists Google and Microsoft) the sign-in, sign-up and invitation screens start with
   "Continue with ..." links, the round trip comes back to `/provider-return`, and `/provider-link` and `/provider-finish` follow; an account
   without a password confirms "Delete account" with its provider (the tab remembers, in `sessionStorage`, only the provider's name and a
-  one-shot flag that it started that confirmation; a `reauth` return without the flag goes to the sign-in screen). `scripts/e2e-web.sh` runs the stack with the fake provider of
+  one-shot flag, the time it started that confirmation; a `reauth` return without the flag, or with one older than 10 minutes, goes to the sign-in screen). `scripts/e2e-web.sh` runs the stack with the fake provider of
   `tests/Auth.FakeOidc` (http://localhost:8099). Started by hand without `-f tests/Auth.FakeOidc/compose.yml`, the sample's health says
   `Degraded` and the start logs that Google and Microsoft have no keys; nothing else changes.
