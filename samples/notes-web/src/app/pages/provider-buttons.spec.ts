@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { ProviderName } from '../account-api';
 import { has, spacedText } from '../../testing/helpers';
-import { ProviderButtons, rememberProvider, rememberedProvider } from './provider-buttons';
+import { ProviderButtons, rememberProvider, rememberedProvider, takeReauth } from './provider-buttons';
 
 @Component({
   imports: [ProviderButtons],
@@ -79,6 +79,48 @@ describe('ProviderButtons (spec 0011)', () => {
     link.click();
     expect(rememberedProvider()).toBe('microsoft');
     expect(Object.keys(sessionStorage)).toEqual(['notes-web.provider']);
+  });
+
+  it('a confirmation sets the one-shot reauth flag (the value 1, never a ticket) besides the name; a plain button does not', () => {
+    const plain = draw();
+    const plainLink = (plain.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
+    plainLink.addEventListener('click', (event) => event.preventDefault());
+    plainLink.click();
+    expect(takeReauth()).toBe(false);
+    sessionStorage.clear();
+
+    const confirm = draw((host) => {
+      host.providers.set(['google']);
+      host.action.set('confirm');
+      host.reauth.set(true);
+    });
+    const link = (confirm.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
+    link.addEventListener('click', (event) => event.preventDefault());
+    link.click();
+    expect(Object.fromEntries(Object.entries(sessionStorage))).toEqual({ 'notes-web.provider': 'google', 'notes-web.reauth': '1' });
+    expect(localStorage.length).toBe(0);
+    expect(takeReauth()).toBe(true);
+    expect(takeReauth()).toBe(false);
+  });
+
+  it('a confirmation survives storage that throws on write: the link is still followed, and nothing is armed', () => {
+    const writing = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    const confirm = draw((host) => {
+      host.providers.set(['google']);
+      host.reauth.set(true);
+    });
+    const link = (confirm.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
+    let prevented: boolean | null = null;
+    link.addEventListener('click', (event) => {
+      prevented = event.defaultPrevented;
+      event.preventDefault();
+    });
+    expect(() => link.click()).not.toThrow();
+    writing.mockRestore();
+    expect(prevented).toBe(false);
+    expect(takeReauth()).toBe(false);
   });
 
   it('keeps the name and nothing else: not the invitation token, not a ticket, and nothing in localStorage', () => {

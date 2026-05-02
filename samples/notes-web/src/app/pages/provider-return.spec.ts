@@ -6,7 +6,7 @@ import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { has, pageText, providerMe, realLocation, settle } from '../../testing/helpers';
-import { rememberProvider } from './provider-buttons';
+import { armReauth, rememberProvider } from './provider-buttons';
 import { ProviderReturnPage } from './provider-return';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -197,7 +197,8 @@ describe('ProviderReturnPage (spec 0011)', () => {
     expect(history.length).toBe(opened.entries);
   });
 
-  it('reauth: the notes screen with the ticket in the navigation state, and no call', async () => {
+  it('reauth after "Confirm with ...": the notes screen with the ticket in the navigation state, and no call', async () => {
+    armReauth();
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     opened.ctrl.expectNone('/auth/providers/exchange');
     expect(opened.router.url).toBe('/notes');
@@ -206,6 +207,61 @@ describe('ProviderReturnPage (spec 0011)', () => {
     expect(stored()).not.toContain(TICKET);
     expect(addressAtRequest).toEqual([]);
     expect(history.length).toBe(opened.entries);
+  });
+
+  it('a forged reauth link (no "Confirm with ..." was followed in this tab): /login, nothing handed on, no call, nothing kept', async () => {
+    const opened = await open(`ticket=${TICKET}&purpose=reauth`);
+    opened.ctrl.expectNone('/auth/providers/exchange');
+    expect(opened.router.url).toBe('/login');
+    expect(Landing.opened).toBe(1);
+    expect(Landing.state).toBeUndefined();
+    expect(addressAtRequest).toEqual([]);
+    expectNoTicketAnywhere(opened);
+    expect(history.length).toBe(opened.entries);
+  });
+
+  it('the flag is one-shot: the return that used it clears it, and a second reauth link in the same tab goes to /login', async () => {
+    armReauth();
+    const first = await open(`ticket=${TICKET}&purpose=reauth`);
+    expect(first.router.url).toBe('/notes');
+    expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
+    TestBed.resetTestingModule();
+    const second = await open(`ticket=${TICKET}&purpose=reauth`);
+    expect(second.router.url).toBe('/login');
+    expect(Landing.state).toBeUndefined();
+    second.ctrl.expectNone('/auth/providers/exchange');
+  });
+
+  it.each([`error=cancelled&purpose=reauth`, `ticket=${TICKET}&purpose=sign_in`])(
+    'any return clears the flag, so that an abandoned confirmation cannot arm a later forged link (%s)',
+    async (fragment) => {
+      armReauth();
+      const opened = await open(fragment);
+      opened.ctrl.match('/auth/providers/exchange'); // the sign-in asks; its answer does not matter here
+      expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
+    },
+  );
+
+  it('storage that throws on read counts as no flag: /login, nothing handed on', async () => {
+    armReauth();
+    const failing = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    try {
+      const opened = await open(`ticket=${TICKET}&purpose=reauth`);
+      expect(opened.router.url).toBe('/login');
+      expect(Landing.state).toBeUndefined();
+      opened.ctrl.expectNone('/auth/providers/exchange');
+    } finally {
+      failing.mockRestore();
+    }
+  });
+
+  it('a flag with another value than 1 is no flag', async () => {
+    sessionStorage.setItem('notes-web.reauth', 'yes');
+    const opened = await open(`ticket=${TICKET}&purpose=reauth`);
+    expect(opened.router.url).toBe('/login');
+    expect(Landing.state).toBeUndefined();
   });
 
   it.each([null, 'purpose=sign_in', `ticket=${TICKET}&purpose=other`, `ticket=${TICKET}`, 'ticket=&purpose=sign_in', `ticket=${TICKET}&purpose=SIGN_IN`, `ticket=${TICKET}&purpose=`])(

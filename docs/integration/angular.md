@@ -249,7 +249,10 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
   `sessionStorage`. The router keeps that state in the browser's history entry of the next screen, so a screen that has spent the ticket, or
   no longer needs it, replaces its entry without the state (the sample's notes screen does for a `reauth` ticket). The sample keeps one
   thing in `sessionStorage`: the name of the provider the person chose (the fragment does not carry it), for the sentence of the link
-  screen; never the ticket, the address or the kinds.
+  screen; and, only after "Confirm with {provider}" in the delete section, a one-shot flag (`notes-web.reauth`, the value `1`) that the
+  return screen reads and clears: it hands a `reauth` ticket to the notes screen only when the flag is there, and otherwise goes to the
+  sign-in screen and sends nothing, so that a forged link `#ticket=...&purpose=reauth` cannot open the delete section. Never the ticket,
+  the address or the kinds.
 - **The exchange.** `POST /auth/providers/exchange` `{"ticket"}` answers as a login does (the token and the refresh cookie), or
   `{"next":"link","email","email_verified"}` (open the link screen), or `{"next":"finish_signup","email","kinds"}` (open the finish
   screen), or an error that the sample words one by one: `invalid_ticket` (too late, used, or another browser: start again), `no_email`,
@@ -263,7 +266,8 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
   address read-only, the choice when `kinds` holds both, the company name for an organization, and no password
   (`POST /auth/providers/finish`, [`pages/provider-finish.ts`](../../samples/notes-web/src/app/pages/provider-finish.ts)).
 - **"Delete account" without a password.** `GET /auth/me` says `has_password` and `linked_providers`. For `has_password: false` show one
-  "Confirm with {provider}" link per linked provider to `start?purpose=reauth`; back with the ticket (purpose `reauth`), delete your data
+  "Confirm with {provider}" link per linked provider to `start?purpose=reauth` (and remember in the tab that you started one: see the flag
+  above); back with the ticket (purpose `reauth`) and that memory, delete your data
   and then call `DELETE /auth/account` with `{"provider_ticket"}` (the ticket is good for 5 minutes and once). `reauth_failed` means
   confirm again; `password_required` and `reauth_required` mean the account changed: ask `GET /auth/me` again and redraw
   ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).

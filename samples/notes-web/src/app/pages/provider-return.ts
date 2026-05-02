@@ -3,13 +3,14 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DEFAULT_RETURN_URL } from '../auth/auth.guard';
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
-import { rememberedProvider } from './provider-buttons';
+import { rememberedProvider, takeReauth } from './provider-buttons';
 
 /**
  * Spec 0011: Auth-Core sends the browser here after the provider, with `#ticket=...&purpose=...` or `#error=...&purpose=...`. The fragment is
  * read once, in the constructor; the address is replaced by /provider-return before anything else, and every way out of this screen is a
  * navigation that replaces the history entry: the ticket is never in the address bar while a request runs, never in the history, never in
- * storage. It lives in this component's memory and in the navigation state of the next screen.
+ * storage. It lives in this component's memory and in the navigation state of the next screen. A `reauth` ticket is handed on only when this
+ * tab started the confirmation (the one-shot flag `armReauth` sets, read and cleared here); otherwise the link was not asked for.
  */
 @Component({
   selector: 'app-provider-return',
@@ -54,6 +55,8 @@ export class ProviderReturnPage implements OnInit {
       this.message.set(this.t.errors['provider_error']);
       return;
     }
+    // Read and cleared on every return that gets this far, so that an abandoned confirmation cannot arm a later forged link.
+    const armed = takeReauth();
     const error = this.fragment.get('error');
     const purpose = this.fragment.get('purpose');
     if (error !== null) {
@@ -62,8 +65,8 @@ export class ProviderReturnPage implements OnInit {
     } else if (this.ticket === '') {
       await this.go('/login');
     } else if (purpose === 'reauth') {
-      // The notes screen opens "Delete account" ready to confirm: the ticket is spent there, not here.
-      await this.go(DEFAULT_RETURN_URL, { reauthTicket: this.ticket });
+      // The notes screen opens "Delete account" ready to confirm: the ticket is spent there, not here. Only for a confirmation this tab started.
+      await (armed ? this.go(DEFAULT_RETURN_URL, { reauthTicket: this.ticket }) : this.go('/login'));
     } else if (purpose === 'sign_in' || purpose === 'invite') {
       await this.exchange();
     } else {

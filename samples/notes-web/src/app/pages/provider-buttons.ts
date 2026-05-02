@@ -3,6 +3,7 @@ import { ProviderName, isProviderName, providerStartUrl } from '../account-api';
 import { texts } from '../texts';
 
 const PROVIDER_KEY = 'notes-web.provider';
+const REAUTH_KEY = 'notes-web.reauth';
 
 /**
  * Keeps the provider the person chose, the name only, for the return screen ("connect Google"): the fragment that comes back does not
@@ -23,6 +24,30 @@ export function rememberedProvider(): ProviderName | null {
     return isProviderName(name) ? name : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * A one-shot flag, set when the person follows "Confirm with ..." in the delete section: this tab started a re-authentication. It is the
+ * flag only (the value `1`), never a ticket. Without it /provider-return hands no `reauth` ticket on, so a forged link cannot open the
+ * delete section. Storage that is off changes nothing here but that a confirmation is then not handed on.
+ */
+export function armReauth(): void {
+  try {
+    sessionStorage.setItem(REAUTH_KEY, '1');
+  } catch {
+    // the confirmation then ends at the sign-in screen
+  }
+}
+
+/** Reads the flag and clears it: true once per `armReauth`. Storage that throws counts as no flag. */
+export function takeReauth(): boolean {
+  try {
+    const armed = sessionStorage.getItem(REAUTH_KEY) === '1';
+    sessionStorage.removeItem(REAUTH_KEY);
+    return armed;
+  } catch {
+    return false;
   }
 }
 
@@ -87,5 +112,8 @@ export class ProviderButtons {
 
   protected chose(name: ProviderName): void {
     rememberProvider(name);
+    if (this.reauth()) {
+      armReauth();
+    }
   }
 }
