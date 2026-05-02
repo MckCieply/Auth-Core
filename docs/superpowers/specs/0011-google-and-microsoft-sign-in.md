@@ -883,6 +883,12 @@ contract was unbuildable; these items change or complete it, and each is named w
   `already_member` through one SQL statement each over the database connection the script already uses. Only
   `no_account` is left to the integration tests: it needs both sign-up switches off, and the stack has them on
   (criterion 33).
+- **A9, deleting a company whose admin has no password (after the final review, 2026-05-02).** `DELETE /auth/org`
+  keeps the password confirmation of spec 0010. An admin whose account has no password (an organization made through
+  `POST /auth/providers/finish`, or an invitation accepted through a provider) gets `403 {"error":"reauth_required"}`
+  for any password: nothing is counted, no row is written, the company stays. The guides tell such an admin to set a
+  password with "Forgot your password?" first and then delete the company. A provider confirmation for deleting a
+  company is left to a later spec.
 
 ## Verification notes (for the local verifiers)
 
