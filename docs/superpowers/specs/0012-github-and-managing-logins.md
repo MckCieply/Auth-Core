@@ -1,6 +1,6 @@
 # Spec 0012 — GitHub, and managing one's own logins
 
-- **Status:** Draft, for the owner's review
+- **Status:** Approved (owner, 2026-05-04), with the Amendment of 2026-05-04
 - **Date:** 2026-05-04
 - **Author:** Alex
 - **Milestone:** Phase 2, slice 0012 — *"a person manages their linked logins"*
@@ -146,30 +146,38 @@ order is the order of the buttons.
 - **The callback address** for GitHub is the return address's origin followed by `/auth/providers/github/callback`, as
   for the others. The operator registers it as the "Authorization callback URL" of a GitHub **OAuth App**.
 - **The test issuer.** With `Auth:Providers:TestIssuer` set (Development only), GitHub is registered as a plain OAuth 2.0
-  client with static endpoints of the fake under `{TestIssuer}/github` (authorization, token) instead of OpenIddict's
-  GitHub web provider, and Auth-Core's GitHub reader (below) calls the fake's `/user`, `/user/emails` and revocation
-  under the same address. As a plain OAuth 2.0 client it has no issuer and no token to check beyond the state, as the
-  real GitHub registration. The reader, the identity rules and everything after them are the same code in both modes.
+  client of the fake under `{TestIssuer}/github` instead of OpenIddict's GitHub web provider: the fake serves a minimal
+  discovery document there (Amendment A5), the scope is `user:email` with no `openid`, PKCE is sent, and Auth-Core's
+  GitHub reader (below) calls the fake's `/user`, `/user/emails` and revocation under the same address. As a plain
+  OAuth 2.0 client it has no identity token and no `nonce`; the document does not advertise the `iss` parameter, so
+  OpenIddict checks the state and not `iss` (Amendment A6). The reader, the identity rules and everything after them are
+  the same code in both modes.
 
 ### GitHub: the round trip and the identity
 
-GitHub is OAuth 2.0, not OpenID Connect: there is no identity token, no `nonce` and no discovery document.
+GitHub is OAuth 2.0, not OpenID Connect: there is no identity token, no `nonce` and no discovery document (the test
+issuer's fake serves a minimal one, Amendment A5).
 
 1. **`start`** (spec 0011, unchanged rules) sends the browser to `https://github.com/login/oauth/authorize` with the
-   code flow, the `state` bound to the browser by OpenIddict's request-forgery cookie, PKCE (`S256`) when GitHub accepts
-   it (To verify), the scope `user:email`, the callback address, and `prompt=select_account` for every purpose (GitHub
-   has nothing like `prompt=login` or `max_age`).
+   code flow, the `state` bound to the browser by OpenIddict's request-forgery cookie, PKCE (`S256`, which GitHub accepts,
+   Amendment A7), the scope `user:email`, the callback address, and `prompt=select_account` for every purpose (GitHub
+   has nothing like `prompt=login`, and no `max_age` is sent to GitHub for any purpose, Amendment A7).
+   GitHub sends `iss` (`https://github.com/login/oauth`) on every authorization answer and OpenIddict's GitHub provider
+   requires it: an answer without it is `provider_error`, `access_denied` included (Amendment A6).
 2. **`callback`** checks the state as for the others and redeems the code with the client secret; GitHub answers with
    an access token. OpenIddict's own userinfo step stays off for every provider (spec 0011, userinfo off). Instead
    **Auth-Core's GitHub reader**, an event handler of OpenIddict's client that runs after the token response and before
-   Auth-Core's callback handler, calls through the HTTP client that OpenIddict's client uses for GitHub (so the tests
-   reach the fake), with `Accept: application/vnd.github+json` and a `User-Agent` naming Auth-Core (GitHub refuses a
-   request without one), each call bounded to 10 seconds and its body to 64 KiB:
+   Auth-Core's callback handler, calls through a named HTTP client of Auth-Core's own, without OpenIddict's retry
+   pipeline, one attempt per call (the tests route it to the fake as they route OpenIddict's clients, Amendment A4),
+   with `Accept: application/vnd.github+json` and a `User-Agent` naming Auth-Core (GitHub refuses a request without
+   one), each call bounded to 10 seconds and its body to 64 KiB:
    - `GET https://api.github.com/user`, and
    - `GET https://api.github.com/user/emails?per_page=100`;
 
-   then it revokes the token (step 4) in a `finally`, and hands the callback handler only the identity below, in place of
-   the identity token's principal that the other two providers give. The callback handler never sees the token.
+   then it revokes the token (step 4) in a `finally`, and hands the callback handler only the identity below, through
+   the client's authentication properties (`context.Properties`), never as a principal. After the revocation it removes
+   the token from the context, so that the callback handler never sees it (Amendment A3). A token answer without
+   `access_token` is `provider_error`.
 3. **The identity:**
 
 | | Identity key (`AspNetUserLogins.ProviderKey`) | Address | Verified when |
@@ -194,10 +202,11 @@ GitHub is OAuth 2.0, not OpenID Connect: there is no identity token, no `nonce` 
 
 ### Sessions (changes spec 0002)
 
-- **Each session records its start and the end of its confirmation window**, stored with its OpenIddict authorization.
-  The routine that every sign-in uses to write the session (`AtomicSignInResult`: the login, the provider
-  sign-ins of spec 0011, the sign-up completion) writes both when it creates the authorization: the start is now, the
-  window ends 5 minutes from now.
+- **Each session records its start and the end of its confirmation window**, in the table `SessionStates` keyed by its
+  OpenIddict authorization and removed with it (Amendment A8). The routine that every sign-in uses to write the session
+  (`AtomicSignInResult`: the login, the provider sign-ins of spec 0011, the sign-up completion) creates the authorization
+  of a new session itself and writes both values in the same transaction: the start is now, the window ends 5 minutes
+  from now. The clock is the service's `TimeProvider`.
 - A refresh keeps the authorization, so it keeps both values, and it never moves the window.
 - The values cannot outlive their session: a sign-out, the end of the session, `AccountSessions.EndAllAsync` and a
   renewal revoke the authorization, and a revoked authorization names no session (General rules); an account deletion
@@ -291,10 +300,11 @@ Authenticated with the access token and the refresh cookie, and `auth_pt`. The c
 ### `POST /auth/account/logins/unlink` — `{"provider"}`
 
 A token-endpoint request of OpenIddict in pass-through mode with a placeholder request, as the exchange of spec 0011
-is, so that the answer can hand this device a new session. The endpoint authenticates the access token with
-OpenIddict's validation scheme itself, as the company API does, and answers its plain `401`; its path is added to the
-token endpoint's paths, to `UnhandledTokenRequestGuard` and to the charset guard, as the provider paths of spec 0011
-are. Authenticated with the access token and the refresh cookie. The checks, in this order:
+is, so that the answer can hand this device a new session. The route requires the access token
+(`.RequireAuthorization()`), as the company API does, and answers its plain `401` (Amendment A9); its path is added to
+the token endpoint's paths with a placeholder handler of its own, so that `UnhandledTokenRequestGuard` lets it through,
+and `LoginResponseShaper` shapes its answer as a login's. The charset guard already covers it, as every `POST` under
+`/auth/`. Authenticated with the access token and the refresh cookie. The checks, in this order:
 
 1. A body that is not a JSON object, or a `provider` that is missing or not a string: `400 invalid_request`.
 2. The session of this device: `401 session_required`. No membership: `403 no_membership`.
@@ -329,20 +339,25 @@ named as at `POST /auth/password/reset`. The checks, in this order:
 5. **The current password** is judged as at `POST /auth/account/confirm`, step 4: counted first; `429
    too_many_attempts` and `403 wrong_password` with `account.confirm_refused` (`details.reason` `locked` or
    `wrong_password`, `details.action` `password`); the streak cleared when right.
-6. Otherwise, in one transaction under the address lock, where steps 2 and 3 are checked again: the account is loaded
-   and its hash read again `FOR SHARE`, as the link of spec 0011 does, and held to the commit, so that a reset waits for
-   it; the hash must be the one that was judged, and a reset that committed meanwhile is `403 wrong_password` with
-   `account.confirm_refused` (`wrong_password`), not counted again, nothing else written. Then: the password hash is set
-   (the security stamp changes, as at a reset); every session of the account ends, every email link of the account is
-   voided and its login streak is cleared, as a reset does (`AccountSessions.EndAllAsync`); a new session is issued to
-   this device with the start and the window of the old one; `password.changed` and `login.succeeded` (`details.via`
-   `session_renewal`) are written; the mail "password changed" is queued. The answer is that of a login: `200
-   {"status":"authenticated","access_token"}` and the refresh cookie. Two changes of one account at once: the first ends
-   every session, so the second is `401 session_required`.
+6. Otherwise, in one transaction under the address lock, where steps 2 and 3 are checked again, in this order
+   (Amendment A2): every email link of the account is voided; the account's row is read again `FOR SHARE`, as the link
+   of spec 0011 does, and its hash must be the one that was judged: a reset that used its link up and committed while the
+   change waited for that link is `403 wrong_password` with `account.confirm_refused` (`wrong_password`, `details.action`
+   `password`), not counted again, nothing else written. (A reset that committed before the change took the address lock
+   ended every session, this one's too: step 2, checked again first, answers `401 session_required`, nothing written.) Then: the password hash is set (the security stamp changes, as at a reset); every session of the
+   account ends (its refresh tokens and authorizations: the effect of `AccountSessions.EndAllAsync`, in an order that
+   cannot deadlock with a reset); its login streak is cleared; a new session is issued to this device with the start and
+   the window of the old one; `password.changed` and `login.succeeded` (`details.via` `session_renewal`) are written; the
+   mail "password changed" is queued. The answer is that of a login: `200 {"status":"authenticated","access_token"}` and
+   the refresh cookie. Two changes of one account at once: the first ends every session, so the second is `401
+   session_required`.
 
-**A reset that waited for the share lock** (changes spec 0004): `POST /auth/password/reset` loads the account again after
-Identity's concurrency check fails and applies its new password once more; it never answers `500` for this. Both
-changes end every session; the reset's password is the one that stays.
+**A reset and a password change of one account at once** (Amendment A1, Decision 19): the first one wins and neither
+answers `500`. A reset that used its link up first and commits while the change waits for that link: the change then
+finds the hash changed and answers `403 wrong_password` as step 6 says. A reset that committed before the change took the
+address lock ended every session, the change's too: the change answers `401 session_required` (step 6 checks step 2
+again first), nothing written. A change that voided the links first makes the reset's link invalid (`400 invalid_token`,
+spec 0004). `POST /auth/password/reset` itself is unchanged.
 
 The account keeps its logins (spec 0011, Decision 15, unchanged).
 
@@ -358,9 +373,9 @@ The checks of spec 0008 stay, in its order, with these changes, which mirror `DE
 - **The provider ticket** must be a ticket of the purpose `reauth`, unused, not expired, with its `auth_pt`, whose
   identity is a login of the caller's account: else `403 reauth_failed` and `org.delete_refused` with `details.reason`
   `reauth_failed`, nothing deleted and nothing used up. The lockout is not consulted.
-- **The ticket is used up inside the deletion's transaction** (`CompanyDeletionService`, under the company lock), with
-  `provider.reauthenticated`; a ticket used up meanwhile by another request is `403 reauth_failed`, nothing deleted. The
-  answer clears `auth_pt`.
+- **The ticket is used up inside the deletion's transaction** (`CompanyDeletionService`, after the company lock and
+  before the name check, so that a refused deletion rolls it back, Amendment A12), with `provider.reauthenticated`; a
+  ticket used up meanwhile by another request is `403 reauth_failed`, nothing deleted. The answer clears `auth_pt`.
 - The name check and safety rule 1 of spec 0008 come after the confirmation, as today.
 
 ### `GET /auth/me` (changes spec 0011)
@@ -408,13 +423,14 @@ Three new mail kinds, in Polish and English (`Auth:App:Locale`), sent to the acc
   `MailRequests`; never a token). It is written in the transaction of the change that causes it, not through the mail
   request path of spec 0004 (`MailRequestStore.SubmitAsync`), and is not counted by the per-address limit of spec 0004.
   `MailDispatchSignal.Notify` runs after that transaction commits.
-- **A limit of its own** (Decision 18): at most 10 rows of these three kinds together per address in a sliding hour,
-  counted in the store of the mail limits of spec 0004 under a key of its own. Beyond it the change still happens, no
-  row is written, and one warning names the kind, never the address.
-- **The dispatcher.** Both of its statements (`DropUnmailableAsync` and `DispatchOneAsync`) gain a branch for these
-  kinds: such a row needs an account with the address, whatever the state of its email confirmation, issues no link
-  token, and takes the provider's name from the row; a row whose address has no account any more (deleted meanwhile) is
-  dropped. They are never treated as a verification mail. The give-up of spec 0004 (a row not sent within an hour is
+- **A limit of its own** (Decision 18): at most 10 rows of these three kinds together per address in a fixed window of
+  one hour, opened by the first accepted notice of the address, with no minimum gap between two (the window rule of spec
+  0004's limit, Amendment A10), counted in the store of the mail limits of spec 0004 under a key of its own. Beyond it
+  the change still happens, no row is written, and one warning names the kind, never the address.
+- **The dispatcher.** Both of its statements (`DropUnmailableAsync` and `DispatchOneAsync`) take these kinds into the
+  reset's branch (Amendment A11): such a row needs an account with the address, whatever the state of its email
+  confirmation. It has a prepare step of its own, which issues no link token and takes the provider's name from the row,
+  and a composer method without a link; a row whose address has no account any more (deleted meanwhile) is dropped. They are never treated as a verification mail. The give-up of spec 0004 (a row not sent within an hour is
   dropped) holds for them.
 - **No mail carries a link or a token**: each names the product's sign-in screen in words only, so that a forged copy of
   it cannot point anywhere.
@@ -603,8 +619,8 @@ GitHub
    (`ManifestProvidersTests`) and integration (`ProviderOptionsTests`, `ProviderSettingsTests`).
 2. `start` for GitHub answers `302` to GitHub's authorization endpoint with `response_type=code`, a `state`, the scope
    `user:email`, `prompt=select_account` and the callback address from the return address's origin, for every purpose;
-   and with `code_challenge_method=S256` exactly when the check of "To verify" found that GitHub accepts PKCE. Guard:
-   integration (`GitHubStartTests`).
+   with `code_challenge_method=S256` (Amendment A7) in both modes, and never `max_age`. Guard: integration
+   (`GitHubStartTests`).
 3. A GitHub callback with a good code reads `/user` and `/user/emails?per_page=100`, revokes the token (the fake records
    the revocation), and answers `302` with `#ticket=` and the purpose; the ticket holds the identity key `id` and the
    primary address with its `verified` flag. Guard: integration (`GitHubCallbackTests`).
@@ -614,9 +630,10 @@ GitHub
    rule.
 5. The GitHub callback answers `#error=cancelled` for `access_denied`, `#error=invalid_state` as for the others, and
    `#error=provider_error` for a refused code, a `/user` or `/user/emails` answer that is not `200` or not the documented
-   JSON, and a `/user` without `id`; none makes a ticket, and in each case where a token was issued the fake records its
-   revocation. A failed revocation still makes the ticket and logs one warning without the token. Guard: integration
-   (`GitHubCallbackErrorTests`), one test per path.
+   JSON, a `/user` without `id`, an authorization answer without `iss` (Amendment A6, `access_denied` included) and a
+   token answer without `access_token` (Amendment A3); none makes a ticket, and in each case where a token was issued
+   the fake records its revocation, once (Amendment A4). A failed revocation still makes the ticket and logs one warning
+   without the token. Guard: integration (`GitHubCallbackErrorTests`), one test per path.
 6. With a GitHub ticket, the exchange, the link, the finish and the invitation acceptance behave as spec 0011's
    criteria 10 to 22 say for Google (sign-in of a linked identity, `next` `link` and `finish_signup`, `no_email`,
    `address_mismatch`, a private and an organization finish); `details.provider` is `github`. Guard: integration
@@ -694,8 +711,10 @@ Password
 19. The password endpoint answers `400 invalid_request` for a bad body; `403 password_not_set` for an account without a
     password, not counted; `400 weak_password` with the broken rules, not counted; `403 wrong_password` (counted) and
     `429 too_many_attempts` with `account.confirm_refused` (`action` `password`); `403 wrong_password` with
-    `account.confirm_refused` and not counted again when a reset committed while it waited, and a reset that starts
-    while it holds the share lock waits for it and then succeeds (never `500`, its password the one that stays); two changes at once give one `200` and one `401 session_required`; `401
+    `account.confirm_refused` and not counted again when a reset that used its link up first committed while it waited
+    for that link; `401 session_required`, nothing written, when a reset committed before it took the address lock (the
+    reset ended its session); and a change that voided the links first makes the reset's link `400 invalid_token` (none
+    of the three answers `500`, Amendment A1); two changes at once give one `200` and one `401 session_required`; `401
     session_required` without the refresh cookie; `403 no_membership`. Guard: integration (`AccountPasswordTests`, with
     parallel requests).
 20. A reset (spec 0004) still keeps the logins and sends no "password changed" mail; on an account without a password
@@ -733,8 +752,8 @@ Mails, `/auth/me`, limits, audit, API
     keeps the sessions it had before the upgrade (a session without a stored start or window refreshes as before, its
     window closed), lists an account's two logins of one provider once in `linked_providers`, and passes its earlier
     tests, except those that pin what this spec changes (the members of `/auth/me`, the counts of audit kinds and OpenAPI
-    operations, the provider names the manifest accepts, the mail and the `provider_in_use` of the link, the reset that
-    waited for a lock), which are changed to this spec. Guard: integration (`UpgradeFromSpec0011Tests`)
+    operations, the provider names the manifest accepts, the mail and the `provider_in_use` of the link), which are
+    changed to this spec. Guard: integration (`UpgradeFromSpec0011Tests`)
     and the whole suite.
 
 Samples and end to end
@@ -773,11 +792,13 @@ Samples and end to end
     `session_required`, `wrong_password`, `password_required`, `reauth_required`, `reauth_failed`, `invalid_ticket`,
     `provider_in_use`, `provider_already_linked`, `address_mismatch`, `email_not_verified`, `no_email`, `last_login`,
     `not_found`, `password_not_set`, `weak_password` — company deletion with a ticket, the three mails read from the
-    queue table, and the audit rows read from the database. Every earlier e2e script passes, `scripts/e2e-providers.sh`
+    development mail catcher and counted through the notification-limit row (Amendment A13), and the audit rows read
+    from the database. Every earlier e2e script passes, `scripts/e2e-providers.sh`
     with its options step expecting three providers. Guard: e2e script.
 32. The fake provider serves GitHub's authorization, token, `/user`, `/user/emails` and revocation endpoints, by host
-    name behind OpenIddict's HTTP client in the tests (`github.com`, `api.github.com`) and under `{TestIssuer}/github`
-    in the stack, for three people (a verified primary address, an unverified primary address, no primary address) and on
+    name behind the HTTP clients of OpenIddict and of the reader in the tests (`github.com`, `api.github.com`, with `iss`
+    on the authorization answers, Amendment A6) and under `{TestIssuer}/github` in the stack, with its minimal discovery
+    document (Amendment A5), for three people (a verified primary address, an unverified primary address, no primary address) and on
     demand for a failing `/user`, a failing `/user/emails` and a failing revocation, and records each revocation. Its
     free-address mode of spec 0011 serves GitHub too (an address, a "verified" box, an identity key derived from the
     address), so that a test can make a GitHub person and a Google person with one fresh address. Guard: the tests above
@@ -847,6 +868,15 @@ Added to the draft (owner, 2026-05-04):
     the per-IP limits. Beyond the limit the change still happens and the mail is dropped; the first mails have already
     told the person.
 
+Added after the probe (owner, 2026-05-04):
+
+19. **A reset and a password change of one account at once: the first one wins**, and neither answers `500` (Amendment
+    A1). A reset that used its link up first and commits while the change waits for that link: the change answers `403
+    wrong_password`; a reset that committed before the change took the address lock ended every session, so the change
+    answers `401 session_required` and writes nothing; a change that voided the account's links first makes the reset's
+    link `400 invalid_token`. Making the reset win in every case would need
+    the change to leave alive the links it cannot lock, so a link would outlive a password change.
+
 ### Settled in this spec
 
 Choices the decisions left open; the contract above reads this way.
@@ -860,8 +890,8 @@ Choices the decisions left open; the contract above reads this way.
    endpoints and `GET /auth/me` read the refresh cookie, which `Path=/auth` already sends; they never redeem it.
 4. **A sign-in opens the window**: a person who signed in a minute ago has just proved who they are. A refresh does not:
    it proves only that the cookie is held.
-5. **The session's start and window are stored with its authorization**, written by the one routine every sign-in uses
-   and copied by a renewal: the refresh token cannot be read without redeeming it, and the new authorization's creation
+5. **The session's start and window are stored in a table keyed by its authorization** (Amendment A8), removed with it,
+   written by the one routine every sign-in uses and copied by a renewal: the refresh token cannot be read without redeeming it, and the new authorization's creation
    time would reset the 30-day cap at every renewal. A session from before this version takes its start from its
    authorization's creation time, which is right for it because no renewal has happened yet.
 6. **Paths and methods.** `POST /auth/account/confirm`, `POST /auth/providers/connect`, `POST
@@ -912,15 +942,86 @@ Choices the decisions left open; the contract above reads this way.
     answer replaces the cookie, and a request that carried the old one would answer `401 session_required` and sign the
     person out of the session they just kept. Another tab of the same browser can still send a refresh in that moment
     and be signed out; that tab signs in again.
-25. **The reset retries once when it waited for a password change**, because it loads the account before any lock and
-    Identity's concurrency check would otherwise turn the wait into a `500`.
+25. *(Withdrawn by Amendment A1: the reset does not retry; the password change voids the links first, and the first of
+    the two wins.)*
 26. **File names.** `scripts/e2e-settings.sh`, `samples/notes-web/e2e/12-settings.spec.ts`,
     `samples/notes-api/tests/test_delete_org_data.py`.
+
+### Amendment (2026-05-04, after the probe)
+
+A probe of OpenIddict 7.7.1 on this code (`.superpowers/sdd/0012-github-and-managing-logins/probe-report.md`) answered the
+"To verify" items before the plan was written. Two items change what a consumer or a person sees: A1, the owner's
+decision, and A10, the window of the notice limit; A13 changes how criterion 31 is checked; the others say how the
+contract is built. Each item names what it changes, and the sentences of the contract, the criteria and the Settled
+items it touches now read so.
+
+- **A1 (owner, Decision 19) — a reset and a password change at once.** The order of the password change as first
+  written deadlocks with a reset, which holds the link it used up while it waits for the share lock: the reset would
+  answer `500`. Now the first one wins and neither answers `500`. The change voids the account's email links first (A2),
+  so a reset that used its link up first and commits while the change waits for that link: the change then finds the
+  hash changed and answers `403 wrong_password` with `account.confirm_refused` (`wrong_password`, `details.action`
+  `password`), not counted again, nothing else written; a change that voided the links first makes the reset's link
+  invalid (`400 invalid_token`, spec 0004). **The third outcome (orchestrator decision D42):** a reset that committed
+  before the change took the address lock ended every session, the change's too, so the change's second read of its
+  session (step 2 again, which comes first under the lock) answers `401 session_required`, nothing written. None of the
+  three outcomes is a `500`. Withdrawn: the paragraph "A reset that waited for the share lock" and its change of spec 0004, the reset's retry
+  and Settled 25. Criteria 19 and 27 read so.
+- **A2 — the order of the password change.** In one transaction under the address lock: the account's email links are
+  deleted; the account's row is read `FOR SHARE` and its hash compared with the one that was judged; the new hash is set
+  (the security stamp changes); the account's refresh tokens and authorizations are revoked (the effect of
+  `AccountSessions.EndAllAsync`, in an order that cannot deadlock with a reset, not that method itself); the login streak
+  is cleared; then the renewed session.
+- **A3 — the GitHub reader's hand-over.** The reader hands the identity to the callback through the client's
+  authentication properties (`context.Properties`), never as a principal. After the revocation it removes the token from
+  the context (`BackchannelAccessToken = null`, `RequireBackchannelAccessToken = false`), so that the token is never in
+  the callback's properties. A token answer without `access_token` is `provider_error`: the reader refuses it
+  (OpenIddict alone would make it `invalid_state`).
+- **A4 — the reader's HTTP client.** A named `HttpClient` of Auth-Core's own, without OpenIddict's retry pipeline: one
+  attempt per call (OpenIddict's client sends a failed read, and a failed revocation, up to four times), each call bounded
+  to 10 seconds and its body to 64 KiB. The tests route it to the fake as they route OpenIddict's clients. It is the
+  fallback that "To verify" named.
+- **A5 — the test issuer for GitHub.** The fake serves a minimal discovery document under `{TestIssuer}/github`
+  (`issuer`, `authorization_endpoint` at the browser's origin, `token_endpoint`, `jwks_uri` with one throwaway key,
+  `response_types_supported: ["code"]`, `code_challenge_methods_supported: ["S256"]`), so that the stack's two origins
+  work: one static address cannot be both. The registration has the scope `user:email` and no `openid`; PKCE is sent in
+  both modes. It replaces "static endpoints".
+- **A6 — `iss` at GitHub.** OpenIddict's GitHub provider requires `iss=https://github.com/login/oauth` on every
+  authorization answer (GitHub sends it since April 2026): an answer without it is `provider_error`, `access_denied`
+  included. The fake sends it on GitHub's hosts; the test issuer's document does not advertise the parameter, so the
+  plain registration does not require it.
+- **A7 — PKCE and `prompt` at GitHub.** GitHub accepts PKCE with `S256` (only), and criterion 2 asserts
+  `code_challenge_method=S256` in both modes. GitHub documents `prompt=select_account`. No `max_age` is sent to GitHub
+  for any purpose: the `max_age=0` of a re-authentication is Google's alone.
+- **A8 — the session values.** A table `SessionStates` keyed by the authorization's id, `ON DELETE CASCADE`, with
+  `SessionStart` and `ConfirmedUntil`. For a new session `AtomicSignInResult` creates the authorization itself and
+  writes the row in the same transaction. The settings endpoints and `GET /auth/me` find the session of this device
+  through OpenIddict's token manager (`FindByReferenceIdAsync`), never by redeeming the cookie. The clock is
+  `TimeProvider`.
+- **A9 — the access token at the four settings endpoints.** Each route requires it (`.RequireAuthorization()`), which
+  gives the same plain `401` as the company API. Only the unlink and the password change are token-endpoint paths, and
+  `LoginResponseShaper` shapes their answers. The charset guard already covers every `POST` under `/auth/`: nothing is
+  added to it, and the count of 28 operations under it (`OpenApiHardeningTests`) stands.
+- **A10 — the window of the notice limit.** A fixed window of one hour, opened by the first accepted notice of the
+  address, at most 10 notices in it, no minimum gap between two, under a limit key of its own in the store of spec
+  0004's limits: the window rule of spec 0004's limit. It replaces "a sliding hour" (Mails); Decision 18 keeps the
+  owner's words, "in an hour".
+- **A11 — the dispatcher and the composer.** The three kinds join the reset's branch of both statements of the
+  dispatcher (an account of the address, confirmed or not), have a prepare step of their own (no token; the provider
+  from the row) and a composer method without a link, in Polish and English.
+- **A12 — `DELETE /auth/org` with a ticket.** The ticket is used up inside `CompanyDeletionService`'s transaction, after
+  the company lock and before the name check, so that a refused deletion (a wrong name, safety rule 1) rolls it back.
+- **A13 (orchestrator, D41) — how criterion 31 reads the mails.** On a running stack the dispatcher sends a queued
+  notification row and removes it within about a second, so a read of the queue table after the answer races it.
+  `scripts/e2e-settings.sh` therefore reads the three notification mails from the development mail catcher (Mailpit):
+  the recipient, the subject in the instance's language, and that the text and HTML parts hold no link; and it checks
+  their count through the notification-limit row of the store of the mail limits (`MailRequestLimits`, the key of
+  Amendment A10). The queue rows themselves (kind, address, provider name, no token) are asserted by the integration
+  tests with the dispatcher run by hand (criterion 22). Criterion 31 reads so.
 
 ## Verification notes (for the local verifiers)
 
 - Criteria 3 to 7, 11 to 21 need the fake provider in process; GitHub's hosts are answered by the fake behind
-  OpenIddict's HTTP client, as Google's and Microsoft's are in spec 0011. Criteria 8 and 9 need a controlled clock;
+  OpenIddict's HTTP client and the reader's own (Amendment A4), as Google's and Microsoft's are in spec 0011. Criteria 8 and 9 need a controlled clock;
   criteria 13, 17 and 21 parallel requests against PostgreSQL; criterion 22 the dispatcher run by hand (the
   `MailTestBase` pattern); criterion 27 a host with the manifest, settings and sessions of spec 0011.
 - Criteria 30 and 31 need the stack with `tests/Auth.FakeOidc/compose.yml`, which sets the fake's GitHub keys and
@@ -929,7 +1030,8 @@ Choices the decisions left open; the contract above reads this way.
 
 ## To verify during implementation
 
-Each item has the answer to take if the check confirms it, and what to do if it does not.
+Each item has the answer to take if the check confirms it, and what to do if it does not. The probe of this slice
+answered every item before the plan was written; the Amendment above records the answers (A3 to A8).
 
 - **The GitHub reader in OpenIddict 7.7.1's client pipeline.** A handler of `ProcessAuthenticationContext` after the
   token response has the backchannel access token and can call GitHub through OpenIddict's HTTP client, so the tests
