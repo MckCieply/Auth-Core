@@ -205,4 +205,12 @@ docs/                         design brief, ADRs, integration guides, deployment
 
 ## License
 
-[MIT](LICENSE) © 2026 Aleksander Torka
+The service is source-available under the [Business Source License 1.1](LICENSE). It is not open source.
+
+- **Free:** development, testing and evaluation; and production use by an individual for personal, non-commercial projects, or by a non-profit organization or an educational institution for non-commercial purposes.
+- **Commercial licence:** any other production use, including a company's internal use, needs one. Write to [kontakt@toviq.pl](mailto:kontakt@toviq.pl).
+- **Change to Apache 2.0:** each version becomes available under the Apache License 2.0 three years after it is first published.
+- **MIT:** `clients/`, `samples/` and `docs/` are under the MIT License (see the `LICENSE` file in each).
+- **Earlier releases:** `v0.1.0` and everything published before this change stay under the MIT License.
+
+© 2026 Aleksander Torka

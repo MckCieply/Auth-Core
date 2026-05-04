@@ -6,7 +6,7 @@
 # What it checks, in order:
 #   1. docker compose refuses to render the production file without its secrets, and the service refuses to start with a key file that
 #      is not there and with a mail relay without TLS; the file does not render without the password of Auth-Core's database role.
-#   2. the image carries the OCI labels (source, version, licenses MIT, revision); the container runs with a read-only root file system,
+#   2. the image carries the OCI labels (source, version, licenses BUSL-1.1, revision); the container runs with a read-only root file system,
 #      no capability and no privilege gain, has a memory ceiling and a health check that reports healthy, and serves /auth/health; the headers of the table on a 200 (nosniff, X-Frame-Options DENY,
 #      the Content-Security-Policy, Referrer-Policy no-referrer, Cross-Origin-Resource-Policy same-origin, Cache-Control no-store,
 #      Pragma no-cache), no Server header and no Strict-Transport-Security (HSTS is the proxy's); no interactive reference; a login
@@ -291,7 +291,7 @@ pass "step 1: docker compose refuses the file without its secrets (the password 
 # --- Step 2: the image, the container, the headers ------------------------------------------------------------------------------------
 labels="$(docker image inspect "$IMAGE" --format '{{json .Config.Labels}}' | tr -d '\r')" || fail "step 2: docker image inspect of $IMAGE failed"
 for expected in '"org.opencontainers.image.source":"https://github.com/MckCieply/Auth-Core"' "\"org.opencontainers.image.version\":\"$VERSION\"" \
-                '"org.opencontainers.image.licenses":"MIT"'; do
+                '"org.opencontainers.image.licenses":"BUSL-1.1"'; do
   [[ "$labels" == *"$expected"* ]] || fail "step 2: the image has no label $expected"
 done
 [[ "$labels" =~ \"org\.opencontainers\.image\.revision\":\"[0-9a-f]{40}\" ]] || fail "step 2: the image has no revision label holding a full commit hash"

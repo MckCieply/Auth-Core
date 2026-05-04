@@ -25,7 +25,7 @@ ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/MckCieply/Auth-Core" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="BUSL-1.1" \
       org.opencontainers.image.revision="${REVISION}"
 WORKDIR /app
 COPY --from=build /app .

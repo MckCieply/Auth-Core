@@ -22,13 +22,12 @@ def test_the_version_is_0_1_1_and_has_one_source():
     assert project()["dynamic"] == ["version"]
 
 
-def test_the_licence_is_mit_and_its_file_is_the_repositorys():
+def test_the_licence_is_mit_in_the_metadata_and_in_the_packages_own_file():
     data = project()
     assert data["license"] == "MIT"
     assert data["license-files"] == ["LICENSE"]
     text = (PACKAGE / "LICENSE").read_text(encoding="utf-8")
     assert text.startswith("MIT License")
-    assert text == (REPOSITORY / "LICENSE").read_text(encoding="utf-8")
 
 
 def test_the_readme_is_in_the_metadata_and_names_the_install_line():
