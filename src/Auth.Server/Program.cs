@@ -17,6 +17,7 @@ using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Auth.Server.Signup;
 using Auth.Server.Tenancy;
+using Auth.Server.Testing;
 using Auth.Server.Tokens;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -47,6 +48,8 @@ builder.Services.AddSingleton(MailSettingsLoader.Load(builder.Configuration, bui
 // Spec 0011: the providers' settings. A bad value stops the start naming its key; a missing one only leaves its provider unoffered.
 var providerSettings = ProviderSettings.Load(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddSingleton(providerSettings);
+// Spec 0012: the Development-only testing endpoint; set elsewhere it stops the start naming its key.
+var testingSettings = TestingSettings.Load(builder.Configuration, builder.Environment.IsDevelopment());
 // Fail fast on a bad proxy list, a bad rate limit or a bad audit retention, naming the key (spec 0008).
 var proxies = ProxySettings.Load(builder.Configuration);
 builder.Services.AddSingleton(proxies);
@@ -135,6 +138,11 @@ app.MapAccountApi();
 app.MapTenancyApi();
 app.MapSignupApi();
 app.MapProviderApi();
+if (testingSettings.WindowEndpoint)
+{
+    app.MapTestingApi();
+}
+
 app.MapAuthOpenApi();
 
 app.Run();

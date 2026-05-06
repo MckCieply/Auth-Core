@@ -32,8 +32,17 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "GET /auth/org/roles", "POST /auth/org/roles", "PUT /auth/org/roles/{id}", "DELETE /auth/org/roles/{id}",
     ];
 
-    // The endpoints that take a provider ticket and its auth_pt cookie (spec 0011).
-    private static readonly string[] TicketEndpoints = ["POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish", "DELETE /auth/account"];
+    // The cookies each operation reads as its request (specs 0002, 0011 and 0012); every other operation reads none.
+    private static readonly Dictionary<string, string[]> CookiesRead = new(StringComparer.Ordinal)
+    {
+        ["POST /auth/refresh"] = ["auth_rt"],
+        ["POST /auth/logout"] = ["auth_rt"],
+        ["GET /auth/me"] = ["auth_rt"],   // spec 0012: confirmed_until
+        ["POST /auth/providers/exchange"] = ["auth_pt"],
+        ["POST /auth/providers/link"] = ["auth_pt"],
+        ["POST /auth/providers/finish"] = ["auth_pt"],
+        ["DELETE /auth/account"] = ["auth_pt"],
+    };
 
     private static async Task<JsonObject> DescriptionAsync(AuthAppFactory factory)
     {
@@ -304,7 +313,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
-        Assert.Equal(["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["confirmed_until", "email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
@@ -358,30 +367,27 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task Refresh_and_logout_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the two
+    public async Task Each_endpoint_reads_the_cookies_of_the_contract_and_no_other()   // criterion 24; spec 0012: GET /auth/me reads auth_rt
     {
         await using var factory = new AuthAppFactory(postgres, keys);
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {
-            var cookies = (operation["parameters"] as JsonArray ?? []).Where(p => p!["in"]!.GetValue<string>() == "cookie").ToList();
+            var declared = (operation["parameters"] as JsonArray ?? [])
+                .Where(p => p!["in"]!.GetValue<string>() == "cookie")
+                .ToList();
+            var cookies = declared.Select(p => p!["name"]!.GetValue<string>()).Order(StringComparer.Ordinal);
+            Assert.Equal(CookiesRead.GetValueOrDefault(endpoint, []), cookies);
+            Assert.All(declared, p => Assert.Equal("string", p!["schema"]!["type"]!.GetValue<string>()));
             if (endpoint is "POST /auth/refresh" or "POST /auth/logout")
             {
-                var cookie = Assert.Single(cookies)!;
-                Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
-                Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
-                Assert.Null(operation["requestBody"]);
+                Assert.Null(operation["requestBody"]);   // the cookie is their whole request
             }
-            else if (TicketEndpoints.Contains(endpoint))
+            else if (cookies.Contains("auth_pt"))
             {
-                // Spec 0011: the endpoints that take a provider ticket read its binding cookie beside their body.
-                var cookie = Assert.Single(cookies)!;
-                Assert.Equal("auth_pt", cookie["name"]!.GetValue<string>());
+                // Spec 0011: the endpoints that take a provider ticket read its binding cookie beside their body (spec 0012: the connect, the
+                // confirmation and the company deletion do too).
                 Assert.NotNull(operation["requestBody"]);
-            }
-            else
-            {
-                Assert.Empty(cookies);
             }
         }
     }

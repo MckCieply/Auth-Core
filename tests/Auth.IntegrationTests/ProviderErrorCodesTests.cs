@@ -17,6 +17,7 @@ public sealed class ProviderErrorCodesTests
     [InlineData(TenancyErrors.ReauthFailed, "reauth_failed", StatusCodes.Status403Forbidden)]
     [InlineData(TenancyErrors.EmailNotVerified, "email_not_verified", StatusCodes.Status403Forbidden)]
     [InlineData(TenancyErrors.NoMembership, "no_membership", StatusCodes.Status403Forbidden)]
+    [InlineData(TenancyErrors.SessionRequired, "session_required", StatusCodes.Status401Unauthorized)]   // spec 0012
     public void The_codes_and_their_statuses_are_those_of_the_contract(string code, string name, int status)
     {
         Assert.Equal(name, code);

@@ -24,8 +24,9 @@ public sealed class OrgEndpointTests(PostgresFixture postgres, KeyMaterialFixtur
 
         var me = await TenancyApi.ReadOkAsync(response);
         Assert.Equal(
-            ["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"],
+            ["confirmed_until", "email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"],
             me.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, me.GetProperty("confirmed_until").ValueKind);   // spec 0012: no refresh cookie, no window
         Assert.True(me.GetProperty("has_password").GetBoolean());
         Assert.Equal(0, me.GetProperty("linked_providers").GetArrayLength());
         Assert.Equal("organization", me.GetProperty("org_kind").GetString());

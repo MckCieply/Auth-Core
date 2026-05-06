@@ -38,8 +38,12 @@ public static class TenancyErrors
     public const string EmailNotVerified = "email_not_verified";
     public const string NoMembership = "no_membership";
 
+    // Spec 0012.
+    public const string SessionRequired = "session_required";
+
     public static int StatusOf(string error) => error switch
     {
+        SessionRequired => StatusCodes.Status401Unauthorized,
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
         Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled
             or NoEmail or NoAccount or AddressMismatch or PasswordRequired or ReauthRequired or ReauthFailed or EmailNotVerified or NoMembership

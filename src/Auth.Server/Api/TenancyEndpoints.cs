@@ -18,6 +18,9 @@ public static class TenancyEndpoints
         app.MapGet(OrgEndpoints.MePath, OrgEndpoints.MeAsync)
             .RequireAuthorization()
             .WithTags("Company")
+            .ReadsRefreshCookie(
+                "The session of this device, for `confirmed_until`; read, never redeemed. Missing, or of no session of this account: "
+                + "`confirmed_until` is null.")
             .Produces<MeResponse>()
             .ProducesGuarded();
 

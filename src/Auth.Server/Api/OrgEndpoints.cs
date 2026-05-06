@@ -1,9 +1,13 @@
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Auth.Server.Lockout;
 using Auth.Server.Requests;
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
+using OpenIddict.Abstractions;
 
 namespace Auth.Server.Api;
 
@@ -20,11 +24,16 @@ public static class OrgEndpoints
     private static readonly string[] RenameFields = ["name"];
     private static readonly string[] DeleteFields = ["name", "password"];
 
-    public static async Task<IResult> MeAsync(HttpContext http, MembershipReader memberships, UserManager<ApplicationUser> users)
+    public static async Task<IResult> MeAsync(
+        HttpContext http, MembershipReader memberships, UserManager<ApplicationUser> users, AuthDbContext db, IOpenIddictTokenManager tokens,
+        TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(memberships);
         ArgumentNullException.ThrowIfNull(users);
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(clock);
 
         var access = await CompanyAccess.AuthorizeAnyKindAsync(http, memberships);
         if (access.Caller is not { } caller)
@@ -40,9 +49,14 @@ public static class OrgEndpoints
 
         // Spec 0011: whether the account has a password, and the providers it signs in with, sorted ordinally.
         var linked = (await users.GetLoginsAsync(user)).Select(l => l.LoginProvider).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+
+        // Spec 0012: the window of the session of this device, read from the refresh cookie, never redeemed; no session, no window.
+        var now = StorableTime.Now(clock);
+        var session = await DeviceSessions.FindAsync(http, db, tokens, caller.UserId, now, http.RequestAborted);
+        var until = session is not null && session.IsConfirmedAt(now) ? ConfirmationWindow.Format(session.ConfirmedUntil!.Value) : null;
         return ApiResults.Ok(new MeResponse(
             caller.UserId, user.Email, caller.CompanyId, caller.CompanyName, SpaceKinds.NameOf(caller.Kind), [caller.RoleName], [.. caller.Permissions],
-            user.PasswordHash is not null, [.. linked]));
+            user.PasswordHash is not null, [.. linked], until));
     }
 
     public static async Task<IResult> GetAsync(HttpContext http, MembershipReader memberships)

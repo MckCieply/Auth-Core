@@ -7,6 +7,7 @@ using Auth.Server.Providers;
 using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Tenancy;
+using Auth.Server.Testing;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -84,6 +85,8 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[ProviderSettings.MicrosoftClientSecretKey] = "";
         _settings[ProviderSettings.MicrosoftSecretExpiresOnKey] = "";
         _settings[ProviderSettings.TestIssuerKey] = "";
+        // Spec 0012: the testing endpoint is off unless a test turns it on (TestingEndpointTests).
+        _settings[TestingSettings.WindowEndpointKey] = "";
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
