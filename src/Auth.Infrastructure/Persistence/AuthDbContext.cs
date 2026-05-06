@@ -2,6 +2,7 @@ using Auth.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using OpenIddict.EntityFrameworkCore.Models;
 
 namespace Auth.Infrastructure.Persistence;
 
@@ -32,6 +33,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
 
     public DbSet<ProviderTicket> ProviderTickets => Set<ProviderTicket>();
 
+    public DbSet<SessionState> SessionStates => Set<SessionState>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -60,6 +63,8 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             request.HasKey(r => r.Id);
             // The dispatcher takes the rows that are due, oldest first.
             request.HasIndex(r => r.NextAttemptAt);
+            // Spec 0012: the provider a notice names, by its name (at most 20 characters, as a ticket's).
+            request.Property(r => r.Provider).HasMaxLength(20);
         });
 
         builder.Entity<MailRequestLimit>(limit =>
@@ -154,6 +159,13 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
             ticket.HasIndex(t => t.TicketHash).IsUnique();
             // The clean-up selects by expiry.
             ticket.HasIndex(t => t.ExpiresAt);
+        });
+
+        // Spec 0012 → Sessions: the values of a session, with its authorization and gone with it.
+        builder.Entity<SessionState>(session =>
+        {
+            session.HasKey(s => s.AuthorizationId);
+            session.HasOne<OpenIddictEntityFrameworkCoreAuthorization>().WithMany().HasForeignKey(s => s.AuthorizationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // Spec 0008 → Audit log. The names are the contract's (snake_case): the backup runbook queries them. No foreign keys on purpose.

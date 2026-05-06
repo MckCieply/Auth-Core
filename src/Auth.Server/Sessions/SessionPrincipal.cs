@@ -15,7 +15,13 @@ namespace Auth.Server.Sessions;
 /// </summary>
 public static class SessionPrincipal
 {
-    public static ClaimsPrincipal Create(HttpContext http, ApplicationUser user, TenantContext tenant, string audience, TimeProvider clock)
+    /// <param name="start">
+    /// Spec 0012 → Sessions: the start of the session a renewal replaces, so that the 30-day cap counts from there; the refresh token then lives what
+    /// is left before the cap. Left out, the session starts now.
+    /// </param>
+    /// <exception cref="InvalidOperationException">The session of <paramref name="start"/> is past its cap: it cannot be renewed.</exception>
+    public static ClaimsPrincipal Create(
+        HttpContext http, ApplicationUser user, TenantContext tenant, string audience, TimeProvider clock, DateTimeOffset? start = null)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(user);
@@ -31,7 +37,12 @@ public static class SessionPrincipal
         // The access token carries `sub` and the tenancy claims below (`org_id`, `org_kind`, `roles`, `permissions`), and nothing else:
         // no email, name or scope.
         identity.SetClaim(Claims.Subject, user.Id.ToString());
-        identity.SetClaim(SessionPolicy.StartClaim, clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
+        var now = clock.GetUtcNow();
+        var begun = start ?? now;
+        var lifetime = start is null
+            ? SessionPolicy.SlidingLifetime
+            : SessionPolicy.RemainingLifetime(begun, now) ?? throw new InvalidOperationException("A session past its cap cannot be renewed.");
+        identity.SetClaim(SessionPolicy.StartClaim, begun.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture));
 
         // The stamp of the account as this sign-in read it. A session that began before a password change, even one
         // whose sign-in was still in flight when the change was committed, carries the old stamp and cannot refresh.
@@ -44,8 +55,8 @@ public static class SessionPrincipal
         principal.SetResources(audience);
         // `sub` and the tenancy claims make the access token; the session start stays in the refresh token only.
         principal.SetDestinations(TenantClaims.DestinationsOf);
-        principal.SetRefreshTokenLifetime(SessionPolicy.SlidingLifetime);
-        http.Items[RefreshCookie.LifetimeItemKey] = SessionPolicy.SlidingLifetime;
+        principal.SetRefreshTokenLifetime(lifetime);
+        http.Items[RefreshCookie.LifetimeItemKey] = lifetime;
         return principal;
     }
 }

@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Security.Claims;
 using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
+using Auth.Server.Email;
+using Auth.Server.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using OpenIddict.Abstractions;
@@ -10,8 +13,9 @@ namespace Auth.Server.Login;
 
 /// <summary>
 /// Issues the session of a sign-in and writes the <c>login.succeeded</c> row in one transaction (spec 0008: a change and its row are
-/// written together, or neither is). OpenIddict makes the authorization and the token entries, in several saves, on the request's own
-/// <see cref="AuthDbContext"/>; the transaction holds all of them and the row. The body of the answer is held in memory
+/// written together, or neither is). The result itself creates the authorization of a new session, with its <c>SessionStates</c> row
+/// (spec 0012 → Sessions; OpenIddict then makes no ad-hoc one, and a refresh keeps the authorization it carries); OpenIddict makes the token
+/// entries, in several saves, on the request's own <see cref="AuthDbContext"/>; the transaction holds all of them and the row. The body of the answer is held in memory
 /// until the transaction has committed, so that no token leaves the server for a session that was rolled back; on any failure the
 /// response is cleared (no cookie either) and the exception goes to the outermost error handler (<c>500 internal_error</c>).
 /// An answer that is not a <c>200</c> (OpenIddict refused the sign-in) is passed on as it is and nothing is committed.
@@ -29,9 +33,14 @@ namespace Auth.Server.Login;
 /// Runs once the sign-in is committed, before the held answer is written: the answer has not started, so it may still set a header (a sign-in
 /// through a provider clears <c>auth_pt</c> there, spec 0011). It never runs for an answer that is rolled back.
 /// </param>
+/// <param name="session">
+/// Spec 0012 → Sessions: the values a new session records. A sign-in leaves it out (the session starts at the principal's start and is confirmed
+/// for five minutes); a renewal passes the start and the window of the session it replaces. A refresh, whose principal carries its
+/// authorization, records nothing.
+/// </param>
 public sealed class AtomicSignInResult(
     ClaimsPrincipal principal, AuditEntry? entry, IDbContextTransaction? opened = null, Func<Task<IResult>>? whenGone = null,
-    Action<HttpContext>? whenCommitted = null) : IResult
+    Action<HttpContext>? whenCommitted = null, SessionValues? session = null) : IResult
 {
     /// <inheritdoc />
     public async Task ExecuteAsync(HttpContext httpContext)
@@ -62,6 +71,13 @@ public sealed class AtomicSignInResult(
                 }
                 else
                 {
+                    // Spec 0012 → Sessions: a new session gets its authorization here, with its row, inside this transaction; OpenIddict then
+                    // makes no ad-hoc one. A refresh carries the authorization of its session and keeps it.
+                    if (string.IsNullOrEmpty(principal.GetAuthorizationId()))
+                    {
+                        await OpenSessionAsync(httpContext, db, principal, session, httpContext.RequestAborted);
+                    }
+
                     await Results.SignIn(principal, properties: null, authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme)
                         .ExecuteAsync(httpContext);
                     if (httpContext.Response.StatusCode == StatusCodes.Status200OK)
@@ -117,6 +133,38 @@ public sealed class AtomicSignInResult(
             }
         }
     }
+
+    /// <summary>
+    /// The authorization of a new session and its row in <c>SessionStates</c> (Amendment A8). The row is saved with the tokens, in the
+    /// transaction of the sign-in: a sign-in that is refused or rolled back leaves neither.
+    /// </summary>
+    private static async Task OpenSessionAsync(
+        HttpContext http, AuthDbContext db, ClaimsPrincipal principal, SessionValues? given, CancellationToken cancellationToken)
+    {
+        var clock = http.RequestServices.GetRequiredService<TimeProvider>();
+        var authorizations = http.RequestServices.GetRequiredService<IOpenIddictAuthorizationManager>();
+        var now = StorableTime.Now(clock);
+        var values = given ?? SessionValues.Opened(StartOf(principal), now);
+        var authorization = await authorizations.CreateAsync(
+            new OpenIddictAuthorizationDescriptor
+            {
+                CreationDate = now,
+                Status = OpenIddictConstants.Statuses.Valid,
+                Subject = principal.GetClaim(OpenIddictConstants.Claims.Subject),
+                Type = OpenIddictConstants.AuthorizationTypes.AdHoc,
+            },
+            cancellationToken);
+        var id = await authorizations.GetIdAsync(authorization, cancellationToken)
+            ?? throw new InvalidOperationException("The authorization of the session has no id.");
+        db.SessionStates.Add(new SessionState { AuthorizationId = id, SessionStart = values.Start, ConfirmedUntil = values.ConfirmedUntil });
+        principal.SetAuthorizationId(id);
+    }
+
+    /// <summary>The start the principal carries for the refresh token (Unix seconds).</summary>
+    private static DateTimeOffset StartOf(ClaimsPrincipal principal) =>
+        long.TryParse(principal.GetClaim(SessionPolicy.StartClaim), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds)
+            : throw new InvalidOperationException("The principal of a new session has no start.");
 
     private static Guid AccountIdOf(ClaimsPrincipal principal) =>
         Guid.TryParse(principal.GetClaim(OpenIddictConstants.Claims.Subject), out var userId)

@@ -11,7 +11,9 @@ public sealed class RefreshTokenIssuanceHandler : IOpenIddictServerHandler<OpenI
 {
     /// <summary>
     /// After OpenIddict decided which tokens to generate, and before it attaches the ad-hoc authorization, which it
-    /// creates only when a refresh token is generated. That authorization is the token family.
+    /// creates only when a refresh token is generated and the principal carries none. That authorization is the token
+    /// family. A new session of ours already carries the authorization that <c>AtomicSignInResult</c> made with its
+    /// <c>SessionStates</c> row (spec 0012 → Sessions), so for it this handler only decides that a refresh token is made.
     /// </summary>
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddictServerEvents.ProcessSignInContext>()

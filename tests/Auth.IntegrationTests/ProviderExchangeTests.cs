@@ -3,6 +3,7 @@ using System.Text.Json;
 using Auth.FakeOidc;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -56,6 +57,21 @@ public sealed class ProviderExchangeTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(userId, row.SubjectUserId);
         Assert.Equal(userId, row.ActorUserId);
         Assert.Equal(0, await TicketCountAsync());
+    }
+
+    [Fact]
+    public async Task A_linked_identity_that_signs_in_records_its_session_start_and_opens_a_window_of_five_minutes()   // spec 0012 → Sessions
+    {
+        await LinkedAccountAsync();
+        var ticket = await TicketAsync("google", GooglePerson());
+        var now = StorableTime.Now(Clock);
+
+        using var response = await ProviderApi.Exchange(Client, ticket);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var row = await InDbAsync(db => db.SessionStates.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds()), row.SessionStart);
+        Assert.Equal(now + TimeSpan.FromMinutes(5), row.ConfirmedUntil);
     }
 
     [Fact]
