@@ -11,7 +11,7 @@ using Microsoft.IdentityModel.Tokens;
 namespace Auth.FakeOidc;
 
 /// <summary>
-/// The fake OpenID provider of spec 0011 (Settled 22). It answers by host and path: the real host names of Google and Microsoft (which only the
+/// The fake OpenID provider of spec 0011 (Settled 22), and through <see cref="FakeGitHub"/> GitHub (spec 0012). It answers by host and path: the real host names of Google and Microsoft (which only the
 /// tests' routing sends to it) with documents that mirror the real ones where OpenIddict reads them, and on any other host the test issuer's
 /// paths <c>/{google|microsoft}/.well-known/openid-configuration</c>, <c>/authorize</c>, <c>/token</c> and <c>/keys</c>. The authorization endpoint
 /// answers at once for a <see cref="FakeSignIn"/> in its query and shows a page otherwise.
@@ -60,7 +60,11 @@ public sealed class FakeOidcServer : IDisposable
 
         _options = options;
         _clock = clock;
+        GitHub = new FakeGitHub(options, KeySet);
     }
+
+    /// <summary>Spec 0012: the fake as GitHub; it answers its hosts and the test issuer's <c>/github</c> paths before anything else here.</summary>
+    public FakeGitHub GitHub { get; }
 
     private enum Endpoint
     {
@@ -79,6 +83,11 @@ public sealed class FakeOidcServer : IDisposable
     public async Task HandleAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        if (await GitHub.TryHandleAsync(context))
+        {
+            return;
+        }
 
         if (Route(context.Request) is not { } site)
         {
@@ -110,6 +119,7 @@ public sealed class FakeOidcServer : IDisposable
 
     public void Dispose()
     {
+        GitHub.Dispose();
         _key.Dispose();
         _otherKey.Dispose();
     }
@@ -274,9 +284,9 @@ public sealed class FakeOidcServer : IDisposable
             return;
         }
 
-        if (signIn.Defect is { } defect && !FakeDefects.IsKnown(defect))
+        if (signIn.Defect is { } defect && (!FakeDefects.IsKnown(defect) || FakeDefects.IsGitHubOnly(defect)))
         {
-            await PlainAsync(context.Response, "This is not a defect the fake knows.");
+            await PlainAsync(context.Response, "This is not a defect the fake knows.");   // GitHub's defects cannot apply to an identity token
             return;
         }
 

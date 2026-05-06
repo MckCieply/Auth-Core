@@ -394,6 +394,8 @@ public sealed class FakeOidcTests : IAsyncDisposable
     [InlineData(true, FakePeople.Google, FakeDefects.NoObjectId)]
     [InlineData(false, FakePeople.MicrosoftWork, "typo")]
     [InlineData(true, FakePeople.Cancel, "typo")]
+    [InlineData(true, FakePeople.Google, FakeDefects.RevokeFails)]   // spec 0012: a GitHub defect on a Google sign-in is refused, not ignored
+    [InlineData(false, FakePeople.MicrosoftWork, FakeDefects.NoIss)]
     public async Task A_defect_the_fake_does_not_know_or_that_cannot_apply_is_refused_not_ignored(bool google, string person, string defect)   // a typo never gives a good token
     {
         var url = new FakeSignIn(person, Defect: defect).AppendTo(AuthorizeUrl(google ? GoogleAuthorize : MicrosoftAuthorize, google ? GoogleCallback : MicrosoftCallback));
@@ -536,7 +538,7 @@ public sealed class FakeOidcTests : IAsyncDisposable
     [Theory]
     [InlineData("https://accounts.google.com/nope")]
     [InlineData("https://login.microsoftonline.com/common/oauth2/v2.0/other")]
-    [InlineData("http://issuer.test/github/authorize")]
+    [InlineData("http://issuer.test/gitlab/authorize")]   // spec 0012: /github is served now
     [InlineData("http://issuer.test/google")]
     public async Task An_unknown_path_is_404(string url)
     {

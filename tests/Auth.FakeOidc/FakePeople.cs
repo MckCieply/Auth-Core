@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Auth.FakeOidc;
 
-/// <summary>The two providers the fake plays.</summary>
+/// <summary>The two OpenID providers the fake plays (GitHub is <see cref="FakeGitHub"/>, which has no identity token).</summary>
 public static class FakeKinds
 {
     public const string Google = "google";
@@ -29,9 +29,36 @@ public static class FakeDefects
     /// <summary>The authorization endpoint answers another error than <c>access_denied</c> (<c>server_error</c>).</summary>
     public const string ProviderError = "provider_error";
 
+    // Spec 0012: GitHub. The authorization answer without `iss`; a token answer without `access_token`; /user and /user/emails failing, not
+    // JSON, without `id`, with an `id` that is not a number, larger than 64 KiB or held until the request is aborted (each of the last two for
+    // /user and for /user/emails); a revocation answering 500 or held until the request is aborted.
+    public const string NoIss = "no_iss";
+    public const string NoToken = "no_token";
+    public const string UserFails = "user_fails";
+    public const string UserNotJson = "user_not_json";
+    public const string UserNoId = "user_no_id";
+    public const string UserBadId = "user_bad_id";
+    public const string UserTooLarge = "user_too_large";
+    public const string UserSlow = "user_slow";
+    public const string EmailsFails = "emails_fails";
+    public const string EmailsNotJson = "emails_not_json";
+    public const string EmailsBadEntry = "emails_bad_entry";
+    public const string EmailsTooLarge = "emails_too_large";
+    public const string EmailsSlow = "emails_slow";
+    public const string RevokeFails = "revoke_fails";
+    public const string RevokeSlow = "revoke_slow";
+
     /// <summary>Whether this is one of the defects above; the fake refuses any other name, so a typo never yields a good identity token.</summary>
     public static bool IsKnown(string defect) => defect is NoSubject or NoTenant or NoObjectId or NoEmail or WrongAudience or WrongNonce
-        or WrongIssuer or BadSignature or RefuseCode or RefuseClient or ProviderError;
+        or WrongIssuer or BadSignature or RefuseCode or RefuseClient or ProviderError || IsGitHubOnly(defect);
+
+    /// <summary>The defects only the fake GitHub can apply (it has no identity token): the OpenID fakes refuse them instead of ignoring them.</summary>
+    public static bool IsGitHubOnly(string defect) => defect is NoIss or NoToken or UserFails or UserNotJson or UserNoId or UserBadId
+        or UserTooLarge or UserSlow or EmailsFails or EmailsNotJson or EmailsBadEntry or EmailsTooLarge or EmailsSlow or RevokeFails or RevokeSlow;
+
+    /// <summary>The defects only the OpenID fakes can apply (claims, the identity token, the client): the fake GitHub refuses them instead of ignoring them.</summary>
+    public static bool IsOpenIdOnly(string defect) => defect is NoSubject or NoTenant or NoObjectId or NoEmail or WrongAudience or WrongNonce
+        or WrongIssuer or BadSignature or RefuseClient;
 }
 
 /// <summary>
@@ -56,6 +83,31 @@ public static class FakePeople
     public const string WorkObjectId = "00000000-0000-0000-0000-00000000b001";
     public const string WorkEmail = "bo@firma.test";
     public const string WorkUserName = "bo@firma.onmicrosoft.test";
+
+    // Spec 0012, criterion 32: the three GitHub people. Ola: a verified primary address, a verified secondary one and a public address on /user
+    // (neither of which may be read as the address); Kim: an unverified primary address; Lee: two verified addresses, neither primary.
+    public const string GitHub = "github";
+    public const string GitHubUnverified = "github-unverified";
+    public const string GitHubNoPrimary = "github-no-primary";
+    public const string GitHubId = "70000001";
+    public const string GitHubLogin = "ola-gh";
+    public const string GitHubEmail = "ola@github.test";
+    public const string GitHubSecondaryEmail = "ola.work@firma.test";
+    public const string GitHubPublicEmail = "ola.public@github.test";
+    public const string GitHubUnverifiedId = "70000002";
+    public const string GitHubUnverifiedEmail = "kim@github.test";
+    public const string GitHubNoPrimaryId = "70000003";
+    public const string GitHubNoPrimaryEmail = "lee@github.test";
+    public const string GitHubNoPrimaryOtherEmail = "lee@work.test";
+
+    /// <summary>The GitHub id of a free address: a positive number derived from the address, whatever its case, the same on every round trip.</summary>
+    public static string GitHubIdOf(string email)
+    {
+        ArgumentNullException.ThrowIfNull(email);
+
+        var number = (System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(Hash(email)) & 0x3FFF_FFFF_FFFF_FFFF) + 1;
+        return number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// The claims of the identity token of this person at this provider (<see cref="FakeKinds"/>), before the fake adds <c>iss</c>, <c>aud</c>,
