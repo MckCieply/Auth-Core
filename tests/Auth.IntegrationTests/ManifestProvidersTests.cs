@@ -23,6 +23,8 @@ public sealed class ManifestProvidersTests
     [InlineData("[google, microsoft]", "google,microsoft")]
     [InlineData("[microsoft, google]", "microsoft,google")]
     [InlineData("[google]", "google")]
+    [InlineData("[github, google, microsoft]", "github,google,microsoft")]   // spec 0012, criterion 1
+    [InlineData("[github]", "github")]
     [InlineData("\n  - microsoft\n  - google", "microsoft,google")]
     public void The_key_lists_the_providers_in_the_order_of_the_file(string list, string expected)   // criterion 1: the order of the buttons
     {
@@ -39,8 +41,18 @@ public sealed class ManifestProvidersTests
         Assert.Equal(["microsoft", "google"], manifest.Providers);
     }
 
+    [Fact]
+    public void A_github_listed_twice_is_folded_and_keeps_its_first_place()   // spec 0012, criterion 1
+    {
+        var manifest = Parsed(Roles + "\nproviders: [github, google, github]\n");
+
+        Assert.Equal(["github", "google"], manifest.Providers);
+        Assert.Equal(["github", "google"], Manifest.FromJson(manifest.ToJson())!.Providers);
+    }
+
     [Theory]
-    [InlineData("[github]")]
+    [InlineData("[gitlab]")]   // spec 0012: github is a provider now; any other name still is not
+    [InlineData("[GitHub]")]
     [InlineData("[password]")]
     [InlineData("[google, apple]")]
     [InlineData("[Google]")]
@@ -60,10 +72,11 @@ public sealed class ManifestProvidersTests
     [Fact]
     public void A_refused_name_is_named_in_the_reason()
     {
-        var result = ManifestParser.Parse(Roles + "\nproviders: [google, github]\n");
+        var result = ManifestParser.Parse(Roles + "\nproviders: [google, gitlab]\n");
 
         Assert.Contains("providers", result.Error, StringComparison.Ordinal);
-        Assert.Contains("github", result.Error, StringComparison.Ordinal);
+        Assert.Contains("'gitlab'", result.Error, StringComparison.Ordinal);
+        Assert.Contains("'github'", result.Error, StringComparison.Ordinal);   // the reason names the three names it accepts
     }
 
     [Theory]
@@ -108,10 +121,13 @@ public sealed class ManifestProvidersTests
     [Fact]
     public void The_names_are_those_of_the_contract()
     {
-        Assert.Equal(["google", "microsoft"], ProviderNames.All);
+        Assert.Equal(["google", "microsoft", "github"], ProviderNames.All);   // spec 0012
         Assert.True(ProviderNames.IsName("google"));
         Assert.False(ProviderNames.IsName("Google"));
         Assert.False(ProviderNames.IsName(null));
         Assert.Equal("Microsoft", ProviderNames.DisplayNameOf("microsoft"));
+        Assert.True(ProviderNames.IsName("github"));
+        Assert.False(ProviderNames.IsName("GitHub"));
+        Assert.Equal("GitHub", ProviderNames.DisplayNameOf("github"));
     }
 }

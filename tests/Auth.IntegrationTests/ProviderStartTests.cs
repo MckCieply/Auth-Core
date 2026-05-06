@@ -144,7 +144,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Theory]
-    [InlineData("github")]
+    [InlineData("gitlab")]   // spec 0012: github is a name now
     [InlineData("Google")]
     [InlineData("password")]
     public async Task An_unknown_name_is_404_not_found(string name)   // criterion 6
@@ -160,6 +160,14 @@ public sealed class ProviderStartTests : ProviderTestBase
         SetManifest(AuthAppFactory.DefaultManifest + "\nproviders: [google]\n", withProviders: false);
 
         using var response = await Browser.GetAsync("/auth/providers/microsoft/start");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.NotFound, "not_found");
+    }
+
+    [Fact]
+    public async Task GitHub_that_the_manifest_does_not_list_is_404_not_found()   // spec 0012 → Configuration: keyed is not offered
+    {
+        using var response = await Browser.GetAsync("/auth/providers/github/start");
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.NotFound, "not_found");
     }
@@ -191,7 +199,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Theory]
-    [InlineData("github", "?purpose=login")]
+    [InlineData("gitlab", "?purpose=login")]
     [InlineData("password", "?invite=abc")]
     public async Task An_unknown_name_with_a_bad_query_is_404_not_400(string name, string query)   // spec 0011 → start: step 1 comes before step 2
     {

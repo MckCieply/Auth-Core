@@ -21,6 +21,8 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
         [ProviderSettings.GoogleClientSecretKey] = AuthAppFactory.GoogleClientSecret,
         [ProviderSettings.MicrosoftClientIdKey] = AuthAppFactory.MicrosoftClientId,
         [ProviderSettings.MicrosoftClientSecretKey] = AuthAppFactory.MicrosoftClientSecret,
+        [ProviderSettings.GitHubClientIdKey] = AuthAppFactory.GitHubClientId,
+        [ProviderSettings.GitHubClientSecretKey] = AuthAppFactory.GitHubClientSecret,
     };
 
     private static async Task<string> BodyAsync(AuthAppFactory factory, string path)
@@ -43,6 +45,8 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal("Auth:Providers:Microsoft:ClientId", ProviderSettings.MicrosoftClientIdKey);
         Assert.Equal("Auth:Providers:Microsoft:ClientSecret", ProviderSettings.MicrosoftClientSecretKey);
         Assert.Equal("Auth:Providers:Microsoft:ClientSecretExpiresOn", ProviderSettings.MicrosoftSecretExpiresOnKey);
+        Assert.Equal("Auth:Providers:GitHub:ClientId", ProviderSettings.GitHubClientIdKey);   // spec 0012
+        Assert.Equal("Auth:Providers:GitHub:ClientSecret", ProviderSettings.GitHubClientSecretKey);
         Assert.Equal("Auth:Providers:TestIssuer", ProviderSettings.TestIssuerKey);
     }
 
@@ -54,11 +58,15 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
         Assert.Null(settings.ReturnUrl);
         Assert.Null(settings.Google);
         Assert.Null(settings.Microsoft);
+        Assert.Null(settings.GitHub);
         Assert.Null(settings.MicrosoftSecretExpiresOn);
         Assert.Null(settings.TestIssuer);
         Assert.Equal(
             [ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.ReturnUrlKey],
             settings.MissingKeysOf(ProviderNames.Google));
+        Assert.Equal(
+            [ProviderSettings.GitHubClientIdKey, ProviderSettings.GitHubClientSecretKey, ProviderSettings.ReturnUrlKey],
+            settings.MissingKeysOf(ProviderNames.GitHub));
     }
 
     [Fact]
@@ -89,6 +97,21 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
         Assert.Null(settings.Google);
         Assert.Equal([named], settings.MissingKeysOf(ProviderNames.Google));
         Assert.Empty(settings.MissingKeysOf(ProviderNames.Microsoft));
+    }
+
+    [Theory]
+    [InlineData(ProviderSettings.GitHubClientIdKey)]
+    [InlineData(ProviderSettings.GitHubClientSecretKey)]
+    public void A_github_with_one_key_blank_is_missing_only_that_key(string blank)   // spec 0012, criterion 1
+    {
+        var values = Configured();
+        values[blank] = "";
+
+        var settings = Load(values);
+
+        Assert.Null(settings.GitHub);
+        Assert.Equal([blank], settings.MissingKeysOf(ProviderNames.GitHub));
+        Assert.Empty(settings.MissingKeysOf(ProviderNames.Google));
     }
 
     [Theory]
@@ -280,5 +303,57 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
             e => e.Level == LogLevel.Warning
                 && e.Message.Contains(ProviderSettings.MicrosoftSecretExpiresOnKey, StringComparison.Ordinal)
                 && e.Message.Contains(date, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GitHubs_keys_are_used_as_configured()   // spec 0012 → Configuration
+    {
+        var settings = Load(Configured());
+
+        Assert.Equal(AuthAppFactory.GitHubClientId, settings.GitHub!.ClientId);
+        Assert.Equal(AuthAppFactory.GitHubClientSecret, settings.KeysOf(ProviderNames.GitHub)!.ClientSecret);
+        Assert.Empty(settings.MissingKeysOf(ProviderNames.GitHub));
+        Assert.Equal(new Uri("https://app.example.com/auth/providers/github/callback"), settings.CallbackUriOf(ProviderNames.GitHub));
+    }
+
+    [Fact]
+    public async Task A_listed_github_without_its_keys_warns_once_naming_them_and_health_says_degraded()   // spec 0012, criterion 1
+    {
+        var logs = new CapturingLoggerProvider();
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.AllProvidersLine)
+            .WithProviderKeys()
+            .WithSetting(ProviderSettings.GitHubClientIdKey, "")
+            .WithSetting(ProviderSettings.GitHubClientSecretKey, "")
+            .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
+
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":["google","microsoft"]}""", await BodyAsync(factory, "/auth/options"));
+        Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
+        var warning = Assert.Single(ProviderWarnings(logs));
+        Assert.Contains("github", warning.Message, StringComparison.Ordinal);
+        Assert.Contains(ProviderSettings.GitHubClientIdKey, warning.Message, StringComparison.Ordinal);
+        Assert.Contains(ProviderSettings.GitHubClientSecretKey, warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(logs.Entries, e => e.Message.Contains(AuthAppFactory.GoogleClientSecret, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(ProviderSettings.GitHubClientIdKey, ProviderSettings.GitHubClientSecretKey)]
+    [InlineData(ProviderSettings.GitHubClientSecretKey, ProviderSettings.GitHubClientIdKey)]
+    public async Task The_github_warning_names_only_the_blank_key_and_never_a_value(string blank, string set)   // spec 0012, criterion 1: keys, never values
+    {
+        var logs = new CapturingLoggerProvider();
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.AllProvidersLine)
+            .WithProviderKeys()
+            .WithSetting(blank, "")
+            .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
+
+        Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
+        var warning = Assert.Single(ProviderWarnings(logs));
+        Assert.Contains("github", warning.Message, StringComparison.Ordinal);
+        Assert.Contains(blank, warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(set, warning.Message, StringComparison.Ordinal);   // the key that is set is not missing
+        Assert.DoesNotContain(logs.Entries, e => e.Message.Contains(AuthAppFactory.GitHubClientId, StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Entries, e => e.Message.Contains(AuthAppFactory.GitHubClientSecret, StringComparison.Ordinal));
     }
 }

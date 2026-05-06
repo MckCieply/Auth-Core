@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Providers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -48,7 +49,9 @@ public sealed class UpgradeFromSpec0011Tests(PostgresFixture postgres, KeyMateri
     [Fact]
     public async Task An_instance_with_the_settings_of_spec_0011_starts_healthy_offers_its_providers_and_issues_the_same_tokens()   // criterion 27
     {
-        await using var factory = new AuthAppFactory(postgres, keys).WithPrivateSignup().WithProviders();
+        await using var factory = new AuthAppFactory(postgres, keys).WithPrivateSignup().WithProviders()
+            .WithSetting(ProviderSettings.GitHubClientIdKey, "")   // spec 0011's settings: no GitHub keys
+            .WithSetting(ProviderSettings.GitHubClientSecretKey, "");
         using var client = SessionApi.CreateClient(factory);
 
         using (var health = await client.GetAsync("/auth/health", TestContext.Current.CancellationToken))
