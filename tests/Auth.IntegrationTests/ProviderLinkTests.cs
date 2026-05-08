@@ -64,8 +64,8 @@ public sealed class ProviderLinkTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal(Ola, row.SubjectEmail);
         Assert.Equal(await DevCompanyIdAsync(), row.OrgId);
         Assert.Equal(DevUserSeeder.DefaultOrgName, row.OrgName);
-        Assert.Equal(["provider"], AuditApi.DetailNames(row));
-        Assert.Equal("google", AuditApi.Text(row, "provider"));
+        Assert.Equal(["provider", "via"], AuditApi.DetailNames(row));   // spec 0012 → Audit events
+        Assert.Equal(("google", "sign_in"), (AuditApi.Text(row, "provider"), AuditApi.Text(row, "via")));
         Assert.Equal("google", AuditApi.Text(await SingleAsync(AuditKinds.LoginSucceeded), "provider"));
 
         // From then on the provider alone signs in, and the password still does.
@@ -93,6 +93,8 @@ public sealed class ProviderLinkTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal(1, await TicketCountAsync());
         Assert.Null(ProviderApi.BindingCookieOf(linked));
         Assert.False(await InDbAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.EmailConfirmed).SingleAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));   // the notice rolled back with the change
+        Assert.Equal(0, await InDbAsync(db => db.MailRequestLimits.CountAsync(l => l.Kind == MailKind.NoticeLimit, TestContext.Current.CancellationToken)));
     }
 
     [Fact]
@@ -351,5 +353,157 @@ public sealed class ProviderLinkTests(PostgresFixture postgres, KeyMaterialFixtu
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
         Assert.Equal("no_company", AuditApi.Text(await SingleAsync(AuditKinds.LoginFailed), "reason"));
         Assert.Empty(await LoginsAsync());
+    }
+
+    private async Task<Guid> AccountWithGoogleLoginAsync()
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", "100000000000000000077");
+        return user.Id;
+    }
+
+    [Fact]
+    public async Task A_right_password_for_an_account_with_a_login_of_the_provider_is_409_provider_in_use_and_nothing_is_written()   // spec 0012, criterion 15
+    {
+        await AccountWithGoogleLoginAsync();
+        await LockoutApi.FailAsync(Client, Clock, Ola, 2);
+        var ticket = await TicketAsync("google", GooglePerson());
+        var auditRows = (await AuditAsync()).Count;
+
+        using var response = await ProviderApi.Link(Client, ticket, UserPassword);
+
+        Assert.Equal(auditRows, (await AuditAsync()).Count);   // no audit row of any kind, login.failed included
+        await AssertNoSecretsAnywhereAsync([UserPassword, ticket.Value, ticket.Binding], await response.Content.ReadAsStringAsync());
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "provider_in_use");
+        Assert.Equal(1, await TicketCountAsync());   // the ticket is kept
+        Assert.Equal("100000000000000000077", Assert.Single(await LoginsAsync()).ProviderKey);
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+        Assert.Equal(0, await AttemptsOfAsync("OLA@GMAIL.TEST"));   // the streak is cleared, as for a right password
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.MailRequestLimits.CountAsync(l => l.Kind == MailKind.NoticeLimit, TestContext.Current.CancellationToken)));
+        Assert.Null(ProviderApi.BindingCookieOf(response));
+    }
+
+    [Fact]
+    public async Task A_wrong_password_for_such_an_account_is_still_401_invalid_credentials()   // check order: the password before provider_in_use
+    {
+        await AccountWithGoogleLoginAsync();
+        var ticket = await TicketAsync("google", GooglePerson());
+
+        using var response = await ProviderApi.Link(Client, ticket, "Wrong-Passw0rd-9");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(1, await AttemptsOfAsync("OLA@GMAIL.TEST"));
+    }
+
+    [Fact]
+    public async Task The_exchange_still_answers_link_for_an_account_with_a_login_of_the_provider()   // spec 0012 → Sign-in of a linked identity, and the link
+    {
+        await AccountWithGoogleLoginAsync();
+        var ticket = await TicketAsync("google", GooglePerson());
+
+        using var exchanged = await ProviderApi.Exchange(Client, ticket);
+
+        Assert.Equal("link", (await TenancyApi.ReadOkAsync(exchanged)).GetProperty("next").GetString());
+    }
+
+    [Fact]
+    public async Task A_login_of_the_provider_added_while_the_link_waited_for_the_lock_is_409_provider_in_use()   // checked again under the lock
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var ticket = await TicketAsync("google", GooglePerson());
+        var auditRows = (await AuditAsync()).Count;
+        await using var held = await HeldLock.AddressAsync(Factory, "OLA@GMAIL.TEST");
+        var pending = ProviderApi.Link(Client, ticket, UserPassword);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, pending);
+        await LinkAsync(user.Id, "google", "100000000000000000077");
+        await held.ReleaseAsync();
+
+        using var response = await pending;
+
+        Assert.Equal(auditRows, (await AuditAsync()).Count);   // no audit row of any kind, login.failed included
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "provider_in_use");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
+        Assert.Equal("100000000000000000077", Assert.Single(await LoginsAsync()).ProviderKey);   // the login that was added is the only one
+        Assert.False(response.Headers.Contains("Set-Cookie"));
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.MailRequestLimits.CountAsync(l => l.Kind == MailKind.NoticeLimit, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task An_unverified_address_of_an_unconfirmed_account_with_a_login_of_the_provider_is_403_email_not_verified_first()   // check order: step 7 before provider_in_use
+    {
+        var user = await CreateUserAsync(FakePeople.WorkEmail, confirmed: false);
+        await LinkAsync(user.Id, "microsoft", "another-microsoft-identity");
+        var ticket = await TicketAsync("microsoft", WorkMicrosoft());
+
+        using var response = await ProviderApi.Link(Client, ticket, UserPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "email_not_verified");
+        Assert.Equal(1, await TicketCountAsync());
+    }
+
+    [Fact]
+    public async Task An_account_without_a_membership_with_a_login_of_the_provider_is_403_no_membership_first()   // check order: step 7 before provider_in_use
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true, member: false);
+        await LinkAsync(user.Id, "google", "100000000000000000077");
+        var ticket = await TicketAsync("google", GooglePerson());
+
+        using var response = await ProviderApi.Link(Client, ticket, UserPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(1, await TicketCountAsync());
+    }
+
+    [Fact]
+    public async Task A_membership_removed_and_a_login_added_while_the_link_waited_answer_no_membership_first()   // check order under the lock: the membership re-read before provider_in_use
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var ticket = await TicketAsync("google", GooglePerson());
+        await using var held = await HeldLock.AddressAsync(Factory, "OLA@GMAIL.TEST");
+        var pending = ProviderApi.Link(Client, ticket, UserPassword);
+        await HeldLock.WaitForWaitersAsync(Factory, 1, pending);
+        await RemoveMembershipAsync(user.Id);
+        await LinkAsync(user.Id, "google", "100000000000000000077");
+        await held.ReleaseAsync();
+
+        using var response = await pending;
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task An_account_with_a_login_of_another_provider_links_this_one_and_the_notice_names_this_one()   // spec 0012: one login per provider, not one login
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "github", "4711");
+        var ticket = await TicketAsync("google", GooglePerson());
+
+        using (var linked = await ProviderApi.Link(Client, ticket, UserPassword))
+        {
+            Assert.Equal(HttpStatusCode.OK, linked.StatusCode);
+        }
+
+        Assert.Equal(["github", "google"], (await LoginsAsync()).Select(l => l.LoginProvider).Order(StringComparer.Ordinal).ToArray());
+        var notice = Assert.Single(await InDbAsync(db => db.MailRequests.ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal((MailKind.ProviderLinked, "google"), (notice.Kind, notice.Provider));
+    }
+
+    [Fact]
+    public async Task The_first_provider_in_use_check_answers_while_the_address_lock_is_held()   // after step 7, before the lock: the lock is not waited for
+    {
+        await AccountWithGoogleLoginAsync();
+        var ticket = await TicketAsync("google", GooglePerson());
+        await using var held = await HeldLock.AddressAsync(Factory, "OLA@GMAIL.TEST");
+
+        using var response = await ProviderApi.Link(Client, ticket, UserPassword).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "provider_in_use");
     }
 }

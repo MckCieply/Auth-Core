@@ -58,9 +58,10 @@ internal static class ProviderSignIn
     }
 
     /// <summary>The answer of a sign-in through a provider, in <paramref name="transaction"/>, which the result owns from now on.</summary>
+    /// <param name="alsoCommitted">Runs after the commit too (the link wakes the dispatcher for the notice it queued).</param>
     public static IResult Session(
         HttpContext http, ApplicationUser account, TenantContext tenant, string provider, IDbContextTransaction transaction, TokenOptions tokens,
-        TimeProvider clock, Func<Task<IResult>>? whenGone = null) =>
+        TimeProvider clock, Func<Task<IResult>>? whenGone = null, Action<HttpContext>? alsoCommitted = null) =>
         new AtomicSignInResult(
             SessionPrincipal.Create(http, account, tenant, tokens.Audience, clock),
             new AuditEntry
@@ -75,7 +76,11 @@ internal static class ProviderSignIn
             },
             transaction,
             whenGone,
-            whenCommitted: context => ProviderBindingCookie.Clear(context.Response));
+            whenCommitted: context =>
+            {
+                ProviderBindingCookie.Clear(context.Response);
+                alsoCommitted?.Invoke(context);
+            });
 
     private static Task<IResult> InvalidTicketAsync() => Task.FromResult(ApiResults.Error(TenancyErrors.InvalidTicket));
 }

@@ -94,7 +94,8 @@ public static class ProviderRoutes
                 + "locked the answer is `429 too_many_attempts`. No account with the address (spelled the same up to ASCII case), an account without a "
                 + "password, and a wrong password are the same `401 invalid_credentials`, and the ticket stays usable. With the right password an "
                 + "unconfirmed address is confirmed when the provider verified it (else `403 email_not_verified`), and an account with no membership is "
-                + "`403 no_membership`. Then the login, `provider.linked`, the use of the ticket and the session are one change: `200` as a login "
+                + "`403 no_membership`; an account that already has a login of the ticket's provider `409 provider_in_use`, the ticket kept (spec 0012). Then "
+                + "the login, `provider.linked` (`via` `sign_in`), the mail \"provider connected\", the use of the ticket and the session are one change: `200` as a login "
                 + "answers, `auth_pt` cleared. An identity linked meanwhile signs in without the password being judged. A ticket without an address is "
                 + "`403 no_email`; one that is unknown, used, expired, not of the purpose `sign_in` or without its `auth_pt` is `400 invalid_ticket`.")
             .ReadsJson<ProviderLinkRequest>()
@@ -105,6 +106,7 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
             .ProducesError(StatusCodes.Status401Unauthorized, LoginEndpoint.InvalidCredentialsError)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoEmail, TenancyErrors.EmailNotVerified, TenancyErrors.NoMembership)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.ProviderInUse)
             .ProducesTooManyAttempts();
 
         app.MapPost(ProviderPaths.Finish, ProviderFinishEndpoint.HandleAsync)

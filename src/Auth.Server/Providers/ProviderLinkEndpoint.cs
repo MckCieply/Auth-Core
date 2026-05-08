@@ -23,7 +23,8 @@ namespace Auth.Server.Providers;
 /// is looked up; an unknown address, an account under another spelling or without a password, and a wrong password are one
 /// <c>401 invalid_credentials</c> after a password hash; then, the password right, the streak cleared, the address confirmed when the provider
 /// verified it (else <c>403 email_not_verified</c>), no membership <c>403 no_membership</c>; and in one transaction under the address lock the
-/// login, <c>provider.linked</c>, the ticket used up and the sign-in.
+/// login, <c>provider.linked</c>, the notice "provider connected", the ticket used up and the sign-in. Spec 0012: an account that already has a login
+/// of the ticket's provider is <c>409 provider_in_use</c> after the password is judged right, and again under the lock.
 /// </summary>
 public static class ProviderLinkEndpoint
 {
@@ -32,8 +33,9 @@ public static class ProviderLinkEndpoint
 
     public static async Task<IResult> HandleAsync(
         HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, LoginStreakStore streaks,
-        DecoyPasswordHash decoy, AuditLog audit, IOptions<TokenOptions> tokens, TimeProvider clock)
+        DecoyPasswordHash decoy, AuditLog audit, MailNotices notices, IOptions<TokenOptions> tokens, TimeProvider clock)
     {
+        ArgumentNullException.ThrowIfNull(notices);
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(users);
@@ -127,13 +129,22 @@ public static class ProviderLinkEndpoint
             return ApiResults.Error(TenancyErrors.NoMembership);
         }
 
-        return await LinkAndSignInAsync(http, db, users, memberships, audit, tokens.Value, clock, account, ticket, ticketText, binding!);
+        // Spec 0012: one login per provider per account. The ticket is kept and nothing is written (the streak is already cleared).
+        if (await ProviderLogins.HasLoginOfProviderAsync(db, account.Id, ticket.Provider, http.RequestAborted))
+        {
+            return ApiResults.Error(TenancyErrors.ProviderInUse);
+        }
+
+        return await LinkAndSignInAsync(http, db, users, memberships, audit, notices, tokens.Value, clock, account, ticket, ticketText, binding!);
     }
 
-    /// <summary>8. In one transaction under the address lock: the login, <c>provider.linked</c>, the ticket used up, the sign-in.</summary>
+    /// <summary>
+    /// 8. In one transaction under the address lock: the login, <c>provider.linked</c> (<c>via</c> <c>sign_in</c>), the notice "provider
+    /// connected", the ticket used up, the sign-in.
+    /// </summary>
     private static async Task<IResult> LinkAndSignInAsync(
-        HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, AuditLog audit, TokenOptions tokens,
-        TimeProvider clock, ApplicationUser account, ProviderTicket ticket, string ticketText, string binding)
+        HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, AuditLog audit, MailNotices notices,
+        TokenOptions tokens, TimeProvider clock, ApplicationUser account, ProviderTicket ticket, string ticketText, string binding)
     {
         // Not the request's token from here on: a client that goes away must not leave the link half done.
         var transaction = await db.Database.BeginTransactionAsync(CancellationToken.None);
@@ -180,8 +191,17 @@ public static class ProviderLinkEndpoint
                 return ApiResults.Error(TenancyErrors.NoMembership);
             }
 
+            // Spec 0012: a login of this provider added meanwhile (a connect, another link) is the answer of step 7's check; the ticket is
+            // given back by the rollback.
+            if (await ProviderLogins.HasLoginOfProviderAsync(db, account.Id, ticket.Provider, CancellationToken.None))
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.ProviderInUse);
+            }
+
             ProviderLogins.Add(db, account.Id, ticket.Provider, ticket.IdentityKey);
             account.EmailConfirmed = true;   // the password proves the account, the provider the mailbox (Settled 13)
+            await notices.QueueAsync(db, MailKind.ProviderLinked, account.NormalizedEmail!, ticket.Provider, StorableTime.Now(clock), CancellationToken.None);
             audit.Stage(new AuditEntry
             {
                 Kind = AuditKinds.ProviderLinked,
@@ -190,10 +210,11 @@ public static class ProviderLinkEndpoint
                 SubjectEmail = account.Email,
                 OrgId = tenant.CompanyId,
                 OrgName = tenant.CompanyName,
-                Details = new Dictionary<string, object?> { ["provider"] = ticket.Provider },
+                Details = new Dictionary<string, object?> { ["provider"] = ticket.Provider, ["via"] = "sign_in" },
             });
             await db.SaveChangesAsync(CancellationToken.None);
-            return ProviderSignIn.Session(http, account, tenant, ticket.Provider, transaction, tokens, clock, InvalidCredentialsAsync);
+            return ProviderSignIn.Session(
+                http, account, tenant, ticket.Provider, transaction, tokens, clock, InvalidCredentialsAsync, alsoCommitted: _ => notices.Notify());
         }
         catch
         {

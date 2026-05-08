@@ -42,4 +42,12 @@ public static class ProviderLogins
 
         return db.UserLogins.AnyAsync(l => l.UserId == userId && l.LoginProvider == provider && l.ProviderKey == key, cancellationToken);
     }
+
+    /// <summary>Whether the account has a login of <paramref name="provider"/> (spec 0012: one login per provider per account).</summary>
+    public static Task<bool> HasLoginOfProviderAsync(AuthDbContext db, Guid userId, string provider, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return db.UserLogins.AsNoTracking().AnyAsync(l => l.UserId == userId && l.LoginProvider == provider, cancellationToken);
+    }
 }

@@ -22,6 +22,13 @@ public sealed record MailText(
 public sealed record AccountExistsText(string Subject, string Greeting, string Intro, string SignInHint, string Deliberate, string Ignore);
 
 /// <summary>
+/// The texts of a notice (spec 0012 → Mails). No link and no button. <c>{0}</c> is the application, <c>{1}</c> the provider's display name,
+/// <c>{2}</c> the account's address (in the body only: a header names the application and the provider, never the address).
+/// </summary>
+/// <param name="NoLink">Says that the mail holds no link, so that a copy of it that holds one is known for a forgery.</param>
+public sealed record NoticeText(string Subject, string Greeting, string Intro, string Advice, string NoLink);
+
+/// <summary>
 /// The mail texts, Polish and English. Plain tables rather than <c>.resx</c> satellites: the container image runs
 /// without ICU, where a culture such as <c>pl</c> cannot be created, so resources could not be selected by culture.
 /// </summary>
@@ -153,5 +160,47 @@ public static class MailTexts
                 + "członka firmy {1}.",
         },
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
+    };
+
+    /// <summary>The notices of spec 0012 → Mails, Polish and English.</summary>
+    public static NoticeText Notice(string locale, MailKind kind) => (locale, kind) switch
+    {
+        ("en", MailKind.ProviderLinked) => new NoticeText(
+            Subject: "{1} was connected to your {0} account",
+            Greeting: "Hello,",
+            Intro: "{1} was connected to your {0} account {2}. From now on it signs you in.",
+            Advice: "If it was not you, reset your password with \"Forgot your password?\" on the sign-in screen of {0}, then disconnect {1} in your settings.",
+            NoLink: "This message holds no link: to act on it, open {0} yourself."),
+        ("en", MailKind.ProviderUnlinked) => new NoticeText(
+            Subject: "{1} was disconnected from your {0} account",
+            Greeting: "Hello,",
+            Intro: "{1} was disconnected from your {0} account {2}. It no longer signs you in, and your other devices were signed out.",
+            Advice: "If it was not you, reset your password with \"Forgot your password?\" on the sign-in screen of {0} and check your settings.",
+            NoLink: "This message holds no link: to act on it, open {0} yourself."),
+        ("en", MailKind.PasswordChanged) => new NoticeText(
+            Subject: "The password of your {0} account was changed",
+            Greeting: "Hello,",
+            Intro: "The password of your {0} account {2} was changed, and your other devices were signed out.",
+            Advice: "If it was not you, reset it with \"Forgot your password?\" on the sign-in screen of {0}.",
+            NoLink: "This message holds no link: to act on it, open {0} yourself."),
+        ("pl", MailKind.ProviderLinked) => new NoticeText(
+            Subject: "Do Twojego konta w {0} podłączono {1}",
+            Greeting: "Dzień dobry,",
+            Intro: "Do Twojego konta {2} w {0} podłączono {1}. Od teraz możesz się nim logować.",
+            Advice: "Jeśli to nie Ty, ustaw nowe hasło, korzystając z opcji ustawienia nowego hasła na ekranie logowania {0}, a potem odłącz {1} w ustawieniach.",
+            NoLink: "Ta wiadomość nie zawiera linku: aby coś zmienić, otwórz {0} samodzielnie."),
+        ("pl", MailKind.ProviderUnlinked) => new NoticeText(
+            Subject: "Od Twojego konta w {0} odłączono {1}",
+            Greeting: "Dzień dobry,",
+            Intro: "Od Twojego konta {2} w {0} odłączono {1}. Nie służy już do logowania, a Twoje pozostałe urządzenia zostały wylogowane.",
+            Advice: "Jeśli to nie Ty, ustaw nowe hasło, korzystając z opcji ustawienia nowego hasła na ekranie logowania {0}, i sprawdź swoje ustawienia.",
+            NoLink: "Ta wiadomość nie zawiera linku: aby coś zmienić, otwórz {0} samodzielnie."),
+        ("pl", MailKind.PasswordChanged) => new NoticeText(
+            Subject: "Hasło do Twojego konta w {0} zostało zmienione",
+            Greeting: "Dzień dobry,",
+            Intro: "Hasło do Twojego konta {2} w {0} zostało zmienione, a Twoje pozostałe urządzenia zostały wylogowane.",
+            Advice: "Jeśli to nie Ty, ustaw nowe hasło, korzystając z opcji ustawienia nowego hasła na ekranie logowania {0}.",
+            NoLink: "Ta wiadomość nie zawiera linku: aby coś zmienić, otwórz {0} samodzielnie."),
+        _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No notice text for locale '{locale}' and kind '{kind}'."),
     };
 }

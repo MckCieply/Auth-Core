@@ -120,7 +120,7 @@ public sealed class AuditProviderFlowsTests(PostgresFixture postgres, KeyMateria
         Assert.Equal((anna.Id, anna.Id, "anna@firma.test"), (link.ActorUserId!.Value, link.SubjectUserId!.Value, link.SubjectEmail));
         Assert.NotNull(link.OrgId);
         Assert.NotNull(link.OrgName);
-        Assert.True(Names(link, "provider"));
+        Assert.True(Names(link, "provider", "via"));   // spec 0012: via sign_in
 
         var completed = await SingleAsync(AuditKinds.SignupCompleted);
         Assert.True(Names(completed, "kind", "provider"));

@@ -78,6 +78,7 @@ builder.Services.AddSingleton<AuditPruner>();
 builder.Services.AddSingleton<LoginStreakStore>();
 builder.Services.AddSingleton<MailRequestStore>();
 builder.Services.AddSingleton<MailDispatchSignal>();
+builder.Services.AddSingleton<MailNotices>();
 builder.Services.AddSingleton<MailDispatcher>();
 builder.Services.AddSingleton<EmailPruner>();
 builder.Services.AddSingleton<MailComposer>();

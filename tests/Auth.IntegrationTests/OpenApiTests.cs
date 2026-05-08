@@ -188,7 +188,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("GET /auth/providers/{name}/start", "302,400,404,429")]
     [InlineData("GET /auth/providers/{name}/callback", "302,404,429")]
     [InlineData("POST /auth/providers/exchange", "200,400,403,409,415,429")]
-    [InlineData("POST /auth/providers/link", "200,400,401,403,415,429")]
+    [InlineData("POST /auth/providers/link", "200,400,401,403,409,415,429")]
     [InlineData("POST /auth/providers/finish", "200,400,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
@@ -256,6 +256,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/providers/link"], "401"));
         Assert.All(["email_not_verified", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/link"], "403")));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/providers/link"], "429"));
+        Assert.Contains("provider_in_use", Description(operations["POST /auth/providers/link"], "409"));   // spec 0012
         Assert.All(["email_not_verified", "signup_disabled"], code => Assert.Contains(code, Description(operations["POST /auth/providers/finish"], "403")));
         Assert.Contains("already_registered", Description(operations["POST /auth/providers/finish"], "409"));
         Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/finish"], "400")));

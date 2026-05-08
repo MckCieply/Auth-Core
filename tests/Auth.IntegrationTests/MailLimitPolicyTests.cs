@@ -95,4 +95,23 @@ public sealed class MailLimitPolicyTests
         Assert.True(last.Allowed);
         Assert.Equal(1, state.WindowCount);
     }
+
+    [Fact]
+    public void The_notice_rule_has_no_gap_and_ten_in_a_fixed_hour()   // spec 0012, Amendment A10
+    {
+        var rule = MailNotices.Rule;
+        var start = DateTimeOffset.Parse("2026-05-04T18:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var state = MailLimitState.Fresh(start);
+        for (var i = 0; i < 10; i++)
+        {
+            (state, var accepted) = MailLimitPolicy.Register(state, start + TimeSpan.FromSeconds(i), rule);
+            Assert.True(accepted.Allowed);
+        }
+
+        var (_, refused) = MailLimitPolicy.Register(state, start + TimeSpan.FromMinutes(59), rule);
+        Assert.False(refused.Allowed);
+        Assert.Equal(TimeSpan.FromMinutes(1), refused.RetryAfter);
+        Assert.True(MailLimitPolicy.Register(state, start + TimeSpan.FromHours(1), rule).Decision.Allowed);
+        Assert.Equal(MailLimitRule.Requests, new MailLimitRule(MailLimitPolicy.MinimumGap, MailLimitPolicy.WindowLimit, MailLimitPolicy.Window));
+    }
 }
