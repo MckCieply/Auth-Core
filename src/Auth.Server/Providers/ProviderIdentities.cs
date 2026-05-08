@@ -39,6 +39,18 @@ public static class ProviderIdentities
         };
     }
 
+    /// <summary>
+    /// Spec 0012: the identity of GitHub, from what the reader read (GitHub has no identity token), with the invitation rule of the other two: an
+    /// address that breaks it is kept and unverified.
+    /// </summary>
+    public static ProviderIdentity FromGitHub(GitHubAccount account, ILookupNormalizer normalizer)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        ArgumentNullException.ThrowIfNull(normalizer);
+
+        return WithAddress(ProviderNames.GitHub, account.Key, account.Email, account.EmailVerified, normalizer);
+    }
+
     private static ProviderIdentity? ReadGoogle(ClaimsPrincipal token, ILookupNormalizer normalizer)
     {
         var subject = Single(token, "sub");
