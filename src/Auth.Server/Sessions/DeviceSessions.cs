@@ -88,6 +88,24 @@ public static class DeviceSessions
         return row.Created is { } created ? new DeviceSession(tokenId, authorizationId, userId, Utc(created), null) : null;
     }
 
+    /// <summary>
+    /// Opens the window of the session until <paramref name="until"/>, in the caller's transaction (spec 0012 → <c>POST /auth/account/confirm</c>, step
+    /// 6). A session from before this version gets its row now, with the start it has (its authorization's creation).
+    /// </summary>
+    public static Task<int> ConfirmAsync(AuthDbContext db, DeviceSession session, DateTimeOffset until, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(session);
+
+        return db.Database.ExecuteSqlAsync(
+            $"""
+            INSERT INTO "SessionStates" ("AuthorizationId", "SessionStart", "ConfirmedUntil")
+            VALUES ({session.AuthorizationId}, {session.Start}, {until})
+            ON CONFLICT ("AuthorizationId") DO UPDATE SET "ConfirmedUntil" = EXCLUDED."ConfirmedUntil"
+            """,
+            cancellationToken);
+    }
+
     /// <summary>Ends the window of the session (the testing endpoint); a session without a row has none to end.</summary>
     public static Task<int> EndWindowAsync(AuthDbContext db, DeviceSession session, CancellationToken cancellationToken)
     {

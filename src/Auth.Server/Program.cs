@@ -138,6 +138,7 @@ app.MapAccountApi();
 app.MapTenancyApi();
 app.MapSignupApi();
 app.MapProviderApi();
+app.MapSettingsApi();
 if (testingSettings.WindowEndpoint)
 {
     app.MapTestingApi();

@@ -35,9 +35,9 @@ public sealed class AuditProviderFlowsTests(PostgresFixture postgres, KeyMateria
     private static bool Names(AuditEvent row, params string[] names) => AuditApi.DetailNames(row).SequenceEqual(names);
 
     [Fact]
-    public void The_audit_log_knows_twenty_eight_kinds()   // criterion 28
+    public void The_audit_log_knows_thirty_two_kinds()   // spec 0011, criterion 28; spec 0012, criterion 25
     {
-        Assert.Equal(28, AuditKinds.All.Count);
+        Assert.Equal(32, AuditKinds.All.Count);
         Assert.Contains("provider.linked", AuditKinds.All);
         Assert.Contains("provider.reauthenticated", AuditKinds.All);
     }

@@ -40,6 +40,10 @@ public static class TenancyErrors
 
     // Spec 0012.
     public const string SessionRequired = "session_required";
+    public const string ConfirmationRequired = "confirmation_required";
+    public const string ProviderInUse = "provider_in_use";
+    public const string LastLogin = "last_login";
+    public const string PasswordNotSet = "password_not_set";
 
     public static int StatusOf(string error) => error switch
     {
@@ -47,11 +51,12 @@ public static class TenancyErrors
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
         Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled
             or NoEmail or NoAccount or AddressMismatch or PasswordRequired or ReauthRequired or ReauthFailed or EmailNotVerified or NoMembership
+            or ConfirmationRequired or PasswordNotSet
             => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
-            or PrivateAccountExists or ProviderAlreadyLinked => StatusCodes.Status409Conflict,
+            or PrivateAccountExists or ProviderAlreadyLinked or ProviderInUse or LastLogin => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };

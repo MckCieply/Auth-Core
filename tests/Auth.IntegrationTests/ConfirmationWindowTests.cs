@@ -432,4 +432,18 @@ public sealed class ConfirmationWindowTests(PostgresFixture postgres, KeyMateria
             Assert.DoesNotContain(secret, Logs.Text, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public async Task A_confirmation_in_one_session_leaves_another_session_unconfirmed()   // criterion 9, Review Focus 5
+    {
+        var here = await SignInAsync("login");
+        var there = await SessionApi.LoginAsync(Client, "login@firma.test", UserPassword);
+        Clock.Advance(TimeSpan.FromMinutes(6));
+
+        using var confirmed = await SettingsApi.Confirm(Client, here, new { password = UserPassword });
+
+        Assert.Equal(HttpStatusCode.NoContent, confirmed.StatusCode);
+        Assert.Equal(OpenUntil(), await SettingsApi.ConfirmedUntilAsync(Client, here));
+        Assert.Null(await SettingsApi.ConfirmedUntilAsync(Client, there));
+    }
 }

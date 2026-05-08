@@ -23,3 +23,6 @@ public sealed record TokenRequest(string Token);
 
 /// <summary>The <c>429</c> of the lockout (spec 0003) and of the mail limit (spec 0004); <c>Retry-After</c> carries the same number.</summary>
 public sealed record TooManyAttemptsBody(string Error, int RetryAfterSeconds);
+
+/// <summary>Request of <c>POST /auth/account/confirm</c> (spec 0012): exactly one of the password and a <c>reauth</c> ticket of a provider.</summary>
+public sealed record ConfirmRequest(string? Password = null, string? ProviderTicket = null);

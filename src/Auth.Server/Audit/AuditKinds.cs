@@ -1,6 +1,6 @@
 namespace Auth.Server.Audit;
 
-/// <summary>The kinds of the audit log (specs 0008 to 0011 → Audit log). The names are the contract's; the runbook queries them.</summary>
+/// <summary>The kinds of the audit log (specs 0008 to 0012 → Audit log). The names are the contract's; the runbook queries them.</summary>
 public static class AuditKinds
 {
     public const string LoginSucceeded = "login.succeeded";
@@ -32,6 +32,12 @@ public static class AuditKinds
     public const string ProviderLinked = "provider.linked";
     public const string ProviderReauthenticated = "provider.reauthenticated";
 
+    // Spec 0012 → Audit events.
+    public const string AccountConfirmed = "account.confirmed";
+    public const string AccountConfirmRefused = "account.confirm_refused";
+    public const string ProviderUnlinked = "provider.unlinked";
+    public const string PasswordChanged = "password.changed";
+
     public static IReadOnlyList<string> All { get; } =
     [
         LoginSucceeded, LoginFailed, LoginLocked, Logout, RefreshReuseDetected,
@@ -42,5 +48,6 @@ public static class AuditKinds
         SignupRequested, SignupCompleted,
         AccountDeleted, AccountDeleteRefused,
         ProviderLinked, ProviderReauthenticated,
+        AccountConfirmed, AccountConfirmRefused, ProviderUnlinked, PasswordChanged,
     ];
 }
