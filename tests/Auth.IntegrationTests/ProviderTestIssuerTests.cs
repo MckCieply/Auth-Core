@@ -9,7 +9,7 @@ namespace Auth.IntegrationTests;
 public sealed class ProviderTestIssuerTests : ProviderTestBase
 {
     public ProviderTestIssuerTests(PostgresFixture postgres, KeyMaterialFixture keys)
-        : base(postgres, keys)
+        : base(postgres, keys, github: true)
     {
         Factory.WithSetting(ProviderSettings.TestIssuerKey, "http://fake-oidc.test");
     }
@@ -42,5 +42,25 @@ public sealed class ProviderTestIssuerTests : ProviderTestBase
 
         Assert.Equal("provider_error", ProviderApi.FragmentOf(callback)["error"]);
         Assert.Equal(0, await InDbAsync(db => db.ProviderTickets.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task GitHub_runs_through_the_test_issuers_discovery_document_with_pkce_and_the_same_reader()   // criterion 2, Amendment A5
+    {
+        var start = await StartAsync("github");
+        Assert.Equal("http://fake-oidc.test/github/authorize", start.Location.GetLeftPart(UriPartial.Path));
+        Assert.Equal("S256", start.Query["code_challenge_method"]);
+        Assert.Equal("user:email", start.Query["scope"]);
+        Assert.False(start.Query.ContainsKey("nonce"));
+        Assert.Equal("select_account", start.Query["prompt"]);
+
+        using var callback = await CallbackAsync(await AuthorizeAsync(start, GitHubPerson()), start.StateCookie);
+
+        Assert.Equal("sign_in", ProviderApi.TicketOf(callback).Purpose);   // no iss required: the document does not advertise it (Amendment A6)
+        var row = await InDbAsync(db => db.ProviderTickets.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(("github", FakePeople.GitHubId, FakePeople.GitHubEmail), (row.Provider, row.IdentityKey, row.Email));
+        Assert.Contains("GET /user", Fake.Server.GitHub.Requests);
+        Assert.Equal(204, Assert.Single(Fake.Server.GitHub.Revocations).Status);
+        Assert.Equal(0, Fake.Server.UserInfoRequests);
     }
 }

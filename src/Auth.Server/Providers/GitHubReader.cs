@@ -98,9 +98,9 @@ public sealed partial class GitHubReader(IHttpClientFactory clients, ProviderSet
             return emails is null ? null : GitHubIdentity.Read(user.RootElement, emails.RootElement);
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException
-            || (exception is OperationCanceledException && !aborted.IsCancellationRequested))
+            || (exception is IOException or OperationCanceledException && !aborted.IsCancellationRequested))
         {
-            return null;   // unreachable, slower than the bound, or not JSON: provider_error
+            return null;   // unreachable, cut off while the body is read, slower than the bound, or not JSON: provider_error (the request's own abort is not)
         }
     }
 

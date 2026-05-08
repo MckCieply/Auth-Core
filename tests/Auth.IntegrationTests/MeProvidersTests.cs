@@ -142,4 +142,16 @@ public sealed class MeProvidersTests(PostgresFixture postgres, KeyMaterialFixtur
 
         Assert.Equal(JsonValueKind.Null, me.GetProperty("confirmed_until").ValueKind);
     }
+
+    [Fact]
+    public async Task A_github_login_is_listed_among_the_providers_sorted()   // spec 0012, criterion 23
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", FakePeople.GoogleSubject);
+        await LinkAsync(user.Id, "github", FakePeople.GitHubId);
+
+        var me = await MeAsync((await SessionApi.LoginAsync(Client, Ola, UserPassword)).AccessToken);
+
+        Assert.Equal(["github", "google"], Providers(me));
+    }
 }

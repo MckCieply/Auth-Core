@@ -77,9 +77,10 @@ public static class ProviderStartEndpoint
         else
         {
             properties.Parameters["prompt"] = "select_account";
-            if (purpose == ProviderTicketPurpose.Reauth)
+            if (purpose == ProviderTicketPurpose.Reauth && name == ProviderNames.Google)
             {
-                // Google: the account chooser stays, and max_age=0 asks for a fresh sign-in (Google has no prompt=login).
+                // Google: the account chooser stays, and max_age=0 asks for a fresh sign-in (Google has no prompt=login). GitHub can be asked
+                // for neither and gets no max_age for any purpose (spec 0012, Amendment A7): the account picker alone.
                 properties.Parameters["max_age"] = 0;
             }
         }

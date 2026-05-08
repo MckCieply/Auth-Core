@@ -17,14 +17,17 @@ namespace Auth.IntegrationTests.Infrastructure;
 /// </summary>
 public abstract class ProviderTestBase : SignupTestBase
 {
+    private readonly string _providersLine;
     private HttpClient? _browser;
 
-    protected ProviderTestBase(PostgresFixture postgres, KeyMaterialFixture keys)
+    /// <param name="github">Spec 0012: list GitHub too, after Google and Microsoft. Every provider has its keys either way.</param>
+    protected ProviderTestBase(PostgresFixture postgres, KeyMaterialFixture keys, bool github = false)
         : base(postgres, keys)
     {
         Fake = new FakeOidcHost(Clock);
+        _providersLine = github ? AuthAppFactory.AllProvidersLine : AuthAppFactory.ProvidersLine;
         Factory.WithPrivateSignup()
-            .WithProviders()
+            .WithProviders(github)
             .WithServices(services => services.AddSingleton(Fake.Routing));
     }
 
@@ -43,11 +46,11 @@ public abstract class ProviderTestBase : SignupTestBase
 
     /// <summary>
     /// Makes this manifest active in the running host at once (the switches and the offered providers follow it), as a start with another file
-    /// would; both providers stay listed unless <paramref name="withProviders"/> is <see langword="false"/>.
+    /// would; the providers of this host stay listed unless <paramref name="withProviders"/> is <see langword="false"/>.
     /// </summary>
     protected void SetManifest(string yaml, bool withProviders = true)
     {
-        var parsed = ManifestParser.Parse(yaml + (withProviders ? AuthAppFactory.ProvidersLine : ""));
+        var parsed = ManifestParser.Parse(yaml + (withProviders ? _providersLine : ""));
         Assert.Null(parsed.Error);
         Holder.Set(parsed.Manifest!, null);
     }
@@ -65,6 +68,10 @@ public abstract class ProviderTestBase : SignupTestBase
     /// <summary>The Microsoft work account of the fake: unverified unless <paramref name="edov"/> says so.</summary>
     protected static FakeSignIn WorkMicrosoft(string? email = null, string? edov = null, string? subject = null, string? defect = null) =>
         new(FakePeople.MicrosoftWork, email, Subject: subject, Edov: edov, Defect: defect);
+
+    /// <summary>The GitHub person of the fake (Ola: a verified primary address), or another address, verification, id or defect (spec 0012).</summary>
+    protected static FakeSignIn GitHubPerson(string? email = null, bool? verified = null, string? subject = null, string? defect = null) =>
+        new(FakePeople.GitHub, email, verified, subject, Defect: defect);
 
     /// <summary>The fake's answer to the start's redirect for this person: the path and query of the callback, with the code and the state.</summary>
     protected async Task<string> AuthorizeAsync(ProviderApi.Start start, FakeSignIn person)

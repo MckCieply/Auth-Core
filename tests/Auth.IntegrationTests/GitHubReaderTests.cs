@@ -95,6 +95,10 @@ public sealed class GitHubReaderTests
             return Json(body);
         }
 
+        /// <summary>Headers at once; the body breaks after some bytes, as a connection that is reset does (<paramref name="beforeBreak"/> runs first).</summary>
+        public static HttpResponseMessage BrokenBody(Action? beforeBreak = null) =>
+            new(HttpStatusCode.OK) { Content = new StreamContent(new BrokenStream(beforeBreak)) };
+
         /// <summary>Headers at once; the body never comes.</summary>
         public HttpResponseMessage StalledBody() =>
             new(HttpStatusCode.OK) { Content = new StreamContent(new StalledStream(Waiting)) };
@@ -124,6 +128,50 @@ public sealed class GitHubReaderTests
                     : await harness.User(cancellationToken);
             }
         }
+    }
+
+    private sealed class BrokenStream(Action? beforeBreak) : Stream
+    {
+        private bool _sentSome;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_sentSome)
+            {
+                _sentSome = true;
+                buffer.Span[0] = (byte)'[';
+                return ValueTask.FromResult(1);
+            }
+
+            beforeBreak?.Invoke();
+            throw new IOException("The connection was reset while the body was read.");
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class StalledStream(SemaphoreSlim waiting) : Stream
@@ -358,6 +406,46 @@ public sealed class GitHubReaderTests
         await read.WaitAsync(Real);
 
         AssertRefused(context);
+        AssertTokenGone(context);
+        AssertRevokedOnce(harness);
+    }
+
+    [Theory]
+    [InlineData("user")]
+    [InlineData("emails")]
+    public async Task A_body_cut_by_the_connection_while_it_is_read_is_refused_and_the_token_is_revoked_once(string document)   // an IOException is a failed read, not a crash
+    {
+        var harness = new Harness();
+        if (document == "user")
+        {
+            harness.User = _ => Task.FromResult(Harness.BrokenBody());
+        }
+        else
+        {
+            harness.Emails = _ => Task.FromResult(Harness.BrokenBody());
+        }
+
+        var context = Context();
+
+        await harness.Reader(false).HandleAsync(context);
+
+        AssertRefused(context);
+        AssertTokenGone(context);
+        AssertRevokedOnce(harness);
+        Assert.Equal(document == "emails", harness.Calls.Any(call => call.Uri.AbsolutePath.EndsWith("/emails", StringComparison.Ordinal)));
+        Assert.Empty(harness.Logs.Entries);
+    }
+
+    [Fact]
+    public async Task A_body_cut_while_the_request_itself_is_aborted_is_not_swallowed_and_the_token_is_still_revoked()   // the filter is the cancellation filter's
+    {
+        var harness = new Harness();
+        using var aborted = new CancellationTokenSource();
+        harness.User = _ => Task.FromResult(Harness.BrokenBody(aborted.Cancel));
+        var context = Context(aborted: aborted.Token);
+
+        await Assert.ThrowsAsync<IOException>(() => harness.Reader(false).HandleAsync(context).AsTask());
+
         AssertTokenGone(context);
         AssertRevokedOnce(harness);
     }

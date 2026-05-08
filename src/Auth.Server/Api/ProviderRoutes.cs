@@ -8,7 +8,7 @@ namespace Auth.Server.Api;
 public static class ProviderRoutes
 {
     /// <summary>
-    /// The endpoints of spec 0011: the round trip with Google or Microsoft and what a product's screens do with its ticket. Mapped here, with what
+    /// The endpoints of spec 0011: the round trip with Google, Microsoft or GitHub and what a product's screens do with its ticket. Mapped here, with what
     /// each takes and answers, so that the OpenAPI description says it all in one place.
     /// </summary>
     public static IEndpointRouteBuilder MapProviderApi(this IEndpointRouteBuilder app)
@@ -18,11 +18,11 @@ public static class ProviderRoutes
         app.MapGet(ProviderPaths.Start, ProviderStartEndpoint.Handle)
             .WithTags("Providers")
             .WithDescription(
-                "Starts a sign-in with Google or Microsoft: a product's button is a link here (a navigation, not a call). The answer is `302` to the "
-                + "provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`, a `nonce`, the scopes `openid email "
-                + "profile` and the callback address built from the configured return address, never from the request. No query: a sign-in, a link or a "
+                "Starts a sign-in with Google, Microsoft or GitHub: a product's button is a link here (a navigation, not a call). The answer is `302` to the "
+                + "provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`, a `nonce` and the scopes `openid email "
+                + "profile` (GitHub: no `nonce` and the scope `user:email`), and the callback address built from the configured return address, never from the request. No query: a sign-in, a link or a "
                 + "sign-up (the exchange decides); `invite=<link token>`: the acceptance of that invitation; `purpose=reauth`: the confirmation of a "
-                + "self-deletion, with a fresh sign-in asked for. It reads no account and no invitation. A name that is not `google` or `microsoft`, or a "
+                + "self-deletion, with a fresh sign-in asked for where the provider can be asked. It reads no account and no invitation. A name that is not `google`, `microsoft` or `github`, or a "
                 + "provider that is not offered, is `404 not_found`; a malformed `invite`, another `purpose`, both, or one of them given twice is "
                 + "`400 invalid_request`. Other parameters are ignored.")
             .ReadsQuery(ProviderStartEndpoint.InviteParameter, "The link token of an invitation (43 base64url characters): the round trip accepts it.")
@@ -36,12 +36,13 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
 
-        // GET only: both providers answer in the response mode `query` (the default of the code flow, which is not even sent); a form post would be a cross-site form, which the JSON-only rule refuses.
+        // GET only: the providers answer in the response mode `query` (the default of the code flow, which is not even sent); a form post would be a cross-site form, which the JSON-only rule refuses.
         app.MapGet(ProviderPaths.Callback, ProviderCallbackEndpoint.HandleAsync)
             .WithTags("Providers")
             .WithDescription(
                 "Where the provider sends the browser back. OpenIddict checks the state (its signature, its age, its single use, the request-forgery "
-                + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token. The answer is always "
+                + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token (GitHub has none: its identity is read from its API, `/user` and "
+                + "`/user/emails`, and its access token is revoked at once). The answer is always "
                 + "`302` to the product's return screen (`Auth:App:FrontendUrls:ProviderReturn`), never a page: on success "
                 + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
                 + "(`purpose` left out when the state could not be read) with the codes `cancelled`, `invalid_state`, `provider_unavailable` and "
