@@ -46,6 +46,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         ["POST /auth/providers/link"] = ["auth_pt"],
         ["POST /auth/providers/finish"] = ["auth_pt"],
         ["DELETE /auth/account"] = ["auth_pt"],
+        ["DELETE /auth/org"] = ["auth_pt"],   // spec 0012: the provider ticket's binding
         ["POST /auth/account/confirm"] = ["auth_pt", "auth_rt"],
         ["POST /auth/providers/connect"] = ["auth_pt", "auth_rt"],
         ["POST /auth/account/logins/unlink"] = ["auth_rt"],
@@ -318,7 +319,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/signup/preview", "token")]
     [InlineData("POST /auth/signup/complete", "company_name,password,token")]
     [InlineData("PATCH /auth/org", "name")]
-    [InlineData("DELETE /auth/org", "name,password")]
+    [InlineData("DELETE /auth/org", "name,password,provider_ticket")]
     [InlineData("DELETE /auth/account", "password,provider_ticket")]
     [InlineData("POST /auth/account/confirm", "password,provider_ticket")]
     [InlineData("POST /auth/account/logins/unlink", "provider")]
@@ -464,7 +465,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200", "POST /auth/account/confirm 204", "POST /auth/providers/connect 204", "POST /auth/account/logins/unlink 200", "POST /auth/account/password 200"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "DELETE /auth/org 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200", "POST /auth/account/confirm 204", "POST /auth/providers/connect 204", "POST /auth/account/logins/unlink 200", "POST /auth/account/password 200"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

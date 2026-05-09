@@ -18,8 +18,11 @@ public sealed record OrgResponse(Guid Id, string Name);
 /// <summary>Request of <c>PATCH /auth/org</c>.</summary>
 public sealed record RenameOrgRequest(string Name);
 
-/// <summary>Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password.</summary>
-public sealed record DeleteOrgRequest(string Name, string Password);
+/// <summary>
+/// Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password. Spec 0012: exactly one of <c>password</c> and
+/// <c>provider_ticket</c>.
+/// </summary>
+public sealed record DeleteOrgRequest(string Name, string? Password = null, string? ProviderTicket = null);
 
 /// <summary>
 /// Request of <c>DELETE /auth/account</c>: exactly one of the caller's own password (spec 0010) and a re-authentication ticket of a provider

@@ -140,5 +140,21 @@ public sealed class ProviderTicketTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(before + TimeSpan.FromMinutes(10), expires);
     }
 
+    [Fact]
+    public async Task A_connect_ticket_is_refused_by_the_company_deletion_as_reauth_failed()   // spec 0012, criterion 14
+    {
+        var (company, adminId, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        await InDbAsync(db => db.Users.Where(u => u.Id == adminId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, (string?)null), TestContext.Current.CancellationToken));
+        await LinkAsync(adminId, "google", "100000000000000000055");
+        var ticket = await TicketAsync("google", GooglePerson(email: "boss@acme.test", subject: "100000000000000000055"), "?purpose=connect");
+
+        using var response = await OrgApi.DeleteWithTicket(Client, token, "Acme", ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "reauth_failed");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
+    }
+
     private DateTimeOffset StorableTimeNow() => Auth.Server.Email.StorableTime.Now(Clock);
 }

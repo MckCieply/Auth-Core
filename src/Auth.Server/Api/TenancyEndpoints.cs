@@ -88,15 +88,24 @@ public static class TenancyEndpoints
             .WithDescription(
                 "Deletes the caller's company with its roles, invitations and the mails queued for them, and the account of every member, the "
                 + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
-                + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
+                + "caller's confirmation. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
                 + "login the `401` of an unknown address. "
                 + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`. "
-                + "An admin whose account has no password (made through Google or Microsoft) gets `403 reauth_required` for any password: nothing is counted or written and "
-                + "the company stays; they set a password with \"Forgot your password?\" first.")
+                + "The body holds the name and exactly one of `password` and `provider_ticket` (spec 0012; both, neither or a member of the wrong "
+                + "type is `400 invalid_request`). An admin with a password confirms with it (`403 password_required` for a ticket); an admin whose "
+                + "account has no password (made through a provider) confirms with a ticket of a round trip with `purpose=reauth` and the browser's "
+                + "`auth_pt` (`403 reauth_required` for a password); neither is counted or written. A ticket that is unknown, used, expired (5 "
+                + "minutes), of another purpose, without its `auth_pt` or of an identity that is not a login of the caller is `403 reauth_failed`, "
+                + "recorded, and nothing is deleted; it is used up inside the deletion, so a deletion refused afterwards keeps it, and the answer "
+                + "clears `auth_pt`.")
             .ReadsJson<DeleteOrgRequest>()
+            .ReadsCookie(ProviderBindingCookie.Name, "With `provider_ticket`: the binding of the ticket, set by the callback that made it.")
             .Produces(StatusCodes.Status204NoContent)
+            .SetsHeader(StatusCodes.Status204NoContent, "Set-Cookie", $"With `provider_ticket`: `{ProviderBindingCookie.Name}` emptied, with `Max-Age=0`.")
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired)
+            .ProducesError(
+                StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired,
+                TenancyErrors.PasswordRequired, TenancyErrors.ReauthFailed)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 

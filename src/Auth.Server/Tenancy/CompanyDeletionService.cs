@@ -17,11 +17,17 @@ public sealed class CompanyDeletionService(AuthDbContext db, CompanyGuard guard,
 {
     /// <summary>
     /// Refused, in this order: <c>not_found</c> (no such company), <c>permissions_changed</c> (a member who no longer holds
-    /// <c>org:delete</c>), <c>invalid_request</c> (<paramref name="confirmName"/> is not exactly the company's name, compared
+    /// <c>org:delete</c>), the refusal of <paramref name="confirmInside"/>, <c>invalid_request</c> (<paramref name="confirmName"/> is not exactly the company's name, compared
     /// ordinally), <c>permission_not_held</c> (safety rule 1: deleting acts on every member, so a member of the company holds a
     /// permission the actor does not; the operator is not bound).
     /// </summary>
-    public async Task<Outcome> DeleteAsync(Actor actor, Guid companyId, string confirmName, CancellationToken cancellationToken)
+    /// <param name="confirmInside">
+    /// Spec 0012, Amendment A12: the caller's confirmation that must be used up inside this transaction (a provider ticket), run right after the
+    /// company lock and before the name check. It returns <see langword="null"/> to go on, or the error that refuses the deletion; a refusal of
+    /// it or of any later check rolls back what it did.
+    /// </param>
+    public async Task<Outcome> DeleteAsync(
+        Actor actor, Guid companyId, string confirmName, CancellationToken cancellationToken, Func<CancellationToken, Task<string?>>? confirmInside = null)
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentNullException.ThrowIfNull(confirmName);
@@ -31,6 +37,11 @@ public sealed class CompanyDeletionService(AuthDbContext db, CompanyGuard guard,
         if (!entered.Succeeded)
         {
             return entered.Without;
+        }
+
+        if (confirmInside is not null && await confirmInside(cancellationToken) is { } refused)
+        {
+            return Outcome.Fail(refused);
         }
 
         var current = entered.Value!;
