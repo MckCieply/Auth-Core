@@ -492,7 +492,7 @@ public sealed class ProviderUnlinkTests : ProviderTestBase
     }
 
     [Fact]
-    public async Task A_reset_that_runs_while_the_unlink_holds_its_revocations_waits_for_it_and_neither_deadlocks()   // lock order: address, logins, tokens, the account's row last
+    public async Task A_reset_that_runs_while_the_unlink_holds_its_revocations_waits_for_it_and_neither_deadlocks()   // lock order: address, the account's row (share), logins, tokens, the account's row again
     {
         var (userId, here) = await PasswordAccountAsync();
         using (var forgot = await AccountApi.Forgot(Client, Ola))
@@ -503,10 +503,11 @@ public sealed class ProviderUnlinkTests : ProviderTestBase
         await DispatchAsync();
         var token = TokenIn(Mail.Sent.Last(m => m.To == Ola));
         Task<HttpResponseMessage>? reset = null;
+        _race.Skip = 1;   // the first share lock on the account's row is the unlink's early one, right after the address lock; this is its second read, at the commit
         _race.Before = async () =>
         {
-            // The unlink has revoked the sessions and is about to read the account's row for share: the reset updates that row, then waits for
-            // the revoked rows. A lock on the row that conflicts with the share lock would be a cycle.
+            // The unlink holds the account's row for share since the address lock and has deleted the login and revoked the sessions: the reset
+            // updates that row, then waits for the revoked rows. A lock on the row that conflicts with the share lock would be a cycle.
             reset = AccountApi.Reset(Client, token, "Brand-New-Passw0rd");
             await HeldLock.WaitForWaitersAsync(Factory, 1, reset);
         };

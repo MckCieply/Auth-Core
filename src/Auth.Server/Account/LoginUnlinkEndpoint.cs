@@ -3,6 +3,7 @@ using Auth.Infrastructure.Persistence;
 using Auth.Server.Api;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Login;
 using Auth.Server.Providers;
 using Auth.Server.Requests;
 using Auth.Server.Tenancy;
@@ -20,7 +21,7 @@ namespace Auth.Server.Account;
 /// never its last way in (the password, or a login of an offered provider). The checks run in the order of the contract: the body; the session
 /// and the membership; the window; a provider name the account has a login of (<c>404 not_found</c>); a way in left (<c>409 last_login</c>);
 /// then, in one transaction under the address lock where the session, the membership, the window and steps 4 and 5 are read again and the cap
-/// of the session is checked, the login rows deleted (waiting for a sign-in that holds them), every session ended, <c>provider.unlinked</c>, the notice
+/// of the session is checked, the account's row read under a share lock, the login rows deleted (waiting for a sign-in that holds them), every session ended, <c>provider.unlinked</c>, the notice
 /// "provider disconnected" and a renewed session for this device, answered as a login.
 /// </summary>
 public static class LoginUnlinkEndpoint
@@ -101,6 +102,15 @@ public static class LoginUnlinkEndpoint
             {
                 await transaction.DisposeAsync();
                 return late ?? ApiResults.Error(TenancyErrors.SessionRequired);
+            }
+
+            // The account's row under a share lock to the end, before any row is deleted or revoked: an account deletion (a member removal, a company
+            // deletion: they take no address lock) locks that row for update and then deletes the logins and tokens, so taking it after them would
+            // wait for a deletion that waits for these rows. It does not conflict with a sign-in, which holds the same lock, nor with a reset.
+            if (!await AtomicSignInResult.AccountExistsAsync(db, current.UserId, CancellationToken.None))
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.SessionRequired);
             }
 
             // Waits for a sign-in that holds one of these rows (spec 0012 → Sign-in of a linked identity); that sign-in's session ends below.

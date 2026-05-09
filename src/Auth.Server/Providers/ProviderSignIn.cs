@@ -22,7 +22,8 @@ internal static class ProviderSignIn
     /// <summary>
     /// Signs in to the account the identity is a login of (the exchange, step 3.1; the link, step 3): an account with no membership is
     /// <c>403 no_membership</c>, as at login; otherwise, in one transaction, the ticket is used up and the session issued. A ticket used meanwhile,
-    /// and an account deleted meanwhile, are <c>400 invalid_ticket</c>. The login streak is neither consulted nor cleared (Settled 12).
+    /// and an account deleted meanwhile, are <c>400 invalid_ticket</c>. The login row is read again under a share lock in that transaction (spec 0012):
+    /// one deleted meanwhile is <c>400 invalid_ticket</c> too. The login streak is neither consulted nor cleared (Settled 12).
     /// </summary>
     public static async Task<IResult> LinkedAsync(
         HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, TokenOptions tokens, TimeProvider clock,
@@ -43,6 +44,13 @@ internal static class ProviderSignIn
         try
         {
             if (await ProviderTickets.ConsumeAsync(db, ticketText, binding, ticket.Purpose, StorableTime.Now(clock), http.RequestAborted) is null)
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.InvalidTicket);
+            }
+
+            // The login this sign-in signs in with, held to the commit. An unlink that committed first leaves none: nothing is signed in.
+            if (!await ProviderLogins.HoldAsync(db, account.Id, ticket.Provider, ticket.IdentityKey, http.RequestAborted))
             {
                 await transaction.DisposeAsync();
                 return ApiResults.Error(TenancyErrors.InvalidTicket);
