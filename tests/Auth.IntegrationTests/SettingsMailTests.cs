@@ -436,4 +436,23 @@ public sealed class SettingsMailTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.Equal(1, LimitWarnings());
         Assert.Empty(await InDbAsync(db => db.UserLogins.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken)));
     }
+
+    [Fact]
+    public async Task A_password_change_queues_password_changed_with_no_provider()   // criterion 22
+    {
+        await CreateUserAsync(Ola, confirmed: true);
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+
+        using (var changed = await SettingsApi.ChangePassword(Client, session, UserPassword, "Fresh-Passw0rd-2"))
+        {
+            Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        }
+
+        var row = Assert.Single(await NoticesAsync());
+        Assert.Equal((MailKind.PasswordChanged, (string?)null), (row.Kind, row.Provider));
+        await DispatchAsync();
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Contains("password", mail.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Fresh-Passw0rd-2", mail.TextBody, StringComparison.Ordinal);
+    }
 }

@@ -87,6 +87,31 @@ public static class SettingsRoutes
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.LastLogin);
 
+        app.MapPost(SettingsRequestHandler.PasswordPath, AccountPasswordEndpoint.HandleAsync)
+            .RequireAuthorization()
+            .WithTags("Account")
+            .WithDescription(
+                "Changes the password of the caller's account against the current one, every time (the confirmation window plays no part); an "
+                + "account without a password sets its first one through `POST /auth/password/forgot`. Every session of the account ends, its email "
+                + "links are voided and its login streak cleared, and this device gets a new session with the start and the window of the old one, "
+                + "answered as a login answers; the mail \"password changed\" is sent. The checks, in this order: a bad body `400 invalid_request` "
+                + "(`new_password` missing, not a string or holding NUL; `current_password` missing, not a string, blank or holding NUL); the "
+                + "session `401 session_required`, no membership `403 no_membership`; no password `403 password_not_set`; a new password that "
+                + "breaks the policy `400 weak_password` with `rules` (neither is counted); the current password counts in the login streak as a "
+                + "failed login does (`403 wrong_password`; while the identifier is locked `429 too_many_attempts`). A session past its 30-day cap is "
+                + "`401 session_required` and nothing changes. A reset of the same account at the same moment: one that used its link up and "
+                + "committed while the change waited is `403 wrong_password`, not counted again; one that committed before the change took the "
+                + "address lock ended every session, so the change is `401 session_required` and nothing is written; a change that voided the links "
+                + "first makes the reset's link `400 invalid_token`. None is a `500`.")
+            .ReadsJson<ChangePasswordRequest>()
+            .ReadsRefreshCookie(RefreshCookieRead)
+            .Produces<LoginResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet)
+            .ProducesPasswordError(AccountResults.InvalidRequestError, AccountResults.WeakPasswordError)
+            .ProducesError(StatusCodes.Status401Unauthorized, TenancyErrors.SessionRequired)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.PasswordNotSet, TenancyErrors.WrongPassword)
+            .ProducesTooManyAttempts();
+
         return app;
     }
 }

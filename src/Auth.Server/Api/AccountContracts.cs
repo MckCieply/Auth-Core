@@ -29,3 +29,6 @@ public sealed record ConfirmRequest(string? Password = null, string? ProviderTic
 
 /// <summary>Request of <c>POST /auth/account/logins/unlink</c> (spec 0012): the provider whose logins the account loses.</summary>
 public sealed record UnlinkRequest(string Provider);
+
+/// <summary>Request of <c>POST /auth/account/password</c> (spec 0012): the members are named as at <c>POST /auth/password/reset</c>.</summary>
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);

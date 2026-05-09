@@ -23,6 +23,13 @@ public static class PasswordRules
             var result = await validator.ValidateAsync(users, user, password);
             foreach (var error in result.Errors)
             {
+                // Identity's rule of unique characters (RequiredUniqueChars = 1) fires only for the empty password, which already breaks the four
+                // rules of the contract: it has no name of its own.
+                if (password.Length == 0 && error.Code == nameof(IdentityErrorDescriber.PasswordRequiresUniqueChars))
+                {
+                    continue;
+                }
+
                 broken.Add(error.Code switch
                 {
                     nameof(IdentityErrorDescriber.PasswordTooShort) => "too_short",
