@@ -373,4 +373,67 @@ public sealed class SettingsMailTests(PostgresFixture postgres, KeyMaterialFixtu
 
         Assert.True(await WaitForSignalAsync(TimeSpan.FromSeconds(30)) < TimeSpan.FromSeconds(10));   // the commit woke it
     }
+
+    [Fact]
+    public async Task An_unlink_queues_provider_disconnected_naming_the_provider()   // criterion 22
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "github", "70000001");
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+
+        using (var unlinked = await SettingsApi.Unlink(Client, session, "github"))
+        {
+            Assert.Equal(HttpStatusCode.OK, unlinked.StatusCode);
+        }
+
+        var row = Assert.Single(await NoticesAsync());
+        Assert.Equal((MailKind.ProviderUnlinked, "github"), (row.Kind, row.Provider));
+        await DispatchAsync();
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Contains("GitHub", mail.Subject, StringComparison.Ordinal);
+        Assert.Contains("disconnected", mail.TextBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_refused_unlink_queues_nothing_and_wakes_nothing_and_a_committed_one_wakes_the_dispatcher()   // criterion 22: in the change's transaction, woken after its commit
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", FakePeople.GoogleSubject);
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+        using (var refused = await SettingsApi.Unlink(Client, session, "microsoft"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
+        }
+
+        Assert.Empty(await NoticesAsync());
+        Assert.Null(await LimitAsync(MailKind.NoticeLimit));
+        Assert.True(await WaitForSignalAsync(TimeSpan.FromMilliseconds(700)) >= TimeSpan.FromMilliseconds(500));   // nothing woke it
+
+        using (var unlinked = await SettingsApi.Unlink(Client, session, "google"))
+        {
+            Assert.Equal(HttpStatusCode.OK, unlinked.StatusCode);
+        }
+
+        Assert.True(await WaitForSignalAsync(TimeSpan.FromSeconds(30)) < TimeSpan.FromSeconds(10));   // the commit woke it
+    }
+
+    [Fact]
+    public async Task An_unlink_beyond_the_notice_limit_still_happens_and_queues_no_row()   // Amendment A10: beyond it the change happens
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", FakePeople.GoogleSubject);
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.True(await QueueAsync(MailKind.PasswordChanged, provider: null));
+        }
+
+        using var unlinked = await SettingsApi.Unlink(Client, session, "google");
+
+        Assert.Equal(HttpStatusCode.OK, unlinked.StatusCode);
+        Assert.Equal(10, (await NoticesAsync()).Count);   // none for the unlink
+        Assert.DoesNotContain(await NoticesAsync(), row => row.Kind == MailKind.ProviderUnlinked);
+        Assert.Equal(1, LimitWarnings());
+        Assert.Empty(await InDbAsync(db => db.UserLogins.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken)));
+    }
 }

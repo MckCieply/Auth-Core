@@ -26,3 +26,6 @@ public sealed record TooManyAttemptsBody(string Error, int RetryAfterSeconds);
 
 /// <summary>Request of <c>POST /auth/account/confirm</c> (spec 0012): exactly one of the password and a <c>reauth</c> ticket of a provider.</summary>
 public sealed record ConfirmRequest(string? Password = null, string? ProviderTicket = null);
+
+/// <summary>Request of <c>POST /auth/account/logins/unlink</c> (spec 0012): the provider whose logins the account loses.</summary>
+public sealed record UnlinkRequest(string Provider);

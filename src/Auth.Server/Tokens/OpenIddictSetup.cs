@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Account;
 using Auth.Server.Keys;
 using Auth.Server.Login;
 using Auth.Server.Providers;
@@ -67,7 +68,9 @@ public static class OpenIddictSetup
                         SignupCompleteEndpoint.Path.TrimStart('/'),
                         ProviderPaths.Exchange.TrimStart('/'),
                         ProviderPaths.Link.TrimStart('/'),
-                        ProviderPaths.Finish.TrimStart('/'))
+                        ProviderPaths.Finish.TrimStart('/'),
+                        SettingsRequestHandler.UnlinkPath.TrimStart('/'),
+                        SettingsRequestHandler.PasswordPath.TrimStart('/'))
                     .SetJsonWebKeySetEndpointUris("auth/.well-known/jwks.json")
                     // No discovery document: it is built from the Host header and is not part of the contract.
                     .SetConfigurationEndpointUris(Array.Empty<Uri>());
@@ -92,6 +95,7 @@ public static class OpenIddictSetup
                     .AddEventHandler(RefreshRequestHandler.Descriptor)
                     .AddEventHandler(SignupCompleteRequestHandler.Descriptor)
                     .AddEventHandler(ProviderRequestHandler.Descriptor)
+                    .AddEventHandler(SettingsRequestHandler.Descriptor)
                     .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);
 
                 // Only anonymous clients exist, so the token endpoint ignores client authentication: without this, an

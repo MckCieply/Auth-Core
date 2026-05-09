@@ -1,3 +1,4 @@
+using Auth.Server.Account;
 using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Microsoft.AspNetCore;
@@ -39,7 +40,8 @@ public sealed class LoginResponseShaper : IOpenIddictServerHandler<OpenIddictSer
         request is not null
         && request.IsPasswordGrantType()
         && (JsonLoginRequestHandler.IsLoginPath(path) || SignupCompleteRequestHandler.IsCompletePath(path)
-            || ProviderRequestHandler.IsProviderTokenPath(path));   // spec 0011: the sign-ins through a provider answer as a login
+            || ProviderRequestHandler.IsProviderTokenPath(path)   // spec 0011: the sign-ins through a provider answer as a login
+            || SettingsRequestHandler.IsSettingsTokenPath(path));   // spec 0012: so do the renewals of the unlink and the password change
 
     /// <inheritdoc />
     public ValueTask HandleAsync(OpenIddictServerEvents.ApplyTokenResponseContext context)

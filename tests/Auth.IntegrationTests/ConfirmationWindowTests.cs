@@ -465,4 +465,32 @@ public sealed class ConfirmationWindowTests(PostgresFixture postgres, KeyMateria
         Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));
         Assert.Null(await SettingsApi.ConfirmedUntilAsync(Client, session));   // the refusal did not touch the window either
     }
+
+    [Fact]
+    public async Task At_five_minutes_and_one_second_the_unlink_is_403_confirmation_required_and_changes_nothing()   // criterion 8
+    {
+        var session = await SignInAsync("login");
+        var userId = await InDbAsync(db => db.Users.Where(u => u.NormalizedEmail == "LOGIN@FIRMA.TEST").Select(u => u.Id).SingleAsync(TestContext.Current.CancellationToken));
+        await LinkAsync(userId, "google", "100000000000000000066");
+        Clock.Advance(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(1));
+
+        using var response = await SettingsApi.Unlink(Client, session, "google");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "confirmation_required");
+        Assert.Equal(1, await InDbAsync(db => db.UserLogins.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task After_a_renewal_the_old_session_names_nothing()   // criterion 9
+    {
+        var session = await SignInAsync("login");
+        var userId = await InDbAsync(db => db.Users.Where(u => u.NormalizedEmail == "LOGIN@FIRMA.TEST").Select(u => u.Id).SingleAsync(TestContext.Current.CancellationToken));
+        await LinkAsync(userId, "google", "100000000000000000066");
+
+        using var response = await SettingsApi.Unlink(Client, session, "google");
+        var renewed = await SessionApi.ReadSessionAsync(response);
+
+        Assert.Null(await SettingsApi.ConfirmedUntilAsync(Client, renewed.AccessToken, session.RefreshToken));
+        Assert.NotNull(await SettingsApi.ConfirmedUntilAsync(Client, renewed));
+    }
 }

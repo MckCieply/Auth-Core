@@ -65,6 +65,28 @@ public static class SettingsRoutes
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.ProviderAlreadyLinked, TenancyErrors.ProviderInUse)
             .ProducesTooManyAttempts();
 
+        app.MapPost(SettingsRequestHandler.UnlinkPath, LoginUnlinkEndpoint.HandleAsync)
+            .RequireAuthorization()
+            .WithTags("Account")
+            .WithDescription(
+                "Disconnects a provider from the caller's account while the session of this device is confirmed (`GET /auth/me` "
+                + "`confirmed_until`; else `403 confirmation_required`): every login of that provider is deleted, every session of the account "
+                + "ends (its email links and its login streak stay), and this device gets a new session with the start and the window of the old "
+                + "one, answered as a login answers. The checks, in this order: a bad body `400 invalid_request`; the session `401 "
+                + "session_required`, no membership `403 no_membership`; the window; a name that is not a provider's, or a provider the account has "
+                + "no login of, `404 not_found` (a login of a provider no longer offered can be disconnected); the last way in (the password or a "
+                + "login of an offered provider) `409 last_login`. A session past its 30-day cap is `401 session_required` and nothing changes. The "
+                + "mail \"provider disconnected\" is sent.")
+            .ReadsJson<UnlinkRequest>()
+            .ReadsRefreshCookie(RefreshCookieRead)
+            .Produces<LoginResponse>()
+            .SetsRefreshCookie(StatusCodes.Status200OK, AccountEndpoints.RefreshCookieSet)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status401Unauthorized, TenancyErrors.SessionRequired)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.ConfirmationRequired)
+            .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.LastLogin);
+
         return app;
     }
 }
