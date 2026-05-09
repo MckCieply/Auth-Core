@@ -12,6 +12,9 @@ public static class ProviderPaths
     public const string Link = "/auth/providers/link";
     public const string Finish = "/auth/providers/finish";
 
+    /// <summary>Spec 0012: a plain POST behind the access token, never a token-endpoint request.</summary>
+    public const string Connect = "/auth/providers/connect";
+
     /// <summary>The three POSTs that are token-endpoint requests of OpenIddict, as the sign-up completion is.</summary>
     public static IReadOnlyList<string> TokenPaths { get; } = [Exchange, Link, Finish];
 

@@ -157,4 +157,45 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Single(await AuditAsync(AuditKinds.LoginSucceeded));
         Assert.Equal(0, await TicketCountAsync());
     }
+
+    [Fact]
+    public async Task Two_accounts_with_two_addresses_linking_one_identity_at_once_link_one_and_the_other_signs_in_to_it()   // the identity lock
+    {
+        var ola = await CreateUserAsync(Ola, confirmed: true);
+        var kim = await CreateUserAsync("kim@firma.test", confirmed: true);
+        var olasTicket = await TicketAsync("google", GooglePerson());
+        var kimsTicket = await TicketAsync("google", GooglePerson(email: "kim@firma.test"));   // the same identity, the address Google says now
+
+        // Each takes the lock of its own address, so only the identity lock makes the second wait: the test holds it, and both queue behind it.
+        Task<HttpResponseMessage>[] pending;
+        await using (var held = await HeldLock.IdentityAsync(Factory, "google", FakePeople.GoogleSubject))
+        {
+            pending = [ProviderApi.Link(Client, olasTicket, UserPassword), ProviderApi.Link(Client, kimsTicket, UserPassword)];
+            await HeldLock.WaitForWaitersAsync(Factory, 2, pending);
+            await held.ReleaseAsync();
+        }
+
+        var answers = await Task.WhenAll(pending);
+        try
+        {
+            Assert.All(answers, answer => Assert.Equal(HttpStatusCode.OK, answer.StatusCode));   // the loser signs in the account that owns the identity by now
+            var owner = Assert.Single(await InDbAsync(db => db.UserLogins.ToListAsync(TestContext.Current.CancellationToken))).UserId;
+            Assert.Contains(owner, new[] { ola.Id, kim.Id });
+            foreach (var answer in answers)
+            {
+                Assert.Equal(owner.ToString(), AccessTokens.Text((await SessionApi.ReadSessionAsync(answer)).AccessToken, "sub"));
+            }
+
+            Assert.Equal(owner, (await SingleAsync(AuditKinds.ProviderLinked)).SubjectUserId);
+            Assert.Equal(1, await MailRowsAsync());
+            Assert.Equal(0, await TicketCountAsync());
+        }
+        finally
+        {
+            foreach (var answer in answers)
+            {
+                answer.Dispose();
+            }
+        }
+    }
 }

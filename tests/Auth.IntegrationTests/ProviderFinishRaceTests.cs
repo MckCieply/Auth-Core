@@ -239,4 +239,39 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         Assert.Empty(await AuditAsync(AuditKinds.SignupCompleted));
         Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
     }
+
+    [Fact]
+    public async Task Two_new_addresses_finishing_with_one_identity_at_once_make_one_account_and_the_other_is_409_already_registered()   // the identity lock
+    {
+        var first = await TicketAsync("google", GooglePerson(email: Racer, subject: Subject));
+        var second = await TicketAsync("google", GooglePerson(email: "race2@gmail.test", subject: Subject));   // the same identity, the address Google says now
+
+        // Each takes the lock of its own address, so only the identity lock makes the second wait: the test holds it, and both queue behind it.
+        Task<HttpResponseMessage>[] pending;
+        await using (var held = await HeldLock.IdentityAsync(Factory, "google", Subject))
+        {
+            pending = [ProviderApi.Finish(Client, first, "private"), ProviderApi.Finish(Client, second, "private")];
+            await HeldLock.WaitForWaitersAsync(Factory, 2, pending);
+            await held.ReleaseAsync();
+        }
+
+        var answers = await Task.WhenAll(pending);
+        try
+        {
+            Assert.Equal([HttpStatusCode.OK, HttpStatusCode.Conflict], answers.Select(a => a.StatusCode).Order());
+            await TenancyApi.AssertErrorAsync(answers.Single(a => a.StatusCode == HttpStatusCode.Conflict), HttpStatusCode.Conflict, "already_registered");
+        }
+        finally
+        {
+            foreach (var answer in answers)
+            {
+                answer.Dispose();
+            }
+        }
+
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Email!.StartsWith("race"), TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await LoginsAsync());
+        Assert.Single(await AuditAsync(AuditKinds.SignupCompleted));
+        Assert.Equal(1, await TicketCountAsync());   // the loser's ticket is given back
+    }
 }

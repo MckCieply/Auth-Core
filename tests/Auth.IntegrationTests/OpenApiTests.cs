@@ -23,7 +23,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "POST /auth/signup",
         "POST /auth/signup/preview",
         "POST /auth/signup/complete",
-        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback", "POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish",
+        "GET /auth/providers/{name}/start", "GET /auth/providers/{name}/callback", "POST /auth/providers/exchange", "POST /auth/providers/link", "POST /auth/providers/finish", "POST /auth/providers/connect",
         "POST /auth/invites/preview", "POST /auth/invites/accept",
         "GET /auth/org", "PATCH /auth/org",
         "DELETE /auth/org",
@@ -47,6 +47,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         ["POST /auth/providers/finish"] = ["auth_pt"],
         ["DELETE /auth/account"] = ["auth_pt"],
         ["POST /auth/account/confirm"] = ["auth_pt", "auth_rt"],
+        ["POST /auth/providers/connect"] = ["auth_pt", "auth_rt"],
     };
 
     private static async Task<JsonObject> DescriptionAsync(AuthAppFactory factory)
@@ -190,6 +191,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/providers/exchange", "200,400,403,409,415,429")]
     [InlineData("POST /auth/providers/link", "200,400,401,403,409,415,429")]
     [InlineData("POST /auth/providers/finish", "200,400,403,409,415,429")]
+    [InlineData("POST /auth/providers/connect", "204,400,401,403,409,415,429")]
     [InlineData("POST /auth/invites/preview", "200,400,409,415,429")]
     [InlineData("POST /auth/invites/accept", "204,400,409,415,429")]
     [InlineData("GET /auth/org", "200,401,403,429")]
@@ -265,6 +267,12 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
             ["no_membership", "password_required", "reauth_required", "wrong_password", "reauth_failed"],
             code => Assert.Contains(code, Description(operations["POST /auth/account/confirm"], "403")));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/account/confirm"], "429"));
+        Assert.All(["invalid_request", "invalid_ticket"], code => Assert.Contains(code, Description(operations["POST /auth/providers/connect"], "400")));
+        Assert.Contains("session_required", Description(operations["POST /auth/providers/connect"], "401"));
+        Assert.All(
+            ["no_membership", "confirmation_required", "no_email", "email_not_verified", "address_mismatch"],
+            code => Assert.Contains(code, Description(operations["POST /auth/providers/connect"], "403")));
+        Assert.All(["provider_already_linked", "provider_in_use"], code => Assert.Contains(code, Description(operations["POST /auth/providers/connect"], "409")));
     }
 
     [Theory]
@@ -304,6 +312,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/providers/exchange", "ticket")]
     [InlineData("POST /auth/providers/link", "password,ticket")]
     [InlineData("POST /auth/providers/finish", "company_name,kind,ticket")]
+    [InlineData("POST /auth/providers/connect", "ticket")]
     [InlineData("POST /auth/org/invites", "email,role_id")]
     [InlineData("PUT /auth/org/members/{user_id}/role", "role_id")]
     [InlineData("POST /auth/org/roles", "name,permissions")]
@@ -439,7 +448,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200", "POST /auth/account/confirm 204"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200", "POST /auth/account/confirm 204", "POST /auth/providers/connect 204"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

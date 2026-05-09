@@ -22,11 +22,15 @@ public static class ProviderRoutes
                 + "provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`, a `nonce` and the scopes `openid email "
                 + "profile` (GitHub: no `nonce` and the scope `user:email`), and the callback address built from the configured return address, never from the request. No query: a sign-in, a link or a "
                 + "sign-up (the exchange decides); `invite=<link token>`: the acceptance of that invitation; `purpose=reauth`: the confirmation of a "
-                + "self-deletion, with a fresh sign-in asked for where the provider can be asked. It reads no account and no invitation. A name that is not `google`, `microsoft` or `github`, or a "
+                + "self-deletion or of the settings screen, with a fresh sign-in asked for where the provider can be asked; `purpose=connect`: the connection of a provider "
+                + "to the account that is signed in, with the account chooser. It reads no account and no invitation. A name that is not `google`, `microsoft` or `github`, or a "
                 + "provider that is not offered, is `404 not_found`; a malformed `invite`, another `purpose`, both, or one of them given twice is "
                 + "`400 invalid_request`. Other parameters are ignored.")
             .ReadsQuery(ProviderStartEndpoint.InviteParameter, "The link token of an invitation (43 base64url characters): the round trip accepts it.")
-            .ReadsQuery(ProviderStartEndpoint.PurposeParameter, "`reauth`: the round trip confirms the deletion of the caller's private account.")
+            .ReadsQuery(
+                ProviderStartEndpoint.PurposeParameter,
+                "`reauth`: the round trip confirms who the caller is (a self-deletion, a company deletion, `POST /auth/account/confirm`); `connect`: "
+                + "it connects a provider on the settings screen (spec 0012). Not together with `invite`.")
             .Produces(StatusCodes.Status302Found)
             .SetsHeader(StatusCodes.Status302Found, "Location", "The provider's authorization endpoint with the request of the round trip.")
             .SetsHeader(
@@ -44,7 +48,7 @@ public static class ProviderRoutes
                 + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token (GitHub has none: its identity is read from its API, `/user` and "
                 + "`/user/emails`, and its access token is revoked at once). The answer is always "
                 + "`302` to the product's return screen (`Auth:App:FrontendUrls:ProviderReturn`), never a page: on success "
-                + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
+                + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth|connect>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
                 + "(`purpose` left out when the state could not be read) with the codes `cancelled`, `invalid_state`, `provider_unavailable` and "
                 + "`provider_error`, and nothing stored. The ticket lives 10 minutes (5 for `reauth`) and works only with the `auth_pt` of this browser. "
                 + "A name that is not a provider, or an instance without the return address, is `404 not_found`.")
@@ -68,7 +72,7 @@ public static class ProviderRoutes
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":false}`, whether or not an account has it; an account with the address "
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":true}`; an account under a look-alike spelling `409 already_registered`; no account "
                 + "`{\"next\":\"finish_signup\",\"email\",\"kinds\"}` while sign-up is on, else `403 no_account`. A ticket that is unknown, used, "
-                + "expired, of the purpose `reauth` or without its `auth_pt` is `400 invalid_ticket`. A ticket of an invitation (`invite`) accepts it "
+                + "expired, of the purpose `reauth` or `connect`, or without its `auth_pt` is `400 invalid_ticket`. A ticket of an invitation (`invite`) accepts it "
                 + "and signs in, with the account made without a password: the invitation unknown, used, expired, cancelled or replaced is "
                 + "`400 invalid_token`; the ticket's address missing, unverified or not the invited one `403 address_mismatch`; a company member's address "
                 + "`409 already_member`, a private account's `409 private_account_exists`, an identity linked already `409 provider_already_linked`; the "

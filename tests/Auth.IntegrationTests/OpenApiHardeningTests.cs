@@ -87,6 +87,9 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
         var start = operations["GET /auth/providers/{name}/start"];
         var query = start["parameters"]!.AsArray().Where(p => p!["in"]!.GetValue<string>() == "query").Select(p => p!["name"]!.GetValue<string>());
         Assert.Equal(["invite", "purpose"], query.Order(StringComparer.Ordinal));
+        var purpose = start["parameters"]!.AsArray().Single(p => p!["name"]!.GetValue<string>() == "purpose")!["description"]!.GetValue<string>();
+        Assert.All(["reauth", "connect"], name => Assert.Contains(name, purpose, StringComparison.Ordinal));   // spec 0012
+        Assert.Contains("purpose=connect", start["description"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.NotNull(start["responses"]!["302"]!["headers"]!["Location"]);
         Assert.Contains("OpenIddict.Client.State", start["responses"]!["302"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
 
@@ -116,7 +119,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(37, operations.Count);   // spec 0012: the confirmation
+        Assert.Equal(38, operations.Count);   // spec 0012: the confirmation and the connect
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -150,7 +153,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(25, covered);   // spec 0012: the confirmation
+        Assert.Equal(26, covered);   // spec 0012: the confirmation and the connect
     }
 
     [Fact]

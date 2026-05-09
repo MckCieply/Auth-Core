@@ -446,4 +446,23 @@ public sealed class ConfirmationWindowTests(PostgresFixture postgres, KeyMateria
         Assert.Equal(OpenUntil(), await SettingsApi.ConfirmedUntilAsync(Client, here));
         Assert.Null(await SettingsApi.ConfirmedUntilAsync(Client, there));
     }
+
+    [Fact]
+    public async Task At_five_minutes_and_one_second_the_connect_is_403_confirmation_required_and_changes_nothing()   // criterion 8
+    {
+        var session = await SignInAsync("login");
+        var ticket = await TicketAsync("google", GooglePerson(email: "login@firma.test", subject: "100000000000000000066"), "?purpose=connect");
+        Clock.Advance(TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(59));
+        var until = await SettingsApi.ConfirmedUntilAsync(Client, session);
+        Assert.NotNull(until);   // the second before the end: the window still covers the connect
+
+        Clock.Advance(TimeSpan.FromSeconds(2));
+        using var response = await SettingsApi.Connect(Client, session, ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "confirmation_required");
+        Assert.Equal(0, await InDbAsync(db => db.UserLogins.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Null(await SettingsApi.ConfirmedUntilAsync(Client, session));   // the refusal did not touch the window either
+    }
 }

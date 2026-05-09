@@ -51,12 +51,19 @@ public static class ProviderStartEndpoint
         }
         else if (purposeText.Count == 1)
         {
-            if (!string.Equals(purposeText[0], ProviderPurposes.ReauthName, StringComparison.Ordinal))
+            // reauth or connect (spec 0012); sign_in and invite are never named by this parameter.
+            if (string.Equals(purposeText[0], ProviderPurposes.ReauthName, StringComparison.Ordinal))
+            {
+                purpose = ProviderTicketPurpose.Reauth;
+            }
+            else if (string.Equals(purposeText[0], ProviderPurposes.ConnectName, StringComparison.Ordinal))
+            {
+                purpose = ProviderTicketPurpose.Connect;
+            }
+            else
             {
                 return ApiResults.InvalidRequest();
             }
-
-            purpose = ProviderTicketPurpose.Reauth;
         }
 
         // RedirectUri is set on purpose: left out, OpenIddict keeps the address of this request, the invitation token included, in the state.

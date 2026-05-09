@@ -146,6 +146,7 @@ public sealed class AccountConfirmTests(PostgresFixture postgres, KeyMaterialFix
 
     [Theory]
     [InlineData("sign_in")]
+    [InlineData("connect")]
     [InlineData("expired")]
     [InlineData("used")]
     [InlineData("foreign")]
@@ -172,7 +173,7 @@ public sealed class AccountConfirmTests(PostgresFixture postgres, KeyMaterialFix
                 "another-accounts-login" => GooglePerson(email: "someone@gmail.test", subject: "100000000000000000099"),
                 _ => GooglePerson(),
             },
-            how == "sign_in" ? "" : "?purpose=reauth");
+            how switch { "sign_in" => "", "connect" => "?purpose=connect", _ => "?purpose=reauth" });
         var value = how switch
         {
             "blank" => "",

@@ -320,4 +320,57 @@ public sealed class SettingsMailTests(PostgresFixture postgres, KeyMaterialFixtu
         Assert.True(await WaitForSignalAsync(TimeSpan.FromSeconds(30)) < TimeSpan.FromSeconds(10));   // the commit woke it
         _ = user;
     }
+
+    [Fact]
+    public async Task A_connect_queues_provider_connected_and_a_connect_of_a_linked_identity_queues_nothing()   // criterion 22
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+        using (var connected = await SettingsApi.Connect(Client, session, await TicketAsync("google", GooglePerson(), "?purpose=connect")))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, connected.StatusCode);
+        }
+
+        var row = Assert.Single(await NoticesAsync());
+        Assert.Equal((MailKind.ProviderLinked, OlaNormalized, "google"), (row.Kind, row.NormalizedEmail, row.Provider));
+        Assert.Equal(row.RequestedAt, (await SingleAsync(AuditKinds.ProviderLinked)).OccurredAt);   // one transaction, one clock reading
+        Assert.Equal(1, (await LimitAsync(MailKind.NoticeLimit))!.WindowCount);
+
+        using (var again = await SettingsApi.Connect(Client, session, await TicketAsync("google", GooglePerson(), "?purpose=connect")))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
+        }
+
+        Assert.Single(await NoticesAsync());
+        Assert.Equal(1, (await LimitAsync(MailKind.NoticeLimit))!.WindowCount);   // the second connect counted nothing against the limit
+        await DispatchAsync();
+        var mail = Assert.Single(Mail.Sent);
+        Assert.Equal(Ola, mail.To);
+        Assert.Contains("Google", mail.Subject, StringComparison.Ordinal);
+        AssertNoLink(mail);
+        _ = user;
+    }
+
+    [Fact]
+    public async Task A_refused_connect_queues_nothing_and_wakes_nothing_and_a_committed_one_wakes_the_dispatcher()   // criterion 22: in the change's transaction, woken after its commit
+    {
+        await CreateUserAsync(Ola, confirmed: true);
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+        var mismatched = await TicketAsync("google", GooglePerson(email: "ola.work@gmail.test", subject: "100000000000000000077"), "?purpose=connect");
+        using (var refused = await SettingsApi.Connect(Client, session, mismatched))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
+
+        Assert.Empty(await NoticesAsync());
+        Assert.Null(await LimitAsync(MailKind.NoticeLimit));
+        Assert.True(await WaitForSignalAsync(TimeSpan.FromMilliseconds(700)) >= TimeSpan.FromMilliseconds(500));   // nothing woke it
+
+        using (var connected = await SettingsApi.Connect(Client, session, await TicketAsync("google", GooglePerson(), "?purpose=connect")))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, connected.StatusCode);
+        }
+
+        Assert.True(await WaitForSignalAsync(TimeSpan.FromSeconds(30)) < TimeSpan.FromSeconds(10));   // the commit woke it
+    }
 }

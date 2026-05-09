@@ -846,4 +846,40 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         Assert.Null(account.PasswordHash);
         Assert.Equal(1, await LoginsAsync());
     }
+
+    [Fact]
+    public async Task Two_invited_addresses_accepting_with_one_identity_at_once_make_one_account_and_the_other_is_409_provider_already_linked()   // the identity lock
+    {
+        var (_, _, acmeToken) = await InvitationAsync(Invited, await CreateCompanyAsync("Acme"));
+        var (_, _, betaToken) = await InvitationAsync("kim@firma.test", await CreateCompanyAsync("Beta"));   // another company: no company lock in common
+        var first = await InviteTicketAsync(acmeToken, Jan());
+        var second = await InviteTicketAsync(betaToken, Jan(email: "kim@firma.test"));   // the same identity, the address Google says now
+
+        // Each takes the lock of its company and its own address, so only the identity lock makes the second wait: the test holds it, and both queue behind it.
+        Task<HttpResponseMessage>[] pending;
+        await using (var held = await HeldLock.IdentityAsync(Factory, "google", JanSubject))
+        {
+            pending = [ProviderApi.Exchange(Client, first), ProviderApi.Exchange(Client, second)];
+            await HeldLock.WaitForWaitersAsync(Factory, 2, pending);
+            await held.ReleaseAsync();
+        }
+
+        var answers = await Task.WhenAll(pending);
+        try
+        {
+            Assert.Equal([HttpStatusCode.OK, HttpStatusCode.Conflict], answers.Select(a => a.StatusCode).Order());
+            await TenancyApi.AssertErrorAsync(answers.Single(a => a.StatusCode == HttpStatusCode.Conflict), HttpStatusCode.Conflict, "provider_already_linked");
+        }
+        finally
+        {
+            foreach (var answer in answers)
+            {
+                answer.Dispose();
+            }
+        }
+
+        Assert.Equal(1, await LoginsAsync());
+        Assert.Equal(1, await TicketCountAsync());   // the loser's ticket is given back
+        Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));   // and so is its invitation
+    }
 }

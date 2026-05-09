@@ -2,22 +2,27 @@ using Auth.Infrastructure.Persistence;
 
 namespace Auth.Server.Providers;
 
-/// <summary>The purposes of a round trip as the fragment names them (spec 0011 → Settled 1): <c>sign_in</c>, <c>invite</c>, <c>reauth</c>.</summary>
+/// <summary>
+/// The purposes of a round trip as the fragment names them (spec 0011 → Settled 1; spec 0012 → Provider tickets): <c>sign_in</c>, <c>invite</c>,
+/// <c>reauth</c>, <c>connect</c>.
+/// </summary>
 public static class ProviderPurposes
 {
     public const string SignInName = "sign_in";
     public const string InviteName = "invite";
     public const string ReauthName = "reauth";
+    public const string ConnectName = "connect";
 
     public static string NameOf(ProviderTicketPurpose purpose) => purpose switch
     {
         ProviderTicketPurpose.SignIn => SignInName,
         ProviderTicketPurpose.Invite => InviteName,
         ProviderTicketPurpose.Reauth => ReauthName,
+        ProviderTicketPurpose.Connect => ConnectName,
         _ => throw new ArgumentOutOfRangeException(nameof(purpose), purpose, "Unknown purpose."),
     };
 
-    /// <summary>Exactly one of the three names.</summary>
+    /// <summary>Exactly one of the four names.</summary>
     public static bool TryParse(string? name, out ProviderTicketPurpose purpose)
     {
         (var known, purpose) = name switch
@@ -25,6 +30,7 @@ public static class ProviderPurposes
             SignInName => (true, ProviderTicketPurpose.SignIn),
             InviteName => (true, ProviderTicketPurpose.Invite),
             ReauthName => (true, ProviderTicketPurpose.Reauth),
+            ConnectName => (true, ProviderTicketPurpose.Connect),
             _ => (false, ProviderTicketPurpose.SignIn),
         };
         return known;

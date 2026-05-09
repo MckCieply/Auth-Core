@@ -186,6 +186,9 @@ public sealed class ProviderStartTests : ProviderTestBase
         "?purpose=REAUTH",
         "?invite=" + Invite43 + "&purpose=reauth",
         "?purpose=reauth&purpose=reauth",
+        "?purpose=CONNECT",
+        "?invite=" + Invite43 + "&purpose=connect",
+        "?purpose=connect&purpose=reauth",
         "?invite=" + Invite43 + "&invite=" + Invite43,
     };
 
@@ -229,6 +232,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     [Theory]
     [InlineData("")]
     [InlineData("?purpose=reauth")]
+    [InlineData("?purpose=connect")]
     [InlineData("?invite=" + Invite43)]
     public async Task The_start_reads_no_account_and_no_invitation(string query)   // criterion 6: statement capture
     {
@@ -243,5 +247,19 @@ public sealed class ProviderStartTests : ProviderTestBase
             || sql.Contains("\"Invites\"", StringComparison.Ordinal)
             || sql.Contains("\"PendingSignups\"", StringComparison.Ordinal)
             || sql.Contains("\"Memberships\"", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("google")]
+    [InlineData("microsoft")]
+    public async Task A_connect_start_asks_for_the_account_chooser_and_its_callback_says_purpose_connect(string provider)   // spec 0012, criterion 14
+    {
+        var start = await StartAsync(provider, "?purpose=connect");
+
+        Assert.Equal("select_account", start.Query["prompt"]);
+        Assert.False(start.Query.ContainsKey("max_age"));
+        var callback = await CallbackAsync(
+            await AuthorizeAsync(start, provider == "google" ? GooglePerson() : PersonalMicrosoft()), start.StateCookie);
+        Assert.Equal("connect", ProviderApi.FragmentOf(callback)["purpose"]);
     }
 }

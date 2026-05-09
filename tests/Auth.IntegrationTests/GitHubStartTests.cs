@@ -30,6 +30,7 @@ public sealed class GitHubStartTests(PostgresFixture postgres, KeyMaterialFixtur
     [Theory]
     [InlineData("")]
     [InlineData("?purpose=reauth")]
+    [InlineData("?purpose=connect")]
     [InlineData("?invite=" + Invite43)]
     public async Task Every_purpose_asks_github_for_select_account_and_never_max_age(string query)   // criterion 2, Amendment A7
     {

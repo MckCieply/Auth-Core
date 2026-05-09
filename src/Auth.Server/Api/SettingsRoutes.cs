@@ -39,6 +39,32 @@ public static class SettingsRoutes
                 TenancyErrors.WrongPassword, TenancyErrors.ReauthFailed)
             .ProducesTooManyAttempts();
 
+        app.MapPost(ProviderPaths.Connect, ProviderConnectEndpoint.HandleAsync)
+            .RequireAuthorization()
+            .WithTags("Providers")
+            .WithDescription(
+                "Connects the identity of a ticket of a round trip with `purpose=connect` to the caller's account, while the session of this device "
+                + "is confirmed (`GET /auth/me` `confirmed_until`; else `403 confirmation_required`, and the ticket stays usable for its 10 minutes "
+                + "as long as no other round trip replaces `auth_pt` in this browser). The checks, in this order: a bad body `400 invalid_request`; "
+                + "the session `401 session_required`, no membership `403 no_membership`; a ticket that is unknown, used, expired, not of the purpose "
+                + "`connect` or without its `auth_pt` `400 invalid_ticket`; the window; an identity that is already this account's login `204`, the "
+                + "ticket used up and nothing else; another account's `409 provider_already_linked`; an account that already has a login of the "
+                + "provider `409 provider_in_use` (one per provider: disconnect the old one first); no address `403 no_email`, an unverified one "
+                + "`403 email_not_verified`, another address than the account's `403 address_mismatch`. Otherwise the login, `provider.linked` "
+                + "(`via` `settings`), the ticket used up and the mail \"provider connected\" are one change; sessions are not touched.")
+            .ReadsJson<ProviderTicketRequest>()
+            .ReadsRefreshCookie(RefreshCookieRead)
+            .ReadsCookie(ProviderBindingCookie.Name, "The binding of the ticket, set by the callback that made it.")
+            .Produces(StatusCodes.Status204NoContent)
+            .SetsHeader(StatusCodes.Status204NoContent, "Set-Cookie", $"`{ProviderBindingCookie.Name}` emptied, with `Max-Age=0`.")
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
+            .ProducesError(StatusCodes.Status401Unauthorized, TenancyErrors.SessionRequired)
+            .ProducesError(
+                StatusCodes.Status403Forbidden, TenancyErrors.NoMembership, TenancyErrors.ConfirmationRequired, TenancyErrors.NoEmail,
+                TenancyErrors.EmailNotVerified, TenancyErrors.AddressMismatch)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.ProviderAlreadyLinked, TenancyErrors.ProviderInUse)
+            .ProducesTooManyAttempts();
+
         return app;
     }
 }

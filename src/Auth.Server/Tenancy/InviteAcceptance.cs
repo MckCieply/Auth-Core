@@ -356,6 +356,9 @@ public sealed class InviteAcceptance(
                 return ProviderRefused(TenancyErrors.AlreadyMember);   // an account with no space: a provider never takes an account over
             }
 
+            // The company and address locks are held: the identity's lock comes last, since another account with another address may hold a
+            // ticket of the same identity.
+            await IdentityLock.AcquireAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken);
             if (await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
             {
                 return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);

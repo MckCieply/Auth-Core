@@ -151,6 +151,7 @@ public static class ProviderLinkEndpoint
         try
         {
             await AddressLock.AcquireAsync(db, account.NormalizedEmail!, CancellationToken.None);
+            await IdentityLock.AcquireAsync(db, ticket.Provider, ticket.IdentityKey, CancellationToken.None);   // after the address lock, always
             if (await ProviderTickets.ConsumeAsync(db, ticketText, binding, ProviderTicketPurpose.SignIn, StorableTime.Now(clock), CancellationToken.None) is null)
             {
                 await transaction.DisposeAsync();

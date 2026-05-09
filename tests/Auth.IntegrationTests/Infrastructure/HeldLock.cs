@@ -37,6 +37,18 @@ public sealed class HeldLock : IAsyncDisposable
         return new HeldLock(scope, db, transaction);
     }
 
+    /// <summary>The advisory lock of a provider identity (<c>IdentityLock</c>), which every flow that adds a login takes after its address lock.</summary>
+    public static async Task<HeldLock> IdentityAsync(AuthAppFactory factory, string provider, string identityKey)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await Auth.Server.Providers.IdentityLock.AcquireAsync(db, provider, identityKey, TestContext.Current.CancellationToken);
+        return new HeldLock(scope, db, transaction);
+    }
+
     /// <summary>The row lock of a company (<c>CompanyLock</c>), which every change to its members, roles and invitations takes first.</summary>
     public static async Task<HeldLock> CompanyAsync(AuthAppFactory factory, Guid companyId)
     {
