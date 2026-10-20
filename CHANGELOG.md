@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.1.1` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
 ## Unreleased
 
@@ -98,6 +98,14 @@ company, or an organization sign-up); the third adds the table `ProviderTickets`
 membership (one an earlier version kept after a removal or a company deletion) is deleted, each with an `account.deleted` row whose
 `details.reason` is `upgrade`. This cannot be undone but by restoring a backup, so back up first; a start that fails on an account stops and logs its id (level Critical). Nothing else is required: without the manifest keys and the address, neither kind of sign-up is on and no
 setting is new and required.
+
+## 0.1.1 - 2026-10-20
+
+A patch release of `0.1.0`: the same code, with the patched transitive packages.
+
+### Changed
+
+- `Directory.Packages.props` pins `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` (transitive packages, brought in by MailKit and the test host) to 10.0.13: NuGet audit reports advisories (GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx; both denial of service) for the versions they resolved to, and the build treats warnings as errors, so `0.1.0` no longer restored from source. The image carries the patched packages.
 
 ## 0.1.0 - 2026-02-24
 
