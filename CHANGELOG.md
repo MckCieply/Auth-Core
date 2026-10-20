@@ -1,7 +1,15 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.1.1` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+
+## 0.1.1 - 2026-10-20
+
+A patch release of `0.1.0`: the same code, with the patched transitive packages.
+
+### Changed
+
+- `Directory.Packages.props` pins `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` (transitive packages, brought in by MailKit and the test host) to 10.0.13: NuGet audit reports advisories (GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx; both denial of service) for the versions they resolved to, and the build treats warnings as errors, so `0.1.0` no longer restored from source. The image carries the patched packages.
 
 ## 0.1.0 - 2026-02-24
 

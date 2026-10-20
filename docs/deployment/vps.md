@@ -32,14 +32,14 @@ You need three files and nothing else from the repository: the compose file, the
 sudo mkdir -p /srv/auth-core && cd /srv/auth-core
 sudo chown "$USER" /srv/auth-core
 mkdir -p deploy/postgres-init
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/docker-compose.prod.yml -o deploy/docker-compose.prod.yml
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.1/deploy/docker-compose.prod.yml -o deploy/docker-compose.prod.yml
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.1/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
 chmod 644 deploy/postgres-init/10-auth-app-role.sh
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/.env.prod.example -o .env
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.1/deploy/.env.prod.example -o .env
 chmod 600 .env
 ```
 
-(Or clone the repository at the tag and use its `deploy/` directory.) The image `ghcr.io/mckcieply/auth-core:0.1.0` is public; `docker compose` pulls it.
+(Or clone the repository at the tag and use its `deploy/` directory.) The image `ghcr.io/mckcieply/auth-core:0.1.1` is public; `docker compose` pulls it.
 
 ## 2. The keys
 
@@ -67,7 +67,7 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 | --- | --- |
 | `POSTGRES_PASSWORD` | a long random value, letters and digits only (`openssl rand -hex 32`): the password of the superuser, which only you use (backups, restores). Empty in the example: compose refuses to start until you fill it |
 | `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16 (`openssl rand -hex 32` again): the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it). Empty in the example too |
-| `AUTH_CORE_VERSION` | `0.1.0` |
+| `AUTH_CORE_VERSION` | `0.1.1` |
 | `AUTH_ISSUER` | `https://app.example.com/auth`: the origin your users see plus `/auth`. Your backend's package must be given the same value |
 | `AUTH_AUDIENCE` | the audience your backend checks, for example `my-product-api` |
 | `AUTH_KEYS_DIR`, `AUTH_MANIFEST` | the two paths above |
