@@ -125,8 +125,11 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
         await DispatchAsync();
         var mail = Assert.Single(Mail.Sent);
         Assert.Equal(Boss, mail.To);
-        Assert.Contains("Acme", mail.TextBody);
-        Assert.Contains("as admin", mail.TextBody);
+        Assert.Contains(
+            "You have been invited to join Acme on Auth-Core Test. Use the link below to choose a password and accept the invitation.",
+            mail.TextBody,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(" as admin", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains(AuthAppFactory.DefaultInviteUrl + "?token=", mail.TextBody);
     }
 

@@ -4,7 +4,7 @@ namespace Auth.Server.Email;
 
 /// <summary>
 /// The texts of one mail. <see cref="Subject"/> and <see cref="Intro"/> hold <c>{0}</c> for the application name; an
-/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company and <c>{2}</c> for the role, and a sign-up's <c>{1}</c> for the company.
+/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company (never the role: its key is a code of the consumer's manifest, not a word to print), and a sign-up's <c>{1}</c> for the company.
 /// People type those (members, or a visitor signing up), so no subject uses them: nothing a person typed goes into a mail header.
 /// </summary>
 /// <param name="Paragraph">
@@ -64,7 +64,7 @@ public static class MailTexts
         ("en", MailKind.Invitation) => new MailText(
             Subject: "You are invited to {0}",
             Greeting: "Hello,",
-            Intro: "You have been invited to join {1} on {0} as {2}. Use the link below to choose a password and accept the invitation.",
+            Intro: "You have been invited to join {1} on {0}. Use the link below to choose a password and accept the invitation.",
             Button: "Accept the invitation",
             Validity: "The link is valid for 7 days and works once.",
             LinkHint: "If the button does not work, copy this address into your browser:",
@@ -72,7 +72,7 @@ public static class MailTexts
         ("pl", MailKind.Invitation) => new MailText(
             Subject: "Zaproszenie do {0}",
             Greeting: "Dzień dobry,",
-            Intro: "Zaproszono Cię do firmy {1} w {0} jako {2}. Użyj poniższego linku, aby ustawić hasło i przyjąć zaproszenie.",
+            Intro: "Zaproszono Cię do firmy {1} w {0}. Użyj poniższego linku, aby ustawić hasło i przyjąć zaproszenie.",
             Button: "Przyjmij zaproszenie",
             Validity: "Link jest ważny przez 7 dni i działa jeden raz.",
             LinkHint: "Jeśli przycisk nie działa, skopiuj ten adres do przeglądarki:",
@@ -135,19 +135,19 @@ public static class MailTexts
 
     /// <summary>
     /// The invitation to an address that has a private account (spec 0010 → Invitations): the intro's last sentence asks no password, and a
-    /// paragraph says what accepting does. <c>{0}</c> the application, <c>{1}</c> the company, <c>{2}</c> the role.
+    /// paragraph says what accepting does. <c>{0}</c> the application, <c>{1}</c> the company.
     /// </summary>
     public static MailText InvitationToPrivateAccount(string locale) => locale switch
     {
         "en" => For(locale, MailKind.Invitation) with
         {
-            Intro = "You have been invited to join {1} on {0} as {2}. Use the link below to accept the invitation.",
+            Intro = "You have been invited to join {1} on {0}. Use the link below to accept the invitation.",
             Paragraph = "You already have a private account on {0} with this email address. If you accept, you move to {1}: the space of your private "
                 + "account is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of {1}.",
         },
         "pl" => For(locale, MailKind.Invitation) with
         {
-            Intro = "Zaproszono Cię do firmy {1} w {0} jako {2}. Użyj poniższego linku, aby przyjąć zaproszenie.",
+            Intro = "Zaproszono Cię do firmy {1} w {0}. Użyj poniższego linku, aby przyjąć zaproszenie.",
             Paragraph = "Masz już konto prywatne w {0} z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, przejdziesz do firmy {1}: przestrzeń Twojego "
                 + "konta prywatnego zostanie usunięta razem z całą zawartością. Samo konto zostaje, z tym samym adresem e-mail i hasłem, i stanie się kontem "
                 + "członka firmy {1}.",

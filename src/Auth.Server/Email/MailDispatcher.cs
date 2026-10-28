@@ -281,7 +281,6 @@ public sealed partial class MailDispatcher(
 
         var invite = invites[0];
         var companyName = await db.Companies.AsNoTracking().Where(c => c.Id == invite.CompanyId).Select(c => c.Name).SingleAsync(cancellationToken);
-        var roleName = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).SingleAsync(cancellationToken);
 
         // Spec 0010: an address that has a private account, spelled as the invitation spells it up to ASCII case, is told what accepting does to
         // it. Decided now, when the mail is composed; the preview decides again when the link is used.
@@ -300,7 +299,7 @@ public sealed partial class MailDispatcher(
         return async () =>
         {
             var token = await InviteTokens.IssueAsync(db, invite.Id, now, cancellationToken);
-            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, roleName, privateAccount);
+            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, privateAccount);
         };
     }
 
