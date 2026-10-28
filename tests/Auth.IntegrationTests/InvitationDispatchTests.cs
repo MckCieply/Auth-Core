@@ -34,7 +34,11 @@ public sealed class InvitationDispatchTests(PostgresFixture postgres, KeyMateria
         Assert.Equal("Auth-Core Test", AuthAppFactory.DefaultAppName);
         Assert.Contains("Auth-Core Test", mail.Subject);
         Assert.Contains("Acme", mail.TextBody);
-        Assert.Contains("as user", mail.TextBody);
+        Assert.Contains(
+            "You have been invited to join Acme on Auth-Core Test. Use the link below to choose a password and accept the invitation.",
+            mail.TextBody,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(" as user", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains("valid for 7 days", mail.TextBody);
         Assert.Empty(await QueueAsync());
         Assert.NotNull((await InviteAsync(invite))!.TokenHash);
@@ -194,7 +198,10 @@ public sealed class InvitationDispatchTests(PostgresFixture postgres, KeyMateria
 
         var mail = Assert.Single(Mail.Sent);
         Assert.Contains("Tom &amp; &lt;Jerry&gt;", mail.HtmlBody);
-        Assert.Contains("&lt;b&gt;boss&lt;/b&gt;", mail.HtmlBody);
+        // The role is out of the mail: its name, plain or encoded, appears nowhere in it.
+        Assert.DoesNotContain("<b>boss</b>", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("&lt;b&gt;boss&lt;/b&gt;", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("boss", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("Jerry", mail.Subject + mail.To);
         Assert.DoesNotContain("boss", mail.Subject + mail.To);
     }
