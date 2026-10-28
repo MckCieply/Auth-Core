@@ -1,7 +1,15 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.1` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.1.2` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+
+## 0.1.2 - 2026-10-28
+
+A patch release of `0.1.1`.
+
+### Changed
+
+- The invitation mail no longer names the role. It printed the role's key from the consumer's manifest (for example `worker`), which is a code, not a word the invitee should read. The rest of the mail is unchanged.
 
 ## 0.1.1 - 2026-10-20
 

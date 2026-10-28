@@ -3,7 +3,7 @@
 One reusable, self-hosted authentication service in .NET that every project drops in instead of rebuilding login, tenancy, RBAC and token
 refresh. One instance per product, behind the product's own reverse proxy at `/auth`; headless: each product owns its screens.
 
-> **Version 0.1.1.** The image is `ghcr.io/mckcieply/auth-core:0.1.1`. Sign-in with RS256 tokens and a rotating refresh cookie, lockout and
+> **Version 0.1.2.** The image is `ghcr.io/mckcieply/auth-core:0.1.2`. Sign-in with RS256 tokens and a rotating refresh cookie, lockout and
 > per-IP rate limits, password reset and email verification by mail, companies with members, roles and invitations, an operator CLI, an
 > audit log, security headers, an OpenAPI description, a Python package and an Angular sample, a production compose file and the runbooks to
 > run it. See the [changelog](CHANGELOG.md), the [deployment guide](docs/deployment/vps.md) and the [threat model](docs/security/threat-model.md).
