@@ -35,19 +35,18 @@ public sealed class MailComposer(MailSettings settings)
     /// The company of an invitation or of an organization sign-up; required for <see cref="MailKind.Invitation"/> and for
     /// <see cref="MailKind.Signup"/> unless <paramref name="privateAccount"/> is set, ignored otherwise (a private sign-up names no company).
     /// </param>
-    /// <param name="roleName">The role of an invitation; required for <see cref="MailKind.Invitation"/>, ignored otherwise.</param>
     /// <param name="privateAccount">
     /// Spec 0010. For <see cref="MailKind.Signup"/>: the private variant, which names no company. For <see cref="MailKind.Invitation"/>: the
     /// invited address has a private account, and the mail says what accepting does to it. Ignored otherwise.
     /// </param>
     public ComposedMail Compose(
-        MailKind kind, string recipient, string token, string? companyName = null, string? roleName = null, bool privateAccount = false)
+        MailKind kind, string recipient, string token, string? companyName = null, bool privateAccount = false)
     {
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(token);
-        if (kind == MailKind.Invitation && (companyName is null || roleName is null))
+        if (kind == MailKind.Invitation && companyName is null)
         {
-            throw new ArgumentException("An invitation names its company and its role.", nameof(kind));
+            throw new ArgumentException("An invitation names its company.", nameof(companyName));
         }
 
         if (kind == MailKind.Signup && companyName is null && !privateAccount)
@@ -71,14 +70,14 @@ public sealed class MailComposer(MailSettings settings)
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind of mail."),
         };
         var link = QueryHelpers.AddQueryString(target.AbsoluteUri, "token", token);
-        // The subject takes the application name only: the company and the role are typed by people, and a header is not the place
-        // for that. They appear in the body, encoded in its HTML part.
+        // The subject takes the application name only: the company is typed by people, and a header is not the place
+        // for that. It appears in the body, encoded in its HTML part.
         var subject = string.Format(CultureInfo.InvariantCulture, text.Subject, settings.AppName);
-        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName, roleName);
-        // Formatted first and encoded whole, like the intro: the company and the role in it are encoded in the HTML part.
+        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName);
+        // Formatted first and encoded whole, like the intro: the company in it is encoded in the HTML part.
         var paragraph = text.Paragraph is null
             ? null
-            : string.Format(CultureInfo.InvariantCulture, text.Paragraph, settings.AppName, companyName, roleName);
+            : string.Format(CultureInfo.InvariantCulture, text.Paragraph, settings.AppName, companyName);
         var paragraphHtml = paragraph is null ? "" : "\n<p>" + Html.Encode(paragraph) + "</p>";
         var lines = new List<string> { text.Greeting, "", intro, "" };
         if (paragraph is not null)

@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.1` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.1.2` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
 ## Unreleased
 
@@ -86,6 +86,7 @@ and two new members in `GET /auth/me`, and nothing else changes.
 - `POST /auth/invites/accept`: an account that exists keeps its password (a `password` sent is not used); a missing password with an unknown
   token is now `400 invalid_token`. `POST /auth/signup/complete`: the company name is required for an organization and refused for a private
   sign-up, judged after the token.
+- The invitation to an address that has a private account no longer names the role either (as in `0.1.2`, for every invitation mail).
 
 ### Fixed
 
@@ -98,6 +99,14 @@ company, or an organization sign-up); the third adds the table `ProviderTickets`
 membership (one an earlier version kept after a removal or a company deletion) is deleted, each with an `account.deleted` row whose
 `details.reason` is `upgrade`. This cannot be undone but by restoring a backup, so back up first; a start that fails on an account stops and logs its id (level Critical). Nothing else is required: without the manifest keys and the address, neither kind of sign-up is on and no
 setting is new and required.
+
+## 0.1.2 - 2026-10-28
+
+A patch release of `0.1.1`.
+
+### Changed
+
+- The invitation mail no longer names the role. It printed the role's key from the consumer's manifest (for example `worker`), which is a code, not a word the invitee should read. The rest of the mail is unchanged.
 
 ## 0.1.1 - 2026-10-20
 

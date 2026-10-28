@@ -248,14 +248,14 @@ The access token gains one claim:
 any other address (status, headers, body), and the inviter learns nothing.
 
 **The mail.** When the invitation mail is composed and the invited address has a private account spelled the same up
-to ASCII case, the intro's last sentence and one paragraph change (`{0}` the application, `{1}` the company, `{2}` the
-role; the company and the role are HTML-encoded as before):
+to ASCII case, the intro's last sentence and one paragraph change (`{0}` the application, `{1}` the company; the
+company is HTML-encoded as before, and the mail does not name the role):
 
-- EN intro: "You have been invited to join {1} on {0} as {2}. Use the link below to accept the invitation."
+- EN intro: "You have been invited to join {1} on {0}. Use the link below to accept the invitation."
 - EN paragraph: "You already have a private account on {0} with this email address. If you accept, you move to {1}:
   the space of your private account is deleted, with everything in it. Your account itself stays, with its email
   address and its password, and becomes a member of {1}."
-- PL intro: "Zaproszono Cię do firmy {1} w {0} jako {2}. Użyj poniższego linku, aby przyjąć zaproszenie."
+- PL intro: "Zaproszono Cię do firmy {1} w {0}. Użyj poniższego linku, aby przyjąć zaproszenie."
 - PL paragraph: "Masz już konto prywatne w {0} z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, przejdziesz do
   firmy {1}: przestrzeń Twojego konta prywatnego zostanie usunięta razem z całą zawartością. Samo konto zostaje, z tym
   samym adresem e-mail i hasłem, i stanie się kontem członka firmy {1}."

@@ -187,6 +187,6 @@ public sealed class SignupMailComposerTests
     [Fact]
     public void An_unknown_kind_of_mail_is_not_composed()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => Composer().Compose((MailKind)99, "anna@firma.test", Token, "Firma", "admin"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Composer().Compose((MailKind)99, "anna@firma.test", Token, "Firma"));
     }
 }
