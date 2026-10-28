@@ -4,8 +4,9 @@ namespace Auth.Server.Email;
 
 /// <summary>
 /// The texts of one mail. <see cref="Subject"/> and <see cref="Intro"/> hold <c>{0}</c> for the application name; an
-/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company and <c>{2}</c> for the role. Those two are
-/// set by members, so no subject uses them: nothing a member typed goes into a mail header.
+/// invitation's <see cref="Intro"/> also holds <c>{1}</c> for the company. The company is set by members, so no subject
+/// uses it: nothing a member typed goes into a mail header. No text names the role: its key is a code of the consumer's
+/// manifest, not a word for the invitee.
 /// </summary>
 public sealed record MailText(string Subject, string Greeting, string Intro, string Button, string Validity, string LinkHint, string Ignore);
 
@@ -52,7 +53,7 @@ public static class MailTexts
         ("en", MailKind.Invitation) => new MailText(
             Subject: "You are invited to {0}",
             Greeting: "Hello,",
-            Intro: "You have been invited to join {1} on {0} as {2}. Use the link below to choose a password and accept the invitation.",
+            Intro: "You have been invited to join {1} on {0}. Use the link below to choose a password and accept the invitation.",
             Button: "Accept the invitation",
             Validity: "The link is valid for 7 days and works once.",
             LinkHint: "If the button does not work, copy this address into your browser:",
@@ -60,7 +61,7 @@ public static class MailTexts
         ("pl", MailKind.Invitation) => new MailText(
             Subject: "Zaproszenie do {0}",
             Greeting: "Dzień dobry,",
-            Intro: "Zaproszono Cię do firmy {1} w {0} jako {2}. Użyj poniższego linku, aby ustawić hasło i przyjąć zaproszenie.",
+            Intro: "Zaproszono Cię do firmy {1} w {0}. Użyj poniższego linku, aby ustawić hasło i przyjąć zaproszenie.",
             Button: "Przyjmij zaproszenie",
             Validity: "Link jest ważny przez 7 dni i działa jeden raz.",
             LinkHint: "Jeśli przycisk nie działa, skopiuj ten adres do przeglądarki:",

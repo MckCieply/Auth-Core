@@ -564,7 +564,7 @@ manifest is the exception above, because it comes from the product.
 22. `remove-member` removes a member as the API does; refused with `last_manager`
     unless `--force`.
 23. No invitation token appears in the database in clear or in the logs; the company
-    and role names are HTML-encoded in the invitation mail.
+    name is HTML-encoded in the invitation mail, which does not name the role (release 0.1.2).
 24. `GET /auth/openapi/v1.json` describes every endpoint of specs 0001–0005 with its
     request, its responses and its error codes.
 25. The e2e script drives the sequence of the Goal and the role and safety cases over
@@ -659,11 +659,11 @@ manifest is the exception above, because it comes from the product.
 - An attacker with a stolen invitation link can join the company with the invited
   role, as with a reset link. The link lives 7 days and only the newest one works.
 - The invitation mail limit is per company and address, so a manager can mail any number
-  of distinct addresses, each with the company's own wording of its name and role. Only
+  of distinct addresses, each with the company's own wording of its name. Only
   members can do it, and each mail names the company.
-- The company and role names, set by members, appear in invitation mails. They are
-  encoded and limited to 100 characters, but a hostile admin can still word them as
-  they like.
+- The company name, set by members, appears in invitation mails. It is encoded and
+  limited to 100 characters, but a hostile admin can still word it as they like. The
+  mail does not name the role (release 0.1.2).
 
 ## Verification notes (for the local verifiers)
 

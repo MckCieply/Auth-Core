@@ -74,7 +74,8 @@ public sealed class OrgInviteTests(PostgresFixture postgres, KeyMaterialFixture 
         Assert.Equal(Worker, mail.To);
         Assert.Contains(AuthAppFactory.DefaultInviteUrl + "?token=", mail.TextBody);
         Assert.Contains("Acme", mail.TextBody);
-        Assert.Contains("as user", mail.TextBody);
+        Assert.Contains($"You have been invited to join Acme on {AuthAppFactory.DefaultAppName}. Use the link below to choose a password and accept the invitation.", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(" as user", mail.TextBody, StringComparison.Ordinal);   // the role is not in the mail
         Assert.Contains("valid for 7 days", mail.TextBody);
     }
 

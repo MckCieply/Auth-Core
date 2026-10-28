@@ -47,7 +47,7 @@ services:
       - auth
 
   auth:
-    image: ghcr.io/mckcieply/auth-core:${AUTH_CORE_VERSION:?set AUTH_CORE_VERSION in .env (for example 0.1.1)}
+    image: ghcr.io/mckcieply/auth-core:${AUTH_CORE_VERSION:?set AUTH_CORE_VERSION in .env (for example 0.1.2)}
     restart: unless-stopped
     depends_on:
       postgres:

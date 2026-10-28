@@ -21,7 +21,7 @@ public sealed class ComposedMail
 /// <summary>
 /// Builds the mails of specs 0004 and 0005 in the configured language, each as plain text and as HTML with the same
 /// content. Only configuration and the token go into a mail; nothing a requester submitted does. An invitation also
-/// names its company and role, which members typed: they are encoded in the HTML part and are never in a header.
+/// names its company, which members typed: it is encoded in the HTML part and are never in a header.
 /// </summary>
 public sealed class MailComposer(MailSettings settings)
 {
@@ -29,14 +29,13 @@ public sealed class MailComposer(MailSettings settings)
     private static readonly HtmlEncoder Html = HtmlEncoder.Create(UnicodeRanges.All);
 
     /// <param name="companyName">The company of an invitation; required for <see cref="MailKind.Invitation"/>, ignored otherwise.</param>
-    /// <param name="roleName">The role of an invitation; required for <see cref="MailKind.Invitation"/>, ignored otherwise.</param>
-    public ComposedMail Compose(MailKind kind, string recipient, string token, string? companyName = null, string? roleName = null)
+    public ComposedMail Compose(MailKind kind, string recipient, string token, string? companyName = null)
     {
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(token);
-        if (kind == MailKind.Invitation && (companyName is null || roleName is null))
+        if (kind == MailKind.Invitation && companyName is null)
         {
-            throw new ArgumentException("An invitation names its company and its role.", nameof(kind));
+            throw new ArgumentException("An invitation names its company.", nameof(kind));
         }
 
         var text = MailTexts.For(settings.Locale, kind);
@@ -47,10 +46,10 @@ public sealed class MailComposer(MailSettings settings)
             _ => settings.AcceptInviteUrl,
         };
         var link = QueryHelpers.AddQueryString(target.AbsoluteUri, "token", token);
-        // The subject takes the application name only: the company and the role are typed by members, and a header is
-        // not the place for that. They appear in the body, encoded in its HTML part.
+        // The subject takes the application name only: the company is typed by members, and a header is
+        // not the place for that. It appears in the body, encoded in its HTML part.
         var subject = string.Format(CultureInfo.InvariantCulture, text.Subject, settings.AppName);
-        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName, roleName);
+        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName);
 
         return new ComposedMail
         {
