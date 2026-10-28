@@ -126,7 +126,8 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
         var mail = Assert.Single(Mail.Sent);
         Assert.Equal(Boss, mail.To);
         Assert.Contains("Acme", mail.TextBody);
-        Assert.Contains("as admin", mail.TextBody);
+        Assert.Contains($"You have been invited to join Acme on {AuthAppFactory.DefaultAppName}. Use the link below to choose a password and accept the invitation.", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(" as admin", mail.TextBody, StringComparison.Ordinal);   // the role is not in the mail
         Assert.Contains(AuthAppFactory.DefaultInviteUrl + "?token=", mail.TextBody);
     }
 

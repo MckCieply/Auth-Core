@@ -196,11 +196,10 @@ public sealed partial class MailDispatcher(
 
         var invite = invites[0];
         var companyName = await db.Companies.AsNoTracking().Where(c => c.Id == invite.CompanyId).Select(c => c.Name).SingleAsync(cancellationToken);
-        var roleName = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).SingleAsync(cancellationToken);
         return async () =>
         {
             var token = await InviteTokens.IssueAsync(db, invite.Id, now, cancellationToken);
-            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, roleName);
+            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName);
         };
     }
 
