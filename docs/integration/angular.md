@@ -92,7 +92,7 @@ export const TOKEN_PATHS: readonly string[] = ['/auth/me', '/auth/account'];
 `/auth/account` is the self-deletion of a private account (spec 0010): it needs the token too.
 
 Edit them to the paths of your own backend (`/api/` is the sample's). It never adds the token to another origin or to the other
-`/auth` endpoints (`/auth/login`, `/auth/refresh`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
+`/auth` endpoints (`/auth/login`, `/auth/refresh`, `/auth/switch`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
 resolved does not count. [`samples/notes-web/src/app/auth/auth.interceptor.spec.ts`](../../samples/notes-web/src/app/auth/auth.interceptor.spec.ts)
 shows the cases.
 
@@ -211,6 +211,36 @@ Known limits, in the spec's words: another open tab keeps its token until it exp
 because tabs are not synchronised; and a token in memory can be read by script running in the page, which the
 `Content-Security-Policy` of step 6 limits to your own files.
 
+## Several companies (spec 0015)
+
+One account can belong to several companies (and at most one personal space), each with its own role. Every session works in one of them,
+the **session's company**: the access token's `org_id` names it, a refresh keeps it, and the other devices of the person keep theirs. A
+product that never switches sees no change. Today a second membership comes from the development seed (`Auth:DevSeed:SecondOrgName`, which puts
+the first seed user in a second company as a plain member) and from tests; no endpoint makes one yet (specs 0016 and 0017 add them).
+
+- **Listing:** `GET /auth/orgs` with the access token answers `{"orgs":[{"id","name","kind","role":{"id","name"},"current"}]}`: every
+  space of the person, ordered by name (ignoring case), then id; `current` is `true` for the one named by the token's `org_id`. A personal space
+  is listed as `private` with `kind` `personal`: hide the entries of that kind if your product has no use for them. `/auth/orgs` starts with
+  `/auth/org`, so the interceptor's list of step 3 already sends the token to it. After a removal from the token's company no entry is `current`.
+- **Switching:** `POST /auth/switch` with `{"org_id": "<id>"}` and the refresh cookie (no access token) answers as `POST /auth/refresh` does:
+  a new access token in the body and a new cookie, for the chosen space. Keep the token as the same session, ask `GET /auth/me` again and
+  reload your data. `404 not_found` means the id is not one of the person's spaces (read the list again; the cookie still works); `401` is a
+  refresh that failed (`invalid_grant`): open `/login`, and do not run the refresh-and-retry of step 5, because the switch is itself a refresh;
+  `400` is a body that is not `{"org_id": "<uuid>"}` sent as `application/json` (a form post is `400`), `415` is a JSON body declared in a charset other than UTF-8; `503` keeps the session, as at a refresh. The sample's `auth.service.ts` has `orgs`
+  (the last list), `loadOrgs()` and `switchTo(orgId)`, and `pages/notes.ts` draws the picker in the account bar when the list has more than
+  one entry: each company by name, the personal space as "Private", the current one marked.
+- **The company used last:** a sign-in lands in the company the person used last (set by a sign-in or a switch; a refresh does not write
+  it), so a person who never switched lands where they always did.
+- **Reload per-company data when `org_id` changes.** Your product keeps its data under the token's `org_id`, so everything on screen that
+  belongs to a company must be read again after a switch **and after a refresh that returns another `org_id`**: the cookie is shared by
+  every tab of the browser, so a switch in one tab moves the others at their next refresh, and within the 15-second grace window a
+  tab that refreshes with the old cookie can put the device back in the old company (after the window the old cookie is a used-up token again: reuse detection, `refresh.reuse_detected`, ends the session). After every refresh the sample reads `GET /auth/me`, and when
+  `org_id` changed it reloads the notes and shows "Switched to {name} in another tab."
+- **A removal signs out only the devices that work in that company.** Removing a person from a company ends the sessions whose
+  company it was, at their next refresh or switch (`401 invalid_grant`); the person's sessions in other companies go on, and a new sign-in lands
+  in the company used last among the rest. Their access token still works at your backend until it expires (at most 10 minutes), while
+  `GET /auth/me` and the company API refuse it at once with `403 permissions_changed`.
+
 ## Private accounts (spec 0010)
 
 When your manifest says `private.signup: self-service`, a person can sign up alone. Your screens tell the two kinds apart by `me().org_kind`:
@@ -226,9 +256,11 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
 - **An invitation to a private account:** when the preview says `has_private_account`, show the warning (the paragraph of the mail) and one
   button that sends `leave_private_account: true` with no password: the account keeps its own. Without it the acceptance answers
   `409 private_account_exists` ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)).
-- **Removing a member deletes the account,** and deleting a company deletes every member's, the admin's included. Say so in the confirmation
-  of your own team screen, with the sample's sentence: "This person's account will be deleted." ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)).
-  The person can be invited again, as a new account.
+- **Removing a member deletes the account only with its last space** (spec 0015), and deleting a company does the same for every member, the
+  admin included: a person who is a member of another space keeps the account. Say so in the confirmation of your own team screen, with the
+  sample's sentence: "This person's account will be deleted." ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)) (it
+  says nothing of the other spaces; a product whose members often belong to several companies should word it as "if this is the last
+  space of the account"). A person whose account is deleted can be invited again, as a new account.
 - **Personal data after deletion:** Auth-Core deletes the account and what it holds of it, keeps the audit rows that name it (its id, its
   address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
   rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.
