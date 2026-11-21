@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.2` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.2.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
-## Unreleased
+## 0.2.0 - 2026-11-21
 
 Self-service sign-up ([spec 0009](docs/superpowers/specs/0009-self-service-signup.md)): a product can let a visitor start a company of their own. Off by default; an
 instance that does not turn it on behaves as `0.1.0`, apart from what spec 0010 below changes (accounts are deleted instead of kept).
