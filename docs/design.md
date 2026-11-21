@@ -32,7 +32,7 @@ JWTs underneath, served from `/auth` on the consumer's own domain.
 | Not `MapIdentityApi` | Rejected                                                                        | Its bearer tokens are an opaque .NET format that Python consumers cannot verify |
 | Placement      | Reverse proxy at `/auth` on the consumer's domain                                     | Same origin: no CORS, no redirects, passkeys bind to the app's domain      |
 | Token storage  | Refresh token in an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie; access token in memory, 5–10 min | No tokens in localStorage and no separate BFF                              |
-| Tenancy        | Organizations inside an instance; global users with memberships; one org per user in the MVP | Schema is many-to-many from day one, so org switching is additive later    |
+| Tenancy        | Organizations inside an instance; global users with memberships; an account can belong to several companies, a session is in one at a time (spec 0015, `POST /auth/switch`) | Schema is many-to-many from day one, so org switching was additive (spec 0015) |
 | Authorization  | RBAC: a per-app permission catalog, roles map to permissions, permissions travel in the access token | Resource-level checks ("is this my draft?") stay in the consumer           |
 | Configuration  | `auth.yaml` manifest in the consumer's repo, applied idempotently                    | Config as code, reviewable in PRs                                          |
 | Stack          | .NET 10 LTS, ASP.NET Core Identity, OpenIddict, EF Core, PostgreSQL                   | OpenIddict is Apache 2.0; Identity handles passwords and lockout           |
@@ -108,7 +108,7 @@ and roles. Estimated effort is about 32 focused days before AI-assisted speed-up
 | Accounts         | Email and password, email verification, password reset, lockout                           | TOTP, passkeys, recovery codes, breached-password check |
 | Login providers  | Password only                                                                              | Google, Microsoft, GitHub with account linking    |
 | Tokens           | JWT access token, refresh rotation with reuse detection, logout with revocation, JWKS, persisted signing keys | Automated key rotation                            |
-| Tenancy          | Organizations, memberships, email invites, `org_id` claim, one org per user               | Self-service org signup                           |
+| Tenancy          | Organizations, memberships, email invites, `org_id` claim, one org per user (several per account since spec 0015) | Self-service org signup                           |
 | RBAC             | Permissions and roles from the manifest, role per membership, `permissions` in the token   | Admin UI for roles                               |
 | Admin            | CLI: create org, invite owner, assign role                                                 | Admin panel, session and device management        |
 | Consumers        | Python FastAPI package; Angular screens, interceptor and guard inside speech-to-mail       | NuGet SDK, npm package, generated clients          |
@@ -363,7 +363,7 @@ typed in a look-alike spelling never takes over an account or an earlier link; w
 *Spec 0010:* a private person signs up with an email address only and works in a hidden one-person space; the access token says
 `org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation warns a
 private person and moves the account only on purpose; an account that loses its only space is deleted (a removal, a company deletion, once
-at upgrade). The comeback of spec 0009, Amendment 3, was removed before any release.
+at upgrade; since spec 0015 only when it has no other space). The comeback of spec 0009, Amendment 3, was removed before any release.
 
 *As built (spec 0010):* built as described above. Private sign-up needs `private.signup: self-service` in the manifest and the
 same completion address as company sign-up; `GET /auth/options` tells a product's screens which of the two to offer. One

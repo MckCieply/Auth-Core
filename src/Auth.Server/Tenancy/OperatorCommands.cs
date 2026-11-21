@@ -54,7 +54,7 @@ public sealed class OperatorCommands(
             : Outcome.Fail(TenancyErrors.NotFound);
     }
 
-    /// <summary>Removes a member as the API does and ends their sessions; <paramref name="force"/> overrides <c>last_manager</c>.</summary>
+    /// <summary>Removes a member as the API does: their sessions in that company end; the account is deleted only when this was its last space; <paramref name="force"/> overrides <c>last_manager</c>.</summary>
     public async Task<Outcome<MemberRemoval>> RemoveMemberAsync(string org, string email, bool force, CancellationToken cancellationToken)
     {
         if (!IdInput.TryParse(org, out var orgId) || email.Length > EmailInput.MaxLength || !EmailInput.TryNormalize(email, normalizer, out var normalized))

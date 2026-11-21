@@ -23,7 +23,7 @@ function isMember(value: unknown): value is Member {
 
 /**
  * The company's members, for a member who holds members:manage (spec 0010, Settled 14): the address and the role of each, and "Remove" for
- * every other member, behind a confirmation that says what removing does: the person's account is deleted.
+ * every other member, behind a confirmation that says what removing does: the person loses this company, and the account is deleted only when it was their last (spec 0015).
  */
 @Component({
   selector: 'app-team',

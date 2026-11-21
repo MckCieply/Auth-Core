@@ -212,8 +212,8 @@ export const texts = {
     back: 'Back to the notes',
     remove: 'Remove',
     cancel: 'Cancel',
-    // Spec 0010: removing a member deletes the account. A product's own team screen says the same.
-    removeConfirm: "This person's account will be deleted.",
+    // Spec 0015: removing a member deletes the account only when this company was its last space. A product's own team screen says the same.
+    removeConfirm: 'This person loses access to this company. Their account is deleted if this company is their last.',
     permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',
     lastManager: 'The company needs at least one person who manages its members.',
     cannotChangeSelf: 'You cannot remove yourself.',

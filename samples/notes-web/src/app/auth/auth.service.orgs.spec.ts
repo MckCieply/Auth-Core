@@ -170,6 +170,111 @@ describe('AuthService: more than one company (spec 0015)', () => {
       expect(auth.notice()).toBeNull();
     });
 
+    it('a refresh that is asked while a switch is on its way joins it: one /auth/switch, no /auth/refresh, and the switched token stays', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.switchTo(PRIVATE);
+      const request = ctrl.expectOne('/auth/switch');
+      const refreshed = auth.refresh();
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      request.flush({ access_token: 'tok-switched' });
+      expect(await refreshed).toBe('ok');
+      await settle();
+      ctrl.expectOne('/auth/me').flush(privateMe);
+      await settle();
+      ctrl.expectOne('/auth/orgs').flush({ orgs: entries(PRIVATE) });
+      expect(await done).toBe('switched');
+      expect(auth.token()).toBe('tok-switched');
+      ctrl.expectNone('/auth/refresh');
+    });
+
+    it('a refresh that is asked while a switch is on its way and finds the switch gone runs its own refresh afterwards', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.switchTo(PRIVATE);
+      const request = ctrl.expectOne('/auth/switch');
+      const refreshed = auth.refresh();
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      request.flush({ error: 'not_found' }, status(404));
+      await settle();
+      ctrl.expectOne('/auth/orgs').flush({ orgs: [entries(ACME)[0]] });
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok-refreshed' });
+      expect(await refreshed).toBe('ok');
+      expect(await done).toBe('gone');
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      expect(auth.token()).toBe('tok-refreshed');
+    });
+
+    it('a refresh that joined a switch which ends 401 gets "rejected": the session is over and no /auth/refresh is sent', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.switchTo(PRIVATE);
+      const request = ctrl.expectOne('/auth/switch');
+      const refreshed = auth.refresh();
+      await settle();
+      request.flush({ error: 'invalid_grant' }, status(401));
+      expect(await refreshed).toBe('rejected');
+      expect(await done).toBe('signed-out');
+      expect(auth.token()).toBeNull();
+      ctrl.expectNone('/auth/refresh');
+    });
+
+    it('a refresh that joined a switch which ends 503 runs its own refresh afterwards', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.switchTo(PRIVATE);
+      const request = ctrl.expectOne('/auth/switch');
+      const refreshed = auth.refresh();
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      request.flush(null, status(503));
+      expect(await done).toBe('failed');
+      await settle();
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok-refreshed' });
+      expect(await refreshed).toBe('ok');
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      expect(auth.token()).toBe('tok-refreshed');
+    });
+
+    it('a refresh asked after a new sign-in, while the old session switch is still away, is not rejected: it runs its own refresh', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.switchTo(PRIVATE);
+      const request = ctrl.expectOne('/auth/switch');
+      auth.dropSession(); // signed out, and signed in again: a refresh is asked for the new session
+      const refreshed = auth.refresh();
+      await settle();
+      ctrl.expectNone('/auth/refresh');
+      request.flush({ access_token: 'tok-old-session' });
+      expect(await done).toBe('signed-out');
+      await settle();
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok-new-session' });
+      expect(await refreshed).toBe('ok');
+      expect(auth.token()).toBe('tok-new-session');
+    });
+
+    it('a second switch asked while the first is away waits for it: its /auth/switch goes out after the first answer', async () => {
+      await signedInAs(auth, ctrl);
+      const first = auth.switchTo(PRIVATE);
+      const firstRequest = ctrl.expectOne('/auth/switch');
+      expect(firstRequest.request.body).toEqual({ org_id: PRIVATE });
+      const second = auth.switchTo(ACME);
+      await settle();
+      ctrl.expectNone('/auth/switch');
+      firstRequest.flush({ access_token: 'tok-2' });
+      await settle();
+      const secondRequest = ctrl.expectOne('/auth/switch');
+      expect(secondRequest.request.body).toEqual({ org_id: ACME });
+      secondRequest.flush({ access_token: 'tok-3' });
+      for (let round = 0; round < 4; round++) {
+        await settle();
+        ctrl.match('/auth/me').forEach((me) => me.flush(adminMe));
+        ctrl.match('/auth/orgs').forEach((list) => list.flush({ orgs: entries(ACME) }));
+      }
+      expect(await first).toBe('switched');
+      expect(await second).toBe('switched');
+      expect(auth.token()).toBe('tok-3');
+    });
+
     it('503: nothing changes, and the answer says it failed', async () => {
       await signedInAs(auth, ctrl);
       const done = auth.switchTo(PRIVATE);

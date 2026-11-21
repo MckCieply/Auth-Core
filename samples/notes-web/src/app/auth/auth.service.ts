@@ -67,7 +67,7 @@ export type ProviderNext =
 /** `next: null`: the exchange signed the person in. */
 export type ExchangeResult = { ok: true; next: ProviderNext | null } | { ok: false; failure: Failure };
 
-const REFRESH_TIMEOUT_MS = 10_000;
+export const REFRESH_TIMEOUT_MS = 10_000;
 const DEFAULT_WAIT_SECONDS = 60;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -243,6 +243,9 @@ export class AuthService {
   private readonly orgsState = signal<OrgEntry[]>([]);
   private readonly orgChangesState = signal(0);
   private refreshing: Promise<RefreshResult> | null = null;
+  // The call of /auth/switch that is on its way. It spends the same refresh cookie as a refresh, so the two never run together: a refresh
+  // asked meanwhile waits for it (and takes its token), a switch asked while a refresh runs waits for that.
+  private switching: Promise<SwitchResult> | null = null;
   // The /auth/me that is on its way, and the session and token it was asked for.
   private asking: { generation: number; token: string | null; answer: Promise<boolean> } | null = null;
   // Counts the sessions that ended in this tab: an answer that was on its way when the person signed out is never used.
@@ -411,12 +414,29 @@ export class AuthService {
    * Exchanges the refresh cookie for a new access token. Callers that ask while a refresh runs get that refresh:
    * there is never more than one request at a time. A refresh that started before the person signed out hands its callers
    * 'rejected' when it ends, whatever the cookie said: the session it was for is gone (the interceptor then leaves the page alone).
+   * A switch that is on its way (spec 0015) spends the same refresh cookie: the refresh waits for it and takes its token ('ok'), or its end
+   * of the session ('rejected'); when the switch renewed nothing (404, 503) the refresh goes on to its own request.
    */
   refresh(): Promise<RefreshResult> {
-    this.refreshing ??= this.exchange().finally(() => {
+    this.refreshing ??= this.renew().finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+
+  private async renew(): Promise<RefreshResult> {
+    const asked = this.generation;
+    while (this.switching !== null) {
+      const switched = await this.switching;
+      if (switched === 'switched') {
+        return 'ok';
+      }
+      // The session this refresh was asked in is over. A switch of an older session that ends 'signed-out' leaves a newer one alone.
+      if (switched === 'signed-out' && this.generation !== asked) {
+        return 'rejected';
+      }
+    }
+    return this.exchange();
   }
 
   /**
@@ -471,13 +491,36 @@ export class AuthService {
    */
   async switchTo(orgId: string): Promise<SwitchResult> {
     const started = this.generation;
-    // A refresh that is on its way spends the same refresh cookie, and its token would replace the switched one when it lands: wait for it.
-    if (this.refreshing !== null) {
-      await this.refreshing;
+    // A refresh or another switch that is on its way spends the same refresh cookie, and its token would replace the switched one when it
+    // lands: wait for it. Only one of them holds the cookie at a time.
+    while (this.refreshing !== null || this.switching !== null) {
+      await (this.switching ?? this.refreshing);
     }
     if (this.generation !== started) {
       return 'signed-out'; // the refresh found the session over
     }
+    // The slot is held for the call and the keeping of its token only: /auth/me and the list below may need a refresh of their own.
+    const call = this.callSwitch(orgId, started);
+    // The slot's promise is only ever awaited by a waiter; `call` is awaited below, so a rejection reaches the caller of `switchTo` once.
+    // The catch keeps the copy kept in the slot from being a second, unobserved rejection when no waiter joins.
+    this.switching = call
+      .finally(() => {
+        this.switching = null;
+      })
+      .catch(() => 'failed');
+    const result = await call;
+    if (result === 'gone') {
+      await this.loadOrgs();
+    } else if (result === 'switched') {
+      await this.loadMe();
+      await this.loadOrgs();
+      this.orgChangesState.update((count) => count + 1);
+    }
+    return result;
+  }
+
+  /** The request of `switchTo` and what the session does with its answer; 'switched' means the new token is kept. */
+  private async callSwitch(orgId: string, started: number): Promise<SwitchResult> {
     const outcome = await this.api.switchOrg(orgId);
     if (this.generation !== started) {
       return 'signed-out'; // the session this was for ended while the call was away: its token is never kept
@@ -488,7 +531,6 @@ export class AuthService {
       return 'signed-out';
     }
     if (outcome.result === 'gone') {
-      await this.loadOrgs();
       return 'gone';
     }
     if (outcome.result === 'failed') {
@@ -497,9 +539,6 @@ export class AuthService {
     this.switches += 1;
     this.accessToken.set(outcome.token);
     this.noticeState.set(null);
-    await this.loadMe();
-    await this.loadOrgs();
-    this.orgChangesState.update((count) => count + 1);
     return 'switched';
   }
 

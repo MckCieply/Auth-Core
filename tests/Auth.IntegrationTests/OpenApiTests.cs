@@ -368,6 +368,41 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task Every_company_operation_says_it_acts_on_the_company_of_the_token_and_the_removals_say_what_happens_to_the_account()   // spec 0015, criterion 33
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operations = Operations(document);
+
+        var checkedOperations = 0;
+        foreach (var (endpoint, operation) in operations)
+        {
+            var path = endpoint.Split(' ')[1];
+            if (path.StartsWith("/auth/org/", StringComparison.Ordinal) || path == "/auth/org" || endpoint is "GET /auth/me" or "DELETE /auth/account")
+            {
+                var text = operation["description"]?.GetValue<string>() ?? string.Empty;
+                Assert.True(text.Contains("token's company", StringComparison.Ordinal) && text.Contains("`org_id`", StringComparison.Ordinal), endpoint);
+                checkedOperations++;
+            }
+        }
+
+        Assert.Equal(16, checkedOperations);   // the 14 under /auth/org plus GET /auth/me and DELETE /auth/account
+
+        var bearer = document["components"]!["securitySchemes"]!["Bearer"]!["description"]!.GetValue<string>();
+        Assert.All(["POST /auth/login", "POST /auth/signup/complete", "POST /auth/refresh", "POST /auth/switch", "`org_id`"], part => Assert.Contains(part, bearer, StringComparison.Ordinal));
+
+        // The company deletion and the member removal keep an account that has another space (not the rule of spec 0010).
+        var company = operations["DELETE /auth/org"]["description"]!.GetValue<string>();
+        Assert.Contains("no other space", company, StringComparison.Ordinal);
+        Assert.Contains("keep their account", company, StringComparison.Ordinal);
+        Assert.DoesNotContain("no account is left without a space", company, StringComparison.Ordinal);
+        var member = operations["DELETE /auth/org/members/{user_id}"]["description"]!.GetValue<string>();
+        Assert.Contains("last space", member, StringComparison.Ordinal);
+        Assert.Contains("the account stays", member, StringComparison.Ordinal);
+        Assert.DoesNotContain("loses its only space", member, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Refresh_logout_and_switch_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the three; spec 0015: the switch also reads a body
     {
         await using var factory = new AuthAppFactory(postgres, keys);

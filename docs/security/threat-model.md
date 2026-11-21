@@ -191,7 +191,7 @@ The providers themselves learn of each sign-in (risk 58).
 ## Account deletion and personal data
 
 Spec 0010 deletes an account in four places: a private person deletes their own (`DELETE /auth/account`), an admin removes a member, a
-company is deleted (the account of every member, the admin's included), and a start deletes the accounts an earlier version left without a
+company is deleted (the account of every member who has no other space, the admin's included), and a start deletes the accounts an earlier version left without a
 company. One routine does it, in the transaction of the change (`AccountDeletionTests`). Since spec 0015 an account can hold several
 memberships, and a removal or a company deletion deletes the account only when it loses its last space: the membership goes, and an account
 with another space stays (`member.removed` is written either way, `account.deleted` only for a deletion, and its `org_id` names the space

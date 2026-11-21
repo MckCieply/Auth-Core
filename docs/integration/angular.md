@@ -258,9 +258,9 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
   `409 private_account_exists` ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)).
 - **Removing a member deletes the account only with its last space** (spec 0015), and deleting a company does the same for every member, the
   admin included: a person who is a member of another space keeps the account. Say so in the confirmation of your own team screen, with the
-  sample's sentence: "This person's account will be deleted." ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)) (it
-  says nothing of the other spaces; a product whose members often belong to several companies should word it as "if this is the last
-  space of the account"). A person whose account is deleted can be invited again, as a new account.
+  sample's sentence: "This person loses access to this company. Their account is deleted if this company is their last."
+  ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)). A person whose account is deleted can be invited again, as a new
+  account.
 - **Personal data after deletion:** Auth-Core deletes the account and what it holds of it, keeps the audit rows that name it (its id, its
   address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
   rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.

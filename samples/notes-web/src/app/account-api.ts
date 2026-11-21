@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom, timeout } from 'rxjs';
-import { Failure, failureOf, formFailureOf, isRecord } from './auth/auth.service';
+import { Failure, REFRESH_TIMEOUT_MS, failureOf, formFailureOf, isRecord } from './auth/auth.service';
 
 /** How long the screens wait for GET /auth/options: a call that is slower counts as failed, as the refresh does (ten seconds). */
 export const OPTIONS_TIMEOUT_MS = 10_000;
@@ -136,11 +136,12 @@ export class AccountApi {
 
   /**
    * POST /auth/switch (spec 0015): the refresh cookie goes with it by itself, as with `/auth/refresh`; no access token is sent (the path is
-   * in neither interceptor list), so a `401` is the session's end and is never retried after a refresh.
+   * in neither interceptor list), so a `401` is the session's end and is never retried after a refresh. It spends the refresh cookie, so it
+   * waits as long as a refresh does (a refresh that joins it must not wait longer); an answer that does not come is a failure.
    */
   async switchOrg(orgId: string): Promise<SwitchOutcome> {
     try {
-      const body = await firstValueFrom(this.http.post<unknown>('/auth/switch', { org_id: orgId }));
+      const body = await firstValueFrom(this.http.post<unknown>('/auth/switch', { org_id: orgId }).pipe(timeout(REFRESH_TIMEOUT_MS)));
       const token = isRecord(body) ? body['access_token'] : undefined;
       return typeof token === 'string' && token !== '' ? { result: 'ok', token } : { result: 'failed' };
     } catch (error) {
