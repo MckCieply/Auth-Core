@@ -1,5 +1,7 @@
+using Auth.Infrastructure.Persistence;
 using Auth.Server.Audit;
 using Auth.Server.Tenancy;
+using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -11,11 +13,15 @@ namespace Auth.Server.Sessions;
 /// rejection ends the handlers after it, so this handler runs just before and asks the same question: the entry is a refresh
 /// token, it has been redeemed, and the redemption is older than the reuse leeway. Inside the leeway an honest retry is let
 /// through and nothing is recorded; once OpenIddict has revoked the family the status is <c>revoked</c>, so a repeated replay does
-/// not record again. It changes nothing about the answer: once the token entry has been read, a failure to look up the account's company
-/// or to write the row is logged at <c>Warning</c> and swallowed, so that OpenIddict still decides the reuse and revokes the family.
+/// not record again. The row names the session's company (spec 0015): the one the reused token carries (<see cref="SessionCompany"/>, read
+/// from <c>context.Principal</c>, which earlier handlers have already set at this handler's order), with its name read now; for a token of the
+/// code before this version, which carries none, or not both claims readable, the space a sign-in would take. It changes nothing about the answer: once the token entry has been read, a failure to
+/// look up the company or to write the row is logged at <c>Warning</c> and swallowed, so that OpenIddict still decides the reuse and revokes
+/// the family.
 /// </summary>
 public sealed partial class RefreshReuseAuditHandler(
-    IOpenIddictTokenManager tokens, TimeProvider clock, AuditLog audit, MembershipReader memberships, ILogger<RefreshReuseAuditHandler> logger)
+    IOpenIddictTokenManager tokens, TimeProvider clock, AuditLog audit, AuthDbContext db, MembershipReader memberships,
+    ILogger<RefreshReuseAuditHandler> logger)
     : IOpenIddictServerHandler<OpenIddictServerEvents.ValidateTokenContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
@@ -48,13 +54,31 @@ public sealed partial class RefreshReuseAuditHandler(
         try
         {
             var subject = Guid.TryParse(await tokens.GetSubjectAsync(token, context.CancellationToken), out var userId) ? userId : (Guid?)null;
-            var tenant = subject is { } id ? await memberships.ReadSignInSpaceAsync(id, context.CancellationToken) : null;
+            Guid? companyId;
+            string? companyName;
+            if (context.Principal is { } principal && SessionCompany.Read(principal) is { } session)
+            {
+                // The company the session signed in to, read now: its name is null once the company is gone.
+                companyId = session.CompanyId;
+                companyName = await db.Companies
+                    .Where(c => c.Id == session.CompanyId)
+                    .Select(c => c.Name)
+                    .FirstOrDefaultAsync(context.CancellationToken);
+            }
+            else
+            {
+                // A token of the code before spec 0015 names no company: the space a sign-in would take.
+                var tenant = subject is { } id ? await memberships.ReadSignInSpaceAsync(id, context.CancellationToken) : null;
+                companyId = tenant?.CompanyId;
+                companyName = tenant?.CompanyName;
+            }
+
             await audit.WriteAloneAsync(new AuditEntry
             {
                 Kind = AuditKinds.RefreshReuseDetected,
                 SubjectUserId = subject,
-                OrgId = tenant?.CompanyId,
-                OrgName = tenant?.CompanyName,
+                OrgId = companyId,
+                OrgName = companyName,
             });
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !context.CancellationToken.IsCancellationRequested)

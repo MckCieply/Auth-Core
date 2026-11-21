@@ -1,15 +1,133 @@
+using System.Collections.Concurrent;
 using System.Net;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Auth.Server.Seeding;
 using Auth.Server.Sessions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using OpenIddict.Abstractions;
+using OpenIddict.Server;
 
 namespace Auth.IntegrationTests;
 
-public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterialFixture keys) : AuditTestBase(postgres, keys)
+public sealed class AuditRefreshReuseTests : AuditTestBase
 {
+    private readonly OldRefreshTokens _oldTokens;
+
+    // What a test-only handler, at the order of the reuse audit handler, saw: whether the validated token's principal carried the company claim.
+    private readonly ConcurrentQueue<bool> _principalCarriedCompany = new();
+
+    public AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        _oldTokens = OldRefreshTokens.Install(Factory);
+        Factory.WithServices(services => services.Configure<OpenIddictServerOptions>(options => options.Handlers.Add(
+            OpenIddictServerHandlerDescriptor.CreateBuilder<OpenIddictServerEvents.ValidateTokenContext>()
+                .UseInlineHandler(context =>
+                {
+                    if (!string.IsNullOrEmpty(context.TokenId))
+                    {
+                        _principalCarriedCompany.Enqueue(context.Principal?.GetClaim(SessionPolicy.CompanyClaim) is not null);
+                    }
+
+                    return ValueTask.CompletedTask;
+                })
+                .SetOrder(OpenIddictServerHandlers.Protection.ValidateTokenEntry.Descriptor.Order - 1)
+                .SetType(OpenIddictServerHandlerType.Custom)
+                .Build())));
+    }
+
+    private Task<int> SetLastUsedAtAsync(Guid userId, Guid companyId, DateTimeOffset? at) =>
+        InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastUsedAt, at), TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task The_principal_of_the_reused_token_is_known_where_the_reuse_is_recorded()
+    {
+        var login = await SessionApi.LoginAsync(Client, Factory);
+        await SessionApi.RefreshOk(Client, login.RefreshToken);
+        Clock.Advance(TimeSpan.FromSeconds(20));
+        using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(replay);
+
+        Assert.Equal(2, _principalCarriedCompany.Count);   // the honest refresh and the replay
+        Assert.All(_principalCarriedCompany, carried => Assert.True(carried, "context.Principal must carry session_org_id at the handler's order."));
+    }
+
+    [Fact]
+    public async Task A_reuse_names_the_session_company_of_the_reused_token()
+    {
+        var user = await Factory.SeedUserIdAsync();
+        var a = await DevCompanyIdAsync();
+        var b = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(user, b, "user");
+        var login = await SessionApi.LoginAsync(Client, Factory);
+        Assert.Equal(a.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        await SessionApi.RefreshOk(Client, login.RefreshToken);
+        await SetLastUsedAtAsync(user, b, StorableTime.Now(Clock).AddHours(1));   // the sign-in order now says B
+
+        Clock.Advance(TimeSpan.FromSeconds(20));
+        using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(replay);
+
+        var row = await SingleAsync(AuditKinds.RefreshReuseDetected);
+        Assert.Equal(user, row.SubjectUserId);
+        Assert.Equal(a, row.OrgId);
+        Assert.Equal(DevUserSeeder.DefaultOrgName, row.OrgName);
+    }
+
+    [Fact]
+    public async Task A_reuse_of_a_token_without_the_session_company_names_the_sign_in_space()
+    {
+        var user = await Factory.SeedUserIdAsync();
+        var a = await DevCompanyIdAsync();
+        var b = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(user, b, "user");
+        var old = await _oldTokens.LoginAsync(Client, Factory.SeedEmail, Factory.SeedPassword);
+        var stored = await StoredTokens.RefreshClaimsAsync(Factory, old.RefreshToken);
+        Assert.False(stored.ContainsKey("session_org_id"), "The minted token must be one of the code before spec 0015.");
+        Assert.Equal(a.ToString(), AccessTokens.Text(old.AccessToken, "org_id"));
+        await SessionApi.RefreshOk(Client, old.RefreshToken);   // consumes it
+        await SetLastUsedAtAsync(user, b, StorableTime.Now(Clock).AddHours(1));   // the sign-in order now says B
+
+        Clock.Advance(TimeSpan.FromSeconds(20));
+        using var replay = await SessionApi.Refresh(Client, old.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(replay);
+
+        var row = await SingleAsync(AuditKinds.RefreshReuseDetected);
+        Assert.Equal(b, row.OrgId);
+        Assert.Equal("Second", row.OrgName);
+    }
+
+    [Fact]
+    public async Task A_reuse_of_a_token_whose_session_company_is_gone_names_the_company_without_a_name()
+    {
+        var user = await Factory.SeedUserIdAsync();
+        var c = await CreateCompanyAsync("Doomed");
+        await AddMembershipAsync(user, c, "user");
+        await SetLastUsedAtAsync(user, c, StorableTime.Now(Clock).AddHours(1));   // the sign-in lands in C
+        var login = await SessionApi.LoginAsync(Client, Factory);
+        Assert.Equal(c.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
+        await SessionApi.RefreshOk(Client, login.RefreshToken);
+        await InDbAsync(async db =>
+        {
+            await db.Memberships.Where(m => m.CompanyId == c).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+            return await db.Companies.Where(x => x.Id == c).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        });
+
+        Clock.Advance(TimeSpan.FromSeconds(20));
+        using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(replay);
+
+        var row = await SingleAsync(AuditKinds.RefreshReuseDetected);
+        Assert.Equal(user, row.SubjectUserId);
+        Assert.Equal(c, row.OrgId);
+        Assert.Null(row.OrgName);
+    }
+
     [Fact]
     public async Task A_consumed_token_presented_after_the_leeway_is_recorded_once_with_its_account()   // criterion 8
     {
@@ -122,13 +240,21 @@ public sealed class AuditRefreshReuseTests(PostgresFixture postgres, KeyMaterial
         return (rejected, (await AuditAsync(AuditKinds.RefreshReuseDetected)).Count);
     }
 
-    [Fact]
-    public async Task A_failing_lookup_of_the_company_does_not_change_the_answer_or_stop_the_revocation()
+    // The lookup of a token that names its company reads Companies; one of before spec 0015 reads the sign-in space (Memberships).
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_failing_lookup_of_the_company_does_not_change_the_answer_or_stop_the_revocation(bool oldToken)
     {
-        var login = await SessionApi.LoginAsync(Client, Factory);
+        var login = oldToken
+            ? await _oldTokens.LoginAsync(Client, Factory.SeedEmail, Factory.SeedPassword)
+            : await SessionApi.LoginAsync(Client, Factory);
         var next = await SessionApi.RefreshOk(Client, login.RefreshToken);
         Clock.Advance(TimeSpan.FromSeconds(20));
-        await InDbAsync(db => db.Database.ExecuteSqlRawAsync("""ALTER TABLE "Memberships" RENAME TO "Memberships_away" """, TestContext.Current.CancellationToken));
+        var rename = oldToken
+            ? """ALTER TABLE "Memberships" RENAME TO "Memberships_away" """
+            : """ALTER TABLE "Companies" RENAME TO "Companies_away" """;
+        await InDbAsync(db => db.Database.ExecuteSqlRawAsync(rename, TestContext.Current.CancellationToken));
 
         using var replay = await SessionApi.Refresh(Client, login.RefreshToken);
         using var afterReplay = await SessionApi.Refresh(Client, next.RefreshToken);
