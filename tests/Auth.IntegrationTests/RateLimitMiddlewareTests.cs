@@ -114,6 +114,7 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
     [InlineData("GET", "/auth/.well-known/jwks.json", 5)]
     [InlineData("POST", "/auth/logout", 5)]
     [InlineData("GET", "/auth/me", 5)]
+    [InlineData("GET", "/auth/orgs", 5)]   // spec 0015
     public async Task Each_policy_refuses_at_its_own_number(string method, string path, int limit)   // criterion 1
     {
         var http = new HttpMethod(method);

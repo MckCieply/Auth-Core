@@ -11,13 +11,14 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0011, as "METHOD path".
+    // Every endpoint of specs 0001–0011 and 0015, as "METHOD path".
     private static readonly string[] Endpoints =
     [
         "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
         "POST /auth/password/forgot", "POST /auth/password/reset", "POST /auth/email/verify/request", "POST /auth/email/verify",
         "GET /auth/.well-known/jwks.json", "GET /auth/health",
         "GET /auth/me",
+        "GET /auth/orgs",
         "DELETE /auth/account",
         "GET /auth/options",
         "POST /auth/signup",
@@ -165,6 +166,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify/request", "202,400,415,429")]
     [InlineData("POST /auth/email/verify", "204,400,415,429")]
     [InlineData("GET /auth/me", "200,401,403,429")]
+    [InlineData("GET /auth/orgs", "200,401,403,429")]
     [InlineData("DELETE /auth/account", "204,400,401,403,415,429")]
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
@@ -216,6 +218,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
+        Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/orgs"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
         Assert.All(["cannot_change_self", "last_manager"], code => Assert.Contains(code, Description(operations["DELETE /auth/org/members/{user_id}"], "409")));
@@ -305,6 +308,8 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
         Assert.Equal(["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["orgs"], Properties("OrgListResponse"));
+        Assert.Equal(["current", "id", "kind", "name", "role"], Properties("OrgListItem"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));

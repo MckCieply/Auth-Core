@@ -9,7 +9,8 @@ public static class TenancyEndpoints
     /// <summary>
     /// The endpoints of spec 0005: the caller's own data and the company API. <c>GET /auth/me</c> and everything under <c>/auth/org</c> act on
     /// the token's company (its <c>org_id</c>), checked against the database on every call (spec 0015), and need an access token; the
-    /// invitation endpoints that need none are mapped beside it.
+    /// invitation endpoints that need none are mapped beside it. <c>GET /auth/orgs</c> does not act on the token's company: it lists every
+    /// space of the account, so it deliberately does not go through <see cref="CompanyAccess"/>.
     /// </summary>
     public static IEndpointRouteBuilder MapTenancyApi(this IEndpointRouteBuilder app)
     {
@@ -22,6 +23,18 @@ public static class TenancyEndpoints
                 "The caller as the database says now, in the token's company (its `org_id`): the membership, role and permissions there, whichever "
                 + "company a sign-in would choose today. When the account is no longer a member of the token's company the answer is `403 permissions_changed`.")
             .Produces<MeResponse>()
+            .ProducesGuarded();
+
+        // Spec 0015: the spaces of the account, behind the access token only: it answers when the token's own company is gone.
+        app.MapGet(OrgListEndpoint.Path, OrgListEndpoint.ListAsync)
+            .RequireAuthorization()
+            .WithTags("Company")
+            .WithDescription(
+                "Every space the caller belongs to, as the database says now: companies and a personal space (`kind` `organization` or `personal`, "
+                + "as `org_kind` of `GET /auth/me`), each with the caller's role there. Ordered by `name`, ignoring case, then by `id`. `current` marks "
+                + "the space the token is for (its `org_id`); no entry is current when the account is no longer a member of it. An account that is gone "
+                + "or has no membership gets `403 permissions_changed`.")
+            .Produces<OrgListResponse>()
             .ProducesGuarded();
 
         // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.

@@ -13,6 +13,15 @@ public sealed record MeResponse(
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);
 
+/// <summary>Response of <c>GET /auth/orgs</c>: every space the caller belongs to.</summary>
+public sealed record OrgListResponse(IReadOnlyList<OrgListItem> Orgs);
+
+/// <summary>
+/// One space of <c>GET /auth/orgs</c>: <c>kind</c> is <c>organization</c> or <c>personal</c> as <c>org_kind</c> of <c>GET /auth/me</c> has it (a
+/// private account's space is named <c>private</c>, as is its role); <c>current</c>: this is the space the token is for.
+/// </summary>
+public sealed record OrgListItem(Guid Id, string Name, string Kind, RoleRef Role, bool Current);
+
 /// <summary>Request of <c>PATCH /auth/org</c>.</summary>
 public sealed record RenameOrgRequest(string Name);
 
