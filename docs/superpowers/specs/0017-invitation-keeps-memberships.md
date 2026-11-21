@@ -383,8 +383,10 @@ No change.
   acceptance; `private_account_exists` no longer answered; the provider path for existing accounts.
 - `docs/design.md`: the note on slices 0015–0017 names this one done.
 
-**Residual risks**, added to the threat model's list after the last one at the time this slice is built (spec 0015 adds
-62 to 65):
+**Residual risks** 68 to 70, added to the threat model's list after spec 0015's 62 to 65 and spec 0016's 66 and 67 (if
+the list has grown otherwise by the time this slice is built, they take the next free numbers). The threat model's
+sentence that names which specs accepted which items ("Items 1 to 61 are the risks accepted by …", as spec 0016
+rewords it for 0015 and 0016) gains "68 to 70 are spec 0017's"; no new sentence is written.
 
 - **The link alone adds an existing account to a company.** Whoever reads the person's mailbox can make the account a
   member of the inviting company. It gives them no sign-in (that still needs the password or a linked provider), and the
@@ -471,7 +473,7 @@ Mail, sample, documents
 22. OpenAPI describes the new preview fields and the changed answers; `OpenApiHardeningTests` counts are unchanged.
 23. `samples/notes-web` unit tests and Playwright specs of "Sample frontend" pass; the existing Playwright specs pass.
 24. The e2e scripts of "e2e scripts" pass against the development stack.
-25. The documents of "Documents" are updated; the threat model lists the three risks.
+25. The documents of "Documents" are updated; the threat model lists the three risks as 68 to 70 and names them in its intro sentence.
 
 ## Decisions (owner, 2026-11-21)
 
