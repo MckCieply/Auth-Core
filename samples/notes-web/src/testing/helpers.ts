@@ -57,6 +57,16 @@ export async function holdToken(auth: AuthService, ctrl: HttpTestingController, 
   await done;
 }
 
+/**
+ * A sign-in, and the start of a session that is resumed, also ask GET /auth/orgs for the picker (spec 0015). A spec about something else
+ * answers that call with no spaces before it checks that nothing else is open.
+ */
+export function answerOrgs(ctrl: HttpTestingController): void {
+  for (const request of ctrl.match('/auth/orgs')) {
+    request.flush({ orgs: [] });
+  }
+}
+
 /** A signed-in person: a token and the answer of /auth/me. */
 export async function signedInAs(
   auth: AuthService,

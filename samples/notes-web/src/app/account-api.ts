@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom, timeout } from 'rxjs';
 import { Failure, failureOf, formFailureOf, isRecord } from './auth/auth.service';
@@ -68,10 +68,88 @@ export interface SignupPreview {
   company_name: string | null;
 }
 
+/** One space of the account, as GET /auth/orgs lists it (spec 0015): a company, or the personal space. */
+export interface OrgEntry {
+  id: string;
+  name: string;
+  kind: 'organization' | 'personal';
+  role: { id: string; name: string };
+  /** True for the space the access token is for. */
+  current: boolean;
+}
+
+/**
+ * What POST /auth/switch came to. 'gone': 404, the account is no longer a member there. 'rejected': 401, the session cannot go on.
+ * 'failed': anything else (an outage, a limit, an answer that is not a token): nothing changed.
+ */
+export type SwitchOutcome = { result: 'ok'; token: string } | { result: 'gone' } | { result: 'rejected' } | { result: 'failed' };
+
+/** An entry of GET /auth/orgs in the contract's shape, or null. */
+function asOrgEntry(value: unknown): OrgEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const role = value['role'];
+  if (
+    typeof value['id'] === 'string' &&
+    typeof value['name'] === 'string' &&
+    typeof value['current'] === 'boolean' &&
+    isRecord(role) &&
+    typeof role['id'] === 'string' &&
+    typeof role['name'] === 'string'
+  ) {
+    return {
+      id: value['id'],
+      name: value['name'],
+      kind: value['kind'] === 'personal' ? 'personal' : 'organization',
+      role: { id: role['id'], name: role['name'] },
+      current: value['current'],
+    };
+  }
+  return null;
+}
+
 /** Auth-Core's endpoints for the mail links and the account, which need no access token. */
 @Injectable({ providedIn: 'root' })
 export class AccountApi {
   private readonly http = inject(HttpClient);
+
+  /**
+   * GET /auth/orgs (spec 0015): every space of the account. The interceptor adds the token (the `/auth/org` prefix). An answer that is not
+   * a list in the contract's shape is a failure, not a list with holes.
+   */
+  async listOrgs(): Promise<Outcome<OrgEntry[]>> {
+    const outcome = await this.get<unknown>('/auth/orgs');
+    if (!outcome.ok) {
+      return outcome;
+    }
+    const body = outcome.value;
+    const listed: unknown = isRecord(body) ? body['orgs'] : undefined;
+    if (Array.isArray(listed)) {
+      const orgs = listed.map(asOrgEntry);
+      if (orgs.every((entry) => entry !== null)) {
+        return { ok: true, value: orgs };
+      }
+    }
+    return { ok: false, failure: { kind: 'other' } };
+  }
+
+  /**
+   * POST /auth/switch (spec 0015): the refresh cookie goes with it by itself, as with `/auth/refresh`; no access token is sent (the path is
+   * in neither interceptor list), so a `401` is the session's end and is never retried after a refresh.
+   */
+  async switchOrg(orgId: string): Promise<SwitchOutcome> {
+    try {
+      const body = await firstValueFrom(this.http.post<unknown>('/auth/switch', { org_id: orgId }));
+      const token = isRecord(body) ? body['access_token'] : undefined;
+      return typeof token === 'string' && token !== '' ? { result: 'ok', token } : { result: 'failed' };
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 404) {
+        return { result: 'gone' };
+      }
+      return error instanceof HttpErrorResponse && error.status === 401 ? { result: 'rejected' } : { result: 'failed' };
+    }
+  }
 
   forgotPassword(email: string): Promise<Outcome> {
     return this.post('/auth/password/forgot', { email });
@@ -153,6 +231,14 @@ export class AccountApi {
       }
     }
     return { ok: false, failure: { kind: 'other' } };
+  }
+
+  private async get<T>(url: string): Promise<Outcome<T>> {
+    try {
+      return { ok: true, value: await firstValueFrom(this.http.get<T>(url)) };
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
   }
 
   /** Like `post`, but a `400 invalid_request` is a failure of its own: the sign-up form has a text for it. */

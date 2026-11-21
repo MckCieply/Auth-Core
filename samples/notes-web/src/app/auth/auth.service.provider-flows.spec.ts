@@ -1,7 +1,7 @@
 import { HttpErrorResponse, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { adminMe, privateMe, providerMe, settle, signedInAs } from '../../testing/helpers';
+import { adminMe, answerOrgs, privateMe, providerMe, settle, signedInAs } from '../../testing/helpers';
 import { authInterceptor, wantsToken } from './auth.interceptor';
 import { AuthService, failureOf } from './auth.service';
 
@@ -17,7 +17,10 @@ describe('AuthService: the provider calls (spec 0011)', () => {
     ctrl = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => ctrl.verify());
+  afterEach(() => {
+    answerOrgs(ctrl);
+    ctrl.verify();
+  });
 
   it('the exchange that signs in starts a session, as a login does', async () => {
     const done = auth.exchangeTicket('t-1');

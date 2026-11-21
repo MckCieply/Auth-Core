@@ -1,7 +1,7 @@
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { ApplicationInitStatus } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { adminMe, settle } from '../testing/helpers';
+import { adminMe, settle, answerOrgs } from '../testing/helpers';
 import { appConfig } from './app.config';
 import { AuthService } from './auth/auth.service';
 
@@ -18,6 +18,7 @@ describe('appConfig', () => {
     ctrl.expectOne('/auth/me').flush(adminMe);
     await status.donePromise;
     expect(TestBed.inject(AuthService).token()).toBe('tok');
+    answerOrgs(ctrl);
     ctrl.verify();
   });
 
