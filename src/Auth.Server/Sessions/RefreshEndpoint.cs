@@ -34,6 +34,24 @@ public static class RefreshEndpoint
             return failure;
         }
 
+        var principal = NextPrincipal(http, tokens, check, check.Space!);
+
+        // A refresh holds the session's membership (it never writes LastUsedAt); a membership that is gone or another one is invalid_grant.
+        return new AtomicSignInResult(principal, entry: null, whenGone: () => Task.FromResult(InvalidGrant()), use: SpaceUse.Hold);
+    }
+
+    /// <summary>
+    /// The principal of the next pair of tokens, made from the refresh token that was presented (<paramref name="check"/>) and the space the
+    /// new session is for (<paramref name="space"/>: the session's own company for a refresh, the chosen one for a switch). It also leaves the
+    /// lifetime of the next refresh token for <see cref="SessionResponseHandler"/>, which sets the cookie from it.
+    /// </summary>
+    internal static ClaimsPrincipal NextPrincipal(HttpContext http, IOptions<TokenOptions> tokens, SessionCheck check, TenantContext space)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(check);
+        ArgumentNullException.ThrowIfNull(space);
+
         // Start from the refresh token's own claims, so OpenIddict's internal ones (the authorization id that makes
         // the family) carry over to the new tokens.
         var identity = new ClaimsIdentity(
@@ -42,19 +60,17 @@ public static class RefreshEndpoint
             nameType: Claims.Name,
             roleType: Claims.Role);
         identity.SetClaim(Claims.Subject, check.UserId.ToString());
-        TenantClaims.Apply(identity, check.Space!);
+        TenantClaims.Apply(identity, space);
 
         // Overwrites the session claims copied from the old token; a token of before spec 0015 gets them here.
-        SessionCompany.Apply(identity, check.Space!);
+        SessionCompany.Apply(identity, space);
 
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);
         principal.SetDestinations(TenantClaims.DestinationsOf);
         principal.SetRefreshTokenLifetime(check.Lifetime);
         http.Items[RefreshCookie.LifetimeItemKey] = check.Lifetime;
-
-        // A refresh holds the session's membership (it never writes LastUsedAt); a membership that is gone or another one is invalid_grant.
-        return new AtomicSignInResult(principal, entry: null, whenGone: () => Task.FromResult(InvalidGrant()), use: SpaceUse.Hold);
+        return principal;
     }
 
     /// <summary>

@@ -47,6 +47,9 @@ public static class AccountEndpoints
             .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up.")
             .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant")
             .ProducesTemporarilyUnavailable();
+        // Spec 0015: the switch's part 1, a refresh in the session's company. Left out of the description until the next part documents it.
+        app.MapPost(SessionPaths.Switch, SwitchEndpoint.SwitchAsync)
+            .ExcludeFromDescription();
         app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync)
             .WithTags("Sessions")
             .ReadsRefreshCookie("The refresh token whose session ends. Missing or unknown: the answer is the same `204`.")

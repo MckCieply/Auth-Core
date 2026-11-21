@@ -11,8 +11,8 @@ namespace Auth.Server.Sessions;
 
 /// <summary>
 /// Moves the refresh token of a successful token response out of the body and into the <c>auth_rt</c> cookie. The
-/// refresh token never reaches a response body (spec 0002, criterion 8). On <c>/auth/refresh</c> it also writes the
-/// response itself: <c>{"access_token"}</c> on success; on failure one uniform <c>401 {"error":"invalid_grant"}</c>, except
+/// refresh token never reaches a response body (spec 0002, criterion 8). On <c>/auth/refresh</c> and <c>/auth/switch</c> (the session
+/// paths, <see cref="SessionPaths.IsSessionPath"/>) it also writes the response itself: <c>{"access_token"}</c> on success; on failure one uniform <c>401 {"error":"invalid_grant"}</c>, except
 /// that a <c>server_error</c> (the service could not do its work, which is not the client's doing) is
 /// <c>503 {"error":"temporarily_unavailable"}</c> with <c>Retry-After: 5</c>, so that the person stays signed in.
 /// </summary>
@@ -38,21 +38,22 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
         var http = context.Transaction.GetHttpRequest()?.HttpContext
             ?? throw new InvalidOperationException("The token endpoint was reached without an ASP.NET Core request.");
 
-        var isRefresh = RefreshRequestHandler.IsRefreshPath(http.Request.Path);
+        var isSession = SessionPaths.IsSessionPath(http.Request.Path);
 
         if (!string.IsNullOrEmpty(context.Response.Error))
         {
             // A refresh that failed for a reason that is not the client's (OpenIddict says server_error) is a 503, and the person
             // stays signed in: the cookie is neither cleared nor rotated (spec 0008 → POST /auth/refresh during an outage).
-            if (isRefresh && string.Equals(context.Response.Error, Errors.ServerError, StringComparison.Ordinal))
+            if (isSession && string.Equals(context.Response.Error, Errors.ServerError, StringComparison.Ordinal))
             {
                 http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 http.Response.Headers.RetryAfter = ErrorHandlingMiddleware.RefreshRetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = ErrorHandlingMiddleware.TemporarilyUnavailable }, context);
             }
-            // invalid_request is the wrong-method case: a malformed request, answered like login's 400. Every other
-            // error on this path is a refresh failure and gets the one uniform answer (spec 0002, criterion 7).
-            else if (isRefresh && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
+            // invalid_request is a malformed request (a wrong method on either path, a body the switch cannot use): answered like login's 400
+            // by OpenIddict's own writer. Every other error on these paths is a refresh failure and gets the one uniform answer (spec 0002,
+            // criterion 7).
+            else if (isSession && !string.Equals(context.Response.Error, Errors.InvalidRequest, StringComparison.Ordinal))
             {
                 http.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await WriteCompactAsync(http.Response, new OpenIddictResponse { Error = Errors.InvalidGrant }, context);
@@ -70,7 +71,7 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
 
         // Checked before the cookie is written, so a response about to fail never carries a Set-Cookie.
         var accessToken = context.Response.AccessToken;
-        if (isRefresh && accessToken is null)
+        if (isSession && accessToken is null)
         {
             throw new InvalidOperationException("A successful token response has no access token.");
         }
@@ -78,7 +79,7 @@ public sealed class SessionResponseHandler : IOpenIddictServerHandler<OpenIddict
         RefreshCookie.Append(http.Response, refreshToken, lifetime);
         context.Response.RefreshToken = null;
 
-        if (isRefresh)
+        if (isSession)
         {
             // Replace, rather than remove one by one: whatever else OpenIddict adds must not leak into the contract.
             await WriteCompactAsync(http.Response, new OpenIddictResponse { AccessToken = accessToken }, context);

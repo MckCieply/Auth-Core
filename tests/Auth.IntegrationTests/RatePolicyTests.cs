@@ -8,6 +8,7 @@ public sealed class RatePolicyTests
     [Theory]
     [InlineData("POST", "/auth/login", RatePolicy.Login)]
     [InlineData("POST", "/auth/refresh", RatePolicy.Refresh)]
+    [InlineData("POST", "/auth/switch", RatePolicy.Refresh)]   // spec 0015: a switch shares the refresh budget
     [InlineData("POST", "/auth/password/forgot", RatePolicy.Email)]
     [InlineData("POST", "/auth/password/reset", RatePolicy.Email)]
     [InlineData("POST", "/auth/email/verify/request", RatePolicy.Email)]

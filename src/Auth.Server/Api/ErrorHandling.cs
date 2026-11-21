@@ -46,7 +46,7 @@ public sealed partial class ErrorHandlingMiddleware(RequestDelegate next, ILogge
             }
 
             var rejected = exception as BadHttpRequestException;
-            var outage = rejected is null && RefreshRequestHandler.IsRefreshPath(context.Request.Path) && IsTransientFailure(exception);
+            var outage = rejected is null && SessionPaths.IsSessionPath(context.Request.Path) && IsTransientFailure(exception);
             if (rejected is not null)
             {
                 LogRejected(logger, exception);

@@ -99,6 +99,7 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
     [Theory]
     [InlineData("POST", "/auth/login", 3)]
     [InlineData("POST", "/auth/refresh", 3)]
+    [InlineData("POST", "/auth/switch", 3)]   // spec 0015
     [InlineData("POST", "/auth/password/forgot", 3)]
     [InlineData("POST", "/auth/password/reset", 3)]
     [InlineData("POST", "/auth/email/verify/request", 3)]
@@ -127,6 +128,22 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
         using var refused = await Send(http, path);
 
         await RateLimitApi.AssertTooManyRequestsAsync(refused);
+    }
+
+    [Fact]
+    public async Task A_switch_and_refreshes_share_the_refresh_budget()   // criterion 22
+    {
+        foreach (var path in new[] { "/auth/refresh", "/auth/switch", "/auth/refresh" })
+        {
+            using var answered = await Send(HttpMethod.Post, path);
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, answered.StatusCode);
+        }
+
+        using var fourthSwitch = await Send(HttpMethod.Post, "/auth/switch");
+        using var fourthRefresh = await Send(HttpMethod.Post, "/auth/refresh");
+
+        await RateLimitApi.AssertTooManyRequestsAsync(fourthSwitch);
+        await RateLimitApi.AssertTooManyRequestsAsync(fourthRefresh);
     }
 
     [Fact]

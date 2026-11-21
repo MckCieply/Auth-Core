@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Net.Http.Headers;
@@ -13,6 +14,7 @@ public static class SessionApi
 {
     public const string RefreshPath = "/auth/refresh";
     public const string LogoutPath = "/auth/logout";
+    public const string SwitchPath = "/auth/switch";
     public const string CookieName = "auth_rt";
 
     public sealed record Session(string AccessToken, string RefreshToken, SetCookieHeaderValue Cookie);
@@ -47,6 +49,18 @@ public static class SessionApi
         using var response = await Refresh(client, refreshToken);
         return await ReadSessionAsync(response);
     }
+
+    /// <summary><c>POST /auth/switch</c> with the cookie as <see cref="Refresh"/> sends it and <paramref name="body"/> as given, declared as <paramref name="contentType"/>.</summary>
+    public static Task<HttpResponseMessage> Switch(HttpClient client, string? refreshToken, string body, string contentType = "application/json", string path = SwitchPath)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8) };
+        request.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+        return client.SendAsync(WithCookie(request, refreshToken));
+    }
+
+    /// <summary>Switches to the space <paramref name="orgId"/>: the body is <c>{"org_id":"&lt;id&gt;"}</c>.</summary>
+    public static Task<HttpResponseMessage> SwitchTo(HttpClient client, string? refreshToken, Guid orgId) =>
+        Switch(client, refreshToken, $$"""{"org_id":"{{orgId:D}}"}""");
 
     public static Task<HttpResponseMessage> Logout(HttpClient client, string? refreshToken, string path = LogoutPath) =>
         client.SendAsync(WithCookie(new HttpRequestMessage(HttpMethod.Post, path), refreshToken));
