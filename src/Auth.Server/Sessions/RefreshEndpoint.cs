@@ -129,7 +129,7 @@ public static class RefreshEndpoint
             return SessionCheck.Failed();
         }
 
-        return new SessionCheck(null, result.Principal, user.Id, lifetime, tenant);
+        return new SessionCheck(null, result.Principal, user.Id, lifetime, tenant, user.Email);
     }
 
     /// <summary>Rejects through OpenIddict, so the failure takes the same path (and shape) as its own rejections.</summary>

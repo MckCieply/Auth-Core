@@ -47,9 +47,20 @@ public static class AccountEndpoints
             .SetsRefreshCookie(StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up.")
             .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant")
             .ProducesTemporarilyUnavailable();
-        // Spec 0015: the switch's part 1, a refresh in the session's company. Left out of the description until the next part documents it.
+        // Spec 0015: a refresh that moves the session to another space of the account. It reads the cookie and a body, so the charset guard covers it.
         app.MapPost(SessionPaths.Switch, SwitchEndpoint.SwitchAsync)
-            .ExcludeFromDescription();
+            .WithTags("Sessions")
+            .ReadsJson<SwitchRequest>()
+            .ReadsRefreshCookie(
+                "The refresh token of the session to move. Missing, unknown, expired, revoked or used up, or the session's company is no longer one of the "
+                + "account's: `401 invalid_grant`.")
+            .Produces<RefreshResponse>()
+            .SetsRefreshCookie(
+                StatusCodes.Status200OK, RefreshCookieSet + " The token that was sent is used up, as a refresh uses it up; the next one is for the space switched to.")
+            .ProducesError(StatusCodes.Status400BadRequest, "invalid_request")
+            .ProducesError(StatusCodes.Status401Unauthorized, "invalid_grant")
+            .ProducesError(StatusCodes.Status404NotFound, "not_found")
+            .ProducesTemporarilyUnavailable();
         app.MapPost(LogoutEndpoint.LogoutPath, LogoutEndpoint.HandleAsync)
             .WithTags("Sessions")
             .ReadsRefreshCookie("The refresh token whose session ends. Missing or unknown: the answer is the same `204`.")

@@ -104,6 +104,11 @@ public sealed class HeldLock : IAsyncDisposable
     public Task<int> DeleteMembershipAsync(Guid userId, Guid companyId) =>
         _db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
 
+    /// <summary>Gives one membership another <c>JoinedAt</c> in the transaction that holds the lock: what a removal and a new join of the same person leave.</summary>
+    public Task<int> RemakeMembershipAsync(Guid userId, Guid companyId) =>
+        _db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.JoinedAt, m => m.JoinedAt.AddHours(1)), TestContext.Current.CancellationToken);
+
     /// <summary>Deletes an account, with the rows that go with it by cascade, in the transaction that holds the lock.</summary>
     public Task<int> DeleteAccountAsync(Guid userId) =>
         _db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(TestContext.Current.CancellationToken);
@@ -142,6 +147,23 @@ public sealed class HeldLock : IAsyncDisposable
             Assert.True(DateTime.UtcNow < deadline, $"Expected {count} backends waiting for a lock, saw {waiting}.");
             await Task.Delay(25, TestContext.Current.CancellationToken);
         }
+    }
+
+    /// <summary>
+    /// How many backends of the factory's database wait for the lock of a row (a transaction id) and not for a table: a request that queues
+    /// behind a held row lock, as opposed to one that queues behind <see cref="AuditTableAsync"/>.
+    /// </summary>
+    public static async Task<long> RowLockWaitersAsync(AuthAppFactory factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        using var scope = factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AuthDbContext>().Database
+            .SqlQuery<long>($"""
+                SELECT count(*) AS "Value" FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+                WHERE NOT l.granted AND l.locktype = 'transactionid' AND a.datname = current_database()
+                """)
+            .SingleAsync(TestContext.Current.CancellationToken);
     }
 
     private static async Task<string> DescribeAsync(Task<HttpResponseMessage> finished)

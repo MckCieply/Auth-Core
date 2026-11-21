@@ -9,7 +9,8 @@ namespace Auth.Server.Sessions;
 /// <param name="UserId">The account the token belongs to.</param>
 /// <param name="Lifetime">The lifetime of the next refresh token (the sliding window, cut at the session's cap).</param>
 /// <param name="Space">The membership of the session's company as the database says now.</param>
-internal sealed record SessionCheck(IResult? Failure, ClaimsPrincipal? Principal, Guid UserId, TimeSpan Lifetime, TenantContext? Space)
+/// <param name="Email">The account's address as stored (the switch's audit row names it).</param>
+internal sealed record SessionCheck(IResult? Failure, ClaimsPrincipal? Principal, Guid UserId, TimeSpan Lifetime, TenantContext? Space, string? Email)
 {
-    internal static SessionCheck Failed() => new(RefreshEndpoint.InvalidGrant(), null, Guid.Empty, TimeSpan.Zero, null);
+    internal static SessionCheck Failed() => new(RefreshEndpoint.InvalidGrant(), null, Guid.Empty, TimeSpan.Zero, null, null);
 }

@@ -14,7 +14,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     // Every endpoint of specs 0001–0011 and 0015, as "METHOD path".
     private static readonly string[] Endpoints =
     [
-        "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
+        "POST /auth/login", "POST /auth/refresh", "POST /auth/switch", "POST /auth/logout",
         "POST /auth/password/forgot", "POST /auth/password/reset", "POST /auth/email/verify/request", "POST /auth/email/verify",
         "GET /auth/.well-known/jwks.json", "GET /auth/health",
         "GET /auth/me",
@@ -160,6 +160,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     // Every operation can also say 429 (the per-IP limit), and every POST, PUT, PATCH and DELETE but refresh and logout 415 (spec 0008: the charset guard).
     [InlineData("POST /auth/login", "200,400,401,403,415,429")]
     [InlineData("POST /auth/refresh", "200,401,429,503")]
+    [InlineData("POST /auth/switch", "200,400,401,404,415,429,503")]
     [InlineData("POST /auth/logout", "204,429")]
     [InlineData("POST /auth/password/forgot", "202,400,415,429")]
     [InlineData("POST /auth/password/reset", "204,400,415,429")]
@@ -212,6 +213,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/login"], "401"));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/login"], "429"));
         Assert.Contains("invalid_grant", Description(operations["POST /auth/refresh"], "401"));
+        Assert.Contains("invalid_grant", Description(operations["POST /auth/switch"], "401"));   // spec 0015
+        Assert.Contains("not_found", Description(operations["POST /auth/switch"], "404"));
+        Assert.Contains("invalid_request", Description(operations["POST /auth/switch"], "400"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
@@ -274,6 +278,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/password/reset", "new_password,token")]
     [InlineData("POST /auth/email/verify/request", "email")]
     [InlineData("POST /auth/email/verify", "token")]
+    [InlineData("POST /auth/switch", "org_id")]
     [InlineData("POST /auth/invites/preview", "token")]
     [InlineData("POST /auth/invites/accept", "leave_private_account,password,token")]
     [InlineData("POST /auth/signup", "company_name,email,kind")]
@@ -363,7 +368,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task Refresh_and_logout_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the two
+    public async Task Refresh_logout_and_switch_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the three; spec 0015: the switch also reads a body
     {
         await using var factory = new AuthAppFactory(postgres, keys);
 
@@ -376,6 +381,12 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
                 Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
                 Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
                 Assert.Null(operation["requestBody"]);
+            }
+            else if (endpoint == "POST /auth/switch")
+            {
+                var cookie = Assert.Single(cookies)!;
+                Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
+                Assert.NotNull(operation["requestBody"]);
             }
             else if (TicketEndpoints.Contains(endpoint))
             {
@@ -395,6 +406,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/login", "200")]
     [InlineData("POST /auth/signup/complete", "200")]
     [InlineData("POST /auth/refresh", "200")]
+    [InlineData("POST /auth/switch", "200")]
     [InlineData("POST /auth/logout", "204")]
     [InlineData("DELETE /auth/account", "204")]
     [InlineData("POST /auth/providers/exchange", "200")]
@@ -425,7 +437,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/switch 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

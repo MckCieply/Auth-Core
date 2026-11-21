@@ -31,6 +31,7 @@ public static class AuditKinds
     public const string AccountDeleteRefused = "account.delete_refused";
     public const string ProviderLinked = "provider.linked";
     public const string ProviderReauthenticated = "provider.reauthenticated";
+    public const string OrgSwitched = "org.switched";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -42,5 +43,6 @@ public static class AuditKinds
         SignupRequested, SignupCompleted,
         AccountDeleted, AccountDeleteRefused,
         ProviderLinked, ProviderReauthenticated,
+        OrgSwitched,
     ];
 }

@@ -1,28 +1,35 @@
+using System.Data.Common;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using OpenIddict.Abstractions;
 
 namespace Auth.IntegrationTests;
 
 /// <summary>
-/// Spec 0015 → <c>POST /auth/switch</c>, part 1: the path, its body checks, its answers and its limit. The switch itself is a refresh in the
-/// session's own company here; what these tests pin is what a person sees when the request is wrong, and that a refusal leaves the cookie
-/// untouched (the token is not used up).
+/// Spec 0015 → <c>POST /auth/switch</c>, part 1: the path, its body checks, its answers and its limit. The target of the switch is the session's
+/// own company or an unknown id here (<c>SwitchTests</c> has the other ones); what these tests pin is what a person sees when the request is wrong, and that a
+/// refusal leaves the cookie untouched (the token is not used up).
 /// </summary>
 public sealed class SwitchRequestTests : TenancyTestBase
 {
     private const string AnId = "11111111-1111-1111-1111-111111111111";
 
     private readonly DatabaseOutage _outage;
+    private readonly StatementFault _fault = new();
 
     public SwitchRequestTests(PostgresFixture postgres, KeyMaterialFixture keys)
         : base(postgres, keys)
     {
+        Factory.WithServices(services => services.ConfigureDbContext<AuthDbContext>(options => options.AddInterceptors(_fault)));
         _outage = new DatabaseOutage(postgres.ConnectionStringFor(Factory.DatabaseName));
         Factory.WithSetting("ConnectionStrings:Auth", _outage.ConnectionString);
     }
@@ -171,7 +178,7 @@ public sealed class SwitchRequestTests : TenancyTestBase
     public async Task The_path_is_taken_without_regard_to_case_or_a_trailing_slash(string path)   // as the refresh path is
     {
         var session = await SessionApi.LoginAsync(Client, Factory);
-        var valid = $$"""{"org_id":"{{AnId}}"}""";
+        var valid = $$"""{"org_id":"{{await DevCompanyIdAsync()}}"}""";
 
         using var badBody = await SessionApi.Switch(Client, session.RefreshToken, "{}", path: path);
         using var noCookie = await SessionApi.Switch(Client, null, valid, path: path);
@@ -302,6 +309,52 @@ public sealed class SwitchRequestTests : TenancyTestBase
         await AssertCookieIntactAsync(session.RefreshToken);   // neither used up nor revoked
     }
 
+    [Fact]
+    public async Task A_database_that_fails_at_the_target_read_is_503_and_the_cookie_is_not_used_up()   // criterion 18, the read after the session's
+    {
+        var (_, _, b) = await SeedInTwoCompaniesAsync();
+        var session = await SessionApi.LoginAsync(Client, Factory);
+
+        _fault.Arm(statement => statement.Contains("\"CompanyRoles\"", StringComparison.Ordinal), skip: 1);   // the session read is the first such statement
+        using (var during = await SessionApi.SwitchTo(Client, session.RefreshToken, b))
+        {
+            await AssertUnavailableAsync(during);
+        }
+
+        Assert.Equal(2, _fault.Matched);   // the second one failed: the switch got past its session read
+        _fault.Disarm();
+        await AssertCookieIntactAsync(session.RefreshToken);
+    }
+
+    [Fact]
+    public async Task A_database_that_fails_inside_the_switch_transaction_is_503_and_the_cookie_is_not_used_up()   // criterion 18, at the lock of the target
+    {
+        var (user, a, b) = await SeedInTwoCompaniesAsync();
+        var session = await SessionApi.LoginAsync(Client, Factory);
+        var before = await LastUsedAtAsync(user, b);
+
+        _fault.Arm(statement => statement.Contains("FOR NO KEY UPDATE", StringComparison.Ordinal), skip: 0);
+        using (var during = await SessionApi.SwitchTo(Client, session.RefreshToken, b))
+        {
+            await AssertUnavailableAsync(during);
+        }
+
+        Assert.Equal(1, _fault.Matched);
+        _fault.Disarm();
+        Assert.Equal(before, await LastUsedAtAsync(user, b));
+        Assert.Equal("valid", await StoredTokens.StatusAsync(Factory, session.RefreshToken));   // neither used up nor revoked
+        Assert.Equal(a.ToString(), AccessTokens.Text((await SessionApi.RefreshOk(Client, session.RefreshToken)).AccessToken, "org_id"));   // and still in A
+    }
+
+    private async Task<(Guid User, Guid A, Guid B)> SeedInTwoCompaniesAsync()
+    {
+        var user = await Factory.SeedUserIdAsync();
+        var a = await DevCompanyIdAsync();
+        var b = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(user, b, "user");
+        return (user, a, b);
+    }
+
     private static async Task AssertUnavailableAsync(HttpResponseMessage response)
     {
         var raw = await response.Content.ReadAsStringAsync();
@@ -314,13 +367,13 @@ public sealed class SwitchRequestTests : TenancyTestBase
     }
 
     [Fact]
-    public async Task A_valid_switch_answers_as_a_refresh()   // this task's stub
+    public async Task A_valid_switch_to_the_session_company_answers_as_a_refresh()
     {
         var viaRefresh = await SessionApi.LoginAsync(Client, Factory);
         var viaSwitch = await SessionApi.LoginAsync(Client, Factory);
 
         using var refreshed = await SessionApi.Refresh(Client, viaRefresh.RefreshToken);
-        using var switched = await SessionApi.SwitchTo(Client, viaSwitch.RefreshToken, Guid.NewGuid());   // the stub ignores org_id
+        using var switched = await SessionApi.SwitchTo(Client, viaSwitch.RefreshToken, await DevCompanyIdAsync());
 
         var raw = await switched.Content.ReadAsStringAsync();
         Assert.Equal(HttpStatusCode.OK, switched.StatusCode);
@@ -350,17 +403,51 @@ public sealed class SwitchRequestTests : TenancyTestBase
     {
         var session = await SessionApi.LoginAsync(Client, Factory);
 
-        using var ok = await SessionApi.SwitchTo(Client, session.RefreshToken, Guid.NewGuid());
+        using var notFound = await SessionApi.SwitchTo(Client, session.RefreshToken, Guid.NewGuid());
+        using var ok = await SessionApi.SwitchTo(Client, session.RefreshToken, await DevCompanyIdAsync());
         using var badRequest = await SessionApi.Switch(Client, session.RefreshToken, "{}");
         using var unauthorized = await SessionApi.SwitchTo(Client, null, Guid.NewGuid());
 
+        Assert.Equal(HttpStatusCode.NotFound, notFound.StatusCode);
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, badRequest.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
-        foreach (var response in new[] { ok, badRequest, unauthorized })
+        foreach (var response in new[] { notFound, ok, badRequest, unauthorized })
         {
             Assert.True(response.Headers.CacheControl?.NoStore, $"{(int)response.StatusCode}: Cache-Control: no-store expected");
             Assert.Contains(response.Headers.Pragma, p => p.Name == "no-cache");
+        }
+    }
+
+    /// <summary>
+    /// While armed, fails every statement the predicate matches after the first <c>skip</c> ones with what a lost connection throws (a transient
+    /// <see cref="NpgsqlException"/>), so that the failure comes at a chosen statement of the request and not at the connection.
+    /// </summary>
+    private sealed class StatementFault : DbCommandInterceptor
+    {
+        private Func<string, bool>? _when;
+        private int _skip;
+
+        public int Matched { get; private set; }
+
+        public void Arm(Func<string, bool> when, int skip)
+        {
+            Matched = 0;
+            _skip = skip;
+            _when = when;
+        }
+
+        public void Disarm() => _when = null;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (_when is { } when && when(command.CommandText) && Matched++ >= _skip)
+            {
+                throw new NpgsqlException("the connection is lost for the test", new IOException("the connection is lost for the test"));
+            }
+
+            return ValueTask.FromResult(result);
         }
     }
 }

@@ -51,16 +51,29 @@ public static class SessionApi
     }
 
     /// <summary><c>POST /auth/switch</c> with the cookie as <see cref="Refresh"/> sends it and <paramref name="body"/> as given, declared as <paramref name="contentType"/>.</summary>
-    public static Task<HttpResponseMessage> Switch(HttpClient client, string? refreshToken, string body, string contentType = "application/json", string path = SwitchPath)
+    public static Task<HttpResponseMessage> Switch(
+        HttpClient client, string? refreshToken, string body, string contentType = "application/json", string path = SwitchPath, string? clientAddress = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8) };
         request.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+        if (clientAddress is not null)
+        {
+            request.Headers.Add(AuthAppFactory.RemoteAddressHeader, clientAddress);   // only a host made with WithRemoteAddressHeader reads it
+        }
+
         return client.SendAsync(WithCookie(request, refreshToken));
     }
 
     /// <summary>Switches to the space <paramref name="orgId"/>: the body is <c>{"org_id":"&lt;id&gt;"}</c>.</summary>
-    public static Task<HttpResponseMessage> SwitchTo(HttpClient client, string? refreshToken, Guid orgId) =>
-        Switch(client, refreshToken, $$"""{"org_id":"{{orgId:D}}"}""");
+    public static Task<HttpResponseMessage> SwitchTo(HttpClient client, string? refreshToken, Guid orgId, string? clientAddress = null) =>
+        Switch(client, refreshToken, $$"""{"org_id":"{{orgId:D}}"}""", clientAddress: clientAddress);
+
+    /// <summary>Switches to the space <paramref name="orgId"/> and returns the new session; asserts the <c>200</c>.</summary>
+    public static async Task<Session> SwitchOk(HttpClient client, string? refreshToken, Guid orgId)
+    {
+        using var response = await SwitchTo(client, refreshToken, orgId);
+        return await ReadSessionAsync(response);
+    }
 
     public static Task<HttpResponseMessage> Logout(HttpClient client, string? refreshToken, string path = LogoutPath) =>
         client.SendAsync(WithCookie(new HttpRequestMessage(HttpMethod.Post, path), refreshToken));

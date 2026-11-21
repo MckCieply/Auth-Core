@@ -12,6 +12,9 @@ public sealed record LoginResponse(string Status, string AccessToken);
 /// <summary>Response of <c>POST /auth/refresh</c>.</summary>
 public sealed record RefreshResponse(string AccessToken);
 
+/// <summary>Request of <c>POST /auth/switch</c> (spec 0015): the id of the space to move the session to, in its <c>8-4-4-4-12</c> form.</summary>
+public sealed record SwitchRequest(string OrgId);
+
 /// <summary>Request of <c>POST /auth/password/forgot</c> and <c>POST /auth/email/verify/request</c>.</summary>
 public sealed record EmailRequest(string Email);
 
