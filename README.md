@@ -2,7 +2,7 @@
 
 A self-hosted authentication service in .NET: sign-in, companies, roles and token refresh, ready to put in front of any product.
 
-> **Version 0.1.0.** Image `ghcr.io/mckcieply/auth-core:0.1.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
+> **Version 0.2.0.** Image `ghcr.io/mckcieply/auth-core:0.2.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
 
 ## What it is
 
