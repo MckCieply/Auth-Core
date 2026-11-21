@@ -38,6 +38,14 @@ public static class SessionCompany
         identity.SetClaim(SessionPolicy.JoinedClaim, MicrosOf(tenant.JoinedAt).ToString(CultureInfo.InvariantCulture));
     }
 
+    /// <summary>Whether the principal carries either of the two claims, however it reads: a token with neither is one of before spec 0015.</summary>
+    public static bool HasAny(ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        return principal.GetClaim(SessionPolicy.CompanyClaim) is not null || principal.GetClaim(SessionPolicy.JoinedClaim) is not null;
+    }
+
     /// <summary>The session's space; <see langword="null"/> when either claim is missing or does not parse.</summary>
     public static SessionSpace? Read(ClaimsPrincipal principal)
     {
