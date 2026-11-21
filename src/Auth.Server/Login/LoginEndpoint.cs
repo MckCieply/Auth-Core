@@ -89,7 +89,7 @@ public static class LoginEndpoint
         }
 
         // Likewise an account that belongs to no company (spec 0005): it has nothing to put into a token.
-        if (await memberships.ReadAsync(user.Id, http.RequestAborted) is not { } tenant)
+        if (await memberships.ReadSignInSpaceAsync(user.Id, http.RequestAborted) is not { } tenant)
         {
             await RecordFailureAsync(audit, "no_company", user, request.Username ?? string.Empty);
             return AccountResults.NoMembership();

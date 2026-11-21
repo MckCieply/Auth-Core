@@ -30,7 +30,7 @@ public sealed class CompanyGuard(AuthDbContext db, MembershipReader memberships)
             return Outcome.Ok(actor);
         }
 
-        var current = await memberships.ReadAsync(actor.Member.UserId, cancellationToken);
+        var current = await memberships.ReadSignInSpaceAsync(actor.Member.UserId, cancellationToken);
         return current is null || current.CompanyId != companyId || !current.Holds(permission)
             ? Outcome.Fail<Actor>(TenancyErrors.PermissionsChanged)
             : Outcome.Ok(Actor.Of(current));

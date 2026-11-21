@@ -48,7 +48,7 @@ public sealed partial class RefreshReuseAuditHandler(
         try
         {
             var subject = Guid.TryParse(await tokens.GetSubjectAsync(token, context.CancellationToken), out var userId) ? userId : (Guid?)null;
-            var tenant = subject is { } id ? await memberships.ReadAsync(id, context.CancellationToken) : null;
+            var tenant = subject is { } id ? await memberships.ReadSignInSpaceAsync(id, context.CancellationToken) : null;
             await audit.WriteAloneAsync(new AuditEntry
             {
                 Kind = AuditKinds.RefreshReuseDetected,

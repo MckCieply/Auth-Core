@@ -69,7 +69,7 @@ public static class AccountDeletionEndpoint
             return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
-        var tenant = await memberships.ReadAsync(userId, http.RequestAborted);
+        var tenant = await memberships.ReadSignInSpaceAsync(userId, http.RequestAborted);
         if (Refusal(http.User, tenant) is { } refused)
         {
             return refused;
@@ -110,7 +110,7 @@ public static class AccountDeletionEndpoint
 
         // Read again under the lock: an invitation may have moved the account into a company, or another deletion may have removed it, while this
         // request waited.
-        var caller = await memberships.ReadAsync(userId, http.RequestAborted);
+        var caller = await memberships.ReadSignInSpaceAsync(userId, http.RequestAborted);
         if (caller is not { Kind: CompanyKind.Personal })
         {
             return ApiResults.Error(TenancyErrors.PermissionsChanged);

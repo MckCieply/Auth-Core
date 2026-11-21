@@ -45,7 +45,7 @@ public abstract class TenancyTestBase : MailTestBase
     protected async Task<TenantContext> TenantOfAsync(Guid userId)
     {
         using var scope = Factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<MembershipReader>().ReadAsync(userId, TestContext.Current.CancellationToken)
+        return await scope.ServiceProvider.GetRequiredService<MembershipReader>().ReadSignInSpaceAsync(userId, TestContext.Current.CancellationToken)
             ?? throw new InvalidOperationException("The user belongs to no company.");
     }
 

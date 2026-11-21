@@ -121,7 +121,7 @@ public static class ProviderLinkEndpoint
             return ApiResults.Error(TenancyErrors.EmailNotVerified);
         }
 
-        if (await memberships.ReadAsync(account.Id, http.RequestAborted) is null)
+        if (await memberships.ReadSignInSpaceAsync(account.Id, http.RequestAborted) is null)
         {
             await RecordFailureAsync(audit, "no_company", account, email, ticket.Provider);
             return ApiResults.Error(TenancyErrors.NoMembership);
@@ -173,7 +173,7 @@ public static class ProviderLinkEndpoint
             }
 
             // A membership removed meanwhile is what step 7 answers for an account that has none.
-            if (await memberships.ReadAsync(account.Id, CancellationToken.None) is not { } tenant)
+            if (await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None) is not { } tenant)
             {
                 await transaction.DisposeAsync();
                 await RecordFailureAsync(audit, "no_company", account, account.Email!, ticket.Provider);

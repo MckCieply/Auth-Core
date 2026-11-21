@@ -42,7 +42,7 @@ public static class CompanyAccess
             return new Access(null, ApiResults.Error(TenancyErrors.Forbidden));
         }
 
-        var tenant = await memberships.ReadAsync(userId, http.RequestAborted);
+        var tenant = await memberships.ReadSignInSpaceAsync(userId, http.RequestAborted);
 
         // A personal space is no company (spec 0010). Read from the database, whatever the token says, and also where no permission is needed:
         // a check on permissions alone would let a private account through GET /auth/org.
