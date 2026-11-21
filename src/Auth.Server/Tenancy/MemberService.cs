@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Server.Tenancy;
 
+/// <summary>What a removal did to the account: <paramref name="AccountDeleted"/> when the removed company was its last space, so the account went with it.</summary>
+public sealed record MemberRemoval(bool AccountDeleted);
+
 /// <summary>
 /// Lists the members of a company, changes their roles and removes them (spec 0005 → Company API, Safety rules, Effects).
 /// The company API and the operator command both call it. Everything that changes anything runs in one transaction
@@ -90,13 +93,14 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
     }
 
     /// <summary>
-    /// Removes a member. The account loses its only space and is deleted with it (spec 0010), its sessions, links and membership included:
-    /// every refresh token issued before is refused, a login is the <c>401</c> of an unknown address, and a later invitation makes a new
-    /// account. Refused: not a member (<c>not_found</c>); the actor is the member
+    /// Removes a member: the membership in this company goes, and every refresh token of the session in it is refused. When that was the
+    /// account's last space the account is deleted with it (spec 0010), its sessions and links included: a login is the <c>401</c> of an
+    /// unknown address, and a later invitation makes a new account. An account that belongs to another space is kept, with its membership
+    /// and sessions there (spec 0015); the result says which it was. Refused: not a member (<c>not_found</c>); the actor is the member
     /// (<c>cannot_change_self</c>); the member's role holds what the actor does not (<c>permission_not_held</c>, rule 1); the removal would leave the company without a manager (<c>last_manager</c>), unless
     /// <paramref name="force"/> — which only the operator has.
     /// </summary>
-    public async Task<Outcome> RemoveAsync(Actor actor, Guid companyId, Guid userId, bool force, CancellationToken cancellationToken)
+    public async Task<Outcome<MemberRemoval>> RemoveAsync(Actor actor, Guid companyId, Guid userId, bool force, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
 
@@ -104,7 +108,7 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
         var entered = await guard.EnterAsync(actor, companyId, PermissionCatalog.MembersManage, cancellationToken);
         if (!entered.Succeeded)
         {
-            return entered.Without;
+            return new Outcome<MemberRemoval>(null, entered.Error, entered.RetryAfter);
         }
 
         var current = entered.Value!;
@@ -112,18 +116,18 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
             .FirstOrDefaultAsync(m => m.CompanyId == companyId && m.UserId == userId, cancellationToken);
         if (membership is null)
         {
-            return Outcome.Fail(TenancyErrors.NotFound);
+            return Outcome.Fail<MemberRemoval>(TenancyErrors.NotFound);
         }
 
         if (current.UserId == userId)
         {
-            return Outcome.Fail(TenancyErrors.CannotChangeSelf);
+            return Outcome.Fail<MemberRemoval>(TenancyErrors.CannotChangeSelf);
         }
 
         // Rule 1 reaches the member's current role: nobody pushes out a member who holds more than they do.
         if (!await MayTouchAsync(current, membership, cancellationToken))
         {
-            return Outcome.Fail(TenancyErrors.PermissionNotHeld);
+            return Outcome.Fail<MemberRemoval>(TenancyErrors.PermissionNotHeld);
         }
 
         if (!force)
@@ -131,7 +135,7 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
             var people = await CompanyPeople.LoadAsync(db, companyId, manifest.Current.Catalog, cancellationToken);
             if (CompanyPeople.LeavesNone(people.Managers(), people.ManagersWithout(userId)))
             {
-                return Outcome.Fail(TenancyErrors.LastManager);
+                return Outcome.Fail<MemberRemoval>(TenancyErrors.LastManager);
             }
         }
 
@@ -155,12 +159,22 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
             },
             current);
 
-        // The account loses its only space, so it is deleted (spec 0010): its membership, sessions and links go with it, and its own row is
-        // staged. Under the company lock only: no address lock (spec 0010 → Locks).
-        await deletion.DeleteAsync(userId, AccountDeletionReason.MemberRemoved, current, cancellationToken);
+        // The membership goes first, by a direct delete in this transaction (its row lock is the first lock on the member's rows).
+        await db.Memberships.Where(m => m.CompanyId == companyId && m.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+
+        // Another space left: the account is kept, with its other sessions. A plain read, no account row lock (spec 0017 → Locks): the
+        // routine locks the account itself, and only for an account that has none left.
+        var deleted = !await db.Memberships.AsNoTracking().AnyAsync(m => m.UserId == userId, cancellationToken);
+        if (deleted)
+        {
+            // The account lost its last space, so it is deleted (spec 0010): its sessions and links go with it, and its own row is staged
+            // and names this company. Under the company lock only: no address lock (spec 0010 → Locks).
+            await deletion.DeleteAsync(userId, AccountDeletionReason.MemberRemoved, current, companyId, cancellationToken);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return Outcome.Done;
+        return Outcome.Ok(new MemberRemoval(deleted));
     }
 
     private Task<string?> EmailOfAsync(Guid userId, CancellationToken cancellationToken) =>

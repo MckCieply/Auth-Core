@@ -3,6 +3,7 @@ using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Admin;
 using Auth.Server.Api;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
@@ -51,6 +52,60 @@ public sealed class AccountDeletionOnRemovalTests(PostgresFixture postgres, KeyM
 
         using var login = await LoginApi.Login(Client, Worker, UserPassword);
         await AssertUnknownAddressAsync(login);
+    }
+
+    /// <summary>Sets when a membership was last used, as a switch or an earlier sign-in would have left it: the next sign-in lands there.</summary>
+    private Task<int> SetLastUsedAtAsync(Guid userId, Guid companyId, DateTimeOffset at) =>
+        InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastUsedAt, (DateTimeOffset?)at), TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task A_member_with_another_membership_keeps_the_account_and_the_other_session()   // criterion 26
+    {
+        var (a, _, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        var worker = await AddMemberAsync(a, Worker, "user");
+        await AddMembershipAsync(worker, b, "user");
+        var inA = await SessionApi.LoginAsync(Client, Worker, UserPassword);
+        Assert.Equal(a.ToString(), AccessTokens.Text(inA.AccessToken, "org_id"));
+        await SetLastUsedAtAsync(worker, b, StorableTime.Now(Clock).AddHours(1));   // the next sign-in lands in B
+        var inB = await SessionApi.LoginAsync(Client, Worker, UserPassword);
+        Assert.Equal(b.ToString(), AccessTokens.Text(inB.AccessToken, "org_id"));
+
+        using (var removed = await SendFromCallerAsync(HttpMethod.Delete, $"/auth/org/members/{worker}", token))
+        {
+            await TenancyApi.AssertEmptyAsync(removed, HttpStatusCode.NoContent);   // the answer does not show which it was
+        }
+
+        Assert.Equal(1, await UsersAsync(worker));
+        Assert.Equal([b], await InDbAsync(db => db.Memberships.Where(m => m.UserId == worker).Select(m => m.CompanyId)
+            .ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Single(await AuditAsync(AuditKinds.MemberRemoved));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
+
+        var refreshedInB = await SessionApi.RefreshOk(Client, inB.RefreshToken);
+        Assert.Equal(b.ToString(), AccessTokens.Text(refreshedInB.AccessToken, "org_id"));
+        using var refusedInA = await SessionApi.Refresh(Client, inA.RefreshToken);
+        await SessionApi.AssertInvalidGrantAsync(refusedInA);
+    }
+
+    [Fact]
+    public async Task A_member_without_another_membership_is_deleted_as_before()   // criterion 27
+    {
+        var (company, _, token) = await CompanyWithAdminAsync();
+        var worker = await AddMemberAsync(company, Worker, "user");
+
+        using (var removed = await SendFromCallerAsync(HttpMethod.Delete, $"/auth/org/members/{worker}", token))
+        {
+            await TenancyApi.AssertEmptyAsync(removed, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal(0, await UsersAsync(worker));
+        var row = await SingleAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(worker, row.SubjectUserId);
+        Assert.Equal(company, row.OrgId);
+        Assert.Equal("Acme", row.OrgName);
+        Assert.Equal("member_removed", AuditApi.Text(row, "reason"));
     }
 
     [Fact]
@@ -134,7 +189,7 @@ public sealed class AccountDeletionOnRemovalTests(PostgresFixture postgres, KeyM
         var run = await OperatorCli.RunAsync(Factory, "delete-org", "--org", acme.ToString(), "--confirm", "Acme");
 
         Assert.Equal(AdminCli.Done, run.Exit);
-        Assert.Equal("Company deleted; the accounts of its members are deleted.", run.Out.Trim());
+        Assert.Equal("Company deleted; members with no other space lose their accounts too.", run.Out.Trim());
         Assert.Equal(0, await UsersAsync(admin));
         Assert.Equal(0, await UsersAsync(one));
         var rows = await AuditAsync(AuditKinds.AccountDeleted);

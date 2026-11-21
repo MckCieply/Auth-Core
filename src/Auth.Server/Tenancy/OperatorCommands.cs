@@ -55,11 +55,11 @@ public sealed class OperatorCommands(
     }
 
     /// <summary>Removes a member as the API does and ends their sessions; <paramref name="force"/> overrides <c>last_manager</c>.</summary>
-    public async Task<Outcome> RemoveMemberAsync(string org, string email, bool force, CancellationToken cancellationToken)
+    public async Task<Outcome<MemberRemoval>> RemoveMemberAsync(string org, string email, bool force, CancellationToken cancellationToken)
     {
         if (!IdInput.TryParse(org, out var orgId) || email.Length > EmailInput.MaxLength || !EmailInput.TryNormalize(email, normalizer, out var normalized))
         {
-            return Outcome.Fail(TenancyErrors.InvalidRequest);
+            return Outcome.Fail<MemberRemoval>(TenancyErrors.InvalidRequest);
         }
 
         var userId = await db.Users.AsNoTracking()
@@ -68,7 +68,7 @@ public sealed class OperatorCommands(
             .FirstOrDefaultAsync(cancellationToken);
         return userId is { } id
             ? await members.RemoveAsync(Actor.Operator, orgId, id, force, cancellationToken)
-            : Outcome.Fail(TenancyErrors.NotFound);
+            : Outcome.Fail<MemberRemoval>(TenancyErrors.NotFound);
     }
 
     /// <summary>

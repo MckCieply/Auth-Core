@@ -144,8 +144,8 @@ auth() { docker compose -p "${COMPOSE_PROJECT_NAME:?set it to the project of you
 auth create-org --name "Acme"                                     # prints the company id
 auth invite --org <id> --email boss@acme.test --role admin
 auth list-orgs                                                    # id, name, number of members
-auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted
-auth delete-org --org <id> --confirm "Acme"                       # deletes the company and its members' accounts
+auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted only when that was its last space, else kept
+auth delete-org --org <id> --confirm "Acme"                       # deletes the company; members with no other space lose their accounts too
 ```
 
 The commands work on the database with the service's configuration and never migrate it. A product's permissions and default roles come from its manifest

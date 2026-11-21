@@ -171,7 +171,7 @@ public static class AccountDeletionEndpoint
         // neither the cooldown nor a half-done deletion behind.
         await streaks.ClearAsync(identifier, CancellationToken.None);
 
-        await deletion.DeleteAsync(userId, AccountDeletionReason.Self, actor: null, CancellationToken.None);
+        await deletion.DeleteAsync(userId, AccountDeletionReason.Self, actor: null, caller.CompanyId, CancellationToken.None);
         await db.SaveChangesAsync(CancellationToken.None);
         await transaction.CommitAsync(CancellationToken.None);
 
@@ -209,7 +209,7 @@ public static class AccountDeletionEndpoint
             OrgName = caller.CompanyName,
             Details = new Dictionary<string, object?> { ["provider"] = ticket.Provider },
         });
-        await deletion.DeleteAsync(userId, AccountDeletionReason.Self, actor: null, CancellationToken.None);
+        await deletion.DeleteAsync(userId, AccountDeletionReason.Self, actor: null, caller.CompanyId, CancellationToken.None);
         await db.SaveChangesAsync(CancellationToken.None);
         await transaction.CommitAsync(CancellationToken.None);
 
