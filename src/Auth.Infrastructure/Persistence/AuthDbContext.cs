@@ -92,7 +92,7 @@ public class AuthDbContext(DbContextOptions<AuthDbContext> options)
 
         builder.Entity<Membership>(membership =>
         {
-            // The key allows several companies per user (spec 0005 → Concepts); the code lets a user have one.
+            // The key lets a user belong to several spaces (spec 0015): any number of companies and at most one personal space.
             membership.HasKey(m => new { m.UserId, m.CompanyId });
             membership.HasOne<ApplicationUser>().WithMany().HasForeignKey(m => m.UserId).OnDelete(DeleteBehavior.Cascade);
             membership.HasOne<Company>().WithMany().HasForeignKey(m => m.CompanyId).OnDelete(DeleteBehavior.Cascade);
