@@ -71,6 +71,7 @@ public static class RefreshEndpoint
             roleType: Claims.Role);
         identity.SetClaim(Claims.Subject, user.Id.ToString());
         TenantClaims.Apply(identity, tenant);
+        SessionCompany.Apply(identity, tenant);   // until the refresh keeps the session's own company (spec 0015, Task 4): the sign-in's space
 
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(tokens.Value.Audience);

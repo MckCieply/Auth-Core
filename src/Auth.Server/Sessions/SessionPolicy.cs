@@ -28,6 +28,19 @@ public static class SessionPolicy
     public const string StampClaim = "session_stamp";
 
     /// <summary>
+    /// Claim holding the id of the space (company or personal space) the session signed in to (spec 0015). Like <see cref="StartClaim"/> it has
+    /// no destination: it lives in the refresh token only, and it is not a tenancy claim.
+    /// </summary>
+    public const string CompanyClaim = "session_org_id";
+
+    /// <summary>
+    /// Claim holding when the account joined that space (<c>Memberships.JoinedAt</c>), as whole Unix microseconds (spec 0015): with the id it
+    /// names one membership, so a membership removed and made again is not the one the session signed in to. No destination, as for
+    /// <see cref="CompanyClaim"/>.
+    /// </summary>
+    public const string JoinedClaim = "session_org_joined";
+
+    /// <summary>
     /// Lifetime of the next refresh token: the sliding window, cut short so it never crosses the absolute cap.
     /// <see langword="null"/> once the cap is reached: the session is over.
     /// </summary>

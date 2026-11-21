@@ -7,6 +7,7 @@ using Auth.Server.Email;
 using Auth.Server.Lockout;
 using Auth.Server.Login;
 using Auth.Server.Requests;
+using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Identity;
@@ -153,6 +154,17 @@ public static class ProviderLinkEndpoint
                 return await ProviderSignIn.LinkedAsync(http, db, users, memberships, tokens, clock, linked, ticket, ticketText, binding);
             }
 
+            // The sign-in's membership before the account row (spec 0015 → Lock order): a removal deletes the membership row before it locks the
+            // account, so the link must not hold the account row while it waits for the membership. The sign-in takes the same row again below
+            // (this transaction: no wait). A membership that is gone is not answered yet: an account removed meanwhile is the answer of an
+            // unknown address, as before (the hash read below), and only then the answer step 7 gives for an account that has no membership.
+            var tenant = await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None);
+            if (tenant is not null
+                && !await SpaceLocks.TakeAsync(db, account.Id, new SessionSpace(tenant.CompanyId, SessionCompany.MicrosOf(tenant.JoinedAt)), StorableTime.Now(clock), CancellationToken.None))
+            {
+                tenant = null;
+            }
+
             // The account's row under a share lock to the end: one removed meanwhile is linked to nothing (the answer of an unknown address), and a
             // password reset meanwhile (a reset takes no address lock, but its update waits for this share lock) leaves a hash other than the one
             // that was judged: the login's own answer, the ticket kept. DELETE /auth/account judges the password it reads under its lock, so a
@@ -172,8 +184,7 @@ public static class ProviderLinkEndpoint
                 return new LoginEndpoint.InvalidCredentialsResult();
             }
 
-            // A membership removed meanwhile is what step 7 answers for an account that has none.
-            if (await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None) is not { } tenant)
+            if (tenant is null)
             {
                 await transaction.DisposeAsync();
                 await RecordFailureAsync(audit, "no_company", account, account.Email!, ticket.Provider);
