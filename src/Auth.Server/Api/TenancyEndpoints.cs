@@ -7,9 +7,9 @@ namespace Auth.Server.Api;
 public static class TenancyEndpoints
 {
     /// <summary>
-    /// The endpoints of spec 0005: the caller's own data and the company API. Everything under <c>/auth/org</c> acts on
-    /// the caller's company, taken from the database, and needs an access token; the invitation endpoints that need
-    /// none are mapped beside it.
+    /// The endpoints of spec 0005: the caller's own data and the company API. <c>GET /auth/me</c> and everything under <c>/auth/org</c> act on
+    /// the token's company (its <c>org_id</c>), checked against the database on every call (spec 0015), and need an access token; the
+    /// invitation endpoints that need none are mapped beside it.
     /// </summary>
     public static IEndpointRouteBuilder MapTenancyApi(this IEndpointRouteBuilder app)
     {
@@ -18,6 +18,9 @@ public static class TenancyEndpoints
         app.MapGet(OrgEndpoints.MePath, OrgEndpoints.MeAsync)
             .RequireAuthorization()
             .WithTags("Company")
+            .WithDescription(
+                "The caller as the database says now, in the token's company (its `org_id`): the membership, role and permissions there, whichever "
+                + "company a sign-in would choose today. When the account is no longer a member of the token's company the answer is `403 permissions_changed`.")
             .Produces<MeResponse>()
             .ProducesGuarded();
 
@@ -73,7 +76,9 @@ public static class TenancyEndpoints
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 
+        // Every operation of this group acts on the token's company (its `org_id`), whichever company a sign-in would choose today.
         company.MapGet("", OrgEndpoints.GetAsync)
+            .WithDescription("The token's company. An account that is no longer a member of it gets `403 permissions_changed`.")
             .Produces<OrgResponse>()
             .ProducesGuarded();
         company.MapPatch("", OrgEndpoints.RenameAsync)
@@ -83,7 +88,7 @@ public static class TenancyEndpoints
             .ProducesGuarded();
         company.MapDelete("", OrgEndpoints.DeleteAsync)
             .WithDescription(
-                "Deletes the caller's company with its roles, invitations and the mails queued for them, and the account of every member, the "
+                "Deletes the token's company with its roles, invitations and the mails queued for them, and the account of every member, the "
                 + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
                 + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
                 + "login the `401` of an unknown address. "

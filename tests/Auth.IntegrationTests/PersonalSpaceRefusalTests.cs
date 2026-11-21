@@ -8,7 +8,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
 
-/// <summary>Spec 0010 → The company API: every endpoint under /auth/org refuses a personal space, read from the database.</summary>
+/// <summary>
+/// Spec 0010 → The company API, as spec 0015 changes it: every endpoint under /auth/org acts on the token's company and refuses a
+/// personal space (<c>403 forbidden</c>); a token whose company the account has left is <c>403 permissions_changed</c>.
+/// </summary>
 public sealed class PersonalSpaceRefusalTests(PostgresFixture postgres, KeyMaterialFixture keys) : TenancyTestBase(postgres, keys)
 {
     private const string Private = "ola@poczta.test";
@@ -79,11 +82,11 @@ public sealed class PersonalSpaceRefusalTests(PostgresFixture postgres, KeyMater
 
     [Theory]
     [MemberData(nameof(CompanyEndpoints))]
-    public async Task A_token_that_says_organization_while_the_database_shows_a_personal_space_is_forbidden(string method, string path)   // "whatever the token says"
+    public async Task A_token_whose_company_the_account_left_is_permissions_changed_even_when_the_database_shows_a_personal_space(string method, string path)   // spec 0015 → The company API, criterion 24
     {
         var company = await DevCompanyIdAsync();
         var user = await AddMemberAsync(company, "moved@poczta.test", "admin");
-        var token = (await SessionApi.LoginAsync(Client, "moved@poczta.test", UserPassword)).AccessToken;   // org_kind organization, every permission
+        var token = (await SessionApi.LoginAsync(Client, "moved@poczta.test", UserPassword)).AccessToken;   // company X, every permission
         await RemoveMembershipAsync(user);
         var space = await InDbAsync(async db =>
         {
@@ -94,7 +97,9 @@ public sealed class PersonalSpaceRefusalTests(PostgresFixture postgres, KeyMater
 
         using var response = await TenancyApi.Send(Client, new HttpMethod(method), path.Replace("{id}", user.ToString(), StringComparison.Ordinal), token, BodyFor(method, path));
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");   // not permissions_changed: the space decides
+        // The company API acts on the token's company (X), and the account's membership in X is gone: the token is out of date,
+        // so permissions_changed (the frontend refreshes; the new sign-in lands in the space and then the answer is forbidden, as in the test above).
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "permissions_changed");
         await AssertSpaceUntouchedAsync(user, space);
     }
 }

@@ -4,9 +4,9 @@ namespace Auth.Server.Tenancy;
 
 /// <summary>
 /// The first step of everything that changes a company's members, roles or invitations: lock the company, and — for a
-/// member — read their membership and role again under the lock. The company API checked the caller against the
-/// database before it called the service, but another request may have demoted or removed them since; what they are
-/// allowed to do is what the database says once nobody else can change the company.
+/// member — read their membership and role in that company again under the lock. The company API checked the caller against the
+/// database (in the token's company) before it called the service, but another request may have demoted or removed them since; what they
+/// are allowed to do is what the database says once nobody else can change the company.
 /// </summary>
 public sealed class CompanyGuard(AuthDbContext db, MembershipReader memberships)
 {
@@ -30,8 +30,8 @@ public sealed class CompanyGuard(AuthDbContext db, MembershipReader memberships)
             return Outcome.Ok(actor);
         }
 
-        var current = await memberships.ReadSignInSpaceAsync(actor.Member.UserId, cancellationToken);
-        return current is null || current.CompanyId != companyId || !current.Holds(permission)
+        var current = await memberships.ReadInCompanyAsync(actor.Member.UserId, companyId, cancellationToken);
+        return current is null || !current.Holds(permission)
             ? Outcome.Fail<Actor>(TenancyErrors.PermissionsChanged)
             : Outcome.Ok(Actor.Of(current));
     }

@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// The members of the caller's company (spec 0005 → Company API): list, change a role, remove. All need
+/// The members of the token's company (spec 0005 → Company API): list, change a role, remove. All need
 /// <c>members:manage</c>, checked against the database.
 /// </summary>
 public static class OrgMemberEndpoints
