@@ -6,7 +6,8 @@
 - **Milestone:** the second of three slices that let one person work in several companies: 0015 (the base: memberships,
   the session's company, listing, switching), this one (a signed-in person creates another company), and 0017
   (accepting an invitation keeps the other memberships). Builds on [0015](0015-multiple-companies.md) and needs it
-  merged first; it can be built in parallel with 0017.
+  merged first; it can be built in parallel with 0017, except that both rely on 0017's recount of memberships in
+  `AccountDeletion.DeleteAsync` (see "Locks"): whichever slice is built first adds it.
 - **Context:** specs [0005](0005-tenancy-and-rbac.md) (companies, roles, the company API, the manifest),
   [0008](0008-hardening-and-release.md) (per-IP limits, audit log, company deletion),
   [0009](0009-self-service-signup.md) (a visitor creates a company, the first admin's role),
@@ -142,8 +143,9 @@ Authenticated with the access token (`Authorization: Bearer`). The checks, in th
    on it.
 5. In one transaction:
    - the address lock of the account is taken (the lock of specs 0009 and 0010, which sign-up completion, invitation
-     acceptance and self-deletion take); the account and its memberships are read again under it; an account gone or
-     without a membership by then is `403 permissions_changed`;
+     acceptance and self-deletion take); then the account row is locked (`FOR UPDATE`) and read afresh, and its
+     memberships are read again under both locks (see "Locks"); an account gone or without a membership by then is
+     `403 permissions_changed`;
    - the account's company memberships (kind `organization`; the personal space does not count) are counted under the
      lock; when there are already at least `Auth:Tenancy:MaxCompaniesPerAccount` (invitations of spec 0017 may take
      the count above it), the answer is
@@ -207,9 +209,24 @@ as the first check after the token (before the body) and again under the address
 
 ### Locks
 
-`POST /auth/orgs` takes only the address lock of the account. It takes no company lock: the company it creates does not
-exist yet, and no other flow can reach it before the commit. It changes no existing company, so the rule "the company
-lock before the address lock" is kept (spec 0010, Locks).
+`POST /auth/orgs` takes the address lock of the account, then the account row (`FOR UPDATE`), the order of spec 0017's
+acceptance. It takes no company lock: the company it creates does not exist yet, and no other flow can reach it before
+the commit. It changes no existing company, so the rule "the company lock before the address lock" is kept (spec 0010,
+Locks).
+
+- **Self-deletion** takes the same address lock, so a creation and a self-deletion of one account run one after the
+  other (see `DELETE /auth/account`).
+- **A removal of a member and a company deletion** take no address lock. By spec 0017 (Locks), their deletion routine
+  (`AccountDeletion.DeleteAsync`) reads the accounts `FOR UPDATE` and counts each account's memberships again under that
+  row lock, keeping an account that has one. With the creation's row lock, a removal of the account's last company
+  membership and a creation of one account run one after the other: a creation committed first keeps the account (the
+  routine's count sees the new membership); a removal committed first deletes it, and the creation, waiting on the
+  account row, finds it gone and answers `403 permissions_changed` with nothing written. Without the row lock, the
+  creation's membership insert would wait on the routine's row lock and then fail its foreign key, a `500`.
+- The creation locks no mail request, so its account row lock never waits on the mail sender's locks in the other
+  order (spec 0017, Locks).
+- The recount belongs to spec 0017; if this slice is built before 0017, it adds the recount to
+  `AccountDeletion.DeleteAsync` itself, as spec 0017 words it.
 
 ### Limits
 
@@ -343,7 +360,9 @@ Manifest and options
 18. A creation and a self-deletion of one private account sent in parallel (checked against PostgreSQL): either the
     creation succeeds and the deletion answers `company_member`, or the deletion succeeds and the creation answers
     `403 permissions_changed`; never an account deleted with a company left behind, and never a company without a
-    member.
+    member. Likewise a creation by an account with one company membership and its removal from that company sent in
+    parallel: either the account is kept with the new company, or it is deleted and the creation answers
+    `403 permissions_changed`; never a `500`.
 
 Sample, scripts, docs
 
@@ -386,7 +405,7 @@ Sample, scripts, docs
   (300 a minute) would leave a script too much room.
 - No new audit kind: `org.created` already records every creation, with `details.via` saying how.
 - The limit is judged under the address lock, so parallel requests cannot pass it; the same lock orders a creation and a
-  self-deletion of one account.
+  self-deletion of one account, and the account row lock orders a creation and a removal (spec 0017's recount).
 - `company_member` is judged on the database before the body and again under the address lock, and writes no row, as
   `permissions_changed` does at that step.
 - Names are not unique, as for every company.
