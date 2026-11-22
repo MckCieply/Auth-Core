@@ -126,7 +126,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
 
         Assert.Equal(["google", "microsoft"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
         Assert.Equal(
-            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"off"}""",
+            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"self-service"}""",
             await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
@@ -185,7 +185,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.True(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"self-service","private_signup":"self-service","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"self-service","providers":[],"org_creation":"self-service"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
