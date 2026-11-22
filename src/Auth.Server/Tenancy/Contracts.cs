@@ -60,7 +60,8 @@ public sealed record InvitePreviewResponse(string OrgName, string Email, string 
 
 /// <summary>
 /// Request of <c>POST /auth/invites/accept</c>: the password of a new account (not used for an account that exists), and
-/// <c>leave_private_account</c>, a JSON boolean, which a private account needs to move (spec 0010).
+/// <c>leave_private_account</c>, a JSON boolean, with which a private account moves into the company on purpose (spec 0010; since spec 0017
+/// a private account joins without it and keeps its personal space).
 /// </summary>
 public sealed record AcceptInviteRequest(string Token, string? Password = null, bool? LeavePrivateAccount = null);
 

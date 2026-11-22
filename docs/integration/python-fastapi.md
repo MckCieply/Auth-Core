@@ -302,14 +302,17 @@ No permission is needed: a person may always delete their own data. Answer `204`
 
 - What your product's frontend shows is the same as for any other backend ([the Angular guide](angular.md), "Private accounts (spec 0010)" and the
   table of screens): the sign-up choice "Organization / Private person" when `GET /auth/options` says both are on, and for a private person the
-  email alone, then the completion at the link with `kind` `private` and the password twice. An invitation to an address that already has a
-  private account shows a warning when the preview says `has_private_account`, with one button that sends `leave_private_account: true` and no
-  password; without it the acceptance answers `409 private_account_exists`.
+  email alone, then the completion at the link with `kind` `private` and the password twice. An invitation to an address that already has an
+  account (spec 0017) shows one line and one button when the preview says `has_account`; the button sends the token and no password, and the
+  acceptance adds the company to the account without ending a session or touching the account's other companies or personal space.
 - An admin who removes a member, or deletes the company, deletes the person's account only when that was the person's last space (spec 0015):
   a person who belongs to another company or space keeps the account. A team screen of your product should say so: "This person's account
   will be deleted." (when it is their last space; the sample's sentence does not distinguish).
-- A private account that accepts an invitation moves into the company; the data of its old space stays in your tables under an `org_id` no
-  token will carry again. Auth-Core has no deletion feed yet.
+- An invitation can add a company to a person who already has one, or a private account: your API sees it as a new `org_id` in that person's
+  tokens, after a sign-in or a switch (`POST /auth/switch`); the tokens already issued keep the `org_id` they have. The acceptance no longer
+  answers `409 private_account_exists`, and a private account that accepts keeps its personal space and the data in it. Only a client that
+  sends `leave_private_account: true` on purpose moves the account into the company and deletes the personal space; then its data stays in your
+  tables under an `org_id` no token will carry again, and Auth-Core has no deletion feed yet.
 - Personal data after deletion: Auth-Core keeps its audit rows, with the account's id, address and client addresses, for 90 days by default on the
   legitimate interest of security, and backups until they are rotated ([threat model](../security/threat-model.md), "Account deletion and
   personal data"). Your product deletes its own data.

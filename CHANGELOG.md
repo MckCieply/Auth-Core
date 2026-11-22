@@ -8,7 +8,7 @@ All notable changes to Auth-Core. The format follows [Keep a Changelog](https://
 Several companies per account ([spec 0015](docs/superpowers/specs/0015-multiple-companies.md), the first of three slices with 0016 and 0017): one
 person belongs to several companies (and at most one personal space) with one account and moves between them without signing in again. A product that
 never switches companies sees no change: every person has one company, the token carries the same claims and every endpoint answers as before. No
-endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /auth/orgs` (below) and spec 0017 will let an invitation keep the other memberships.
+endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /auth/orgs` (below) and spec 0017 lets an invitation keep the other memberships (below).
 
 ### Added
 
@@ -37,9 +37,28 @@ endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /aut
 - **`Auth:DevSeed:SecondOrgName`**: the development seed also creates that company and makes its first user a plain member of it.
 - **The sample**: a company picker in the account bar of `samples/notes-web`, and a reload of the notes when another tab switched.
 - **`scripts/e2e-orgs.sh`**: the live check of the sequence above against the development stack (the run sequences of `e2e-tenancy.sh` and `e2e-hardening.sh` name it).
+- **An invitation keeps the other memberships** (spec 0017). An address that has an account of any kind (a company member's, a private account, or both) accepts an
+  invitation and joins the company with that account: the password, the linked providers, the other memberships, the personal space and the sessions stay, and the new
+  company is in `GET /auth/orgs` at once (`current` `false`). The acceptance needs no password for such an address (one sent is not used), confirms an unconfirmed
+  email and writes `LastUsedAt` with `JoinedAt`.
+- **`has_account` and `org_id` in `POST /auth/invites/preview`**: `has_account` is `true` when the address has an account of any kind, `org_id` is the invited
+  company's id. A client uses them to show one button instead of a password form and to call `POST /auth/switch` after the `204`.
+- **The acceptance through Google or Microsoft joins an existing account** when the identity is one of its logins: the person is signed in to the invited company
+  with the answer of a login. An identity that is not one of the account's logins is `409 already_registered`; one that belongs to another account is
+  `409 provider_already_linked`; nothing is used up in those cases.
+- **The sample**: `/invite` shows one line and the button "Accept the invitation" for an existing account, with the provider buttons below, and moves the session of
+  the invited person into the company after the `204`; it never sends `leave_private_account`.
 
 ### Changed
 
+- **An invitation to an existing account no longer ends sessions, mail links or the login streak** (spec 0017). Until now an acceptance bumped the security stamp and
+  ended every session of the account; it ends none, on either path, and a lockout, a reset link or a verification link sent before it stays as it was.
+- **`409 already_member` of an invitation means a member of the invited company only** (preview, acceptance and provider exchange); a member of another company
+  joins. **`409 private_account_exists` is no longer answered by any path** (the OpenAPI description drops it; the exchange describes `already_registered` for the
+  purpose `invite`). A client built for spec 0010 that sends `leave_private_account: true` still gets the move: the personal space is deleted, and sessions of that space
+  get `401 invalid_grant` at their next refresh or switch. A screen built for an older server that sends a `password` for an existing account sees it ignored.
+- **The invitation mail to an address that has an account** names the application and the company and says that the account joins and keeps everything it has (English
+  and Polish); no mail holds the warning of spec 0010 any more. As since `0.1.2`, no invitation mail names the role.
 - **An account is deleted only when it loses its last space.** Removing a member and deleting a company delete the membership; an account left with no space is
   deleted as before (`account.deleted`, now naming in `org_id` the space it lost), and one that has another space is kept (`member.removed` is written either way).
   The sessions whose company was the removed one get `401 invalid_grant` at their next refresh or switch; the others go on. `remove-member` prints
@@ -47,7 +66,7 @@ endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /aut
 - `GET /auth/me`, every endpoint under `/auth/org` and `DELETE /auth/account` act on the token's company, checked against the database. `DELETE /auth/account`
   with a personal-space token of an account that is also a company member answers `403 company_member` (spec 0016; it was `403 permissions_changed`).
 - The per-IP limits count `POST /auth/switch` against the `refresh` policy and `GET /auth/orgs` against `general`. The OpenAPI description has 38 operations (39 with `POST /auth/orgs`).
-- The threat model (residual risks 62 to 65, the session's company), the guides for Angular and Python, the design document and the audit runbook describe the feature (residual risks 66 and 67 are spec 0016's).
+- The threat model (residual risks 62 to 65, the session's company), the guides for Angular and Python, the design document and the audit runbook describe the feature (residual risks 66 and 67 are spec 0016's, 68 to 70 spec 0017's).
 
 ### Upgrading
 

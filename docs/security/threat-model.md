@@ -97,7 +97,7 @@ Not applicable: R (the proxy is not where actions are recorded: Auth-Core's audi
 | E | A session reaches a company it does not work in, or outlives its place in it | Every session works in one space, **the session's company** (spec 0015): a sign-in sets it, `POST /auth/switch` changes it, a refresh keeps it. The refresh token carries it as two internal claims, `session_org_id` and `session_org_joined` (the membership's join time), which live in the token store and never reach the access token; a refresh reads the membership in the session's company and answers the uniform `401 invalid_grant` when it is gone or has another join time, so a removed and re-added member's old session does not come back. A switch needs the refresh cookie, answers `404 not_found` for a space that is not the person's (the same answer for an unknown id, a company of others and another account's personal space) without using the cookie up, and is a refresh in every other respect: the same rotation, grace window, reuse detection and per-IP limit. `GET /auth/me`, the company API and `DELETE /auth/account` act on the token's `org_id`, checked against the database on every call | See residual risks 62 to 65 |
 | E | A private account reaches the company API, or the operator acts on a personal space | Every endpoint under `/auth/org` refuses a personal space, read from the database whatever the token says, `GET /auth/org` included (`PersonalSpaceRefusalTests`); the company lock locks companies only, so every company service answers `not_found` for a personal space, the CLI too, and `list-orgs` does not list them (`PersonalSpaceCliTests`); the private role never holds a built-in permission (`ManifestPrivateTests`) | |
 | S | An access token alone deletes an account | `DELETE /auth/account` needs the password, which counts in the login streak like a failed login and is refused while the identifier is locked (`AccountDeletionEndpointTests`); it serves private accounts only, and a company account is managed by the company's admins; the account is read again under the address lock (`AccountDeletionEndpointTests.A_deletion_that_finds_the_space_no_longer_personal_under_the_lock_is_permissions_changed`, `PrivateAccountRaceTests`) | Whoever knows the password and holds a live access token can delete the account: that is what the endpoint is for |
-| T | An invitation takes a private account over by surprise | Accepting needs `leave_private_account: true`; without it nothing changes (`409 private_account_exists`); the mail and the preview say what accepting does (`PrivateInvitationTests`, `PrivateInvitationMailTests`) | The product's data of the old space stays behind (risk 48) |
+| T | An invitation takes a private account over by surprise | Without `leave_private_account: true` an acceptance only adds the company: the account keeps its personal space, its password, its other memberships and its sessions (`PrivateInvitationTests.Accepting_without_leave_private_account_joins_and_keeps_the_personal_space`); the space goes only when the request says `leave_private_account: true`, and the audit row says so (`PrivateInvitationTests.Accepting_with_leave_private_account_moves_the_account_and_deletes_its_space`); the mail and the preview tell an existing account that it joins (`PrivateInvitationMailTests`, `InviteAcceptTests.The_preview_says_has_account_and_org_id_for_every_kind_of_address`) | The link alone adds the company (risk 68); the product's data of a moved space stays behind (risk 48) |
 | E | Privilege through the container | Non-root user, read-only root file system, no capabilities, no privilege gain (`docker-compose.prod.yml`, proven by `scripts/e2e-prod.sh` step 2); the bind mounts do not create a missing host path, so a wrong path stops the start instead of leaving the service on the built-in manifest or without keys; the SMTP credentials must be present in `.env` (blank means a relay without authentication, not a forgotten value) | |
 
 ## PostgreSQL
@@ -222,14 +222,15 @@ the account lost).
   is used once, within 5 minutes, and bound to the browser. The section "Sign-in with Google and Microsoft" has the threat and risk 57 its
   limit (`AccountDeletionProviderTests`). Deleting a company keeps the password: an admin without one gets `403 reauth_required` (nothing
   counted, no row, the company stays) and sets a password with "forgot password" first (Amendment A9; `OrgDeleteEndpointTests`).
-- **The invitation move:** a private account that accepts an invitation with `leave_private_account: true` keeps its address and password
-  and becomes a member; its personal space is deleted in Auth-Core, and the product's rows under that space's `org_id` stay (risk 48).
-  At an acceptance, an account that holds both a personal and a company membership (only a direct change of the database makes one) is
-  treated as a company member's: the company wins and nothing is moved.
+- **An invitation to an account that exists (spec 0017):** the account joins the company and keeps everything it has, its personal space
+  included; a private person is no longer warned. Only an acceptance with `leave_private_account: true` is the move: the account keeps its
+  address and password and becomes a member, its personal space is deleted in Auth-Core, and the product's rows under that space's `org_id`
+  stay (risk 48). An account with a personal space and a company that sends `leave_private_account: true` is moved too, and keeps its
+  company; one that does not send it keeps the space.
 
 ## Residual risks
 
-Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 67 are the risks accepted by specs 0002 to 0011, 0015 and 0016 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's; 52 to 61 are spec 0011's; 62 to 65 are spec 0015's; 66 and 67 are spec 0016's).
+Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 70 are the risks accepted by specs 0002 to 0011, 0015, 0016 and 0017 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's; 52 to 61 are spec 0011's; 62 to 65 are spec 0015's; 66 and 67 are spec 0016's; 68 to 70 are spec 0017's).
 
 1. **A key change signs everyone out.** No previous keys are kept for verification or decryption; rotation is a runbook (spec 0008, Decision 7).
 2. **A distributed guesser below the per-IP limits** on many addresses is stopped only by the per-identifier lockout, which an attacker can use to keep a chosen account locked, at one request per cooldown (spec 0003, Decision 8 and Deferred / follow-ups; spec 0008, Residual risks).
@@ -311,6 +312,15 @@ Accepted, with the decision that accepted each. None of them is hidden by a miti
 67. **A member of another company cannot delete their own account alone.** No one leaves a company on their own, so a
     person who wants their account erased while they are a plain member of someone else's company needs that company's
     admin, or the operator (`remove-member`). Their own companies they can delete themselves.
+68. **The link alone adds an existing account to a company.** Whoever reads the person's mailbox can make the account a
+    member of the inviting company. It gives them no sign-in (that still needs the password or a linked provider), and the
+    person sees the company in their list. The move of spec 0010 already worked on the link alone.
+69. **An acceptance no longer ends sessions, mail links or the login streak.** A session stolen before an acceptance
+    keeps working until it expires, the person changes the password, or the person is removed; a reset or verification
+    link sent before it stays usable until it expires; a lockout runs its course. An acceptance was never meant as a way
+    to end them.
+70. **The preview names the company's id** to whoever holds the link, as it names the company. The id grants nothing
+    without a membership.
 
 ### Accepted earlier and closed by spec 0008
 
