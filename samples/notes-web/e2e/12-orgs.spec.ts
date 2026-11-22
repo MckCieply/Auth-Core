@@ -15,9 +15,12 @@ const seed = () => ({ email: setting('E2E_SEED_EMAIL'), password: setting('E2E_S
 
 const picker = (page: Page) => page.getByTestId('org-picker');
 
+/** The company options of the picker, without the "New company..." entry (value new-company) that spec 0016 adds. */
+const companyOptions = (page: Page) => picker(page).locator('option:not([value="new-company"])');
+
 /** The names the picker offers, in the order of the list. */
 async function pickerNames(page: Page): Promise<string[]> {
-  return picker(page).locator('option').allTextContents();
+  return companyOptions(page).allTextContents();
 }
 
 /** Chooses a company in the picker and waits until the account bar names it and the picker is usable again. */
@@ -58,7 +61,7 @@ test('the picker lists both companies, and a switch moves the notes and the sess
   await signIn(page, email, password);
   const company = page.getByTestId('me-company');
   // The first company is the one of the picker that is not Beta, whichever of the two the seed user was left in.
-  await expect(picker(page).locator('option')).toHaveCount(2);
+  await expect(companyOptions(page)).toHaveCount(2);
   const first = (await pickerNames(page)).map((name) => name.trim()).find((name) => name !== SECOND);
   expect(first, `the picker offers no company besides ${SECOND}`).toBeDefined();
   await backToFirstCompany(page, first!);
@@ -68,7 +71,7 @@ test('the picker lists both companies, and a switch moves the notes and the sess
     // The picker lists the first company and Beta, with the first one chosen.
     await expect(picker(page)).toBeVisible();
     await expect(page.getByLabel('Company', { exact: true })).toBeVisible();
-    await expect(picker(page).locator('option')).toHaveCount(2);
+    await expect(companyOptions(page)).toHaveCount(2);
     expect((await pickerNames(page)).map((name) => name.trim()).sort()).toEqual([first!, SECOND].sort());
     await expect(picker(page).locator('option:checked')).toHaveText(first!);
 

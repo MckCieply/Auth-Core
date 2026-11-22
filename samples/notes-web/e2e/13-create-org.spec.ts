@@ -39,8 +39,8 @@ test('"New company..." creates a company and shows it as current with no notes',
   let failure: unknown;
   try {
     // The picker offers the entry as its last option.
-    const options = (await picker(page).locator('option').allTextContents()).map((text) => text.trim());
-    expect(options[options.length - 1]).toBe(NEW_COMPANY);
+    // It waits: the entry is rendered once the options answer has arrived.
+    await expect(picker(page).locator('option').last()).toHaveText(NEW_COMPANY);
 
     await createCompany(page, name);
 
