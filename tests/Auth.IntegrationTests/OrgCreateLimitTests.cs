@@ -119,9 +119,9 @@ public sealed class OrgCreateLimitTests : AuditTestBase
         var invite = await AddInviteAsync(crowded, Boss, "user");
         await EnqueueInvitationAsync(invite, Boss);
         await DispatchAsync();
-        using (var refused = await TenancyApi.Accept(Client, TokenIn(Mail.Sent.Last(m => m.To == Boss)), "Invited-Passw0rd"))
+        using (var joined = await TenancyApi.Accept(Client, TokenIn(Mail.Sent.Last(m => m.To == Boss)), "Invited-Passw0rd"))
         {
-            Assert.NotEqual("company_limit_reached", await ErrorOfAsync(refused));
+            Assert.Equal(HttpStatusCode.NoContent, joined.StatusCode);   // spec 0017: an existing account joins whatever it holds
         }
 
         // An address with no account: the invitation makes the account and the membership, as ever.

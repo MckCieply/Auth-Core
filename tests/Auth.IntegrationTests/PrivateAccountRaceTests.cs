@@ -148,6 +148,40 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
     }
 
     [Fact]
+    public async Task A_removal_that_holds_the_account_row_makes_an_acceptance_without_a_password_400_and_the_invitation_stays()   // spec 0017, criterion 18, order B without a password
+    {
+        var (acme, _, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
+        var globex = await CreateCompanyAsync("Globex");
+        var invite = await AddInviteAsync(globex, "worker@acme.test", "user");
+        await EnqueueInvitationAsync(invite, "worker@acme.test");
+        await DispatchAsync();
+        var token = TokenIn(Mail.Sent.Last(m => m.To == "worker@acme.test"));
+        var hash = (await InviteAsync(invite))!.TokenHash;
+
+        Task<HttpResponseMessage> removal;
+        Task<HttpResponseMessage> acceptance;
+        await using (var held = await HeldLock.AuditTableAsync(Factory))
+        {
+            removal = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, removal);
+
+            acceptance = TenancyApi.AcceptWithoutPassword(Client, token);
+            await HeldLock.WaitForWaitersAsync(Factory, 2, removal, acceptance);   // the acceptance waits at the account row
+
+            await held.ReleaseAsync();
+        }
+
+        using var removed = await removal;
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        using var refused = await acceptance;
+        await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.BadRequest, "invalid_request");   // the row is gone: no account, and no password to make one
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.NormalizedEmail == "WORKER@ACME.TEST", TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == globex, TestContext.Current.CancellationToken)));
+        Assert.Equal(hash, (await InviteAsync(invite))!.TokenHash);   // the invitation stays usable
+    }
+
+    [Fact]
     public async Task A_removal_that_commits_while_the_acceptance_waits_for_the_account_row_makes_a_new_account()   // criterion 27
     {
         var (acme, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
