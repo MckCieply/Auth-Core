@@ -37,7 +37,46 @@ describe('AccountApi', () => {
     const request = ctrl.expectOne('/auth/invites/preview');
     expect(request.request.body).toEqual({ token: 'tok' });
     request.flush({ org_name: 'Acme', email: 'a@b.example', role: 'viewer' });
-    expect(await done).toEqual({ ok: true, value: { org_name: 'Acme', email: 'a@b.example', role: 'viewer', has_private_account: false } });
+    expect(await done).toEqual({
+      ok: true,
+      value: { org_name: 'Acme', email: 'a@b.example', role: 'viewer', has_private_account: false, has_account: false, org_id: null },
+    });
+  });
+
+  it('reads has_account and org_id from the preview; anything but true is false; a missing or empty org_id is null', async () => {
+    const base = { org_name: 'Acme', email: 'a@b.example', role: 'viewer' };
+    const read = async (extra: object) => {
+      const done = api.previewInvite('tok');
+      ctrl.expectOne('/auth/invites/preview').flush({ ...base, ...extra });
+      const outcome = await done;
+      if (!outcome.ok) {
+        throw new Error('the preview should be read');
+      }
+      return outcome.value;
+    };
+    const full = await read({ has_account: true, org_id: 'org-1' });
+    expect([full.has_account, full.org_id]).toEqual([true, 'org-1']);
+    for (const odd of ['true', 1, null, 'yes', false]) {
+      expect((await read({ has_account: odd, org_id: 'org-1' })).has_account).toBe(false);
+    }
+    for (const odd of [undefined, '', 5, null, {}]) {
+      expect((await read({ has_account: true, org_id: odd })).org_id).toBeNull();
+    }
+  });
+
+  it('acceptInvite sends the token alone when the password is null and never sends leave_private_account', async () => {
+    const alone = api.acceptInvite('tok', null);
+    const first = ctrl.expectOne('/auth/invites/accept');
+    expect(first.request.body).toEqual({ token: 'tok' });
+    expect(Object.keys(first.request.body as object)).toEqual(['token']);
+    first.flush(null, status(204));
+    await alone;
+    const withPassword = api.acceptInvite('tok', 'Pw-1 x');
+    const second = ctrl.expectOne('/auth/invites/accept');
+    expect(second.request.body).toEqual({ token: 'tok', password: 'Pw-1 x' });
+    expect(JSON.stringify(second.request.body)).not.toContain('leave_private_account');
+    second.flush(null, status(204));
+    await withPassword;
   });
 
   it('a preview that is not what the contract says is a failure, not a half-filled screen', async () => {

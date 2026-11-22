@@ -94,12 +94,11 @@ export const texts = {
     joinMiddle: 'as',
     setsPassword: (email: string): string => `This sets the password for ${email}.`,
     submit: 'Join',
-    alreadyMember: 'This account already belongs to a company.',
-    // The paragraph of the invitation mail (spec 0010), for an address that has a private account.
-    privateWarning: (company: string): string =>
-      `You already have a private account with this email address. If you accept, you move to ${company}: the space of your private account ` +
-      `is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of ${company}.`,
-    move: 'Move me to the company and delete my private account',
+    alreadyMember: 'You are already a member of this company. Sign in to open it.',
+    // Spec 0017: an address that has an account of any kind joins the company with that account; nothing it has is lost.
+    existingAccount: (email: string, company: string): string =>
+      `You already have an account with ${email}. Accepting adds ${company} to it; everything else stays as it is.`,
+    accept: 'Accept the invitation',
     // Not the link texts of the other screens: a person cannot get a new invitation from this app, only from the company.
     invalid: 'This invitation has expired or was already used. Ask for a new one.',
   },

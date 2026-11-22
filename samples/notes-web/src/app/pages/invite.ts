@@ -2,10 +2,16 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AccountApi, InvitePreview, Outcome, ProviderName } from '../account-api';
+import { AuthService } from '../auth/auth.service';
 import { texts } from '../texts';
 import { PasswordRules } from './password-rules';
 import { ProviderButtons } from './provider-buttons';
 import { takeTokenFromUrl } from './token-from-url';
+
+/** Folds ASCII capitals only, as the server compares addresses; `toLowerCase()` would fold other letters too. */
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32));
+}
 
 @Component({
   selector: 'app-invite',
@@ -23,12 +29,11 @@ import { takeTokenFromUrl } from './token-from-url';
               {{ t.joinPrefix }} <strong>{{ invitation.org_name }}</strong> {{ t.joinMiddle }}
               <strong>{{ invitation.role }}</strong>
             </p>
-            @if (invitation.has_private_account) {
-              <!-- The address has a private account. Accepting moves it and deletes its space; it keeps its password. -->
-              <p class="error" role="alert" data-testid="invite-private-warning">{{ t.privateWarning(invitation.org_name) }}</p>
-              <label for="email">{{ common.email }}</label>
-              <input id="email" type="email" [value]="invitation.email" readonly autocomplete="username" />
-              <button type="button" data-testid="move" [disabled]="busy()" (click)="move()">{{ t.move }}</button>
+            @if (invitation.has_account) {
+              <!-- Spec 0017: the address has an account. Accepting adds the company to it, with no password and nothing lost. -->
+              <p data-testid="invite-existing">{{ t.existingAccount(invitation.email, invitation.org_name) }}</p>
+              <button type="button" data-testid="accept" [disabled]="busy()" (click)="acceptExisting()">{{ t.accept }}</button>
+              <app-provider-buttons [providers]="providers()" action="accept" [invite]="token" />
             } @else {
               <!-- Spec 0011: the invitation can be accepted with a provider; the token rides on the start, never in this page's URL. -->
               <app-provider-buttons [providers]="providers()" action="accept" [invite]="token" />
@@ -71,6 +76,7 @@ export class InvitePage implements OnInit {
   protected readonly common = texts.common;
   private readonly account = inject(AccountApi);
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthService);
   // Read once, here, and gone from the address bar from now on.
   protected readonly token = takeTokenFromUrl(inject(ActivatedRoute), inject(Router));
 
@@ -85,7 +91,7 @@ export class InvitePage implements OnInit {
   protected readonly busy = signal(false);
   protected readonly rules = signal<string[]>([]);
   protected readonly error = signal<string | null>(null);
-  /** The offered providers (spec 0011): "Accept with ..." for an address without a private account. */
+  /** The offered providers (spec 0011): "Accept with ..." for every address (spec 0017: an existing account has the buttons too). */
   protected readonly providers = signal<ProviderName[]>([]);
 
   ngOnInit(): void {
@@ -120,27 +126,31 @@ export class InvitePage implements OnInit {
     this.busy.set(false);
   }
 
-  /** The one button of an address with a private account: it moves on purpose, with no password (spec 0010). */
-  protected async move(): Promise<void> {
+  /** The one button of an address that has an account (spec 0017): the token goes alone, no password. */
+  protected async acceptExisting(): Promise<void> {
     const invitation = this.invite();
     if (this.busy() || this.token === null || invitation === null) {
       return;
     }
     this.error.set(null);
     this.busy.set(true);
-    await this.answer(await this.account.acceptInvite(this.token, null, true), invitation);
+    await this.answer(await this.account.acceptInvite(this.token, null), invitation);
     this.busy.set(false);
   }
 
   private async answer(result: Outcome, invitation: InvitePreview): Promise<void> {
     if (result.ok) {
-      // The email goes in the navigation state: it is never in the URL. The button stays off until the login is open: the
+      // The email goes in the navigation state: it is never in the URL. The button stays off until the next screen is open: the
       // token is used up, and a second Enter would only post it again.
       // When the router cannot open it (it answers false or fails) the person stays here and the button is on again.
       try {
-        await this.router.navigate(['/login'], { state: { email: invitation.email } });
+        if (invitation.has_account && (await this.switchIntoCompany(invitation))) {
+          await this.router.navigate(['/notes']);
+        } else {
+          await this.router.navigate(['/login'], { state: { email: invitation.email } });
+        }
       } catch {
-        // nothing to show: the password was set
+        // nothing to show: the invitation is accepted
       }
     } else if (result.failure.kind === 'weak_password') {
       this.rules.set(result.failure.rules);
@@ -148,14 +158,27 @@ export class InvitePage implements OnInit {
       this.phase.set('invalid');
     } else if (result.failure.kind === 'already_member') {
       this.phase.set('member');
-    } else if (result.failure.kind === 'private_account_exists' && this.token !== null) {
-      // The address has a private account by now: ask again, and the screen shows the warning and its button.
-      await this.preview(this.token);
     } else if (result.failure.kind === 'too_many_requests') {
       // The notice bar above the screen says when to try again: the interceptor put it there.
+    } else if (result.failure.kind === 'private_account_exists') {
+      // An older server (spec 0010) still sends this. Nothing here can answer it: the generic error, and no second preview.
+      this.phase.set('error');
     } else {
       this.error.set(this.common.somethingWrong);
     }
+  }
+
+  /**
+   * After the acceptance of an existing account: when the person signed in here is the invited one (the address up to ASCII case) and
+   * the preview named the company, move the session into it. False: the page opens /login instead (also after a switch that did not
+   * end in the company, `switchTo` has then done what it does).
+   */
+  private async switchIntoCompany(invitation: InvitePreview): Promise<boolean> {
+    const me = this.auth.me();
+    if (me === null || invitation.org_id === null || asciiLower(me.email) !== asciiLower(invitation.email)) {
+      return false;
+    }
+    return (await this.auth.switchTo(invitation.org_id)) === 'switched';
   }
 
   private async preview(token: string): Promise<void> {
