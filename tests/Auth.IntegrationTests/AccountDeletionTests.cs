@@ -100,7 +100,7 @@ public sealed class AccountDeletionTests : AuditTestBase
     }
 
     /// <summary>The statements the routine sends for these accounts, in a transaction of the test.</summary>
-    private async Task<int> CountStatementsAsync(IReadOnlyCollection<Guid> users)
+    private async Task<int> CountStatementsAsync(IReadOnlyCollection<Guid> users, AccountDeletionReason reason = AccountDeletionReason.Self)
     {
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
@@ -110,7 +110,7 @@ public sealed class AccountDeletionTests : AuditTestBase
         try
         {
             Assert.Equal(users.Count, await scope.ServiceProvider.GetRequiredService<AccountDeletion>()
-                .DeleteAsync(users, AccountDeletionReason.OrgDeleted, Actor.Operator, TestContext.Current.CancellationToken));
+                .DeleteAsync(users, reason, Actor.Operator, TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -205,7 +205,9 @@ public sealed class AccountDeletionTests : AuditTestBase
         var worker = await AddMemberAsync(company, "worker@acme.test", "admin");
         var invite = await AddInviteAsync(company, "new@acme.test", "user", invitedBy: worker);
 
-        Assert.Equal(1, await DeleteAsync([worker], AccountDeletionReason.MemberRemoved, Actor.Of(await TenantOfAsync(admin))));
+        var tenant = await TenantOfAsync(admin);
+        await RemoveMembershipAsync(worker);   // as MemberService does before it calls the routine (which counts again)
+        Assert.Equal(1, await DeleteAsync([worker], AccountDeletionReason.MemberRemoved, Actor.Of(tenant), company));
 
         Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
@@ -225,7 +227,8 @@ public sealed class AccountDeletionTests : AuditTestBase
         var (user, space) = await CreatePrivateAccountAsync(Private);
         await AddLaterMembershipAsync(user, company, "user");   // the personal membership is the older one
 
-        Assert.Equal(1, await DeleteAsync([user], AccountDeletionReason.MemberRemoved, actor: null));
+        // The start-up step names no lost space (a removal would keep an account that still has a membership).
+        Assert.Equal(1, await DeleteAsync([user], AccountDeletionReason.Upgrade, actor: null));
 
         var row = await SingleAsync(AuditKinds.AccountDeleted);
         Assert.Equal(company, row.OrgId);
@@ -285,6 +288,7 @@ public sealed class AccountDeletionTests : AuditTestBase
         var other = await AddMemberAsync(a, "other@acme.test", "user");
         await AddMembershipAsync(other, b, "user");
         await SetLastUsedAtAsync(other, a, StorableTime.Now(Clock));
+        await RemoveMembershipAsync(other);   // a removal deletes the memberships first (the routine counts again)
         Assert.Equal(1, await DeleteAsync([other], AccountDeletionReason.MemberRemoved, actor: null, lostSpaceId: b));
 
         var named = Assert.Single(await AuditAsync(AuditKinds.AccountDeleted), r => r.SubjectUserId == other);
@@ -302,7 +306,8 @@ public sealed class AccountDeletionTests : AuditTestBase
         var fresh = await AddMemberAsync(a, "fresh@acme.test", "user");
         await AddMembershipAsync(fresh, b, "user");                   // none used: the earliest joined, A
 
-        Assert.Equal(2, await DeleteAsync([used, fresh], AccountDeletionReason.OrgDeleted, actor: null));
+        // No lost space named, as at start-up (a company deletion would keep these accounts: they still hold memberships).
+        Assert.Equal(2, await DeleteAsync([used, fresh], AccountDeletionReason.Upgrade, actor: null));
 
         var rows = await AuditAsync(AuditKinds.AccountDeleted);
         Assert.Equal(b, Assert.Single(rows, r => r.SubjectUserId == used).OrgId);
@@ -341,6 +346,7 @@ public sealed class AccountDeletionTests : AuditTestBase
         var member = await AddMemberAsync(company, "worker@acme.test", "user");
         var lonely = (await CreateUserAsync("lonely@example.test", confirmed: true, member: false)).Id;
 
+        await RemoveMembershipAsync(member);   // a company deletion removes the memberships first (the routine counts again)
         await DeleteAsync([member], AccountDeletionReason.OrgDeleted, Actor.Operator);
         await DeleteAsync([lonely], AccountDeletionReason.Upgrade, actor: null);
 
@@ -492,7 +498,31 @@ public sealed class AccountDeletionTests : AuditTestBase
         ]);
 
         Assert.Equal(one, three);
-        Assert.InRange(one, 3, 10);   // three reads (the membership lock, the accounts, the spaces) and at most seven deletes
+        Assert.InRange(one, 3, 10);   // three reads (the membership lock, the accounts, the spaces) and at most seven deletes (Self: no recount)
+    }
+
+    [Fact]
+    public async Task A_removal_or_company_deletion_of_any_size_costs_the_same_number_of_statements()
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var one = await CountStatementsAsync([await FormerMemberAsync(company, "one@acme.test")], AccountDeletionReason.OrgDeleted);
+        var three = await CountStatementsAsync(
+        [
+            await FormerMemberAsync(company, "two@acme.test"),
+            await FormerMemberAsync(company, "three@acme.test"),
+            await FormerMemberAsync(company, "four@acme.test"),
+        ], AccountDeletionReason.OrgDeleted);
+
+        Assert.Equal(one, three);
+        Assert.InRange(one, 4, 10);   // four reads (the membership lock, the accounts, the recount, the spaces) and at most six deletes
+    }
+
+    /// <summary>An account whose memberships are already deleted, as a removal or a company deletion leaves it before it calls the routine.</summary>
+    private async Task<Guid> FormerMemberAsync(Guid company, string email)
+    {
+        var user = await AddMemberAsync(company, email, "user");
+        await RemoveMembershipAsync(user);
+        return user;
     }
 
     [Fact]
@@ -503,6 +533,11 @@ public sealed class AccountDeletionTests : AuditTestBase
         for (var i = 0; i < 3; i++)
         {
             members.Add(await AddMemberAsync(company, $"worker{i}@acme.test", "user"));
+        }
+
+        foreach (var member in members)
+        {
+            await RemoveMembershipAsync(member);   // a company deletion removes the memberships first (the routine counts again)
         }
 
         Assert.Equal(3, await DeleteAsync(members, AccountDeletionReason.OrgDeleted, Actor.Of(await TenantOfAsync(admin))));

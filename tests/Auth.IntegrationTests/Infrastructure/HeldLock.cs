@@ -91,6 +91,29 @@ public sealed class HeldLock : IAsyncDisposable
     }
 
     /// <summary>
+    /// The row lock of one account (<c>FOR UPDATE</c>) and nothing else: a routine that has locked the memberships waits only when it reaches
+    /// the account row, which is where the recount of a removal runs.
+    /// </summary>
+    public static async Task<HeldLock> AccountRowAsync(AuthAppFactory factory, Guid userId)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        await db.Database.ExecuteSqlAsync($"""SELECT 1 FROM "AspNetUsers" WHERE "Id" = {userId} FOR UPDATE""", TestContext.Current.CancellationToken);
+        return new HeldLock(scope, db, transaction);
+    }
+
+    /// <summary>Inserts one membership in the transaction that holds the lock: what a creation of a company leaves, committed with the release.</summary>
+    public async Task InsertMembershipAsync(Guid userId, Guid companyId, Guid roleId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _db.Memberships.Add(new Membership { UserId = userId, CompanyId = companyId, RoleId = roleId, JoinedAt = now.AddTicks(-(now.Ticks % 10)) });
+        await _db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
     /// Locks the row of an account (<c>FOR UPDATE</c>) in the transaction that holds the lock, waiting at most two seconds: it throws
     /// when the row is held by another transaction, so a test that must not wait for it fails fast.
     /// </summary>

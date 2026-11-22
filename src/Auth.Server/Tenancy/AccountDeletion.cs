@@ -34,6 +34,12 @@ public enum AccountDeletionReason
 /// an account it is deleting (they read their account again under a share lock first).
 /// </para>
 /// <para>
+/// For a removal and a company deletion it then counts each account's memberships again, under that row lock, and keeps an account that
+/// has one (a creation of a company, which holds the account row, may have given it one since the caller looked): nothing of it is
+/// deleted and no row is staged (spec 0017, built with spec 0016). The mail requests and pending sign-ups deleted first are not restored
+/// for such an account.
+/// </para>
+/// <para>
 /// It keeps the audit rows, the invitations of companies to the address and the mail-limit counters. It relies on the caller's
 /// locks for the rest: when the delete removes another number of accounts than the read found, it throws and the caller's
 /// transaction rolls back.
@@ -64,8 +70,9 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
         DeleteAsync(userIds, reason, actor, lostSpaceId: null, cancellationToken);
 
     /// <summary>
-    /// Deletes the accounts; returns how many there were (one already gone is skipped, with no row). <paramref name="actor"/> is the admin who
-    /// removes a member or deletes the company, <see cref="Actor.Operator"/> for the CLI, or <see langword="null"/>; for
+    /// Deletes the accounts; returns how many were deleted (one already gone is skipped, with no row; for a removal or a company
+    /// deletion so is one that still holds a membership). <paramref name="actor"/> is the admin who removes a member or deletes the
+    /// company, <see cref="Actor.Operator"/> for the CLI, or <see langword="null"/>; for
     /// <see cref="AccountDeletionReason.Self"/> the account itself is the actor of its row. <paramref name="lostSpaceId"/> is the space the
     /// caller took from the accounts (a removal, a company deletion, a self-deletion): every <c>account.deleted</c> row names it; without it the
     /// row names the space a sign-in would have taken.
@@ -104,12 +111,25 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
             .AsNoTracking()
             .Select(u => new { u.Id, u.Email, u.NormalizedEmail })
             .ToListAsync(cancellationToken);
+        List<Guid> found = [.. accounts.Select(a => a.Id)];
+        if (reason is AccountDeletionReason.MemberRemoved or AccountDeletionReason.OrgDeleted)
+        {
+            // The recount (spec 0017, built with spec 0016): an account that gained a membership since the caller looked (a creation of a
+            // company holds the account row and commits first) is kept. A plain read: the account rows are locked above, so no creation
+            // can add one now.
+            var holding = await db.Memberships.AsNoTracking()
+                .Where(m => found.Contains(m.UserId))
+                .Select(m => m.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            _ = found.RemoveAll(holding.Contains);
+            _ = accounts.RemoveAll(a => holding.Contains(a.Id));
+        }
+
         if (accounts.Count == 0)
         {
             return 0;
         }
-
-        List<Guid> found = [.. accounts.Select(a => a.Id)];
 
         // The space each account loses, read before anything is deleted: the row names it. The caller's space when it names one (a removal or a
         // company deletion: the account lost that company, whatever else it had), else the space a sign-in would take, in the sign-in's order.
