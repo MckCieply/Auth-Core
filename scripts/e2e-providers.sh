@@ -37,8 +37,11 @@
 #      as another identity -> 409 already_registered - criterion 12.
 #  11. the refusals of the exchange the stack reaches only with some set-up (spec 0011, Amendment A8): an invitation accepted with PW's
 #      Microsoft identity -> 409 provider_already_linked; the same invitation cancelled by SEED -> 400 invalid_token; an invitation of PW's
-#      address (a private account) -> 409 private_account_exists; INV's membership deleted by one SQL statement -> 403 no_membership;
-#      INV invited again and its membership put back by one SQL statement -> 409 already_member - criteria 10, 22. Only no_account is out
+#      address (a private account) accepted with a Google identity that is not PW's login -> 409 already_registered (spec 0017; no
+#      private_account_exists any more); PW invited again and accepting with its own Microsoft identity -> authenticated, in the
+#      development company, its personal space kept (spec 0017); INV's membership deleted by one SQL statement -> 403 no_membership;
+#      INV invited again and its membership put back by one SQL statement -> 409 already_member (only for a member of the inviting
+#      company) - criteria 10, 22. Only no_account is out
 #      of the stack's reach (both sign-up switches are on): the integration tests guard it.
 #  12. the audit rows of the run, read from the database: login.succeeded with details.provider, login.failed, provider.linked,
 #      signup.completed, invite.accepted, account.delete_refused, provider.reauthenticated, account.deleted; and no row holds a state, a
@@ -60,7 +63,7 @@
 # `docker compose exec postgres psql`. Needs: curl, python3 (standard library only; E2E_PYTHON=<interpreter> names another, for example
 # E2E_PYTHON=C:/p6v/Scripts/python.exe), docker compose, and host ports 8088, 8443, 8080, 8025 and 8099 free. Env: BASE_URL (default
 # https://localhost:8443), FAKE_URL (default http://localhost:8099), MAILPIT_URL (default http://localhost:8025). Takes about two minutes (the mails
-# are sent at once; the one wait is the mail limit of INV's second invitation, up to a minute). Re-runnable on the same stack: every address is made for the run. Exits non-zero on the first failure; prints
+# are sent at once; the waits are the mail limit of PW's second invitation and of INV's second invitation, up to a minute each). Re-runnable on the same stack: every address is made for the run. Exits non-zero on the first failure; prints
 # "PASS <step>" per step; never prints a password, a token, a ticket, a cookie, a state, a code or a mail body.
 set -euo pipefail
 
@@ -667,12 +670,30 @@ ticket_json cancelled ticket "$tmp/cancelled.exchange"
 call POST /auth/providers/exchange "$tmp/cancelled.exchange" "$tmp/cancelled.pt"
 expect_error "step 11: a cancelled invitation" 400 invalid_token
 
-# private_account_exists: PW's address (a private account) invited, accepted with a Google identity of that address.
+# already_registered (spec 0017): PW's address (a private account) invited, accepted with a Google identity of that address, which is not
+# a login of PW's account. The server no longer answers private_account_exists.
 invite E2E_PW_EMAIL pwinvite
 round_trip pwinvite google "?invite=$(cat "$tmp/pwinvite.invite")" "person=custom&email=$(enc "$PW_EMAIL")&verified=true"
 ticket_json pwinvite ticket "$tmp/pwinvite.exchange"
 call POST /auth/providers/exchange "$tmp/pwinvite.exchange" "$tmp/pwinvite.pt"
-expect_error "step 11: an invitation of a private account's address" 409 private_account_exists
+expect_error "step 11: an invitation of a private account's address accepted with an identity that is not its login" 409 already_registered
+
+# The join (spec 0017): PW's address invited again (the mail limit of one a minute for a company and an address is waited out by invite),
+# accepted with PW's own Microsoft identity. PW joins the development company, keeps its personal space and is signed in to the company.
+invite E2E_PW_EMAIL pwjoin
+round_trip pwjoin microsoft "?invite=$(cat "$tmp/pwjoin.invite")" "person=custom&email=$(enc "$PW_EMAIL")&verified=true&subject=$PW_OID"
+ticket_json pwjoin ticket "$tmp/pwjoin.exchange"
+call POST /auth/providers/exchange "$tmp/pwjoin.exchange" "$tmp/pwjoin.pt"
+expect_signed_in "step 11: an existing account accepts an invitation with its own identity" pwjoin
+BODY="$(jwt_payload "$tmp/pwjoin.auth")"
+expect_eq "step 11: it is PW's account" "$(val 'd["sub"]')" "$PW_SUB"
+expect_eq "step 11: signed in to the invited company" "$(val 'd["org_id"]')" "$DEV_ORG"
+expect_eq "step 11: org_kind" "$(val 'd["org_kind"]')" "organization"
+expect_eq "step 11: roles" "$(val 'd["roles"]')" "['user']"
+expect_eq "step 11: PW keeps its personal space and has the company besides" \
+  "$(psql_value "SELECT count(*) FROM \"Memberships\" WHERE \"UserId\" = '$PW_SUB'")" "2"
+expect_eq "step 11: invite.accepted with the provider, no move" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'invite.accepted' AND subject_user_id = '$PW_SUB' AND org_id = '$DEV_ORG' AND details->>'provider' = 'microsoft' AND details->>'left_private_account' IS NULL")" "1"
 
 # no_membership: INV's membership deleted by one SQL statement (no API leaves an account without one); INV's linked identity is refused.
 expect_eq "step 11: INV's membership is deleted" \
@@ -691,13 +712,13 @@ round_trip again google "?invite=$(cat "$tmp/again.invite")" "person=custom&emai
 ticket_json again ticket "$tmp/again.exchange"
 call POST /auth/providers/exchange "$tmp/again.exchange" "$tmp/again.pt"
 expect_error "step 11: an invitation of a company member's address" 409 already_member
-pass "step 11: provider_already_linked, invalid_token (a cancelled invitation), private_account_exists, no_membership and already_member"
+pass "step 11: provider_already_linked, invalid_token (a cancelled invitation), already_registered (an identity that is not the account's login), the join of an existing account signed in to the company, no_membership and already_member"
 
 # --- Step 12: the audit rows and no secret (criteria 28, 33) -------------------------------------------------------------------
 [[ -s "$tmp/secrets" ]] || fail "step 12: no secret was collected"
 since="occurred_at >= '$START_TS'"
-expect_eq "step 12: login.succeeded with details.provider (finish, button, link, button, the moved address, invitation, the micro-sign finish)" \
-  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'login.succeeded' AND details ? 'provider' AND $since")" "7"
+expect_eq "step 12: login.succeeded with details.provider (finish, button, link, button, the moved address, invitation, the micro-sign finish, PW's joining invitation)" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'login.succeeded' AND details ? 'provider' AND $since")" "8"
 expect_eq "step 12: login.failed of the wrong password" \
   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'login.failed' AND subject_email = '$PW_EMAIL' AND details->>'reason' = 'wrong_password' AND details->>'provider' = 'microsoft' AND $since")" "1"
 expect_eq "step 12: provider.linked" \

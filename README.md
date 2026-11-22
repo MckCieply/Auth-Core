@@ -125,8 +125,8 @@ scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
 scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
-scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
-scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, removal keeps the account
+scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, an invitation that keeps the space and the opt-in move, self-deletion, removal (~3 min)
+scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, an invitation of another company joins, removal keeps the account
 scripts/e2e-orgs-create.sh      # creating another company: POST /auth/orgs, switch into it, delete it; a private person cannot delete the account while in one
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)

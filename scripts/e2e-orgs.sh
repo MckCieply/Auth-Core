@@ -26,6 +26,11 @@
 #   8. POST /auth/refresh with jar's cookie and with jar2's -> 401 {"error":"invalid_grant"}: the devices that worked in SECOND are signed
 #      out at their next refresh - criterion 8.
 #   9. a new sign-in (jar3) -> 200, org_id FIRST: the account stayed and the company left is the first - criteria 4, 26.
+#  10. spec 0017 (an invitation keeps the account's memberships): the operator makes the company GAMMA ("E2E Gamma <run>", a name of
+#      its own per run) and invites its admin, who invites SEED; the invitation mail tells an existing account it joins; the preview ->
+#      200 has_account true and GAMMA's org_id; the acceptance with the token alone -> 204; jar3 (signed in to FIRST) still refreshes in
+#      FIRST; GET /auth/orgs lists FIRST (current) and GAMMA (SECOND was left in step 7); a switch into GAMMA -> 200, role user; a new
+#      sign-in (jar4) lands in GAMMA. A trap deletes GAMMA with the operator command delete-org, also when a step fails.
 #
 # Full sequence, from the repo root (the stack and .env of the other e2e scripts, with the per-IP limiter OFF as for them; run this one
 # after e2e-private.sh and before e2e-hardening.sh, which recreates the stack with the limits on):
@@ -43,21 +48,41 @@
 # script, which removes SEED from that company. Reads AUTH_DEV_SEED_EMAIL, AUTH_DEV_SEED_PASSWORD and AUTH_DEV_SEED_SECOND_ORG_NAME from
 # the repo-root .env (parsed, never sourced). The operator command runs as `docker compose run --rm -T --no-deps auth admin ...`; the
 # audit log is read with `docker compose exec postgres psql`. Needs: curl, python3 (standard library only; E2E_PYTHON=<interpreter>
-# names another, for example E2E_PYTHON=C:/p6v/Scripts/python.exe), docker compose. Env: BASE_URL (default http://localhost:8080).
-# Takes under a minute. Exits non-zero on the first failure; prints "PASS <step>" per step; never prints a password, a token, a cookie or
-# a mail body. Request bodies are built into files in a mktemp -d directory (removed on exit) and curl reads them with --data-binary
+# names another, for example E2E_PYTHON=C:/p6v/Scripts/python.exe), docker compose. Env: BASE_URL (default http://localhost:8080),
+# MAILPIT_URL (default http://localhost:8025; step 10).
+# Takes about two minutes. Exits non-zero on the first failure; prints "PASS <step>" per step; never prints a password, a token, a cookie or
+# a mail body. Step 10 waits for the invitation mail of GAMMA's admin, which the server sends at its next poll (up to a minute). Request bodies are built into files in a mktemp -d directory (removed on exit) and curl reads them with --data-binary
 # @file; tokens and cookies reach curl through header files.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+MAILPIT_URL="${MAILPIT_URL:-http://localhost:8025}"
+INVITE_LINK="http://localhost:4200/invite"
 PY="${E2E_PYTHON:-python3}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auth-core-hardening}"
 [[ "$COMPOSE_PROJECT_NAME" != "auth-core" ]] || { echo "FAIL COMPOSE_PROJECT_NAME=auth-core is the development stack; use another name" >&2; exit 1; }
 compose=(docker compose -f "$root/deploy/docker-compose.yml" --env-file "$root/.env")
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+# What step 10 made and has not yet deleted, for the cleanup (GAMMA_ID is set as soon as the company exists).
+GAMMA_ID=""
+GAMMA_NAME=""
+# The trap removes the temporary directory and, when step 10 made GAMMA, deletes it with the operator command (also when a step failed), so
+# that the script can run again and the next scripts meet SEED in the company they expect. It runs with `set +e`: a leftover is reported on
+# stderr and the exit status stays the run's. It extends the former trap, which only removed $tmp.
+cleanup() {
+  set +e
+  if [[ -n "$GAMMA_ID" ]]; then
+    if cli delete-org --org "$GAMMA_ID" --confirm "$GAMMA_NAME" > /dev/null 2>&1 && [[ "$CLI_EXIT" == "0" ]]; then
+      echo "cleanup: deleted the company $GAMMA_NAME" >&2
+    else
+      echo "cleanup: could not delete the company $GAMMA_NAME ($GAMMA_ID): delete it by hand with the operator command delete-org" >&2
+    fi
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 
 fail() { echo "FAIL $*" >&2; exit 1; }
 pass() { echo "PASS $*"; }
@@ -188,6 +213,54 @@ cli() {
   CLI_OUT="${CLI_OUT//$'\r'/}"
 }
 
+# --- the mail catcher (step 10) -----------------------------------------------------------------------------------------
+
+mail_count() {
+  curl -sS --max-time 10 -G "$MAILPIT_URL/api/v1/search" --data-urlencode "query=to:$1" -o "$tmp/search.json"
+  "$PY" -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages_count"])' < "$tmp/search.json" | tr -d '\r'
+}
+
+# wait_mail <address> <count> <seconds>: waits until the catcher holds <count> mails for the address, then saves the newest to $tmp/mail.json
+wait_mail() {
+  local i id
+  for i in $(seq 1 "$3"); do
+    if [[ "$(mail_count "$1")" == "$2" ]]; then
+      id="$("$PY" -c 'import json,sys; print(json.load(sys.stdin.buffer)["messages"][0]["ID"])' < "$tmp/search.json" | tr -d '\r')"
+      curl -sS --max-time 10 "$MAILPIT_URL/api/v1/message/$id" -o "$tmp/mail.json"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# token_body <file> [password-env]: takes the token of the invitation link from the text part of $tmp/mail.json, checks that the HTML part
+# holds the same token, and writes the request body ({"token"} or {"token","password"}). Never printed.
+token_body() {
+  "$PY" -c '
+import json, os, re, sys
+mail = json.load(sys.stdin.buffer)
+match = re.search(re.escape(sys.argv[3]) + r"\?token=([A-Za-z0-9_-]{43})\s", mail["Text"])
+if not match:
+    sys.exit("the mail holds no invitation link with a token")
+if match.group(1) not in mail["HTML"]:
+    sys.exit("the HTML part does not hold the link of the text part")
+body = {"token": match.group(1)}
+if sys.argv[2]:
+    body["password"] = os.environ[sys.argv[2]]
+print(json.dumps(body))
+' "$1" "${2:-}" "$INVITE_LINK" < "$tmp/mail.json" > "$1"
+}
+
+# mail_says <text>...: the text part of $tmp/mail.json holds every one of the texts
+mail_says() {
+  "$PY" -c '
+import json, sys
+text = json.load(sys.stdin.buffer)["Text"]
+sys.exit(0 if all(needle in text for needle in sys.argv[1:]) else 1)
+' "$@" < "$tmp/mail.json"
+}
+
 # psql_value <sql>: the value the query returns. The SQL is this script's own text: a value that came from the service under test is
 # only ever a UUID or an address checked above, never free text.
 psql_value() {
@@ -302,5 +375,71 @@ expect_eq "step 9: org_id" "$(claim jar3 'd["org_id"]')" "$FIRST"
 expect_eq "step 9: roles" "$(claim jar3 'd["roles"]')" "['admin']"
 expect_eq "step 9: sub" "$(claim jar3 'd["sub"]')" "$SEED_SUB"
 pass "step 9: a new sign-in (jar3) -> 200 into the first company: the account is kept, as the next scripts expect"
+
+# --- Step 10: an invitation from a third company keeps SEED's memberships (spec 0017) ---------------------------------------
+# GAMMA is a company of this run, named with the run's number so that it never meets the Gamma of e2e-orgs-create.sh. Its admin is made
+# with the operator command, as e2e-tenancy.sh makes its companies; the trap above deletes GAMMA at the end.
+run="$RANDOM$RANDOM"
+GAMMA_NAME="E2E Gamma $run"
+GAMMA_ADMIN_EMAIL="gamma-$run@acme.test"
+export E2E_GAMMA_ADMIN_EMAIL="$GAMMA_ADMIN_EMAIL" E2E_GAMMA_PASSWORD="E2e-Passw0rd-$run"
+cli create-org --name "$GAMMA_NAME"
+expect_eq "step 10: create-org exit code" "$CLI_EXIT" "0"
+[[ "$CLI_OUT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail "step 10: create-org printed more than the company id"
+GAMMA_ID="$CLI_OUT"
+cli invite --org "$GAMMA_ID" --email "$GAMMA_ADMIN_EMAIL" --role admin
+expect_eq "step 10: invite exit code" "$CLI_EXIT" "0"
+# The CLI only queues the mail: the server sends it at its next poll, within a minute.
+wait_mail "$GAMMA_ADMIN_EMAIL" 1 120 || fail "step 10: no invitation mail for GAMMA's admin within 120s of the CLI invitation"
+token_body "$tmp/gamma-admin-accept.json" E2E_GAMMA_PASSWORD || fail "step 10: no usable invitation link in the mail of GAMMA's admin"
+call POST /auth/invites/accept "$tmp/gamma-admin-accept.json"
+expect_status "step 10: GAMMA's admin accepts" 204 ""
+json_body "$tmp/gadmin.login" "{'email': os.environ['E2E_GAMMA_ADMIN_EMAIL'], 'password': os.environ['E2E_GAMMA_PASSWORD']}"
+call POST /auth/login "$tmp/gadmin.login"
+expect_status "step 10: login of GAMMA's admin" 200
+keep_session gadmin
+expect_eq "step 10: GAMMA's admin is in GAMMA" "$(claim gadmin 'd["org_id"]')" "$GAMMA_ID"
+call GET /auth/org/roles "" "$tmp/gadmin.auth"
+expect_status "step 10: GET /auth/org/roles of GAMMA" 200
+export E2E_GAMMA_USER_ROLE
+E2E_GAMMA_USER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "user"][0]')"
+SEED_MAILS="$(mail_count "$SEED_EMAIL")"
+json_body "$tmp/invite-seed.json" "{'email': os.environ['E2E_SEED_EMAIL'], 'role_id': os.environ['E2E_GAMMA_USER_ROLE']}"
+call POST /auth/org/invites "$tmp/invite-seed.json" "$tmp/gadmin.auth"
+expect_status "step 10: GAMMA's admin invites SEED" 202 ""
+wait_mail "$SEED_EMAIL" "$((SEED_MAILS + 1))" 90 || fail "step 10: no invitation mail for SEED within 90s"
+mail_says "$GAMMA_NAME" "You already have an account on" || fail "step 10: the invitation mail does not name the company and tell an existing account it joins"
+token_body "$tmp/seed-invite.json" || fail "step 10: no usable invitation link in SEED's mail"
+call POST /auth/invites/preview "$tmp/seed-invite.json"
+expect_status "step 10: the preview" 200
+expect_no_store "step 10: the preview"
+expect_eq "step 10: has_account" "$(val 'd["has_account"]')" "True"
+expect_eq "step 10: org_id" "$(val 'd["org_id"]')" "$GAMMA_ID"
+expect_eq "step 10: org_name" "$(val 'd["org_name"]')" "$GAMMA_NAME"
+call POST /auth/invites/accept "$tmp/seed-invite.json"
+expect_status "step 10: the acceptance with the token alone" 204 ""
+expect_no_cookie "step 10: the acceptance"
+# The session of step 9 (jar3, in FIRST) is not ended by the acceptance.
+refresh jar3
+expect_status "step 10: jar3 still refreshes" 200
+expect_eq "step 10: jar3 stays in the first company" "$(claim jar3 'd["org_id"]')" "$FIRST"
+call GET /auth/orgs "" "$tmp/jar3.auth"
+expect_status "step 10: GET /auth/orgs" 200
+expect_eq "step 10: the list holds the first company and GAMMA, and no other (SECOND was left in step 7)" \
+  "$(val "sorted([o['id'] for o in d['orgs']]) == sorted(['$FIRST', '$GAMMA_ID'])")" "True"
+expect_eq "step 10: the first company is still the current one" "$(val '[o["id"] for o in d["orgs"] if o["current"]][0]')" "$FIRST"
+expect_eq "step 10: GAMMA is listed with the role user" "$(val "[o['role']['name'] for o in d['orgs'] if o['id'] == '$GAMMA_ID'][0]")" "user"
+export E2E_GAMMA_ORG="$GAMMA_ID"
+json_body "$tmp/switch-gamma.json" "{'org_id': os.environ['E2E_GAMMA_ORG']}"
+call POST /auth/switch "$tmp/switch-gamma.json" "$tmp/jar3.cookie"
+expect_status "step 10: the switch into GAMMA" 200
+keep_session jar3
+expect_eq "step 10: org_id after the switch" "$(claim jar3 'd["org_id"]')" "$GAMMA_ID"
+expect_eq "step 10: roles after the switch" "$(claim jar3 'd["roles"]')" "['user']"
+login jar4
+expect_eq "step 10: a new sign-in lands in GAMMA" "$(claim jar4 'd["org_id"]')" "$GAMMA_ID"
+expect_eq "step 10: invite.accepted is in the audit log, with no move" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'invite.accepted' AND subject_user_id = '$SEED_SUB' AND org_id = '$GAMMA_ID' AND details->>'left_private_account' IS NULL AND occurred_at >= '$START_TS'")" "1"
+pass "step 10: an invitation from GAMMA to SEED: the mail tells an existing account it joins; has_account and org_id in the preview; the token alone -> 204; jar3 still refreshes in the first company; the list holds two companies; a switch and a new sign-in land in GAMMA"
 
 echo "ALL PASS"
