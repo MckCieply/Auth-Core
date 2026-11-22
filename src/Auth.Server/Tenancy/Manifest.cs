@@ -43,9 +43,17 @@ public static class SignupModes
     }
 }
 
+/// <summary>The names of the values of the key <c>org_creation</c>, in the manifest and in <c>GET /auth/options</c> (spec 0016).</summary>
+public static class OrgCreationModes
+{
+    public const string SelfServiceName = "self-service";
+    public const string OffName = "off";
+}
+
 /// <summary>
 /// What a product declares in its <c>auth.yaml</c>: its permissions, its default roles and whether a visitor may start a company
-/// (<c>signup</c>) and whether a private person may sign up alone (<c>private</c>, spec 0010). Always valid: it is made by
+/// (<c>signup</c>), whether a private person may sign up alone (<c>private</c>, spec 0010) and whether an account may create another
+/// company (<c>org_creation</c>, spec 0016). Always valid: it is made by
 /// <see cref="ManifestParser"/> or is <see cref="BuiltIn"/>, and what is stored in the database was one of those.
 /// </summary>
 public sealed class Manifest
@@ -62,9 +70,11 @@ public sealed class Manifest
     /// What the private role grants: catalog permissions, none built in, sorted, distinct. None when absent.
     /// </param>
     /// <param name="providers">The providers the product lists (spec 0011): provider names, the order of the file, distinct. None when absent.</param>
+    /// <param name="orgCreation">Whether the key <c>org_creation</c> says <c>self-service</c> (spec 0016).</param>
     public Manifest(
         IReadOnlyList<string> permissions, IReadOnlyList<DefaultRole> defaultRoles, SignupMode signup = SignupMode.InviteOnly,
-        bool privateSignup = false, IReadOnlyList<string>? privatePermissions = null, IReadOnlyList<string>? providers = null)
+        bool privateSignup = false, IReadOnlyList<string>? privatePermissions = null, IReadOnlyList<string>? providers = null,
+        bool orgCreation = false)
     {
         ArgumentNullException.ThrowIfNull(permissions);
         ArgumentNullException.ThrowIfNull(defaultRoles);
@@ -75,6 +85,7 @@ public sealed class Manifest
         PrivateSignup = privateSignup;
         PrivatePermissions = privatePermissions ?? [];
         Providers = providers ?? [];
+        OrgCreation = orgCreation;
         Catalog = new PermissionCatalog(permissions);
     }
 
@@ -107,6 +118,11 @@ public sealed class Manifest
     /// </summary>
     public IReadOnlyList<string> Providers { get; }
 
+    /// <summary>
+    /// Whether an account may create another company (spec 0016 → Manifest, <c>org_creation: self-service</c>). It needs no frontend address.
+    /// </summary>
+    public bool OrgCreation { get; }
+
     public PermissionCatalog Catalog { get; }
 
     /// <summary>
@@ -129,7 +145,9 @@ public sealed class Manifest
                 ? new StoredPrivate(PrivateSignup ? SignupModes.SelfServiceName : SignupModes.OffName, [.. PrivatePermissions])
                 : null,
             // Written only when there is one, so that the stored form of a manifest without providers is the one of slice 0010.
-            Providers.Count > 0 ? [.. Providers] : null),
+            Providers.Count > 0 ? [.. Providers] : null,
+            // Written only when on, so that the stored form of a manifest without it is the one of slice 0011.
+            OrgCreation ? OrgCreationModes.SelfServiceName : null),
         StoredJson);
 
     /// <summary>
@@ -157,7 +175,8 @@ public sealed class Manifest
                 signup,
                 privateSignup,
                 stored.Private?.Permissions ?? [],
-                stored.Providers ?? []);   // a form stored before spec 0011 has no providers: none is listed
+                stored.Providers ?? [],   // a form stored before spec 0011 has no providers: none is listed
+                string.Equals(stored.OrgCreation, OrgCreationModes.SelfServiceName, StringComparison.Ordinal));   // before spec 0016: off
         }
         catch (JsonException)
         {
@@ -170,5 +189,6 @@ public sealed class Manifest
     private sealed record StoredPrivate(string? Signup, string[]? Permissions);
 
     private sealed record StoredManifest(
-        string[] Permissions, StoredRole[] DefaultRoles, string? Signup = null, StoredPrivate? Private = null, string[]? Providers = null);
+        string[] Permissions, StoredRole[] DefaultRoles, string? Signup = null, StoredPrivate? Private = null, string[]? Providers = null,
+        string? OrgCreation = null);
 }

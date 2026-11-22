@@ -137,6 +137,16 @@ public static class ManifestParser
             return Fail($"signup must be '{SignupModes.InviteOnlyName}' or '{SignupModes.SelfServiceName}'");
         }
 
+        // Spec 0016: the key `org_creation`. A missing value (`org_creation:` or `~`) is the same as a missing key; any other text, an empty
+        // one included, must be one of the two names exactly (no trimming, no case folding).
+        var orgCreationText = document.OrgCreation ?? OrgCreationModes.OffName;
+        if (orgCreationText is not (OrgCreationModes.OffName or OrgCreationModes.SelfServiceName))
+        {
+            return Fail($"org_creation must be '{OrgCreationModes.OffName}' or '{OrgCreationModes.SelfServiceName}'");
+        }
+
+        var orgCreation = orgCreationText == OrgCreationModes.SelfServiceName;
+
         // Spec 0010: the block `private`. `private:` with no value is no block. Its switch is on with `self-service` only, and any other value
         // leaves it off (unlike the top-level `signup`, which refuses a value it does not know). The private role never manages a company.
         var privateSignup = string.Equals(document.Private?.Signup, SignupModes.SelfServiceName, StringComparison.Ordinal);
@@ -167,7 +177,7 @@ public static class ManifestParser
         }
 
         List<string> providers = [.. providersListed.Distinct(StringComparer.Ordinal)];
-        return new ManifestParseResult(new Manifest(permissions, defaults, signup, privateSignup, privatePermissions, providers), null);
+        return new ManifestParseResult(new Manifest(permissions, defaults, signup, privateSignup, privatePermissions, providers, orgCreation), null);
     }
 
     private static ManifestParseResult Fail(string error) => new(null, Printable(error));
@@ -208,6 +218,9 @@ public static class ManifestParser
 
         // `invite-only` or `self-service` (spec 0009); a text so that any other value reaches the check above instead of a binding error.
         public string? Signup { get; set; }
+
+        // `off` or `self-service` (spec 0016); a text, so that any other value reaches the check above instead of a binding error.
+        public string? OrgCreation { get; set; }
 
         // The block of spec 0010. Its own keys only: any other is an error, like a typo at the top level.
         public PrivateDocument? Private { get; set; }
