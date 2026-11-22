@@ -32,6 +32,7 @@ async function open(list: OrgEntry[], notes: object[] = [aNote]) {
   const fixture = TestBed.createComponent(NotesPage);
   fixture.detectChanges();
   ctrl.expectOne('/api/notes').flush(notes);
+  ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
   await settle(fixture);
   return { fixture, ctrl, auth, root: fixture.nativeElement as HTMLElement };
 }

@@ -1,10 +1,10 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { vi } from 'vitest';
 import { AuthService, Me } from '../auth/auth.service';
-import { adminMe, clickOn, has, pageText, privateMe, settle, signedInAs, submitForm, typeInto, valueOf, viewerMe } from '../../testing/helpers';
+import { adminMe, answerOrgs, clickOn, has, pageText, privateMe, settle, signedInAs, submitForm, typeInto, valueOf, viewerMe } from '../../testing/helpers';
 import { NotesPage } from './notes';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -22,11 +22,18 @@ async function open(me: Me, notes: object[] = []) {
   const fixture = TestBed.createComponent(NotesPage);
   fixture.detectChanges();
   ctrl.expectOne('/api/notes').flush(notes);
+  ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
   await settle(fixture);
   return { fixture, ctrl, auth, navigateByUrl };
 }
 
 type Opened = Awaited<ReturnType<typeof open>>;
+
+/** The check before the notes are deleted (spec 0016): GET /auth/orgs, answered with the personal space only unless a test says otherwise. */
+async function passGuard(opened: { ctrl: HttpTestingController; fixture: ComponentFixture<unknown> }): Promise<void> {
+  answerOrgs(opened.ctrl);
+  await settle(opened.fixture);
+}
 
 async function askToDelete(opened: Opened, password: string): Promise<void> {
   clickOn(opened.fixture, '[data-testid="delete-account"]');
@@ -34,6 +41,7 @@ async function askToDelete(opened: Opened, password: string): Promise<void> {
   typeInto(opened.fixture, '#delete-password', password);
   submitForm(opened.fixture, 'form[data-testid="delete-form"]');
   await settle(opened.fixture);
+  await passGuard(opened);
 }
 
 /** The notes service says 204 and Auth-Core says what `answer` is: the state after the notes are gone. */
@@ -159,6 +167,7 @@ describe('NotesPage: "Delete account" (spec 0010)', () => {
     typeInto(opened.fixture, '#delete-password', 'Chosen-Passw0rd');
     submitForm(opened.fixture, 'form[data-testid="delete-form"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204)); // idempotent: there is nothing left to delete
     await settle(opened.fixture);
     const account = opened.ctrl.expectOne('/auth/account');
@@ -285,5 +294,77 @@ describe('NotesPage: "Delete account" (spec 0010)', () => {
     opened.ctrl.expectNone('/auth/account');
     expect(pageText(opened.fixture)).toContain('Enter your password.');
     expect(pageText(opened.fixture)).toContain('Buy oat milk');
+  });
+});
+
+describe('NotesPage: "Delete account" and the companies of the account (spec 0016)', () => {
+  const text = (names: string): string =>
+    `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`;
+  const personal = { id: privateMe.org_id, name: 'private', kind: 'personal', role: { id: 'r2', name: 'private' }, current: true };
+  const company = (name: string) => ({ id: `id-${name}`, name, kind: 'organization', role: { id: 'r1', name: 'admin' }, current: false });
+
+  /** The password typed and sent; the list check that comes first is left to the test. */
+  async function submitPassword(opened: Opened): Promise<void> {
+    clickOn(opened.fixture, '[data-testid="delete-account"]');
+    opened.fixture.detectChanges();
+    typeInto(opened.fixture, '#delete-password', 'Chosen-Passw0rd');
+    submitForm(opened.fixture, 'form[data-testid="delete-form"]');
+    await settle(opened.fixture);
+  }
+
+  it('delete_account_with_a_company_listed_shows_the_company_member_text_and_deletes_no_notes', async () => {
+    const opened = await open(privateMe, [aNote]);
+    await submitPassword(opened);
+    const listed = opened.ctrl.expectOne('/auth/orgs');
+    expect(listed.request.method).toBe('GET');
+    listed.flush({ orgs: [personal, company('Acme'), company('Beta')] });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(text('Acme, Beta'));
+    opened.ctrl.expectNone('/api/me');
+    opened.ctrl.expectNone('/auth/account');
+    expect(pageText(opened.fixture)).toContain('Buy oat milk');
+    expect(pageText(opened.fixture)).not.toContain(gone);
+    expect(opened.auth.token()).not.toBeNull();
+  });
+
+  it('delete_account_with_only_the_personal_space_still_deletes_the_notes_first', async () => {
+    const opened = await open(privateMe, [aNote]);
+    await submitPassword(opened);
+    opened.ctrl.expectOne('/auth/orgs').flush({ orgs: [personal] });
+    await settle(opened.fixture);
+    opened.ctrl.expectNone('/auth/account');
+    opened.ctrl.expectOne('/api/me').flush(null, status(204));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/account').flush(null, status(204));
+    await settle(opened.fixture);
+    expect(opened.navigateByUrl).toHaveBeenCalledWith('/login', { state: { notice: 'deleted' } });
+  });
+
+  it('a list that cannot be read deletes nothing and says something went wrong', async () => {
+    const opened = await open(privateMe, [aNote]);
+    await submitPassword(opened);
+    opened.ctrl.expectOne('/auth/orgs').flush('oops', status(500));
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('Something went wrong. Try again.');
+    expect(pageText(opened.fixture)).not.toContain(gone);
+    opened.ctrl.expectNone('/api/me');
+    opened.ctrl.expectNone('/auth/account');
+  });
+
+  it('delete_account_on_403_company_member_shows_the_text_with_the_names', async () => {
+    const opened = await open(privateMe, [aNote]);
+    await submitPassword(opened);
+    opened.ctrl.expectOne('/auth/orgs').flush({ orgs: [personal] }); // a company was created in another tab after this check
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/api/me').flush(null, status(204));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/account').flush({ error: 'company_member' }, status(403));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/orgs').flush({ orgs: [personal, company('Gamma')] });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(text('Gamma'));
+    expect(pageText(opened.fixture)).toContain(gone);
+    expect(opened.auth.token()).not.toBeNull();
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
   });
 });

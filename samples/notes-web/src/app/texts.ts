@@ -204,6 +204,13 @@ export const texts = {
     gone: 'That company is no longer yours. The list is up to date.',
     // The bar, after a refresh found that another tab moved the session to another space.
     switchedInAnotherTab: (name: string): string => `Switched to ${name} in another tab.`,
+    // Spec 0016: creating another company.
+    limitReached: 'You have reached the limit of companies.',
+    creationOff: 'Creating companies is turned off.',
+    nameRule: 'Check the company name.',
+    // Spec 0016: an account that is still in a company cannot be deleted; the names are those of GET /auth/orgs.
+    companyMember: (names: string): string =>
+      `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`,
   },
 
   team: {

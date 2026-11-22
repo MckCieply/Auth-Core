@@ -41,6 +41,10 @@ export type Failure =
   | { kind: 'reauth_failed' }
   | { kind: 'password_required' }
   | { kind: 'reauth_required' }
+  | { kind: 'org_creation_disabled' }
+  | { kind: 'company_limit_reached' }
+  | { kind: 'company_member' }
+  | { kind: 'permissions_changed' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
@@ -58,6 +62,9 @@ export type LoginResult = { ok: true } | { ok: false; failure: Failure };
 
 /** What `switchTo` came to: the session is in the other space; the account is not a member there any more; the session is over; nothing changed. */
 export type SwitchResult = 'switched' | 'gone' | 'signed-out' | 'failed';
+
+/** What `createCompany` came to (spec 0016); 'created' means the session is now in the new company. */
+export type CreateCompanyResult = 'created' | 'limit' | 'disabled' | 'invalid' | 'gone' | 'failed';
 
 /** The next screen of a provider round trip, from POST /auth/providers/exchange (spec 0011). */
 export type ProviderNext =
@@ -128,6 +135,12 @@ export function failureOf(error: unknown): Failure {
   }
   if (error.status === 409 && code === 'private_account_exists') {
     return { kind: 'private_account_exists' };
+  }
+  if (error.status === 403 && (code === 'org_creation_disabled' || code === 'company_member' || code === 'permissions_changed')) {
+    return { kind: code };
+  }
+  if (error.status === 409 && code === 'company_limit_reached') {
+    return { kind: 'company_limit_reached' };
   }
   return providerFailureOf(error.status, code);
 }
@@ -517,6 +530,35 @@ export class AuthService {
       this.orgChangesState.update((count) => count + 1);
     }
     return result;
+  }
+
+  /**
+   * Creates another company for the account (POST /auth/orgs, spec 0016) and moves the session into it with `switchTo`, as the picker does.
+   * 'limit', 'disabled', 'invalid' and 'gone' (`permissions_changed`: the caller refreshes) mean nothing was created and nothing was
+   * switched. After the `201` a `switchTo` that does not end in the company is 'gone' (a `404`) or 'failed' (anything else, also a session
+   * that ended: `switchTo` has opened /login itself); the company exists then and the next list shows it.
+   */
+  async createCompany(name: string): Promise<CreateCompanyResult> {
+    const outcome = await this.api.createOrg(name);
+    if (!outcome.ok) {
+      switch (outcome.failure.kind) {
+        case 'company_limit_reached':
+          return 'limit';
+        case 'org_creation_disabled':
+          return 'disabled';
+        case 'invalid_request':
+          return 'invalid';
+        case 'permissions_changed':
+          return 'gone';
+        default:
+          return 'failed';
+      }
+    }
+    const result = await this.switchTo(outcome.value.id);
+    if (result === 'switched') {
+      return 'created';
+    }
+    return result === 'gone' ? 'gone' : 'failed';
   }
 
   /** The request of `switchTo` and what the session does with its answer; 'switched' means the new token is kept. */

@@ -4,6 +4,7 @@ import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, eff
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { AccountApi } from '../account-api';
 import { AuthService, LoginResult, errorCode } from '../auth/auth.service';
 import { texts } from '../texts';
 import { ProviderButtons } from './provider-buttons';
@@ -169,6 +170,7 @@ export class NotesPage implements OnInit {
   protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
+  private readonly account = inject(AccountApi);
   private readonly router = inject(Router);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
@@ -176,6 +178,8 @@ export class NotesPage implements OnInit {
   protected readonly me = this.auth.me;
   protected readonly orgs = this.auth.orgs;
   protected readonly switching = signal(false);
+  // Spec 0016: GET /auth/options says `org_creation` `self-service`. Read once when the page starts; the picker of the next task uses it.
+  protected readonly orgCreation = signal(false);
   // The last switch that did not go through: the company is gone from the account, or the call failed.
   protected readonly switchProblem = signal<'gone' | 'failed' | null>(null);
   protected readonly canWrite = computed(() => this.me()?.permissions.includes('notes:write') ?? false);
@@ -221,6 +225,7 @@ export class NotesPage implements OnInit {
       void this.auth.loadMe();
     }
     void this.load();
+    void this.account.options().then((options) => this.orgCreation.set(options.orgCreation));
     if (this.reauthTicket() !== null) {
       this.deleting.set(true);
       this.focusDeleteSection();
@@ -337,6 +342,9 @@ export class NotesPage implements OnInit {
     if (this.deleteBusy() || ticket === null) {
       return;
     }
+    if (await this.stillInACompany()) {
+      return;
+    }
     if (!(await this.deleteNotes())) {
       return;
     }
@@ -368,6 +376,9 @@ export class NotesPage implements OnInit {
       this.deleteError.set(this.t.passwordRequired);
       return;
     }
+    if (await this.stillInACompany()) {
+      return;
+    }
     if (!(await this.deleteNotes())) {
       return;
     }
@@ -377,6 +388,33 @@ export class NotesPage implements OnInit {
       return;
     }
     await this.refused(result);
+  }
+
+  /**
+   * Spec 0016: an account that is still a member of a company cannot be deleted, so nothing is deleted before the sample knows it is not
+   * (the server's `403 company_member` stays the guard, see `refused`). True when the deletion must stop: a company is listed, and the
+   * section says which; or the list could not be read, and the section says something went wrong. Nothing was deleted either way.
+   */
+  private async stillInACompany(): Promise<boolean> {
+    this.deleteBusy.set(true);
+    this.deleteError.set(null);
+    const names = await this.companyNames();
+    this.deleteBusy.set(false);
+    if (names === null) {
+      this.deleteError.set(this.somethingWrong);
+      return true;
+    }
+    if (names.length === 0) {
+      return false;
+    }
+    this.deleteError.set(this.o.companyMember(names.join(', ')));
+    return true;
+  }
+
+  /** The names of the companies in a fresh GET /auth/orgs, or null when the list cannot be read. */
+  private async companyNames(): Promise<string[] | null> {
+    const listed = await this.account.listOrgs();
+    return listed.ok ? listed.value.filter((entry) => entry.kind === 'organization').map((entry) => entry.name) : null;
   }
 
   /**
@@ -414,7 +452,9 @@ export class NotesPage implements OnInit {
 
   /** The refusals both deletions share, after the notes are gone. */
   private async refused(result: LoginResult & { ok: false }): Promise<void> {
-    if (result.failure.kind === 'password_required' || result.failure.kind === 'reauth_required') {
+    if (result.failure.kind === 'company_member' && (await this.refusedAsCompanyMember())) {
+      // The text with the names is shown; the account stays.
+    } else if (result.failure.kind === 'password_required' || result.failure.kind === 'reauth_required') {
       // Spec 0011: the account is not what this screen thought (a password was set, or it has none): draw the section that fits it now.
       this.reauthTicket.set(null);
       this.deleteForm.reset();
@@ -433,6 +473,17 @@ export class NotesPage implements OnInit {
       this.deleteError.set(`${this.somethingWrong} ${this.t.notesGone}`);
     }
     this.deleteBusy.set(false);
+  }
+
+  /** `403 company_member` after the notes are gone (a company was created since the check): the text with the names from a fresh list. */
+  private async refusedAsCompanyMember(): Promise<boolean> {
+    const names = await this.companyNames();
+    if (names === null || names.length === 0) {
+      return false;
+    }
+    this.deleteError.set(`${this.o.companyMember(names.join(', '))} ${this.t.notesGone}`);
+    this.deleteBusy.set(false);
+    return true;
   }
 
   /**

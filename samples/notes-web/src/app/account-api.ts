@@ -53,6 +53,8 @@ export interface SiteOptions {
   signup: 'self-service' | 'invite-only';
   private_signup: 'self-service' | 'off';
   providers: ProviderName[];
+  /** Whether a signed-in account may create another company (spec 0016); `false` when the member is absent (an older server). */
+  orgCreation: boolean;
 }
 
 /** A company of one's own, or a private account (spec 0010). */
@@ -152,6 +154,20 @@ export class AccountApi {
     }
   }
 
+  /**
+   * POST /auth/orgs (spec 0016): another company for the signed-in account. The interceptor adds the token (the `/auth/org` prefix). The
+   * `201` body must be an entry in the contract's shape; the company is not current yet, `switchTo` moves the session there. A `400
+   * invalid_request` is a failure of its own (the name rule), as in the sign-up form.
+   */
+  async createOrg(name: string): Promise<Outcome<OrgEntry>> {
+    const outcome = await this.postForm<unknown>('/auth/orgs', { name });
+    if (!outcome.ok) {
+      return outcome;
+    }
+    const entry = asOrgEntry(outcome.value);
+    return entry === null ? { ok: false, failure: { kind: 'other' } } : { ok: true, value: entry };
+  }
+
   forgotPassword(email: string): Promise<Outcome> {
     return this.post('/auth/password/forgot', { email });
   }
@@ -206,9 +222,10 @@ export class AccountApi {
         signup: isRecord(body) && body['signup'] === 'self-service' ? 'self-service' : 'invite-only',
         private_signup: isRecord(body) && body['private_signup'] === 'self-service' ? 'self-service' : 'off',
         providers: isRecord(body) ? providerNamesOf(body['providers']) : [],
+        orgCreation: isRecord(body) && body['org_creation'] === 'self-service',
       };
     } catch {
-      return { signup: 'invite-only', private_signup: 'off', providers: [] };
+      return { signup: 'invite-only', private_signup: 'off', providers: [], orgCreation: false };
     }
   }
 

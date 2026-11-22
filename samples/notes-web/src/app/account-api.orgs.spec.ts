@@ -116,4 +116,60 @@ describe('AccountApi: the spaces of the account (spec 0015)', () => {
       },
     );
   });
+
+  describe('createOrg (spec 0016)', () => {
+    const entry = { id: ACME, name: 'Gamma', kind: 'organization', role: { id: 'r1', name: 'admin' }, current: false };
+
+    it('createOrg_posts_the_name_with_the_token_and_returns_the_entry', async () => {
+      const done = api.createOrg('Gamma');
+      const request = ctrl.expectOne('/auth/orgs');
+      expect(request.request.method).toBe('POST');
+      expect(request.request.body).toEqual({ name: 'Gamma' });
+      request.flush(entry, status(201));
+      expect(await done).toEqual({ ok: true, value: entry });
+    });
+
+    it.each([[{}], ['<html>oops</html>'], [{ id: ACME }], [null]])('a 201 with %j is not an entry: a failure', async (body) => {
+      const done = api.createOrg('Gamma');
+      ctrl.expectOne('/auth/orgs').flush(body, status(201));
+      expect(await done).toEqual({ ok: false, failure: { kind: 'other' } });
+    });
+
+    it.each([
+      [403, 'org_creation_disabled', 'org_creation_disabled'],
+      [409, 'company_limit_reached', 'company_limit_reached'],
+      [403, 'company_member', 'company_member'],
+      [403, 'permissions_changed', 'permissions_changed'],
+      [400, 'invalid_request', 'invalid_request'],
+      [500, 'boom', 'other'],
+    ])('createOrg_carries_the_error_codes: %s %s is %s', async (code, error, kind) => {
+      const done = api.createOrg('Gamma');
+      ctrl.expectOne('/auth/orgs').flush({ error }, status(code));
+      expect(await done).toEqual({ ok: false, failure: { kind } });
+    });
+  });
+
+  describe('options (spec 0016)', () => {
+    it.each([
+      ['self-service', true],
+      ['off', false],
+      ['on', false],
+    ])('the_options_body_with_org_creation_%s_is_read: orgCreation %s', async (value, expected) => {
+      const done = api.options();
+      ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off', providers: [], org_creation: value });
+      expect((await done).orgCreation).toBe(expected);
+    });
+
+    it('an_old_body_without_it_means_off', async () => {
+      const done = api.options();
+      ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off', providers: [] });
+      expect((await done).orgCreation).toBe(false);
+    });
+
+    it('a_failed_call_means_off', async () => {
+      const done = api.options();
+      ctrl.expectOne('/auth/options').flush('oops', status(500));
+      expect((await done).orgCreation).toBe(false);
+    });
+  });
 });

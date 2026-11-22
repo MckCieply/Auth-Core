@@ -12,6 +12,7 @@ import { AuthService } from './auth.service';
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const ACME = adminMe.org_id;
 const PRIVATE = privateMe.org_id;
+const GAMMA = '66666666-6666-6666-6666-666666666666';
 
 function entries(current: string): OrgEntry[] {
   return [
@@ -404,6 +405,103 @@ describe('AuthService: more than one company (spec 0015)', () => {
       auth.showSwitchedNotice(null);
       await settle(fixture);
       expect(text()).toBe('Switched to Private in another tab.');
+    });
+  });
+
+  describe('createCompany (spec 0016)', () => {
+    const created = { id: GAMMA, name: 'Gamma', kind: 'organization', role: { id: 'r1', name: 'admin' }, current: false };
+
+    it('createCompany_creates_then_switches_and_ends_in_the_new_company', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      const create = ctrl.expectOne('/auth/orgs');
+      expect(create.request.method).toBe('POST');
+      expect(create.request.body).toEqual({ name: 'Gamma' });
+      expect(create.request.headers.get('Authorization')).toBe('Bearer tok');
+      create.flush(created, status(201));
+      await settle();
+      const sw = ctrl.expectOne('/auth/switch');
+      expect(sw.request.body).toEqual({ org_id: GAMMA });
+      sw.flush({ access_token: 'tok-2' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush({ ...adminMe, org_id: GAMMA, org_name: 'Gamma' });
+      await settle();
+      ctrl.expectOne('/auth/orgs').flush({ orgs: [...entries(ACME), { ...created, current: true }] });
+      expect(await done).toBe('created');
+      expect(auth.token()).toBe('tok-2');
+      expect(auth.me()?.org_name).toBe('Gamma');
+      expect(auth.orgChanges()).toBe(1);
+    });
+
+    it('createCompany_on_409_returns_limit_and_does_not_switch', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush({ error: 'company_limit_reached' }, status(409));
+      expect(await done).toBe('limit');
+      ctrl.expectNone('/auth/switch');
+      expect(auth.token()).toBe('tok');
+    });
+
+    it('createCompany_on_org_creation_disabled_returns_disabled_and_does_not_switch', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush({ error: 'org_creation_disabled' }, status(403));
+      expect(await done).toBe('disabled');
+      ctrl.expectNone('/auth/switch');
+    });
+
+    it('createCompany_on_permissions_changed_returns_gone', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      // The interceptor treats it as for any company call: one refresh, the person asked for again, the request sent once more.
+      ctrl.expectOne('/auth/orgs').flush({ error: 'permissions_changed' }, status(403));
+      await settle();
+      ctrl.expectOne('/auth/refresh').flush({ access_token: 'tok-r' });
+      await settle();
+      ctrl.expectOne('/auth/me').flush(adminMe);
+      ctrl.expectOne('/auth/orgs').flush({ error: 'permissions_changed' }, status(403));
+      expect(await done).toBe('gone');
+      ctrl.expectNone('/auth/switch');
+    });
+
+    it('createCompany_on_400_returns_invalid', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('');
+      ctrl.expectOne('/auth/orgs').flush({ error: 'invalid_request' }, status(400));
+      expect(await done).toBe('invalid');
+    });
+
+    it('createCompany_on_any_other_answer_returns_failed', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush('oops', status(500));
+      expect(await done).toBe('failed');
+    });
+
+    it('createCompany_when_the_switch_says_404_returns_gone_and_when_it_fails_returns_failed', async () => {
+      await signedInAs(auth, ctrl);
+      const first = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush(created, status(201));
+      await settle();
+      ctrl.expectOne('/auth/switch').flush({ error: 'not_found' }, status(404));
+      await settle();
+      ctrl.expectOne('/auth/orgs').flush({ orgs: entries(ACME) });
+      expect(await first).toBe('gone');
+      const second = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush(created, status(201));
+      await settle();
+      ctrl.expectOne('/auth/switch').flush('oops', status(503));
+      expect(await second).toBe('failed');
+    });
+
+    it('createCompany_when_the_switch_ends_the_session_returns_failed_and_opens_login', async () => {
+      await signedInAs(auth, ctrl);
+      const done = auth.createCompany('Gamma');
+      ctrl.expectOne('/auth/orgs').flush(created, status(201));
+      await settle();
+      ctrl.expectOne('/auth/switch').flush({ error: 'invalid_grant' }, status(401));
+      expect(await done).toBe('failed');
+      expect(navigateByUrl).toHaveBeenCalledWith('/login');
     });
   });
 });
