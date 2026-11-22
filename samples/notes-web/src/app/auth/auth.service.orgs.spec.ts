@@ -450,7 +450,7 @@ describe('AuthService: more than one company (spec 0015)', () => {
       ctrl.expectNone('/auth/switch');
     });
 
-    it('createCompany_on_permissions_changed_returns_gone', async () => {
+    it('createCompany_on_permissions_changed_returns_changed', async () => {
       await signedInAs(auth, ctrl);
       const done = auth.createCompany('Gamma');
       // The interceptor treats it as for any company call: one refresh, the person asked for again, the request sent once more.
@@ -460,7 +460,7 @@ describe('AuthService: more than one company (spec 0015)', () => {
       await settle();
       ctrl.expectOne('/auth/me').flush(adminMe);
       ctrl.expectOne('/auth/orgs').flush({ error: 'permissions_changed' }, status(403));
-      expect(await done).toBe('gone');
+      expect(await done).toBe('changed');
       ctrl.expectNone('/auth/switch');
     });
 
@@ -478,7 +478,7 @@ describe('AuthService: more than one company (spec 0015)', () => {
       expect(await done).toBe('failed');
     });
 
-    it('createCompany_when_the_switch_says_404_returns_gone_and_when_it_fails_returns_failed', async () => {
+    it('createCompany_when_the_switch_says_404_returns_gone_and_when_it_fails_returns_switch_failed', async () => {
       await signedInAs(auth, ctrl);
       const first = auth.createCompany('Gamma');
       ctrl.expectOne('/auth/orgs').flush(created, status(201));
@@ -491,7 +491,7 @@ describe('AuthService: more than one company (spec 0015)', () => {
       ctrl.expectOne('/auth/orgs').flush(created, status(201));
       await settle();
       ctrl.expectOne('/auth/switch').flush('oops', status(503));
-      expect(await second).toBe('failed');
+      expect(await second).toBe('switch-failed');
     });
 
     it('createCompany_when_the_switch_ends_the_session_returns_failed_and_opens_login', async () => {

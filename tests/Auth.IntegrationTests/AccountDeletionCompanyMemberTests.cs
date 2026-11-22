@@ -158,7 +158,7 @@ public sealed class AccountDeletionCompanyMemberTests : AuditTestBase
         using var spaceGone = await DeleteAsync(personal.AccessToken);
         await TenancyApi.AssertErrorAsync(spaceGone, HttpStatusCode.Forbidden, "permissions_changed");
 
-        // The other way: a token of the company, the company membership is gone while the personal space is back.
+        // The other way: a token of the company, the company membership is gone too (the personal space was removed above), so the token names a membership that does not exist.
         var inCompany = await SessionApi.SwitchOk(Client, session.RefreshToken, company);
         await RemoveMembershipAsync(user, company);
         using var companyGone = await DeleteAsync(inCompany.AccessToken);

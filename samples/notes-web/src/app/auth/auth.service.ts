@@ -63,8 +63,12 @@ export type LoginResult = { ok: true } | { ok: false; failure: Failure };
 /** What `switchTo` came to: the session is in the other space; the account is not a member there any more; the session is over; nothing changed. */
 export type SwitchResult = 'switched' | 'gone' | 'signed-out' | 'failed';
 
-/** What `createCompany` came to (spec 0016); 'created' means the session is now in the new company. */
-export type CreateCompanyResult = 'created' | 'limit' | 'disabled' | 'invalid' | 'gone' | 'failed';
+/**
+ * What `createCompany` came to (spec 0016); 'created' means the session is now in the new company. 'changed': the POST answered
+ * `permissions_changed` (the caller asks for the list again). 'gone': the switch found the new company gone (the list is already asked again).
+ * 'switch-failed': the company was created but the switch did not go through (the caller asks for the list again). 'failed': anything else.
+ */
+export type CreateCompanyResult = 'created' | 'limit' | 'disabled' | 'invalid' | 'changed' | 'gone' | 'switch-failed' | 'failed';
 
 /** The next screen of a provider round trip, from POST /auth/providers/exchange (spec 0011). */
 export type ProviderNext =
@@ -534,9 +538,9 @@ export class AuthService {
 
   /**
    * Creates another company for the account (POST /auth/orgs, spec 0016) and moves the session into it with `switchTo`, as the picker does.
-   * 'limit', 'disabled', 'invalid' and 'gone' (`permissions_changed`: the caller refreshes) mean nothing was created and nothing was
-   * switched. After the `201` a `switchTo` that does not end in the company is 'gone' (a `404`) or 'failed' (anything else, also a session
-   * that ended: `switchTo` has opened /login itself); the company exists then and the next list shows it.
+   * 'limit', 'disabled', 'invalid' and 'changed' (`permissions_changed`: the caller refreshes) mean nothing was created and nothing was
+   * switched. After the `201` a `switchTo` that does not end in the company is 'gone' (a `404`), 'switch-failed' (any other failed answer) or
+   * 'failed' (the session ended: `switchTo` has opened /login itself); the company exists then and the next list shows it.
    */
   async createCompany(name: string): Promise<CreateCompanyResult> {
     const outcome = await this.api.createOrg(name);
@@ -549,7 +553,7 @@ export class AuthService {
         case 'invalid_request':
           return 'invalid';
         case 'permissions_changed':
-          return 'gone';
+          return 'changed';
         default:
           return 'failed';
       }
@@ -558,7 +562,10 @@ export class AuthService {
     if (result === 'switched') {
       return 'created';
     }
-    return result === 'gone' ? 'gone' : 'failed';
+    if (result === 'gone') {
+      return 'gone';
+    }
+    return result === 'failed' ? 'switch-failed' : 'failed';
   }
 
   /** The request of `switchTo` and what the session does with its answer; 'switched' means the new token is kept. */

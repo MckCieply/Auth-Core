@@ -45,7 +45,7 @@ endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /aut
   The sessions whose company was the removed one get `401 invalid_grant` at their next refresh or switch; the others go on. `remove-member` prints
   "Member removed; the account is deleted." or "Member removed; the account is kept."; `delete-org` prints "Company deleted; members with no other space lose their accounts too."
 - `GET /auth/me`, every endpoint under `/auth/org` and `DELETE /auth/account` act on the token's company, checked against the database. `DELETE /auth/account`
-  with a personal-space token of an account that is also a company member answers `403 forbidden` (it was `403 permissions_changed`).
+  with a personal-space token of an account that is also a company member answers `403 company_member` (spec 0016; it was `403 permissions_changed`).
 - The per-IP limits count `POST /auth/switch` against the `refresh` policy and `GET /auth/orgs` against `general`. The OpenAPI description has 38 operations (39 with `POST /auth/orgs`).
 - The threat model (residual risks 62 to 65, the session's company), the guides for Angular and Python, the design document and the audit runbook describe the feature (residual risks 66 and 67 are spec 0016's).
 

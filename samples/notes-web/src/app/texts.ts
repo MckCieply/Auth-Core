@@ -202,6 +202,8 @@ export const texts = {
     // The name of the personal space, whatever the server calls it.
     private: 'Private',
     gone: 'That company is no longer yours. The list is up to date.',
+    // Spec 0016: the account's rights changed while a company was being created.
+    changed: 'Your companies changed. The list is up to date.',
     // The bar, after a refresh found that another tab moved the session to another space.
     switchedInAnotherTab: (name: string): string => `Switched to ${name} in another tab.`,
     // Spec 0016: creating another company.

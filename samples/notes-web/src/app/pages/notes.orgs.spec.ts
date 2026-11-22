@@ -341,9 +341,44 @@ describe('NotesPage: "New company..." in the picker (spec 0016)', () => {
     await settle(opened.fixture);
     opened.ctrl.expectOne('/auth/orgs').flush({ orgs: [entries(PRIVATE)[1]] });
     await settle(opened.fixture);
-    expect(pageText(opened.fixture)).toContain('That company is no longer yours. The list is up to date.');
+    expect(pageText(opened.fixture)).toContain('Your companies changed. The list is up to date.');
+    expect(pageText(opened.fixture)).not.toContain('no longer yours');
     expect(has(opened.fixture, FORM)).toBe(false);
     expect(optionTexts(opened)).toEqual(['Private', 'New company...']);
+  });
+
+  it('a switch that says 404 after the 201 reads the list once and says the company is no longer yours', async () => {
+    const opened = await open([entries(ACME)[0]], [aNote], 'self-service');
+    await submitName(opened, 'Gamma');
+    opened.ctrl.expectOne('/auth/orgs').flush(gammaEntry, status(201));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/switch').flush({ error: 'not_found' }, status(404));
+    await settle(opened.fixture);
+    const lists = opened.ctrl.match('/auth/orgs');
+    expect(lists.length).toBe(1);
+    lists[0].flush({ orgs: [entries(ACME)[0]] });
+    await settle(opened.fixture);
+    opened.ctrl.expectNone('/auth/orgs');
+    expect(pageText(opened.fixture)).toContain('That company is no longer yours. The list is up to date.');
+    expect(has(opened.fixture, FORM)).toBe(false);
+  });
+
+  it('a switch that fails after the 201 closes the form, reads the list and says something went wrong', async () => {
+    const opened = await open([entries(ACME)[0]], [aNote], 'self-service');
+    await submitName(opened, 'Gamma');
+    opened.ctrl.expectOne('/auth/orgs').flush(gammaEntry, status(201));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/switch').flush('oops', status(503));
+    await settle(opened.fixture);
+    const lists = opened.ctrl.match('/auth/orgs');
+    expect(lists.length).toBe(1);
+    expect(lists[0].request.method).toBe('GET');
+    lists[0].flush({ orgs: [{ ...entries(ACME)[0] }, { ...gammaEntry, current: false }] });
+    await settle(opened.fixture);
+    expect(has(opened.fixture, FORM)).toBe(false);
+    expect(opened.root.querySelector('[data-testid="org-switch-failed"]')?.textContent).toContain('Something went wrong. Try again.');
+    expect(optionTexts(opened)).toContain('Gamma');
+    opened.ctrl.expectNone('/auth/orgs');
   });
 
   it('the form can be cancelled and leaves the picker as it was', async () => {

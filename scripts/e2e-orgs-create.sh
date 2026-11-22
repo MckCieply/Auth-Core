@@ -282,7 +282,7 @@ expect_no_store "step 1: the options"
 json_body "$tmp/gamma.json" "{'name': 'Gamma'}"
 call POST /auth/orgs "$tmp/gamma.json"
 expect_status "step 1: POST /auth/orgs without a token" 401
-login jar
+login jar E2E_SEED_EMAIL E2E_SEED_PASSWORD
 FIRST="$(claim jar 'd["org_id"]')"
 SEED_SUB="$(claim jar 'd["sub"]')"
 [[ -n "$FIRST" && -n "$SEED_SUB" ]] || fail "step 1: the token of the sign-in has no org_id or sub"
@@ -315,7 +315,7 @@ pass "step 3: POST /auth/switch into Gamma -> 200, the token says Gamma, organiz
 # --- Step 4: SEED deletes the company, the account is kept (criterion 16) -------------------------------------------
 delete_org jar Gamma E2E_SEED_PASSWORD
 GAMMA_GONE=1
-login jar2
+login jar2 E2E_SEED_EMAIL E2E_SEED_PASSWORD
 expect_eq "step 4: the same account" "$(claim jar2 'd["sub"]')" "$SEED_SUB"
 [[ "$(claim jar2 'd["org_id"]')" != "$GAMMA_ID" ]] || fail "step 4: the new sign-in is in the deleted company"
 call GET /auth/orgs "" "$tmp/jar2.auth"

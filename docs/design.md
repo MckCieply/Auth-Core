@@ -382,9 +382,9 @@ registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is i
 specified):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
 `GET /auth/orgs` lists the person's spaces and `POST /auth/switch` moves the device to another one with the refresh cookie alone; every
 session works in one company, the access token still names exactly one, and a sign-in lands in the company used last. A removal or a company
-deletion deletes an account only when it loses its last space. The sample has a company picker. No endpoint makes a second membership yet:
-0016 lets a signed-in person create another company and 0017 lets an invitation keep the other memberships; until then a second membership
-exists only in tests and in the development seed (`Auth:DevSeed:SecondOrgName`). What remains is in the threat model (risks 62 to 65).
+deletion deletes an account only when it loses its last space. The sample has a company picker. A second membership comes from `POST /auth/orgs`
+(spec 0016: a signed-in person creates another company) and from the development seed (`Auth:DevSeed:SecondOrgName`); 0017 lets an
+invitation keep the other memberships. What remains is in the threat model (risks 62 to 65).
 
 *As built (spec 0016, the second slice):* a signed-in person creates another company with `POST /auth/orgs` (off until the manifest says
 `org_creation: self-service`; `GET /auth/options` tells the product's screens). The creator is its first admin; the session does not move, so

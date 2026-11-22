@@ -123,6 +123,8 @@ function isNote(value: unknown): value is Note {
       <h1>{{ t.title }}</h1>
       @if (switchProblem() === 'gone') {
         <p class="status" role="status" data-testid="org-gone">{{ o.gone }}</p>
+      } @else if (switchProblem() === 'changed') {
+        <p class="status" role="status" data-testid="org-changed">{{ o.changed }}</p>
       } @else if (switchProblem() === 'failed') {
         <p class="error" role="alert" data-testid="org-switch-failed">{{ somethingWrong }}</p>
       }
@@ -207,7 +209,7 @@ export class NotesPage implements OnInit {
   protected readonly creationOffNotice = signal(false);
   protected readonly companyForm = inject(NonNullableFormBuilder).group({ name: ['', Validators.required] });
   // The last switch that did not go through: the company is gone from the account, or the call failed.
-  protected readonly switchProblem = signal<'gone' | 'failed' | null>(null);
+  protected readonly switchProblem = signal<'gone' | 'changed' | 'failed' | null>(null);
   protected readonly canWrite = computed(() => this.me()?.permissions.includes('notes:write') ?? false);
   /** A company member who manages members gets the way to the team screen (spec 0010). */
   protected readonly canManageMembers = computed(() => this.me()?.permissions.includes('members:manage') ?? false);
@@ -362,11 +364,20 @@ export class NotesPage implements OnInit {
         this.creationOffNotice.set(true);
       } else if (result === 'invalid') {
         this.createError.set(this.o.nameRule);
-      } else if (result === 'gone') {
-        // permissions_changed (or a switch that found the company gone): the list is asked again and the page says it is up to date.
+      } else if (result === 'changed') {
+        // permissions_changed: the list is asked again and the page says it is up to date.
         await this.auth.loadOrgs();
         this.creating.set(false);
+        this.switchProblem.set('changed');
+      } else if (result === 'gone') {
+        // The switch found the new company gone: `switchTo` has asked for the list again already.
+        this.creating.set(false);
         this.switchProblem.set('gone');
+      } else if (result === 'switch-failed') {
+        // The company exists, only the switch failed (`switchTo` does not ask for the list then): the list shows it, the form is closed.
+        await this.auth.loadOrgs();
+        this.creating.set(false);
+        this.switchProblem.set('failed');
       } else {
         this.createError.set(this.somethingWrong);
       }

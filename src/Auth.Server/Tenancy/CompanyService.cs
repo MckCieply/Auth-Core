@@ -29,7 +29,7 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             return Outcome.Fail<Guid>(TenancyErrors.InvalidRequest);
         }
 
-        var company = Stage(name, via, userId: null, email: null);
+        var company = Stage(name, via, userId: null, email: null, manifest.Current);
         await db.SaveChangesAsync(cancellationToken);
         return Outcome.Ok(company.Id);
     }
@@ -55,12 +55,14 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             return Outcome.Fail<CreatedCompany>(TenancyErrors.InvalidRequest);
         }
 
-        var company = Stage(name, "api", userId, email);
+        // One read of the manifest: the copied roles and the first admin's role come from the same version.
+        var active = manifest.Current;
+        var company = Stage(name, "api", userId, email, active);
 
         await db.SaveChangesAsync(cancellationToken);
 
         // The role is the company's own copy of the first admin's default role, found by its normalised name.
-        var roleKey = NameInput.Normalize(manifest.Current.FirstAdminRole.Name);
+        var roleKey = NameInput.Normalize(active.FirstAdminRole.Name);
         var role = await db.CompanyRoles.AsNoTracking()
             .Where(r => r.CompanyId == company.Id && r.NormalizedName == roleKey)
             .Select(r => new { r.Id, r.Name })
@@ -81,11 +83,11 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
     /// Adds the company, one role per default role and the <c>org.created</c> row to the context; the caller saves. The row is written
     /// by the same save as the company and its roles. The creator, when there is one, is the actor and the subject of the row.
     /// </summary>
-    private Company Stage(string name, string via, Guid? userId, string? email)
+    private Company Stage(string name, string via, Guid? userId, string? email, Manifest active)
     {
         var company = new Company { Id = Guid.NewGuid(), Name = name, CreatedAt = StorableTime.Now(clock) };
         db.Companies.Add(company);
-        foreach (var role in manifest.Current.DefaultRoles)
+        foreach (var role in active.DefaultRoles)
         {
             db.CompanyRoles.Add(new CompanyRole
             {
