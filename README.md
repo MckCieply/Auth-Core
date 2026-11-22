@@ -127,6 +127,7 @@ scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules
 scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
 scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
 scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, removal keeps the account
+scripts/e2e-orgs-create.sh      # creating another company: POST /auth/orgs, switch into it, delete it; a private person cannot delete the account while in one
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v

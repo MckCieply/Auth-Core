@@ -7,8 +7,8 @@
 # development seed user, the admin of the development company). Each step names the criteria it touches; the guarding tests are in
 # docs/superpowers/plans/0010-acceptance-map.md.
 #   1. health is Healthy; the mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service",
-#      "providers":[]}
-#      (deploy/auth.yaml turns both on); the OpenAPI description names DELETE /auth/account - part of criteria 2 and 30.
+#      "providers":[],"org_creation":"self-service"}
+#      (deploy/auth.yaml turns all three on); the OpenAPI description names DELETE /auth/account - part of criteria 2 and 30.
 #   2. PRIV asks for a private sign-up -> 202 with an empty body; the mail "Complete your sign-up" has the private intro and the same link in
 #      its text and HTML parts; the preview -> 200 {"kind":"private","email":PRIV}; a weak password -> 400 weak_password; the password ->
 #      200 with a login's body and the auth_rt cookie; the token says org_kind personal, roles ["private"] and the private permissions of
@@ -40,6 +40,7 @@
 #   scripts/e2e-login.sh; scripts/e2e-refresh.sh; scripts/e2e-lockout.sh; scripts/e2e-email.sh; scripts/e2e-tenancy.sh; scripts/e2e-signup.sh
 #   scripts/e2e-private.sh                # this script (does NOT bring the stack up or down)
 #   scripts/e2e-orgs.sh                   # spec 0015 (several companies), after this one
+#   scripts/e2e-orgs-create.sh            # spec 0016 (creating another company), after e2e-orgs.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The database is read with
@@ -286,7 +287,7 @@ wait_ok "$MAILPIT_URL/readyz" 60 || fail "step 1: $MAILPIT_URL/readyz did not re
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[]}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[],"org_creation":"self-service"}'
 expect_no_store "step 1: the options"
 call GET /auth/openapi/v1.json
 expect_status "step 1: the OpenAPI description" 200
