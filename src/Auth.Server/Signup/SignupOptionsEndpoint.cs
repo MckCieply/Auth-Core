@@ -1,5 +1,6 @@
 using Auth.Server.Api;
 using Auth.Server.Providers;
+using Auth.Server.Tenancy;
 
 namespace Auth.Server.Signup;
 
@@ -11,11 +12,13 @@ public static class SignupOptionsEndpoint
 {
     public const string Path = "/auth/options";
 
-    public static IResult Handle(SignupGate gate, ProviderCatalog providers)
+    public static IResult Handle(SignupGate gate, ProviderCatalog providers, ManifestHolder manifest)
     {
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(providers);
+        ArgumentNullException.ThrowIfNull(manifest);
 
-        return ApiResults.Ok(new OptionsResponse(gate.ModeName, gate.PrivateModeName, providers.Offered));
+        var orgCreation = manifest.Current.OrgCreation ? OrgCreationModes.SelfServiceName : OrgCreationModes.OffName;
+        return ApiResults.Ok(new OptionsResponse(gate.ModeName, gate.PrivateModeName, providers.Offered, orgCreation));
     }
 }

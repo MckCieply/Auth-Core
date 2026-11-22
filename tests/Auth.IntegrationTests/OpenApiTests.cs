@@ -319,7 +319,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
-        Assert.Equal(["private_signup", "providers", "signup"], Properties("OptionsResponse"));
+        Assert.Equal(["org_creation", "private_signup", "providers", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
         Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
@@ -327,6 +327,20 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));
         Assert.Equal(["error"], Properties("ErrorBody"));
         Assert.Equal(["access_token", "email", "email_verified", "kinds", "next", "status"], Properties("ProviderExchangeResponse"));
+    }
+
+    [Fact]
+    public async Task The_options_describe_org_creation()   // spec 0016
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operation = Operations(document)["GET /auth/options"];
+
+        var text = operation["description"]!.GetValue<string>();
+        Assert.Contains("org_creation", text, StringComparison.Ordinal);
+        Assert.Contains("self-service", text, StringComparison.Ordinal);
+        Assert.Contains("`off`", text, StringComparison.Ordinal);
+        Assert.NotNull(document["components"]!["schemas"]!["OptionsResponse"]!["properties"]!["org_creation"]);
     }
 
     [Fact]

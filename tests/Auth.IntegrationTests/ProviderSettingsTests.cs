@@ -184,7 +184,7 @@ public sealed class ProviderSettingsTests(PostgresFixture postgres, KeyMaterialF
             .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
             .WithServices(services => services.AddSingleton<ILoggerProvider>(logs));
 
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":["microsoft"]}""", await BodyAsync(factory, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":["microsoft"],"org_creation":"off"}""", await BodyAsync(factory, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
         var warning = Assert.Single(ProviderWarnings(logs));   // one warning in all: none for Microsoft, which is configured
         Assert.Contains("google", warning.Message, StringComparison.Ordinal);
