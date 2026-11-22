@@ -134,23 +134,22 @@ public static class MailTexts
     };
 
     /// <summary>
-    /// The invitation to an address that has a private account (spec 0010 → Invitations): the intro's last sentence asks no password, and a
-    /// paragraph says what accepting does. <c>{0}</c> the application, <c>{1}</c> the company.
+    /// The invitation to an address that has an account (spec 0017 → Mails, which changes spec 0010): the intro's last sentence asks no password,
+    /// and a paragraph says that accepting adds the company to the account. <c>{0}</c> the application, <c>{1}</c> the company.
     /// </summary>
-    public static MailText InvitationToPrivateAccount(string locale) => locale switch
+    public static MailText InvitationToExistingAccount(string locale) => locale switch
     {
         "en" => For(locale, MailKind.Invitation) with
         {
             Intro = "You have been invited to join {1} on {0}. Use the link below to accept the invitation.",
-            Paragraph = "You already have a private account on {0} with this email address. If you accept, you move to {1}: the space of your private "
-                + "account is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of {1}.",
+            Paragraph = "You already have an account on {0} with this email address. If you accept, your account also joins {1} "
+                + "and keeps everything it has now, with the same email address and the same way of signing in.",
         },
         "pl" => For(locale, MailKind.Invitation) with
         {
             Intro = "Zaproszono Cię do firmy {1} w {0}. Użyj poniższego linku, aby przyjąć zaproszenie.",
-            Paragraph = "Masz już konto prywatne w {0} z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, przejdziesz do firmy {1}: przestrzeń Twojego "
-                + "konta prywatnego zostanie usunięta razem z całą zawartością. Samo konto zostaje, z tym samym adresem e-mail i hasłem, i stanie się kontem "
-                + "członka firmy {1}.",
+            Paragraph = "Masz już konto w {0} z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, Twoje konto dołączy także do firmy {1} "
+                + "i zachowa wszystko, co ma teraz, z tym samym adresem e-mail i tym samym sposobem logowania.",
         },
         _ => throw new ArgumentOutOfRangeException(nameof(locale), $"No mail text for locale '{locale}'."),
     };

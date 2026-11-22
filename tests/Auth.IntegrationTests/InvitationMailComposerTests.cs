@@ -119,9 +119,9 @@ public sealed class InvitationMailComposerTests
     [InlineData("pl", false)]
     [InlineData("en", true)]
     [InlineData("pl", true)]
-    public void No_text_of_an_invitation_has_a_place_for_the_role(string locale, bool privateAccount)   // Toviq #724
+    public void No_text_of_an_invitation_has_a_place_for_the_role(string locale, bool accountExists)   // Toviq #724
     {
-        var text = privateAccount ? MailTexts.InvitationToPrivateAccount(locale) : MailTexts.For(locale, MailKind.Invitation);
+        var text = accountExists ? MailTexts.InvitationToExistingAccount(locale) : MailTexts.For(locale, MailKind.Invitation);
 
         Assert.All(
             new[] { text.Subject, text.Greeting, text.Intro, text.Button, text.Validity, text.LinkHint, text.Ignore, text.Paragraph ?? "" },

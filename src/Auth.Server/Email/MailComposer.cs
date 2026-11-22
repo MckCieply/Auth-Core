@@ -36,11 +36,15 @@ public sealed class MailComposer(MailSettings settings)
     /// <see cref="MailKind.Signup"/> unless <paramref name="privateAccount"/> is set, ignored otherwise (a private sign-up names no company).
     /// </param>
     /// <param name="privateAccount">
-    /// Spec 0010. For <see cref="MailKind.Signup"/>: the private variant, which names no company. For <see cref="MailKind.Invitation"/>: the
-    /// invited address has a private account, and the mail says what accepting does to it. Ignored otherwise.
+    /// Spec 0010. For <see cref="MailKind.Signup"/> only: the private variant, which names no company. Ignored otherwise (since spec 0017 an
+    /// invitation no longer has a private variant: see <paramref name="accountExists"/>).
+    /// </param>
+    /// <param name="accountExists">
+    /// Spec 0017. For <see cref="MailKind.Invitation"/> only: the invited address has an account (of any kind), and the mail says that
+    /// accepting adds the company to it and keeps what it has. Ignored otherwise.
     /// </param>
     public ComposedMail Compose(
-        MailKind kind, string recipient, string token, string? companyName = null, bool privateAccount = false)
+        MailKind kind, string recipient, string token, string? companyName = null, bool privateAccount = false, bool accountExists = false)
     {
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(token);
@@ -54,10 +58,10 @@ public sealed class MailComposer(MailSettings settings)
             throw new ArgumentException("An organization sign-up names its company.", nameof(companyName));
         }
 
-        var text = (kind, privateAccount) switch
+        var text = (kind, privateAccount, accountExists) switch
         {
-            (MailKind.Signup, true) => MailTexts.PrivateSignup(settings.Locale),
-            (MailKind.Invitation, true) => MailTexts.InvitationToPrivateAccount(settings.Locale),
+            (MailKind.Signup, true, _) => MailTexts.PrivateSignup(settings.Locale),
+            (MailKind.Invitation, _, true) => MailTexts.InvitationToExistingAccount(settings.Locale),
             _ => MailTexts.For(settings.Locale, kind),
         };
         var target = kind switch
