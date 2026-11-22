@@ -208,6 +208,10 @@ export const texts = {
     limitReached: 'You have reached the limit of companies.',
     creationOff: 'Creating companies is turned off.',
     nameRule: 'Check the company name.',
+    // The last entry of the picker and its small form.
+    newCompany: 'New company...',
+    newCompanyName: 'Name of the new company',
+    createCompany: 'Create company',
     // Spec 0016: an account that is still in a company cannot be deleted; the names are those of GET /auth/orgs.
     companyMember: (names: string): string =>
       `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`,

@@ -18,6 +18,8 @@ interface Note {
 }
 
 const MAX_NOTE_CHARACTERS = 1000;
+// The value of the picker's last option, "New company...": it is no company id, so it is never sent to POST /auth/switch.
+const NEW_COMPANY = 'new-company';
 
 // What .NET calls white space, which is what Auth-Core calls a blank password (spec 0010: 400 invalid_request).
 const BLANK = /^[\t-\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*$/;
@@ -90,17 +92,34 @@ function isNote(value: unknown): value is Note {
             <button type="button" data-testid="delete-account" (click)="askToDelete()">{{ t.deleteAccount }}</button>
           }
         }
-        @if (orgs().length > 1) {
-          <!-- Spec 0015: the account belongs to more than one space. Choosing one moves the session there. -->
+        @if (orgs().length > 1 || (orgCreation() && orgs().length > 0)) {
+          <!-- Spec 0015: the account belongs to more than one space. Choosing one moves the session there. Spec 0016: "New company..." opens a form. -->
           <label for="org-picker">{{ o.label }}</label>
-          <select id="org-picker" data-testid="org-picker" [disabled]="switching()" (change)="switchTo($event)">
+          <select id="org-picker" data-testid="org-picker" [disabled]="switching() || creatingBusy()" (change)="switchTo($event)">
             @for (entry of orgs(); track entry.id) {
               <option [value]="entry.id" [selected]="entry.current">{{ entry.kind === 'personal' ? o.private : entry.name }}</option>
+            }
+            @if (orgCreation()) {
+              <option [value]="newCompany">{{ o.newCompany }}</option>
             }
           </select>
         }
         <button type="button" data-testid="sign-out" [disabled]="signingOut()" (click)="signOut()">{{ t.signOut }}</button>
       </header>
+      @if (creating()) {
+        <form [formGroup]="companyForm" (ngSubmit)="createCompany()" novalidate data-testid="new-company-form">
+          <label for="new-company-name">{{ o.newCompanyName }}</label>
+          <input id="new-company-name" data-testid="new-company-name" type="text" formControlName="name" autocomplete="off" maxlength="100" />
+          <button type="submit" data-testid="new-company-submit" [disabled]="creatingBusy()">{{ o.createCompany }}</button>
+          <button type="button" data-testid="new-company-cancel" [disabled]="creatingBusy()" (click)="cancelCreate()">{{ t.cancel }}</button>
+          @if (createError(); as text) {
+            <p class="error" role="alert" data-testid="new-company-error">{{ text }}</p>
+          }
+        </form>
+      }
+      @if (creationOffNotice()) {
+        <p class="status" role="status" data-testid="new-company-off">{{ o.creationOff }}</p>
+      }
       <h1>{{ t.title }}</h1>
       @if (switchProblem() === 'gone') {
         <p class="status" role="status" data-testid="org-gone">{{ o.gone }}</p>
@@ -180,6 +199,13 @@ export class NotesPage implements OnInit {
   protected readonly switching = signal(false);
   // Spec 0016: GET /auth/options says `org_creation` `self-service`. Read once when the page starts; the picker of the next task uses it.
   protected readonly orgCreation = signal(false);
+  protected readonly newCompany = NEW_COMPANY;
+  // The small form of "New company...", the request that is on its way, the text under the form, and the notice after a switch-off.
+  protected readonly creating = signal(false);
+  protected readonly creatingBusy = signal(false);
+  protected readonly createError = signal<string | null>(null);
+  protected readonly creationOffNotice = signal(false);
+  protected readonly companyForm = inject(NonNullableFormBuilder).group({ name: ['', Validators.required] });
   // The last switch that did not go through: the company is gone from the account, or the call failed.
   protected readonly switchProblem = signal<'gone' | 'failed' | null>(null);
   protected readonly canWrite = computed(() => this.me()?.permissions.includes('notes:write') ?? false);
@@ -269,6 +295,12 @@ export class NotesPage implements OnInit {
     const select = event.target as HTMLSelectElement;
     const wanted = select.value;
     const current = (): string => this.orgs().find((entry) => entry.current)?.id ?? this.me()?.org_id ?? '';
+    if (wanted === NEW_COMPANY) {
+      // Not a space: the select goes back to the current one and the form opens.
+      select.value = current();
+      this.openCreateForm();
+      return;
+    }
     if (this.switching() || wanted === current()) {
       select.value = current();
       return;
@@ -284,6 +316,62 @@ export class NotesPage implements OnInit {
       this.switching.set(false);
       // The select shows the space the session is in, whatever came of the choice.
       select.value = current();
+    }
+  }
+
+  private openCreateForm(): void {
+    if (this.creatingBusy()) {
+      return;
+    }
+    this.companyForm.reset();
+    this.createError.set(null);
+    this.creationOffNotice.set(false);
+    this.creating.set(true);
+  }
+
+  protected cancelCreate(): void {
+    if (this.creatingBusy()) {
+      return;
+    }
+    this.creating.set(false);
+    this.createError.set(null);
+  }
+
+  /** Spec 0016: POST /auth/orgs, then the session moves into the new company. The button is disabled while the request runs. */
+  protected async createCompany(): Promise<void> {
+    if (this.creatingBusy()) {
+      return;
+    }
+    const name = this.companyForm.controls.name.value;
+    if (name.trim() === '') {
+      this.createError.set(this.o.nameRule);
+      return;
+    }
+    this.creatingBusy.set(true);
+    this.createError.set(null);
+    this.switchProblem.set(null);
+    try {
+      const result = await this.auth.createCompany(name);
+      if (result === 'created') {
+        this.creating.set(false);
+      } else if (result === 'limit') {
+        this.createError.set(this.o.limitReached);
+      } else if (result === 'disabled') {
+        this.orgCreation.set(false);
+        this.creating.set(false);
+        this.creationOffNotice.set(true);
+      } else if (result === 'invalid') {
+        this.createError.set(this.o.nameRule);
+      } else if (result === 'gone') {
+        // permissions_changed (or a switch that found the company gone): the list is asked again and the page says it is up to date.
+        await this.auth.loadOrgs();
+        this.creating.set(false);
+        this.switchProblem.set('gone');
+      } else {
+        this.createError.set(this.somethingWrong);
+      }
+    } finally {
+      this.creatingBusy.set(false);
     }
   }
 
