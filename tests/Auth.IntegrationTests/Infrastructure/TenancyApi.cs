@@ -32,6 +32,25 @@ public static class TenancyApi
 
     public static Task<HttpResponseMessage> Get(HttpClient client, string path, string? token) => Send(client, HttpMethod.Get, path, token);
 
+    public const string CreateOrgPath = "/auth/orgs";
+
+    /// <summary>
+    /// <c>POST /auth/orgs</c> (spec 0016) with <paramref name="body"/> declared as <paramref name="contentType"/>: a string is sent as it is, anything
+    /// else as JSON, <see langword="null"/> as no body at all.
+    /// </summary>
+    public static Task<HttpResponseMessage> CreateOrg(HttpClient client, string? token, object? body, string contentType = "application/json")
+    {
+        var request = Request(HttpMethod.Post, CreateOrgPath, token);
+        if (body is not null)
+        {
+            var text = body as string ?? JsonSerializer.Serialize(body);
+            request.Content = new StringContent(text, System.Text.Encoding.UTF8);
+            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+        }
+
+        return client.SendAsync(request);
+    }
+
     public const string PreviewPath = "/auth/invites/preview";
     public const string AcceptPath = "/auth/invites/accept";
 

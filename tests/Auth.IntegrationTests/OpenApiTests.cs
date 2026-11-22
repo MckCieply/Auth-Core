@@ -18,7 +18,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         "POST /auth/password/forgot", "POST /auth/password/reset", "POST /auth/email/verify/request", "POST /auth/email/verify",
         "GET /auth/.well-known/jwks.json", "GET /auth/health",
         "GET /auth/me",
-        "GET /auth/orgs",
+        "GET /auth/orgs", "POST /auth/orgs",
         "DELETE /auth/account",
         "GET /auth/options",
         "POST /auth/signup",
@@ -168,6 +168,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/email/verify", "204,400,415,429")]
     [InlineData("GET /auth/me", "200,401,403,429")]
     [InlineData("GET /auth/orgs", "200,401,403,429")]
+    [InlineData("POST /auth/orgs", "201,400,401,403,409,415,429")]   // spec 0016
     [InlineData("DELETE /auth/account", "204,400,401,403,415,429")]
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
@@ -341,6 +342,26 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("self-service", text, StringComparison.Ordinal);
         Assert.Contains("`off`", text, StringComparison.Ordinal);
         Assert.NotNull(document["components"]!["schemas"]!["OptionsResponse"]!["properties"]!["org_creation"]);
+    }
+
+    [Fact]
+    public async Task POST_auth_orgs_is_described()   // spec 0016
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operation = Operations(document)["POST /auth/orgs"];
+
+        Assert.Equal(["name"], BodyProperties(document, operation));
+        Assert.Equal("OrgListItem", operation["responses"]!["201"]!["content"]!["application/json"]!["schema"]!["$ref"]!.GetValue<string>().Split('/')[^1]);
+        Assert.Contains("invalid_request", Description(operation, "400"));
+        Assert.All(["org_creation_disabled", "permissions_changed"], code => Assert.Contains(code, Description(operation, "403")));
+        Assert.Contains("company_limit_reached", Description(operation, "409"));
+        Assert.NotNull(operation["responses"]!["401"]);
+        Assert.NotNull(operation["responses"]!["415"]);
+        Assert.NotNull(operation["responses"]!["429"]);
+        var text = operation["description"]!.GetValue<string>();
+        Assert.Contains("POST /auth/switch", text, StringComparison.Ordinal);
+        Assert.Contains("does not change", text, StringComparison.Ordinal);
     }
 
     [Fact]

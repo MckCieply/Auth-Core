@@ -49,6 +49,11 @@ public abstract class TenancyTestBase : MailTestBase
             ?? throw new InvalidOperationException("The user belongs to no company.");
     }
 
+    /// <summary>How many company memberships (kind organization) the account has; its personal space is not counted.</summary>
+    protected Task<int> CompanyCountOfAsync(Guid userId) =>
+        InDbAsync(db => db.Memberships.CountAsync(
+            m => m.UserId == userId && db.Companies.Any(c => c.Id == m.CompanyId && c.Kind == CompanyKind.Organization), TestContext.Current.CancellationToken));
+
     /// <summary>The company the development seed made.</summary>
     protected Task<Guid> DevCompanyIdAsync() =>
         InDbAsync(db => db.Companies.Where(c => c.Name == DevUserSeeder.DefaultOrgName).Select(c => c.Id).SingleAsync(TestContext.Current.CancellationToken));

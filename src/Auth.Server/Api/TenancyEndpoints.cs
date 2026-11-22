@@ -40,6 +40,28 @@ public static class TenancyEndpoints
             .Produces<OrgListResponse>()
             .ProducesGuarded();
 
+        // Spec 0016: a signed-in account creates another company. Behind the access token only, as the list; the same path, so that a 405 names both.
+        app.MapPost(OrgCreateEndpoint.Path, OrgCreateEndpoint.CreateAsync)
+            .RequireAuthorization()
+            .WithTags("Company")
+            .WithDescription(
+                "Creates another company for the caller, who becomes its first admin (the first role of the manifest's `default_roles` that holds `*`, "
+                + "else the first that holds `members:manage`), when the product's manifest says `org_creation: self-service` (`GET /auth/options`); "
+                + "any account may create, a private one included, and its personal space stays. The body is `{\"name\"}`: 1 to 100 characters, no "
+                + "control, format or noncharacters, no leading or trailing space; names are not unique. The checks run in this order: no valid access "
+                + "token `401`; creation off `403 org_creation_disabled` (before the body is read); a body or name that breaks the rules `400 "
+                + "invalid_request`; an account that is gone or has no membership `403 permissions_changed` (the token's own company need not still "
+                + "be one); the account already in `Auth:Tenancy:MaxCompaniesPerAccount` companies (the personal space is not counted) `409 "
+                + "company_limit_reached`. The answer is `201` with the new space as `GET /auth/orgs` lists it, `current` always `false`. The session "
+                + "does not change (no cookie is set, the token and the refresh cookie keep their company): the product calls `POST /auth/switch` with "
+                + "the new `id` to go into it. A refused creation writes nothing.")
+            .ReadsJson<CreateOrgRequest>()
+            .Produces<OrgListItem>(StatusCodes.Status201Created)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.OrgCreationDisabled)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CompanyLimitReached)
+            .ProducesGuarded();
+
         // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.
         app.MapDelete(AccountDeletionEndpoint.Path, AccountDeletionEndpoint.DeleteAsync)
             .RequireAuthorization()
