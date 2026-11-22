@@ -77,4 +77,22 @@ public sealed class RatePolicyTests
         Assert.Equal(["login", "refresh", "email", "invite", "general"], Enum.GetValues<RatePolicy>().Select(RatePolicies.NameOf));
         Assert.Equal([30, 60, 10, 20, 300], Enum.GetValues<RatePolicy>().Select(RatePolicies.DefaultPermitPerMinute));
     }
+
+    // Spec 0016: creating another company is a POST to /auth/orgs, counted with the other per-IP "invite" paths.
+    [Theory]
+    [InlineData("/auth/orgs")]
+    [InlineData("/auth/orgs/")]
+    [InlineData("/AUTH/Orgs")]
+    public void POST_auth_orgs_is_invite(string path) =>
+        Assert.Equal(RatePolicy.Invite, RatePolicies.Classify("POST", new PathString(path)));
+
+    [Fact]
+    public void GET_auth_orgs_stays_general() =>   // spec 0016: the list of companies has no policy of its own
+        Assert.Equal(RatePolicy.General, RatePolicies.Classify("GET", new PathString("/auth/orgs")));
+
+    [Theory]
+    [InlineData("PUT")]
+    [InlineData("DELETE")]
+    public void PUT_and_DELETE_auth_orgs_are_general(string method) =>   // spec 0016: only the POST is limited
+        Assert.Equal(RatePolicy.General, RatePolicies.Classify(method, new PathString("/auth/orgs")));
 }

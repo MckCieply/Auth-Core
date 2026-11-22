@@ -38,6 +38,11 @@ public static class TenancyErrors
     public const string EmailNotVerified = "email_not_verified";
     public const string NoMembership = "no_membership";
 
+    // Spec 0016: creating another company.
+    public const string OrgCreationDisabled = "org_creation_disabled";
+    public const string CompanyMember = "company_member";
+    public const string CompanyLimitReached = "company_limit_reached";
+
     public static int StatusOf(string error) => error switch
     {
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
