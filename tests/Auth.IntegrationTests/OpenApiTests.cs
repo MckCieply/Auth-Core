@@ -236,6 +236,21 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task The_exchange_describes_already_registered_for_an_invitation()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var exchange = Operations(await DescriptionAsync(factory))["POST /auth/providers/exchange"];
+
+        var text = exchange["description"]!.GetValue<string>();
+        Assert.Contains("invite", text);
+        Assert.Contains("whose identity is its login joins", text);
+        Assert.Contains("signed in", text);
+        Assert.Contains("409 already_registered", text);
+        Assert.Contains("not its login", text);
+        Assert.DoesNotContain("private_account_exists", text);
+    }
+
+    [Fact]
     public async Task The_error_codes_of_the_contract_are_in_the_descriptions()   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -275,8 +290,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_token", Description(operations["POST /auth/providers/exchange"], "400"));
         Assert.Contains("address_mismatch", Description(operations["POST /auth/providers/exchange"], "403"));
         Assert.All(
-            ["already_member", "private_account_exists", "provider_already_linked"],
+            ["already_member", "provider_already_linked"],
             code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "409")));
+        Assert.DoesNotContain("private_account_exists", Description(operations["POST /auth/providers/exchange"], "409"));
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/providers/link"], "401"));
         Assert.All(["email_not_verified", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/link"], "403")));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/providers/link"], "429"));

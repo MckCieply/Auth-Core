@@ -318,19 +318,6 @@ public sealed class InviteAcceptance(
     }
 
     /// <summary>
-    /// The space of the account and its kind; <see langword="null"/> when it has none. A company wins over a personal space, should an account
-    /// ever hold both. Only <see cref="AcceptThroughProviderAsync"/> still reads it, to keep its answers until the provider path joins too
-    /// (Task 4 of plan 0017 removes it).
-    /// </summary>
-    private Task<Space?> SpaceOfAsync(Guid userId, CancellationToken cancellationToken) =>
-        (from membership in db.Memberships.AsNoTracking()
-         join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
-         where membership.UserId == userId
-         orderby company.Kind, membership.JoinedAt   // Organization (1) before Personal (2)
-         select new Space(company.Id, company.Kind))
-        .FirstOrDefaultAsync(cancellationToken);
-
-    /// <summary>
     /// Locks the row of an existing account until the transaction ends and reads it afresh; <see langword="false"/> when it is gone. A removal
     /// of a member takes no address lock, so it can commit between the read of the account and this lock; flows that hold the address lock are
     /// kept out by the lock this acceptance holds. The lock is the last one of the order (company, address, membership rows, account row).
@@ -355,13 +342,16 @@ public sealed class InviteAcceptance(
     /// Accepts an invitation through a provider (spec 0011 → exchange, purpose <c>invite</c>; spec 0010's acceptance with the provider in place of
     /// the password), in the order of the contract: the invitation found by the hash the ticket holds (unknown, used, expired, cancelled, replaced
     /// or a look-alike: <c>invalid_token</c>); the ticket's address missing, unverified or not the invited one (<c>address_mismatch</c>,
-    /// Decision 9); a company member's address (<c>already_member</c>) or a private account's (<c>private_account_exists</c>: the move of spec 0010
-    /// is the screen's own button, Settled 15); the identity a login already (<c>provider_already_linked</c>). Every refusal changes nothing, the
-    /// invitation and the ticket included. Otherwise, under the company lock and then the address lock, the ticket is used up first (right after the
-    /// company lock, so that of parallel requests with one ticket the later is <c>invalid_ticket</c>, and a ticket that expired while it waited is
-    /// refused), then the invitation, the account is made with the invited address and no password, its email confirmed, the identity its login, a member with the invited role,
-    /// and <c>invite.accepted</c> names the role and the provider. Nothing is committed: the transaction is handed over, because the acceptance
-    /// signs the person in (Settled 16).
+    /// Decision 9); an account that is a member of the invited company (<c>already_member</c>); the identity a login of another account
+    /// (<c>provider_already_linked</c>); an existing account whose identity is not one of its logins (<c>already_registered</c>: a provider does
+    /// not take an account over; the screen's own link joins it). Every refusal changes nothing, the invitation and the ticket included.
+    /// Otherwise, under the company lock and then the address lock, the ticket is used up first (right after the company lock, so that of
+    /// parallel requests with one ticket the later is <c>invalid_ticket</c>, and a ticket that expired while it waited is refused), then the
+    /// invitation, and: an existing account whose identity is its login joins (spec 0017: never the move; an unconfirmed email is confirmed,
+    /// nothing else changes), the returned account being that one; an address with no account gets an account made with the invited address and
+    /// no password, its email confirmed and the identity its login. Either way it is a member with the invited role, <c>LastUsedAt</c> the time
+    /// of the acceptance, and <c>invite.accepted</c> names the role and the provider. Nothing is committed: the transaction is handed over,
+    /// because the acceptance signs the person in (Settled 16).
     /// </summary>
     public async Task<ProviderAcceptance> AcceptThroughProviderAsync(ProviderInvite request, CancellationToken cancellationToken)
     {
@@ -394,25 +384,41 @@ public sealed class InviteAcceptance(
             var user = locked.User;
             var now = locked.Now;
 
-            // Shim: the provider path keeps its answers until Task 4 of plan 0017 makes it join; it reads the account's space on its own.
-            var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
-
-            if (space is { Kind: CompanyKind.Organization })
+            if (locked.InInvitedCompany)
             {
                 return ProviderRefused(TenancyErrors.AlreadyMember);
             }
 
-            if (space is { Kind: CompanyKind.Personal })
-            {
-                return ProviderRefused(TenancyErrors.PrivateAccountExists);
-            }
-
+            var owner = await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken);
             if (user is not null)
             {
-                return ProviderRefused(TenancyErrors.AlreadyMember);   // an account with no space: a provider never takes an account over
+                // The identity of another account is judged first; an identity that is no login of this account is not proof of the person.
+                if (owner is { } other && other != user.Id)
+                {
+                    return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);
+                }
+
+                if (owner is null)
+                {
+                    return ProviderRefused(TenancyErrors.AlreadyRegistered);
+                }
+
+                // The identity is a login of this account: the join, never the move. It changes nothing the account has (spec 0017): only an
+                // unconfirmed email is confirmed (the tracked entity was reloaded under the row lock).
+                if (!user.EmailConfirmed)
+                {
+                    user.EmailConfirmed = true;
+                }
+
+                db.Memberships.Add(new Membership { UserId = user.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now, LastUsedAt = now });
+                audit.Stage(await InviteAcceptedAsync(invite, user, ticket.Provider, cancellationToken));
+                await db.SaveChangesAsync(CancellationToken.None);
+
+                handedOver = true;
+                return new ProviderAcceptance(null, user, invite.CompanyId, transaction);
             }
 
-            if (await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
+            if (owner is not null)
             {
                 return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);
             }
@@ -421,21 +427,8 @@ public sealed class InviteAcceptance(
             var account = new ApplicationUser { UserName = invite.Email, Email = invite.Email, EmailConfirmed = true };
             Ensure(await users.CreateAsync(account));
             ProviderLogins.Add(db, account.Id, ticket.Provider, ticket.IdentityKey);
-            db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now });
-            audit.Stage(new AuditEntry
-            {
-                Kind = AuditKinds.InviteAccepted,
-                SubjectUserId = account.Id,
-                SubjectEmail = account.Email,
-                OrgId = invite.CompanyId,
-                OrgName = await audit.CompanyNameAsync(invite.CompanyId, cancellationToken),
-                TargetId = invite.Id,
-                Details = new Dictionary<string, object?>
-                {
-                    ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
-                    ["provider"] = ticket.Provider,
-                },
-            });
+            db.Memberships.Add(new Membership { UserId = account.Id, CompanyId = invite.CompanyId, RoleId = invite.RoleId, JoinedAt = now, LastUsedAt = now });
+            audit.Stage(await InviteAcceptedAsync(invite, account, ticket.Provider, cancellationToken));
             await db.SaveChangesAsync(CancellationToken.None);
 
             handedOver = true;
@@ -450,11 +443,25 @@ public sealed class InviteAcceptance(
         }
     }
 
+    /// <summary>The <c>invite.accepted</c> row of an acceptance through a provider: the role and the provider, and no actor (the holder of the link is anonymous).</summary>
+    private async Task<AuditEntry> InviteAcceptedAsync(Invite invite, ApplicationUser account, string provider, CancellationToken cancellationToken) => new()
+    {
+        Kind = AuditKinds.InviteAccepted,
+        SubjectUserId = account.Id,
+        SubjectEmail = account.Email,
+        OrgId = invite.CompanyId,
+        OrgName = await audit.CompanyNameAsync(invite.CompanyId, cancellationToken),
+        TargetId = invite.Id,
+        Details = new Dictionary<string, object?>
+        {
+            ["role"] = await db.CompanyRoles.AsNoTracking().Where(r => r.Id == invite.RoleId).Select(r => r.Name).FirstOrDefaultAsync(cancellationToken),
+            ["provider"] = provider,
+        },
+    };
+
     private static ProviderAcceptance ProviderRefused(string error) => new(error);
 
     private static Outcome<IReadOnlyList<string>> Refused(string error) => new(null, error);
 
     private static void Ensure(IdentityResult result) => AccountSessions.Ensure(result, "Could not set up the account");
-
-    private sealed record Space(Guid Id, CompanyKind Kind);
 }

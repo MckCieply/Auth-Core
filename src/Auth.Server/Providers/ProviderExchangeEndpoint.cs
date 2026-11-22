@@ -116,7 +116,8 @@ public static class ProviderExchangeEndpoint
         try
         {
             var account = accepted.Account!;
-            var tenant = await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None)
+            // The invited company, not the account's usual space: an existing account that joined has others, and the person signs in to this one.
+            var tenant = await memberships.ReadInCompanyAsync(account.Id, accepted.CompanyId, CancellationToken.None)
                 ?? throw new InvalidOperationException("The account that was just made has no membership.");
             if (tenant.CompanyId != accepted.CompanyId)
             {

@@ -308,9 +308,8 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
     }
 
     [Fact]
-    public void The_new_error_is_a_409()
+    public void private_account_exists_is_no_longer_a_code_of_the_server()   // spec 0017, criterion 13
     {
-        Assert.Equal(409, TenancyErrors.StatusOf(TenancyErrors.PrivateAccountExists));
-        Assert.Equal("private_account_exists", TenancyErrors.PrivateAccountExists);
+        Assert.Throws<ArgumentOutOfRangeException>(() => TenancyErrors.StatusOf("private_account_exists"));
     }
 }
