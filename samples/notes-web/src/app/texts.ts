@@ -148,7 +148,8 @@ export const texts = {
     alreadyRegistered: 'An account with this address exists. Sign in with your password.',
     addressMismatch: 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.',
     alreadyMember: 'This account already belongs to a company.',
-    privateAccountExists: 'You have a private account with this address. Open the invitation link again to move it into the company.',
+    // Spec 0017: an invitation for an address that has an account is accepted with the button on /invite, then the person signs in.
+    alreadyRegisteredInvite: 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.',
     providerAlreadyLinked: 'This Google or Microsoft account already signs in to another account.',
     invalidToken: 'This invitation has expired or was already used. Ask for a new one.',
   },
