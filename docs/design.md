@@ -378,13 +378,19 @@ links with its password once; a new person finishes an account without a passwor
 accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
 registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
-*As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 is built, 0016 and 0017 are
+*As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 and 0016 are built, 0017 is
 specified):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
 `GET /auth/orgs` lists the person's spaces and `POST /auth/switch` moves the device to another one with the refresh cookie alone; every
 session works in one company, the access token still names exactly one, and a sign-in lands in the company used last. A removal or a company
 deletion deletes an account only when it loses its last space. The sample has a company picker. No endpoint makes a second membership yet:
 0016 lets a signed-in person create another company and 0017 lets an invitation keep the other memberships; until then a second membership
 exists only in tests and in the development seed (`Auth:DevSeed:SecondOrgName`). What remains is in the threat model (risks 62 to 65).
+
+*As built (spec 0016, the second slice):* a signed-in person creates another company with `POST /auth/orgs` (off until the manifest says
+`org_creation: self-service`; `GET /auth/options` tells the product's screens). The creator is its first admin; the session does not move, so
+the frontend calls `POST /auth/switch`. One account holds at most `Auth:Tenancy:MaxCompaniesPerAccount` companies (20 by default), judged under
+the address lock. An account that is still in a company cannot delete itself (`403 company_member`). The sample has "New company...". What
+remains is in the threat model (risks 66 and 67).
 
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, and any provider beyond the three.
 

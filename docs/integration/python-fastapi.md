@@ -270,6 +270,13 @@ frontend must reload what it shows when `org_id` changes ([Angular guide](angula
 no change. A person removed from a company is signed out only on the devices that work in that company, at their next
 refresh; the access token they already hold works at your endpoints until it expires.
 
+Creating a company (spec 0016): when the manifest says `org_creation: self-service`, `GET /auth/options` answers `org_creation`
+`self-service` and your frontend offers "New company" ([Angular guide](angular.md), "Creating another company"): `POST /auth/orgs` makes the
+company with the person as its first admin, and the frontend calls `POST /auth/switch` to go into it. Your backend needs no change: the
+next token carries the new `org_id`, and your filter by `org_id` finds no rows yet, so the company's data starts empty. An account that is
+still a member of a company cannot delete itself (`DELETE /auth/account` answers `403 company_member`); your own data-deletion endpoint is
+called first, so have the frontend read `GET /auth/orgs` and stop when a company is listed, as the sample does, before it calls your endpoint.
+
 A person who signs in with Google or Microsoft (spec 0011) gets exactly the access token a password sign-in gives: nothing changes for your
 backend or for this package.
 

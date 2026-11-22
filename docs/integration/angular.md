@@ -216,7 +216,7 @@ because tabs are not synchronised; and a token in memory can be read by script r
 One account can belong to several companies (and at most one personal space), each with its own role. Every session works in one of them,
 the **session's company**: the access token's `org_id` names it, a refresh keeps it, and the other devices of the person keep theirs. A
 product that never switches sees no change. Today a second membership comes from the development seed (`Auth:DevSeed:SecondOrgName`, which puts
-the first seed user in a second company as a plain member) and from tests; no endpoint makes one yet (specs 0016 and 0017 add them).
+the first seed user in a second company as a plain member), from tests and, since spec 0016, from `POST /auth/orgs` ("Creating another company" below); spec 0017 adds the invitation.
 
 - **Listing:** `GET /auth/orgs` with the access token answers `{"orgs":[{"id","name","kind","role":{"id","name"},"current"}]}`: every
   space of the person, ordered by name (ignoring case), then id; `current` is `true` for the one named by the token's `org_id`. A personal space
@@ -242,6 +242,36 @@ the first seed user in a second company as a plain member) and from tests; no en
   company it was, at their next refresh or switch (`401 invalid_grant`); the person's sessions in other companies go on, and a new sign-in lands
   in the company used last among the rest. Their access token still works at your backend until it expires (at most 10 minutes), while
   `GET /auth/me` and the company API refuse it at once with `403 permissions_changed`.
+
+## Creating another company (spec 0016)
+
+A signed-in person can start another company. It is off until your manifest says `org_creation: self-service`; an instance that does not
+opt in sees no change.
+
+- **Offer it from `GET /auth/options`.** The answer has `org_creation`, `self-service` or `off`: show "New company..." only for
+  `self-service`. The sample reads it once when the notes page starts (`pages/notes.ts`, through `account-api.ts`) and adds "New company..." as
+  the last entry of the picker, also for a person who has only one space; the entry opens a small form with the name.
+- **Create:** `POST /auth/orgs` with the access token and `{"name": "<1 to 100 characters>"}` as `application/json`. The answer is `201` with
+  the entry of `GET /auth/orgs` for the new company (`id`, `name`, `kind` `organization`, `role`, `current` `false`). The person is its first
+  admin and the company has a copy of the default roles. Any signed-in account may create, a private one included; its personal space stays.
+  Creating does not move the session: the token and the cookie are unchanged.
+- **Switch after the `201`.** Call `POST /auth/switch` with the new `id`, as the picker does, then ask `GET /auth/me` and reload. The sample's
+  `createCompany(name)` in `auth.service.ts` does both. If the switch fails after the `201`, the company exists and the next `GET /auth/orgs`
+  lists it.
+- **The product's data in the new company starts empty.** Your product keeps its rows under the token's `org_id`, and the new company has none:
+  show the empty state (the sample shows no notes), and write nothing for it until the person adds something.
+- **The answers.** `403 org_creation_disabled`: the switch is off (hide the entry, as the sample does, with "Creating companies is turned
+  off."); `409 company_limit_reached`: the account is in as many companies as `Auth:Tenancy:MaxCompaniesPerAccount` allows (20 by default; the
+  personal space is not counted); `400 invalid_request`: a name or a body that breaks the rules; `403 permissions_changed`: the account is gone
+  or has no membership any more, so read the list again; `401`: refresh as for any call. `415` is a JSON body declared in another charset.
+  The per-IP `invite` limit counts it.
+- **Deleting an account that is still in a company.** `DELETE /auth/account` answers `403 company_member` to an account that holds its
+  personal space and a company, whichever space the token names: no company is deleted with an account and none loses its admin. Tell the
+  person to delete their companies (`DELETE /auth/org`, which an admin does with the company's token) or to ask their admins to remove them, then to
+  delete the account. The sample reads `GET /auth/orgs` before it deletes the notes and, when a company is listed, shows "You are still a member
+  of {names}. Delete those companies or ask their admins to remove you, then delete your account." without deleting anything; the server's
+  `403 company_member` stays the guard for a company created in another tab in between (then the notes are already gone, as after a wrong
+  password).
 
 ## Private accounts (spec 0010)
 

@@ -56,6 +56,7 @@ needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_S
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
 The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
 `providers: [google, microsoft]` is optional too (no key, no provider): it offers "Continue with Google" and "Continue with Microsoft", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token (spec 0011).
+`org_creation: self-service` is optional as well (the default is `off`): a signed-in person may create another company (`POST /auth/orgs`, off until the key is there), and `GET /auth/options` tells your screens whether to offer it. It needs no address; the number of companies one account may create is `AUTH_MAX_COMPANIES_PER_ACCOUNT` (20 by default; spec 0016).
 
 ### 2. Run it on your server
 
