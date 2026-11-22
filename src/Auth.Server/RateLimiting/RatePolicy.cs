@@ -1,3 +1,4 @@
+using Auth.Server.Api;
 using Auth.Server.Providers;
 using Auth.Server.Sessions;
 
@@ -88,6 +89,7 @@ public static class RatePolicies
         if (trimmed.Equals("/auth/invites/preview", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/invites/accept", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/signup/preview", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals(OrgListEndpoint.Path, StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("/auth/signup/complete", StringComparison.OrdinalIgnoreCase))
         {
             return RatePolicy.Invite;
