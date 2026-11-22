@@ -6,9 +6,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Auth.Server.Tenancy;
 
+/// <summary>The company a signed-in account created, with its creator's role in it.</summary>
+public sealed record CreatedCompany(Guid CompanyId, string Name, Guid RoleId, string RoleName);
+
 /// <summary>
-/// Creates companies (spec 0005 → Concepts): only the operator does, through the CLI, and the development seeder, and a self-service
-/// sign-up (spec 0009). And renames one, for a member who may manage it.
+/// Creates companies (spec 0005 → Concepts): the operator through the CLI, the development seeder, a self-service sign-up (spec 0009)
+/// and a signed-in account that makes another one (spec 0016). And renames one, for a member who may manage it.
 /// </summary>
 public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, TimeProvider clock, AuditLog audit)
 {
@@ -26,6 +29,60 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             return Outcome.Fail<Guid>(TenancyErrors.InvalidRequest);
         }
 
+        var company = Stage(name, via, userId: null, email: null);
+        await db.SaveChangesAsync(cancellationToken);
+        return Outcome.Ok(company.Id);
+    }
+
+    /// <summary>
+    /// Creates a company for a signed-in account (spec 0016, <c>POST /auth/orgs</c>): the company with its copy of the default roles,
+    /// the account's membership with the first admin's role of the new company, and <c>org.created</c> with <c>via</c> <c>api</c>.
+    /// It needs the caller's transaction, which holds the address lock and the account row, and saves into it but does not commit,
+    /// so that the caller commits or rolls back the company, the membership and the row together. A name that breaks the rules is
+    /// <c>invalid_request</c> and stages nothing.
+    /// </summary>
+    public async Task<Outcome<CreatedCompany>> CreateForAccountAsync(Guid userId, string? email, string name, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("Creating a company for an account needs the caller's transaction: the company, the membership and the audit row must commit together.");
+        }
+
+        if (!NameInput.IsValid(name))
+        {
+            return Outcome.Fail<CreatedCompany>(TenancyErrors.InvalidRequest);
+        }
+
+        var company = Stage(name, "api", userId, email);
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        // The role is the company's own copy of the first admin's default role, found by its normalised name.
+        var roleKey = NameInput.Normalize(manifest.Current.FirstAdminRole.Name);
+        var role = await db.CompanyRoles.AsNoTracking()
+            .Where(r => r.CompanyId == company.Id && r.NormalizedName == roleKey)
+            .Select(r => new { r.Id, r.Name })
+            .SingleAsync(cancellationToken);
+        db.Memberships.Add(new Membership
+        {
+            UserId = userId,
+            CompanyId = company.Id,
+            RoleId = role.Id,
+            JoinedAt = StorableTime.Now(clock),
+            LastUsedAt = null,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        return Outcome.Ok(new CreatedCompany(company.Id, name, role.Id, role.Name));
+    }
+
+    /// <summary>
+    /// Adds the company, one role per default role and the <c>org.created</c> row to the context; the caller saves. The row is written
+    /// by the same save as the company and its roles. The creator, when there is one, is the actor and the subject of the row.
+    /// </summary>
+    private Company Stage(string name, string via, Guid? userId, string? email)
+    {
         var company = new Company { Id = Guid.NewGuid(), Name = name, CreatedAt = StorableTime.Now(clock) };
         db.Companies.Add(company);
         foreach (var role in manifest.Current.DefaultRoles)
@@ -39,16 +96,17 @@ public sealed class CompanyService(AuthDbContext db, CompanyGuard guard, Manifes
             });
         }
 
-        // The row is written by the same save as the company and its roles.
         audit.Stage(new AuditEntry
         {
             Kind = AuditKinds.OrgCreated,
             OrgId = company.Id,
             OrgName = name,
+            ActorUserId = userId,
+            SubjectUserId = userId,
+            SubjectEmail = email,
             Details = new Dictionary<string, object?> { ["via"] = via },
         });
-        await db.SaveChangesAsync(cancellationToken);
-        return Outcome.Ok(company.Id);
+        return company;
     }
 
     /// <summary>
