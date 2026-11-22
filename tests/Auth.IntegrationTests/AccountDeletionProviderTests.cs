@@ -80,6 +80,31 @@ public sealed class AccountDeletionProviderTests : ProviderTestBase
     }
 
     [Fact]
+    public async Task The_provider_ticket_branch_answers_company_member_too()   // spec 0016: judged before the ticket is consumed
+    {
+        var (userId, session) = await PrivateThroughProviderAsync("google", GooglePerson());
+        var company = await DevCompanyIdAsync();
+        await AddMembershipAsync(userId, company, "user");
+        var reauth = await TicketAsync("google", GooglePerson(), "?purpose=reauth");
+
+        using (var refused = await ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = reauth.Value }, reauth.Binding))
+        {
+            await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.Forbidden, "company_member");
+        }
+
+        Assert.Equal(1, await UsersAsync(userId));
+        Assert.Equal(1, await TicketCountAsync());   // not used up
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleteRefused));
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderReauthenticated));
+
+        await RemoveMembershipAsync(userId, company);   // no password: DELETE /auth/org is out of reach
+        using var response = await ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = reauth.Value }, reauth.Binding);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);   // the same ticket
+        Assert.Equal(0, await UsersAsync(userId));
+    }
+
+    [Fact]
     public async Task A_deletion_by_the_microsoft_identity_names_microsoft_in_the_row_it_writes()   // criterion 23: details.provider is the ticket's
     {
         var (userId, session) = await PrivateThroughProviderAsync("microsoft", PersonalMicrosoft());

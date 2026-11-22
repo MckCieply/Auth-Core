@@ -18,8 +18,8 @@ namespace Auth.Server.Api;
 /// <c>DELETE /auth/account</c> (spec 0010, spec 0015): a private person deletes their own account. The checks run in this order: the token's
 /// company (its <c>org_id</c>) against the database, not the space a sign-in would choose today (a token that says <c>personal</c> while the
 /// account has no membership in it any more is <c>403 permissions_changed</c>, so that the frontend refreshes; a token of a company is
-/// <c>403 forbidden</c>: company accounts are managed by their admins; so is a personal token of an account that has another membership too,
-/// because deleting the account would take the company membership with it), the body (exactly one of <c>password</c> and <c>provider_ticket</c>,
+/// <c>403 forbidden</c>: company accounts are managed by their admins; an account that holds a personal space and a company is
+/// <c>403 company_member</c>, whichever space the token names, because deleting the account would take the company membership with it), the body (exactly one of <c>password</c> and <c>provider_ticket</c>,
 /// spec 0011), the address lock, and then, under the lock, the membership again (an invitation may have moved the account meanwhile) and the account's password hash again. The confirmation must then fit the
 /// account: a ticket for an account with a password is <c>403 password_required</c>, a password for an account without one is
 /// <c>403 reauth_required</c>; both are judged before anything is counted and write no row.
@@ -31,7 +31,7 @@ namespace Auth.Server.Api;
 /// logout does, and <c>auth_pt</c> beside it.
 /// <para>
 /// Why the lock comes before the counting and the hash. An account that moved into a company, or was deleted, while the request waited for the lock
-/// is refused as <c>permissions_changed</c> (and one that joined a company meanwhile as <c>forbidden</c>) before any attempt is counted and before
+/// is refused as <c>permissions_changed</c> (and one that joined a company meanwhile as <c>company_member</c>) before any attempt is counted and before
 /// any password is evaluated; the password that is verified is the one read under the lock, and the check and the deletion sit under one lock, with no window between them. It is not a deadlock that the order
 /// avoids: the login streak is written by <see cref="LoginStreakStore"/>, which commits on a connection of its own before it returns, so this
 /// transaction never holds a streak row while it waits for the address lock. That is the rule to keep: never write the streak on the request's own
@@ -73,9 +73,7 @@ public static class AccountDeletionEndpoint
         // Spec 0015: judged on the token's company (its org_id), not on the space a sign-in would choose today. A token without a usable org_id
         // names no space, so there is no membership to read.
         var tokenSpace = Guid.TryParse(http.User.FindFirst(TenantClaims.OrgId)?.Value, out var orgId) ? orgId : (Guid?)null;
-        var tenant = tokenSpace is { } space ? await memberships.ReadInCompanyAsync(userId, space, http.RequestAborted) : null;
-        var membershipCount = tenant is { Kind: CompanyKind.Personal } ? await memberships.CountAsync(userId, http.RequestAborted) : 0;
-        if (Refusal(http.User, tenant, membershipCount) is { } refused)
+        if ((await JudgeAsync(http.User, memberships, userId, tokenSpace, http.RequestAborted)).Refusal is { } refused)
         {
             return refused;
         }
@@ -113,18 +111,18 @@ public static class AccountDeletionEndpoint
         await using var transaction = await db.Database.BeginTransactionAsync(http.RequestAborted);
         await AddressLock.AcquireAsync(db, normalized, http.RequestAborted);
 
-        // Read again under the lock, in the token's company: an invitation may have moved the account into a company, or another deletion may have
-        // removed it, while this request waited. Not personal any more (or gone) is permissions_changed; still personal but with another membership
-        // now (the account joined a company meanwhile) is forbidden, as at the first read.
-        var caller = tokenSpace is { } lockedSpace ? await memberships.ReadInCompanyAsync(userId, lockedSpace, http.RequestAborted) : null;
+        // Judged again under the lock, with the same helper, on a fresh read: an invitation may have moved the account into a company, or another
+        // deletion may have removed it, while this request waited. The personal space gone (or the account gone) is permissions_changed; a company
+        // membership now (the account joined a company meanwhile) is company_member, as at the first read. A ticket is consumed only after this.
+        var (lockedRefusal, caller) = await JudgeAsync(http.User, memberships, userId, tokenSpace, http.RequestAborted);
+        if (lockedRefusal is { } refusal)
+        {
+            return refusal;
+        }
+
         if (caller is not { Kind: CompanyKind.Personal })
         {
             return ApiResults.Error(TenancyErrors.PermissionsChanged);
-        }
-
-        if (await memberships.CountAsync(userId, http.RequestAborted) > 1)
-        {
-            return ApiResults.Error(TenancyErrors.Forbidden);
         }
 
         // The hash is read under the lock too: a password changed while this request waited must not be answered by the old one.
@@ -227,31 +225,43 @@ public static class AccountDeletionEndpoint
         && users.PasswordHasher.VerifyHashedPassword(new ApplicationUser(), hash, password) != PasswordVerificationResult.Failed;
 
     /// <summary>
-    /// The first rows of the table of spec 0010, judged on the token's company (spec 0015) and the token's <c>org_kind</c> first;
-    /// <see langword="null"/> for a private account. <paramref name="tenant"/> is the account's membership in the token's company and
-    /// <paramref name="membershipCount"/> how many memberships the account has (read for a personal space only). A personal space is let through
-    /// when it is the account's only membership: an account that is also a company member is <c>403 forbidden</c> even with a personal token.
-    /// A token that does not say <c>personal</c> while the database shows a personal space is let through: the database decides.
+    /// The table of specs 0010, 0015 and 0016, judged on the database: the account's memberships are read once. The token's company not among
+    /// them is <c>403 permissions_changed</c> (a token without an <c>org_id</c> that does not say <c>personal</c> is <c>403 forbidden</c>, as before).
+    /// A personal space and at least one company is <c>403 company_member</c>, whichever company the token names; companies only is
+    /// <c>403 forbidden</c> (company accounts are managed by their admins); the personal space only lets the request through, with that space
+    /// as the caller. A token that says <c>personal</c> while the database shows its company as a company is <c>permissions_changed</c>.
+    /// Used before the body and again under the address lock, so that both judge alike.
     /// </summary>
-    private static IResult? Refusal(System.Security.Claims.ClaimsPrincipal user, TenantContext? tenant, int membershipCount)
+    private static async Task<(IResult? Refusal, TenantContext? Caller)> JudgeAsync(
+        System.Security.Claims.ClaimsPrincipal user, MembershipReader memberships, Guid userId, Guid? tokenSpace, CancellationToken cancellationToken)
     {
-        if (tenant is { Kind: CompanyKind.Personal })
-        {
-            return membershipCount > 1 ? ApiResults.Error(TenancyErrors.Forbidden) : null;
-        }
-
+        var all = await memberships.ListAsync(userId, cancellationToken);
+        var tenant = tokenSpace is { } space ? all.FirstOrDefault(m => m.CompanyId == space) : null;
         var saysPersonal = string.Equals(user.FindFirst(TenantClaims.OrgKind)?.Value, SpaceKinds.PersonalName, StringComparison.Ordinal);
-        if (saysPersonal)
-        {
-            return ApiResults.Error(TenancyErrors.PermissionsChanged);   // it moved to a company, or it is gone: the frontend refreshes
-        }
 
         if (tenant is null)
         {
-            return ApiResults.Error(user.HasClaim(c => c.Type == TenantClaims.OrgId) ? TenancyErrors.PermissionsChanged : TenancyErrors.Forbidden);
+            if (saysPersonal)
+            {
+                return (ApiResults.Error(TenancyErrors.PermissionsChanged), null);   // it moved to a company, or it is gone: the frontend refreshes
+            }
+
+            return (ApiResults.Error(user.HasClaim(c => c.Type == TenantClaims.OrgId) ? TenancyErrors.PermissionsChanged : TenancyErrors.Forbidden), null);
         }
 
-        return ApiResults.Error(TenancyErrors.Forbidden);   // a company member: company accounts are managed by their admins
+        if (saysPersonal && tenant.Kind != CompanyKind.Personal)
+        {
+            return (ApiResults.Error(TenancyErrors.PermissionsChanged), null);
+        }
+
+        var hasPersonal = all.Any(m => m.Kind == CompanyKind.Personal);
+        var hasCompany = all.Any(m => m.Kind == CompanyKind.Organization);
+        if (hasPersonal && hasCompany)
+        {
+            return (ApiResults.Error(TenancyErrors.CompanyMember), null);
+        }
+
+        return hasPersonal ? (null, tenant) : (ApiResults.Error(TenancyErrors.Forbidden), null);
     }
 
     private static Task RecordRefusalAsync(AuditLog audit, TenantContext caller, string email, string reason) =>

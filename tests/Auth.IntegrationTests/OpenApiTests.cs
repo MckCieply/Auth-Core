@@ -345,6 +345,16 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task DELETE_auth_account_lists_403_company_member()   // spec 0016
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var operation = Operations(await DescriptionAsync(factory))["DELETE /auth/account"];
+
+        Assert.Contains("company_member", Description(operation, "403"));
+        Assert.Contains("only membership is its personal space", operation["description"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task POST_auth_orgs_is_described()   // spec 0016
     {
         await using var factory = new AuthAppFactory(postgres, keys);

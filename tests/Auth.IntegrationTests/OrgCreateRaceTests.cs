@@ -96,8 +96,7 @@ public sealed class OrgCreateRaceTests : AuditTestBase
 
         if (creation.StatusCode == HttpStatusCode.Created)
         {
-            // 403 either way: today `forbidden`, `company_member` once Task 9 of plan 0016 lands.
-            Assert.Equal(HttpStatusCode.Forbidden, deletion.StatusCode);
+            await TenancyApi.AssertErrorAsync(deletion, HttpStatusCode.Forbidden, "company_member");
             Assert.Equal((1, 1, 1), (accounts, spaces, companies));
         }
         else
