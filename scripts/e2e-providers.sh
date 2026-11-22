@@ -678,13 +678,13 @@ ticket_json pwinvite ticket "$tmp/pwinvite.exchange"
 call POST /auth/providers/exchange "$tmp/pwinvite.exchange" "$tmp/pwinvite.pt"
 expect_error "step 11: an invitation of a private account's address accepted with an identity that is not its login" 409 already_registered
 
-# The join (spec 0017): PW's address invited again (the mail limit of one a minute for a company and an address is waited out by invite),
-# accepted with PW's own Microsoft identity. PW joins the development company, keeps its personal space and is signed in to the company.
-invite E2E_PW_EMAIL pwjoin
-round_trip pwjoin microsoft "?invite=$(cat "$tmp/pwjoin.invite")" "person=custom&email=$(enc "$PW_EMAIL")&verified=true&subject=$PW_OID"
+# The join (spec 0017): the pwinvite invitation, still pending because the refusal above used nothing up, accepted with PW's own Microsoft
+# identity. PW joins the development company, keeps its personal space and is signed in to the company. (A second invitation of the same
+# address would be 409 invite_pending, so none is sent.)
+round_trip pwjoin microsoft "?invite=$(cat "$tmp/pwinvite.invite")" "person=custom&email=$(enc "$PW_EMAIL")&verified=true&subject=$PW_OID"
 ticket_json pwjoin ticket "$tmp/pwjoin.exchange"
 call POST /auth/providers/exchange "$tmp/pwjoin.exchange" "$tmp/pwjoin.pt"
-expect_signed_in "step 11: an existing account accepts an invitation with its own identity" pwjoin
+expect_signed_in "step 11: an existing account accepts the invitation that its earlier refusal left usable, with its own identity" pwjoin
 BODY="$(jwt_payload "$tmp/pwjoin.auth")"
 expect_eq "step 11: it is PW's account" "$(val 'd["sub"]')" "$PW_SUB"
 expect_eq "step 11: signed in to the invited company" "$(val 'd["org_id"]')" "$DEV_ORG"

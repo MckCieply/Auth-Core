@@ -210,6 +210,14 @@ describe('InvitePage', () => {
     },
   );
 
+  it('the switch rejects after the 204: /login with the email in the navigation state', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    signedIn(opened.auth, 'new@acme.example');
+    vi.spyOn(opened.auth, 'switchTo').mockRejectedValue(new Error('network'));
+    await accept(opened);
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+  });
+
   it('409 already_member on the accept of an existing account: the sentence of the member, no switch', async () => {
     const opened = await open('?token=tok-i', 'ok', existing);
     signedIn(opened.auth, 'new@acme.example');

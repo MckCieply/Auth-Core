@@ -375,7 +375,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
 
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_registered");
         await AssertRefusedAsync(before, invite, token);
-        var after =await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == existing.Id, TestContext.Current.CancellationToken));
+        var after = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == existing.Id, TestContext.Current.CancellationToken));
         Assert.Equal((hash, which != "unconfirmed"), (after.PasswordHash, after.EmailConfirmed));   // not taken over: password kept, email not confirmed by a provider
         Assert.Equal(0, await LoginsAsync());
     }

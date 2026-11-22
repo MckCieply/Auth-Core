@@ -178,7 +178,12 @@ export class InvitePage implements OnInit {
     if (me === null || invitation.org_id === null || asciiLower(me.email) !== asciiLower(invitation.email)) {
       return false;
     }
-    return (await this.auth.switchTo(invitation.org_id)) === 'switched';
+    try {
+      return (await this.auth.switchTo(invitation.org_id)) === 'switched';
+    } catch {
+      // The token is used up by now: a throw is a switch that did not happen, and the person signs in again.
+      return false;
+    }
   }
 
   private async preview(token: string): Promise<void> {

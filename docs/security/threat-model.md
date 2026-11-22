@@ -203,9 +203,15 @@ the account lost).
 - **Order and locks:** the routine first deletes the queued mail requests and the pending sign-ups of the addresses (the mail sender locks
   them in that order), then locks the account rows, then deletes the sessions, the accounts and the personal spaces. A sign-in or a refresh
   reads its account again under a share lock before it writes a session, so no session of a deleted account survives
-  (`SignInRaceTests`). Removal and company deletion hold the company lock; self-deletion, the invitation move and the start-up step hold the
-  address lock and read the membership again under it. A flow that changes a company takes the company lock before the address lock (the
-  invitation move does); nothing takes them the other way round.
+  (`SignInRaceTests`). Removal and company deletion hold the company lock; self-deletion, an invitation acceptance and the start-up step hold the
+  address lock and read the membership again under it. A flow that changes a company takes the company lock before the address lock (an
+  invitation acceptance does); nothing takes them the other way round. Since spec 0017 every acceptance by an existing account (a join or a
+  move, over HTTP or with a provider) takes the company lock, the address lock, the personal membership row (the move only) and then the
+  account row `FOR UPDATE`, read afresh; since spec 0016 the account deletion locks the membership rows first and the account rows after
+  them, so the two orders meet at the account row and never wait for each other in a cycle. The account-row lock is what keeps a removal that
+  committed meanwhile from leaving the acceptance a membership of an account that is gone: guarded by `InvitationJoinRaceTests` (an
+  acceptance that holds the account row keeps the account) and `PrivateAccountRaceTests.A_removal_that_holds_the_account_row_*` (without
+  the lock the membership insert fails on the foreign key, a 500).
 - **The start-up step** deletes each account that has no membership once, even when two replicas start together
   (`AccountsWithoutSpaceStartupTests.Two_runs_at_once_delete_each_account_once`); a failure stops the start and logs the account id at
   the level Critical, so that the operator sees which account blocks it.

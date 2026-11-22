@@ -462,7 +462,7 @@ call POST /auth/org/invites "$tmp/invite-badmin.json" "$tmp/admin.auth"
 expect_status "step 8: invite a member of another company" 202 ""
 [[ "$(header_names)" == "$STRANGER_HEADERS" ]] || fail "step 8: the headers differ between an unknown address and a member of another company"
 wait_mail "$BADMIN_EMAIL" 2 30 || fail "step 8: no second invitation mail for B's admin"
-token_body "$tmp/badmin-second.json" E2E_PASSWORD
+token_body "$tmp/badmin-second.json"
 call POST /auth/invites/preview "$tmp/badmin-second.json"
 expect_status "step 8: the preview of an invitation to a member of another company" 200
 expect_no_store "step 8: the preview"
