@@ -1,4 +1,5 @@
 using System.Net;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Microsoft.EntityFrameworkCore;
@@ -63,10 +64,15 @@ public sealed class ProviderFinishRaceTests(PostgresFixture postgres, KeyMateria
         Assert.Equal(HttpStatusCode.OK, finished.StatusCode);
         // The finish deleted the pending sign-up of the address: the link of the mail is used up by then.
         await TenancyApi.AssertErrorAsync(completed, HttpStatusCode.BadRequest, "invalid_token");
-        await TenancyApi.AssertErrorAsync(accepted, HttpStatusCode.Conflict, "private_account_exists");
+        await TenancyApi.AssertEmptyAsync(accepted, HttpStatusCode.NoContent);   // spec 0017: the private account the finish made joins; it is no longer private_account_exists
         Assert.Equal(1, await AccountsAsync());
         Assert.Equal(1, await LoginsAsync());
         Assert.Single(await AuditAsync(AuditKinds.SignupCompleted));
+        Assert.Single(await AuditAsync(AuditKinds.InviteAccepted));
+        var kinds = await InDbAsync(db => db.Memberships.AsNoTracking()
+            .Join(db.Companies, m => m.CompanyId, c => c.Id, (m, c) => new { c.Id, c.Kind }).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, kinds.Count(k => k.Kind == CompanyKind.Personal));   // the personal space stays
+        Assert.Contains(kinds, k => k.Id == company);                         // and the account is a member of Acme
         Assert.Equal(0, await TicketCountAsync());
     }
 

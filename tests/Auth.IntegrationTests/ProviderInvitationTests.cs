@@ -822,7 +822,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task An_account_that_a_removal_deletes_between_the_read_of_it_and_the_read_of_its_space_is_made_anew()   // spec 0011 → exchange: removed meanwhile; as spec 0010's acceptance
+    public async Task An_account_that_a_removal_deletes_while_the_exchange_waits_for_its_row_is_made_anew()   // spec 0011 → exchange: removed meanwhile; as spec 0010's acceptance
     {
         var (acme, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, Invited, "user");
@@ -830,10 +830,10 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         var ticket = await InviteTicketAsync(token, Jan());
 
         Task<HttpResponseMessage> exchange;
-        await using (var held = await HeldLock.MembershipsAsync(Factory))
+        await using (var held = await HeldLock.AccountRowAsync(Factory, worker))
         {
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the account is read; the read of its space waits for the memberships
+            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the account is read; its row lock waits for the held row
             await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
             await held.ReleaseAsync();
         }

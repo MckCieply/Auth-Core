@@ -218,6 +218,24 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task The_acceptance_says_an_existing_account_joins_with_the_token_alone()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var accept = Operations(await DescriptionAsync(factory))["POST /auth/invites/accept"];
+
+        var text = accept["description"]!.GetValue<string>();
+        Assert.Contains("token alone", text);
+        Assert.Contains("other memberships", text);
+        Assert.Contains("leave_private_account", text);
+        Assert.Contains("personal space", text);
+        Assert.Contains("no session", text);
+        var conflicts = Description(accept, "409");
+        Assert.Contains("already_member", conflicts);
+        Assert.DoesNotContain("private_account_exists", conflicts);
+        Assert.DoesNotContain("private_account_exists", text);
+    }
+
+    [Fact]
     public async Task The_error_codes_of_the_contract_are_in_the_descriptions()   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -232,7 +250,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_request", Description(operations["POST /auth/switch"], "400"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
-        Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
+        Assert.DoesNotContain("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));

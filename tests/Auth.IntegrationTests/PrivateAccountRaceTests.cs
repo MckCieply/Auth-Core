@@ -1,6 +1,7 @@
 using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Audit;
 using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
 
@@ -113,7 +114,7 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
     }
 
     [Fact]
-    public async Task A_removal_not_yet_committed_makes_a_parallel_acceptance_already_member_and_the_invitation_stays()   // criterion 27
+    public async Task A_removal_that_holds_the_account_row_makes_a_parallel_acceptance_make_a_new_account()   // spec 0017, criterion 18, order B
     {
         var (acme, _, adminToken) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
@@ -123,29 +124,31 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         await DispatchAsync();
         var token = TokenIn(Mail.Sent.Last(m => m.To == "worker@acme.test"));
 
+        Task<HttpResponseMessage> removal;
+        Task<HttpResponseMessage> acceptance;
         await using (var held = await HeldLock.AuditTableAsync(Factory))
         {
-            var removal = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken);
-            await HeldLock.WaitForWaitersAsync(Factory, 1, removal);   // the account's rows are deleted, not committed: the removal waits at its audit rows
+            removal = TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, removal);   // the account's rows are deleted and locked, not committed: the removal waits at its audit rows
 
-            using (var early = await TenancyApi.Accept(Client, token, "Invited-Passw0rd"))
-            {
-                await TenancyApi.AssertErrorAsync(early, HttpStatusCode.Conflict, "already_member");   // it saw the committed state: a member
-            }
+            acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
+            await HeldLock.WaitForWaitersAsync(Factory, 2, removal, acceptance);   // the acceptance waits at the account row
 
             await held.ReleaseAsync();
-            using var removed = await removal;
-            Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
         }
 
-        using var later = await TenancyApi.Accept(Client, token, "Invited-Passw0rd");   // the invitation stayed usable
-        Assert.Equal(HttpStatusCode.NoContent, later.StatusCode);
+        using var removed = await removal;
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        using var accepted = await acceptance;
+        Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);   // the row is gone when it gets in: the no-account path, the password sent makes the account
         await AssertOneAccountWithOneSpaceAsync("WORKER@ACME.TEST");
         Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));   // a new account
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.CompanyId == globex, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.AuditEvents.CountAsync(e => e.Kind == AuditKinds.AccountDeleted && e.SubjectUserId == worker, TestContext.Current.CancellationToken)));
     }
 
     [Fact]
-    public async Task A_removal_that_commits_between_the_read_of_the_account_and_the_read_of_its_space_makes_a_new_account()   // criterion 27
+    public async Task A_removal_that_commits_while_the_acceptance_waits_for_the_account_row_makes_a_new_account()   // criterion 27
     {
         var (acme, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, "worker@acme.test", "user");
@@ -156,10 +159,10 @@ public sealed class PrivateAccountRaceTests : SignupTestBase
         var token = TokenIn(Mail.Sent.Last(m => m.To == "worker@acme.test"));
 
         Task<HttpResponseMessage> acceptance;
-        await using (var held = await HeldLock.MembershipsAsync(Factory))
+        await using (var held = await HeldLock.AccountRowAsync(Factory, worker))
         {
             acceptance = TenancyApi.Accept(Client, token, "Invited-Passw0rd");
-            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // the account is read; the read of its space waits for the memberships
+            await HeldLock.WaitForWaitersAsync(Factory, 1, acceptance);   // the account is read; its row lock waits for the held row
             await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
             await held.ReleaseAsync();
         }

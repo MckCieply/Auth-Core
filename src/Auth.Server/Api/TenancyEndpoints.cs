@@ -111,13 +111,15 @@ public static class TenancyEndpoints
         app.MapPost(InviteEndpoints.AcceptPath, InviteEndpoints.AcceptAsync)
             .WithTags("Invitations")
             .WithDescription(
-                "Accepts an invitation. A new account needs `password`. An account that exists keeps its own password (a `password` sent is not "
-                + "used); a private account moves only with `leave_private_account: true` (its personal space is deleted, every session ends), "
-                + "and without it the answer is `409 private_account_exists` and nothing changes. A company member is `409 already_member`.")
+                "Accepts an invitation. A new account needs `password`. An account that exists joins with the token alone: it keeps its own "
+                + "password (a `password` sent is not used or judged), its other memberships, its personal space and its linked providers, and no "
+                + "session ends. `leave_private_account: true` also deletes the account's personal space (a move; sessions of that space get "
+                + "`401 invalid_grant` at their next refresh or switch, every other session goes on); without a personal space it is ignored. A "
+                + "member of the invited company is `409 already_member` and the invitation stays usable.")
             .ReadsJson<AcceptInviteRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesPasswordError(TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken, TenancyErrors.WeakPassword)
-            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember, TenancyErrors.PrivateAccountExists);
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.AlreadyMember);
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 
