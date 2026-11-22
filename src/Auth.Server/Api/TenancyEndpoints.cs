@@ -99,8 +99,11 @@ public static class TenancyEndpoints
         app.MapPost(InviteEndpoints.PreviewPath, InviteEndpoints.PreviewAsync)
             .WithTags("Invitations")
             .WithDescription(
-                "The company, the address and the role of an invitation, and `has_private_account`: whether the address has a private account, "
-                + "which accepting moves into the company (its personal space is deleted). An address of a company member is `409 already_member`.")
+                "The company (`org_name`, and `org_id`, the company to pass to `POST /auth/switch` after the acceptance), the address and the role of an "
+                + "invitation; `has_account`: whether the address has an account of any kind (a screen asks for a password only when it is `false`); "
+                + "and `has_private_account`: whether that account has a personal space, also when it holds a company too (accepting with "
+                + "`leave_private_account: true` deletes the space). `409 already_member` is answered only for an account that is a member of this "
+                + "company. The preview never uses the invitation.")
             .ReadsJson<PreviewInviteRequest>()
             .Produces<InvitePreviewResponse>()
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidToken)

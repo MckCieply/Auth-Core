@@ -205,6 +205,19 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task The_preview_describes_has_account_org_id_and_already_member_for_this_company()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var preview = Operations(await DescriptionAsync(factory))["POST /auth/invites/preview"];
+
+        var operationText = preview["description"]!.GetValue<string>();
+        Assert.Contains("has_account", operationText);
+        Assert.Contains("org_id", operationText);
+        Assert.Contains("member of this company", operationText);   // the 409 response text is only the code list ("Error: already_member")
+        Assert.Contains("already_member", Description(preview, "409"));
+    }
+
+    [Fact]
     public async Task The_error_codes_of_the_contract_are_in_the_descriptions()   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -322,7 +335,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["org_creation", "private_signup", "providers", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
-        Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
+        Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));

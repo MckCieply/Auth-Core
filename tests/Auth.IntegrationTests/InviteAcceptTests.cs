@@ -59,8 +59,10 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         using (var preview = await TenancyApi.Preview(Client, token))
         {
             var body = await TenancyApi.ReadOkAsync(preview);
-            Assert.Equal(["email", "has_private_account", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
             Assert.False(body.GetProperty("has_private_account").GetBoolean());   // spec 0010: an address without an account
+            Assert.False(body.GetProperty("has_account").GetBoolean());           // spec 0017
+            Assert.Equal(company.ToString(), body.GetProperty("org_id").GetString());
             Assert.Equal(Address, body.GetProperty("email").GetString());
             Assert.Equal("Acme", body.GetProperty("org_name").GetString());
             Assert.Equal("user", body.GetProperty("role").GetString());
@@ -78,6 +80,86 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     // ---- preview
+
+    [Theory]
+    [InlineData("member")]
+    [InlineData("private")]
+    [InlineData("both")]
+    [InlineData("none")]
+    [InlineData("no_account")]
+    public async Task The_preview_says_has_account_and_org_id_for_every_kind_of_address(string kind)   // spec 0017, criterion 1
+    {
+        var company = await CreateCompanyAsync("Acme");
+        switch (kind)
+        {
+            case "member":
+                await CreateUserAsync(Address, confirmed: true);
+                break;
+            case "private":
+                await CreatePrivateAccountAsync(Address);
+                break;
+            case "both":
+                var (user, _) = await CreatePrivateAccountAsync(Address);
+                await AddMembershipAsync(user, await DevCompanyIdAsync(), "user");
+                break;
+            case "none":
+                await CreateUserAsync(Address, confirmed: true, member: false);
+                break;
+        }
+
+        var (invite, token) = await MailedAsync(company);
+        var before = await InviteAsync(invite);
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.Equal(kind != "no_account", body.GetProperty("has_account").GetBoolean());
+        Assert.Equal(company, Guid.Parse(body.GetProperty("org_id").GetString()!));
+        Assert.Equal("Acme", body.GetProperty("org_name").GetString());
+        Assert.Equal(Address, body.GetProperty("email").GetString());
+        Assert.Equal("user", body.GetProperty("role").GetString());
+        var after = await InviteAsync(invite);
+        Assert.NotNull(after);
+        Assert.Equal(before!.TokenHash, after.TokenHash);
+    }
+
+    [Fact]
+    public async Task A_member_of_the_invited_company_is_409_already_member_in_the_preview()   // spec 0017, criterion 3
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var user = await CreateUserAsync(Address, confirmed: true);   // a member of the development company
+        await AddMembershipAsync(user.Id, company, "user");
+        var (invite, token) = await MailedAsync(company);
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+        Assert.NotNull(await InviteAsync(invite));
+    }
+
+    [Fact]
+    public async Task The_preview_decides_again_when_the_link_is_used_in_both_directions()   // Review Focus 1, preview half
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var token = await InvitationTokenAsync(company, Address);   // no account yet
+        using (var first = await TenancyApi.Preview(Client, token))
+        {
+            Assert.False((await TenancyApi.ReadOkAsync(first)).GetProperty("has_account").GetBoolean());
+        }
+
+        await CreateUserAsync(Address, confirmed: true);   // the person signed up before using the link
+        using (var second = await TenancyApi.Preview(Client, token))
+        {
+            Assert.True((await TenancyApi.ReadOkAsync(second)).GetProperty("has_account").GetBoolean());
+        }
+
+        const string other = "gone@acme.test";
+        var gone = await CreateUserAsync(other, confirmed: true, member: false);
+        var goneToken = await InvitationTokenAsync(company, other);
+        await InDbAsync(db => db.Users.Where(u => u.Id == gone.Id).ExecuteDeleteAsync(TestContext.Current.CancellationToken));   // deleted before the link is used
+        using var third = await TenancyApi.Preview(Client, goneToken);
+        Assert.False((await TenancyApi.ReadOkAsync(third)).GetProperty("has_account").GetBoolean());
+    }
 
     [Fact]
     public async Task Preview_leaves_the_token_usable()   // criterion 3
@@ -520,9 +602,12 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
 
         using (var preview = await TenancyApi.Preview(Client, token))
         {
-            await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+            var body = await TenancyApi.ReadOkAsync(preview);   // spec 0017: only a member of the invited company is already_member
+            Assert.True(body.GetProperty("has_account").GetBoolean());
+            Assert.False(body.GetProperty("has_private_account").GetBoolean());
         }
 
+        // TODO(0017 Task 2): the acceptance joins; this half then changes and the test is renamed.
         using (var accept = await TenancyApi.Accept(Client, token, Password))
         {
             await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");

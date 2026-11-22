@@ -13,10 +13,10 @@ using OpenIddict.Abstractions;
 namespace Auth.Server.Tenancy;
 
 /// <summary>
-/// What the acceptance screen shows before it asks for anything: the company, the address, the role, and whether the address has a private
-/// account (spec 0010), which accepting would move into the company.
+/// What the acceptance screen shows before it asks for anything: the company (and its id), the address, the role, whether the address has an
+/// account of any kind (spec 0017) and whether it has a private account (spec 0010: a personal space, also when it holds a company too).
 /// </summary>
-public sealed record InvitePreview(string OrgName, string Email, string Role, bool HasPrivateAccount);
+public sealed record InvitePreview(string OrgName, string Email, string Role, bool HasPrivateAccount, bool HasAccount, Guid OrgId);
 
 /// <summary>An acceptance through a provider (spec 0011): the ticket as read, and the ticket and its binding as sent.</summary>
 public sealed record ProviderInvite(ProviderTicket Ticket, string TicketText, string Binding);
@@ -45,7 +45,7 @@ public sealed class InviteAcceptance(
     /// The company, address and role of a usable invitation, and whether the address has a private account; the token stays usable. Unknown,
     /// used, expired, cancelled and replaced tokens are all <c>invalid_token</c>, and so is an invitation whose address matches an existing
     /// account that is not spelled the same (<see cref="EmailInput.IsSameAddress"/>), or that
-    /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An address that belongs to a company is <c>already_member</c>.
+    /// <see cref="EmailInput.MayStandForAnotherAddress">may stand for another</see>. An account that is a member of the invited company is <c>already_member</c>.
     /// </summary>
     public async Task<Outcome<InvitePreview>> PreviewAsync(string token, CancellationToken cancellationToken)
     {
@@ -58,7 +58,7 @@ public sealed class InviteAcceptance(
             join company in db.Companies.AsNoTracking() on invite.CompanyId equals company.Id
             join role in db.CompanyRoles.AsNoTracking() on invite.RoleId equals role.Id
             where invite.TokenHash == hash && invite.ExpiresAt > now
-            select new { invite.Email, CompanyName = company.Name, RoleName = role.Name })
+            select new { invite.Email, invite.CompanyId, CompanyName = company.Name, RoleName = role.Name })
             .FirstOrDefaultAsync(cancellationToken);
         if (row is null || EmailInput.MayStandForAnotherAddress(row.Email))
         {
@@ -73,10 +73,33 @@ public sealed class InviteAcceptance(
             return Outcome.Fail<InvitePreview>(TenancyErrors.InvalidToken);
         }
 
-        var space = user is null ? null : await SpaceOfAsync(user.Id, cancellationToken);
-        return space is { Kind: CompanyKind.Organization }
+        // Spec 0017: only a member of the invited company is already_member; any other account joins, and its personal space (if any) is told.
+        if (user is null)
+        {
+            return Outcome.Ok(new InvitePreview(row.CompanyName, row.Email, row.RoleName, HasPrivateAccount: false, HasAccount: false, row.CompanyId));
+        }
+
+        var memberships = await ReadMembershipsAsync(user.Id, row.CompanyId, cancellationToken);
+        return memberships.InInvitedCompany
             ? Outcome.Fail<InvitePreview>(TenancyErrors.AlreadyMember)
-            : Outcome.Ok(new InvitePreview(row.CompanyName, row.Email, row.RoleName, space is { Kind: CompanyKind.Personal }));
+            : Outcome.Ok(new InvitePreview(
+                row.CompanyName, row.Email, row.RoleName, HasPrivateAccount: memberships.PersonalSpaceId is not null, HasAccount: true, row.CompanyId));
+    }
+
+    /// <summary>What an account holds that the acceptance judges: a membership of the invited company, and its personal space, if any.</summary>
+    private sealed record Memberships(bool InInvitedCompany, Guid? PersonalSpaceId);
+
+    private async Task<Memberships> ReadMembershipsAsync(Guid userId, Guid companyId, CancellationToken cancellationToken)
+    {
+        var rows = await (
+            from membership in db.Memberships.AsNoTracking()
+            join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
+            where membership.UserId == userId
+            select new { company.Id, company.Kind })
+            .ToListAsync(cancellationToken);
+        return new Memberships(
+            rows.Any(r => r.Id == companyId),
+            rows.Where(r => r.Kind == CompanyKind.Personal).Select(r => (Guid?)r.Id).FirstOrDefault());
     }
 
     /// <summary>

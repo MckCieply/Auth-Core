@@ -60,6 +60,10 @@ public static class TenancyApi
     public static Task<HttpResponseMessage> Accept(HttpClient client, string token, string password) =>
         client.PostAsJsonAsync(AcceptPath, new { token, password });
 
+    /// <summary>Accepts with the token alone (spec 0017): what a screen sends for an address that has an account.</summary>
+    public static Task<HttpResponseMessage> AcceptWithoutPassword(HttpClient client, string token) =>
+        client.PostAsJsonAsync(AcceptPath, new { token });
+
     /// <summary>Accepts for an address that has a private account, on purpose (spec 0010): <c>leave_private_account: true</c>.</summary>
     public static Task<HttpResponseMessage> AcceptLeaving(HttpClient client, string token, string? password = null) =>
         password is null

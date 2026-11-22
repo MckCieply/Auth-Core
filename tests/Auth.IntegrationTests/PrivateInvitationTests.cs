@@ -51,10 +51,27 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
         using var forNew = await TenancyApi.Preview(Client, newToken);
 
         var mine = await TenancyApi.ReadOkAsync(forPrivate);
-        Assert.Equal(["email", "has_private_account", "org_name", "role"], mine.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], mine.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.True(mine.GetProperty("has_private_account").GetBoolean());
+        Assert.True(mine.GetProperty("has_account").GetBoolean());
         Assert.Equal("Acme", mine.GetProperty("org_name").GetString());
-        Assert.False((await TenancyApi.ReadOkAsync(forNew)).GetProperty("has_private_account").GetBoolean());
+        var fresh = await TenancyApi.ReadOkAsync(forNew);
+        Assert.False(fresh.GetProperty("has_private_account").GetBoolean());
+        Assert.False(fresh.GetProperty("has_account").GetBoolean());
+    }
+
+    [Fact]
+    public async Task The_preview_says_has_private_account_true_also_for_an_account_with_a_company()   // spec 0017, criterion 2
+    {
+        var (user, _) = await CreatePrivateAccountAsync(Private);
+        await AddMembershipAsync(user, await DevCompanyIdAsync(), "user");
+        var (_, _, token) = await InvitedAsync(Private);
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.True(body.GetProperty("has_private_account").GetBoolean());
+        Assert.True(body.GetProperty("has_account").GetBoolean());
     }
 
     [Fact]
@@ -66,7 +83,9 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
         using var preview = await TenancyApi.Preview(Client, token);
         using var accept = await TenancyApi.AcceptLeaving(Client, token);
 
-        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+        // Spec 0017: the preview says 200 for a member of another company (the invitation is for Acme); the acceptance changes in Task 2.
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.False(body.GetProperty("has_private_account").GetBoolean());
         await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");
         Assert.NotNull(await InviteAsync(invite));
     }
@@ -201,7 +220,8 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
         using var preview = await TenancyApi.Preview(Client, token);
         using var accept = await TenancyApi.AcceptLeaving(Client, token);
 
-        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+        var body = await TenancyApi.ReadOkAsync(preview);   // spec 0017; the acceptance half changes in Task 2
+        Assert.True(body.GetProperty("has_private_account").GetBoolean());
         await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");
         Assert.NotNull(await InviteAsync(invite));
         Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
