@@ -95,6 +95,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.SmtpPasswordKey] = "";
         _settings[DevUserSeeder.UnverifiedEmailKey] = "";
         _settings[DevUserSeeder.UnverifiedPasswordKey] = "";
+        // A second development company is a setting of its own (appsettings.Development.json names one): no test host sees it
+        // unless the test sets it with WithSetting.
+        _settings[DevUserSeeder.SecondOrgNameKey] = "";
         // The per-IP limiter is off in a test host, so that no test meets it by accident (the test server sends everything from one
         // address, "unknown"); a test about it turns it on with WithSetting. Blank proxy lists count as unset, so that a variable of
         // the machine cannot make a test host trust a proxy.

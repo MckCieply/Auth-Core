@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { adminMe, privateMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
+import { adminMe, privateMe, settle, signedInAs, viewerMe, answerOrgs } from '../../testing/helpers';
 import { AuthService } from './auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -35,6 +35,7 @@ describe('AuthService.completeSignup', () => {
     expect(await done).toEqual({ ok: true });
     expect(auth.token()).toBe('tok-c');
     expect(auth.me()).toEqual(adminMe);
+    answerOrgs(ctrl);
     ctrl.verify();
   });
 
@@ -49,6 +50,7 @@ describe('AuthService.completeSignup', () => {
     expect(await done).toEqual({ ok: true });
     expect(auth.token()).toBe('tok-c');
     expect(auth.me()).toEqual(privateMe);
+    answerOrgs(ctrl);
     ctrl.verify();
   });
 
@@ -112,6 +114,7 @@ describe('AuthService.completeSignup', () => {
     expect(await done).toEqual({ ok: true });
     expect(auth.token()).toBe('tok-c');
     expect(auth.me()).toEqual(viewerMe);
+    answerOrgs(ctrl);
     ctrl.verify();
   });
 

@@ -1,4 +1,5 @@
 using Auth.Server.Providers;
+using Auth.Server.Sessions;
 
 namespace Auth.Server.RateLimiting;
 
@@ -69,7 +70,8 @@ public static class RatePolicies
             return RatePolicy.Login;
         }
 
-        if (trimmed.Equals("/auth/refresh", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.Equals("/auth/refresh", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals(SessionPaths.Switch, StringComparison.OrdinalIgnoreCase))
         {
             return RatePolicy.Refresh;
         }

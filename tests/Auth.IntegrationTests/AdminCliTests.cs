@@ -210,6 +210,27 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
     }
 
     [Fact]
+    public async Task Remove_member_says_whether_the_account_was_kept_or_deleted()
+    {
+        var acme = await CreateOrgAsync("Acme");
+        var globex = await CreateOrgAsync("Globex");
+        await AddMemberAsync(acme, Boss, "admin");
+        var both = await AddMemberAsync(acme, "both@acme.test", "user");
+        await AddMembershipAsync(both, globex, "user");
+        var only = await AddMemberAsync(acme, "only@acme.test", "user");
+
+        var kept = await RunAsync("remove-member", "--org", acme.ToString(), "--email", "both@acme.test");
+        var deleted = await RunAsync("remove-member", "--org", acme.ToString(), "--email", "only@acme.test");
+
+        Assert.Equal(0, kept.Exit);
+        Assert.Equal("Member removed; the account is kept.", kept.Out.Trim());
+        Assert.Equal(0, deleted.Exit);
+        Assert.Equal("Member removed; the account is deleted.", deleted.Out.Trim());
+        Assert.NotNull(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == both, TestContext.Current.CancellationToken)));
+        Assert.Null(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == only, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
     public async Task Removing_the_last_manager_is_refused_unless_forced()   // criteria 16, 22
     {
         var acme = await CreateOrgAsync("Acme");

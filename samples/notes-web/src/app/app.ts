@@ -43,7 +43,13 @@ export class App {
     if (kind === null) {
       return null;
     }
-    return kind === 'wait' ? texts.notices.tryAgainIn(this.auth.noticeSeconds()) : texts.notices[kind];
+    if (kind === 'wait') {
+      return texts.notices.tryAgainIn(this.auth.noticeSeconds());
+    }
+    if (kind === 'switched') {
+      return texts.orgs.switchedInAnotherTab(this.auth.noticeName() ?? texts.orgs.private);
+    }
+    return texts.notices[kind];
   });
 
   protected dismiss(): void {

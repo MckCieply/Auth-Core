@@ -196,14 +196,24 @@ export const texts = {
     tooLong: (max: number): string => `A note can be at most ${max} characters.`,
   },
 
+  // Spec 0015: an account in more than one company (or a company and a personal space). The picker of the account bar.
+  orgs: {
+    label: 'Company',
+    // The name of the personal space, whatever the server calls it.
+    private: 'Private',
+    gone: 'That company is no longer yours. The list is up to date.',
+    // The bar, after a refresh found that another tab moved the session to another space.
+    switchedInAnotherTab: (name: string): string => `Switched to ${name} in another tab.`,
+  },
+
   team: {
     title: 'Team',
     loading: 'Loading...',
     back: 'Back to the notes',
     remove: 'Remove',
     cancel: 'Cancel',
-    // Spec 0010: removing a member deletes the account. A product's own team screen says the same.
-    removeConfirm: "This person's account will be deleted.",
+    // Spec 0015: removing a member deletes the account only when this company was its last space. A product's own team screen says the same.
+    removeConfirm: 'This person loses access to this company. Their account is deleted if this company is their last.',
     permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',
     lastManager: 'The company needs at least one person who manages its members.',
     cannotChangeSelf: 'You cannot remove yourself.',

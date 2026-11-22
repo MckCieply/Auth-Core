@@ -116,7 +116,7 @@ public static class ProviderExchangeEndpoint
         try
         {
             var account = accepted.Account!;
-            var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
+            var tenant = await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None)
                 ?? throw new InvalidOperationException("The account that was just made has no membership.");
             if (tenant.CompanyId != accepted.CompanyId)
             {

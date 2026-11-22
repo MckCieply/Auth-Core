@@ -191,8 +191,10 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
     [Fact]
     public async Task An_account_with_a_personal_space_and_a_company_is_a_company_member_at_sign_in_and_cannot_delete_itself()   // criterion 22
     {
-        var (user, _, _) = await PrivateAsync();
-        await AddLaterMembershipAsync(user, await DevCompanyIdAsync(), "user");   // the personal membership is the older one
+        // No login before the second membership: a sign-in picks the most recently used space, so an earlier login
+        // would have made the personal space the used one.
+        var (user, _) = await CreatePrivateAccountAsync(Private);
+        await AddLaterMembershipAsync(user, await DevCompanyIdAsync(), "user");   // both memberships are unused, so the company is picked first
         var session = await SessionApi.LoginAsync(Client, Private, UserPassword);
         Assert.Equal("organization", AccessTokens.Text(session.AccessToken, "org_kind"));
 
@@ -326,6 +328,67 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
         using var response = await pending;
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "permissions_changed");
         Assert.Equal(1, await UsersAsync(user));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
+        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));   // nothing was counted
+    }
+
+    [Fact]
+    public async Task A_personal_token_of_an_account_that_is_also_a_company_member_is_forbidden()   // criterion 25
+    {
+        var (user, space, session) = await PrivateAsync();   // the token is the personal space's
+        Assert.Equal("personal", AccessTokens.Text(session.AccessToken, "org_kind"));
+        var company = await DevCompanyIdAsync();
+        await AddMembershipAsync(user, company, "user");
+
+        using var response = await DeleteAsync(session.AccessToken);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        var cancellation = TestContext.Current.CancellationToken;
+        Assert.Equal(1, await UsersAsync(user));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user && m.CompanyId == space, cancellation)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user && m.CompanyId == company, cancellation)));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleteRefused));   // as for a company token: a forbidden writes no row
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
+        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(cancellation)));   // nothing was counted
+    }
+
+    [Fact]
+    public async Task A_company_member_that_gains_a_personal_space_meanwhile_is_forbidden_under_the_lock()   // criterion 25
+    {
+        var (user, _, session) = await PrivateAsync();
+        var company = await DevCompanyIdAsync();
+        Task<HttpResponseMessage> pending;
+
+        await using (var held = await HeldLock.AddressAsync(Factory, "OLA@POCZTA.TEST"))
+        {
+            pending = DeleteAsync(session.AccessToken);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, pending);   // checked as a private account with one space, waiting for the address
+
+            await AddMembershipAsync(user, company, "user");   // meanwhile it joins a company too
+            await held.ReleaseAsync();
+        }
+
+        using var response = await pending;
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        Assert.Equal(1, await UsersAsync(user));
+        Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
+        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));   // nothing was counted
+    }
+
+    [Fact]
+    public async Task A_token_of_a_space_the_account_left_is_permissions_changed_even_with_another_membership()   // criterion 25
+    {
+        var (user, space, session) = await PrivateAsync();
+        var company = await DevCompanyIdAsync();
+        await AddMembershipAsync(user, company, "user");
+        await RemoveMembershipAsync(user, space);   // the personal membership is gone, a company one remains
+
+        using var response = await DeleteAsync(session.AccessToken);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "permissions_changed");   // spec 0010's line, on the token's company
+        Assert.Equal(1, await UsersAsync(user));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
         Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));
         Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));   // nothing was counted
     }

@@ -21,6 +21,8 @@ def add(user: Principal = Depends(auth.require_permission("notes:write"))):
 
 `Principal.org_kind` is `"personal"` for a private account (Auth-Core spec 0010) and `"organization"` for a company member, also for a token without the claim. It is in the package released with `v0.2.0`; `python-v0.1.1` has no `org_kind`.
 
+`Principal.org_id` is the company the person works in now, which can change between two requests of one person after a switch between companies (Auth-Core spec 0015); the package needs no change for it.
+
 Install it from the repository at a tag (it is not on PyPI):
 
 ```

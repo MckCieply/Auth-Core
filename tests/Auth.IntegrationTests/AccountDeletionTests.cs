@@ -234,6 +234,106 @@ public sealed class AccountDeletionTests : AuditTestBase
         Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
     }
 
+    private async Task<int> DeleteAsync(IReadOnlyCollection<Guid> users, AccountDeletionReason reason, Actor? actor, Guid? lostSpaceId)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        await using var transaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+        var deleted = await scope.ServiceProvider.GetRequiredService<AccountDeletion>()
+            .DeleteAsync(users, reason, actor, lostSpaceId, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await transaction.CommitAsync(TestContext.Current.CancellationToken);
+        return deleted;
+    }
+
+    /// <summary>Sets when a membership was last used, as a sign-in or a switch would have left it.</summary>
+    private Task<int> SetLastUsedAtAsync(Guid userId, Guid companyId, DateTimeOffset at) =>
+        InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastUsedAt, (DateTimeOffset?)at), TestContext.Current.CancellationToken));
+
+    /// <summary>Two companies, each with an admin, so that the operator may remove their other members without <c>--force</c>.</summary>
+    private async Task<(Guid A, Guid B)> TwoCompaniesAsync()
+    {
+        var a = await CreateCompanyAsync("Acme");
+        var b = await CreateCompanyAsync("Globex");
+        await AddMemberAsync(a, "boss@acme.test", "admin");
+        await AddMemberAsync(b, "boss@globex.test", "admin");
+        return (a, b);
+    }
+
+    [Fact]
+    public async Task An_account_deleted_by_a_removal_names_the_space_it_lost()
+    {
+        var (a, b) = await TwoCompaniesAsync();
+        var worker = await AddMemberAsync(a, "worker@acme.test", "user");
+        await AddMembershipAsync(worker, b, "user");
+        await SetLastUsedAtAsync(worker, a, StorableTime.Now(Clock));   // a sign-in would take A
+
+        var first = await OperatorCli.RunAsync(Factory, "remove-member", "--org", a.ToString(), "--email", "worker@acme.test");
+        Assert.True(first.Exit == 0, first.Error);
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));   // kept: B is left
+
+        var second = await OperatorCli.RunAsync(Factory, "remove-member", "--org", b.ToString(), "--email", "worker@acme.test");
+        Assert.True(second.Exit == 0, second.Error);
+
+        var row = await SingleAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(worker, row.SubjectUserId);
+        Assert.Equal(b, row.OrgId);
+        Assert.Equal("Globex", row.OrgName);
+
+        // The caller's space beats the sign-in's pick: an account still in A and B, deleted with B named as the lost space.
+        var other = await AddMemberAsync(a, "other@acme.test", "user");
+        await AddMembershipAsync(other, b, "user");
+        await SetLastUsedAtAsync(other, a, StorableTime.Now(Clock));
+        Assert.Equal(1, await DeleteAsync([other], AccountDeletionReason.MemberRemoved, actor: null, lostSpaceId: b));
+
+        var named = Assert.Single(await AuditAsync(AuditKinds.AccountDeleted), r => r.SubjectUserId == other);
+        Assert.Equal(b, named.OrgId);
+        Assert.Equal("Globex", named.OrgName);
+    }
+
+    [Fact]
+    public async Task Without_a_lost_space_the_row_names_the_space_a_sign_in_would_take()
+    {
+        var (a, b) = await TwoCompaniesAsync();
+        var used = await AddMemberAsync(a, "used@acme.test", "user");
+        await AddMembershipAsync(used, b, "user");
+        await SetLastUsedAtAsync(used, b, StorableTime.Now(Clock));   // the one used last wins, though A was joined first
+        var fresh = await AddMemberAsync(a, "fresh@acme.test", "user");
+        await AddMembershipAsync(fresh, b, "user");                   // none used: the earliest joined, A
+
+        Assert.Equal(2, await DeleteAsync([used, fresh], AccountDeletionReason.OrgDeleted, actor: null));
+
+        var rows = await AuditAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(b, Assert.Single(rows, r => r.SubjectUserId == used).OrgId);
+        Assert.Equal(a, Assert.Single(rows, r => r.SubjectUserId == fresh).OrgId);
+    }
+
+    [Fact]
+    public async Task The_deletion_locks_the_memberships_before_the_account()   // spec 0015 → Lock order
+    {
+        var (user, space) = await CreatePrivateAccountAsync(Private);
+        var session = await SessionApi.LoginAsync(Client, Private, UserPassword);
+        var other = await CreateCompanyAsync("Other");
+        Task<HttpResponseMessage> pending;
+
+        await using (var membership = await HeldLock.MembershipRowAsync(Factory, user, space))
+        await using (var spare = await HeldLock.CompanyAsync(Factory, other))
+        {
+            pending = TenancyApi.Send(Client, HttpMethod.Delete, "/auth/account", session.AccessToken, new { password = UserPassword });
+            await HeldLock.WaitForWaitersAsync(Factory, 1, pending);   // the deletion waits for the membership row
+
+            // It holds no account row meanwhile: before the change it held the account row while its cascade waited for the membership.
+            await spare.LockAccountAsync(user);
+            await spare.ReleaseAsync();
+            await membership.ReleaseAsync();
+        }
+
+        using var response = await pending;
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, await CountAsync(db => db.Users.CountAsync(u => u.Id == user, TestContext.Current.CancellationToken)));
+    }
+
     [Fact]
     public async Task The_operator_is_marked_cli_and_the_start_up_step_has_no_actor_and_no_space()
     {
@@ -392,7 +492,7 @@ public sealed class AccountDeletionTests : AuditTestBase
         ]);
 
         Assert.Equal(one, three);
-        Assert.InRange(one, 2, 9);   // two reads and at most seven deletes
+        Assert.InRange(one, 3, 10);   // three reads (the membership lock, the accounts, the spaces) and at most seven deletes
     }
 
     [Fact]

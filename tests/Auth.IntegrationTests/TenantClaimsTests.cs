@@ -5,10 +5,6 @@ using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Sessions;
 using Auth.Server.Tenancy;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 
@@ -83,9 +79,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
         // Three generations on, nothing is doubled: one company, one role, each permission once.
         Assert.Equal(["admin"], AccessTokens.Array(session.AccessToken, "roles"));
         Assert.Equal(EveryPermission, AccessTokens.Array(session.AccessToken, "permissions"));
-        Assert.Equal(
-            ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"],
-            AccessTokens.Payload(session.AccessToken).Select(p => p.Key).Order(StringComparer.Ordinal));
+        Assert.Equal(AccessTokens.ContractClaims, AccessTokens.Payload(session.AccessToken).Select(p => p.Key).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -134,22 +128,7 @@ public sealed class TenantClaimsTests(PostgresFixture postgres, KeyMaterialFixtu
     /// The claims of a refresh token as the service keeps them: the cookie holds only a reference, and its entry holds the
     /// token itself, encrypted to the instance's key.
     /// </summary>
-    private async Task<JsonObject> StoredRefreshTokenClaimsAsync(string reference)
-    {
-        using var scope = Factory.Services.CreateScope();
-        var tokens = scope.ServiceProvider.GetRequiredService<IOpenIddictTokenManager>();
-        var entry = await tokens.FindByReferenceIdAsync(reference, TestContext.Current.CancellationToken)
-            ?? throw new InvalidOperationException("The refresh token is not stored.");
-        var payload = await tokens.GetPayloadAsync(entry, TestContext.Current.CancellationToken)
-            ?? throw new InvalidOperationException("The refresh token entry has no payload.");
-
-        var server = Factory.Services.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue;
-        var handler = new JsonWebTokenHandler();
-        var signed = handler.DecryptToken(
-            handler.ReadJsonWebToken(payload),
-            new TokenValidationParameters { TokenDecryptionKeys = [.. server.EncryptionCredentials.Select(c => c.Key)] });
-        return AccessTokens.Payload(signed);
-    }
+    private Task<JsonObject> StoredRefreshTokenClaimsAsync(string reference) => StoredTokens.RefreshClaimsAsync(Factory, reference);
 
     [Fact]
     public async Task Account_without_a_company_is_refused_with_no_token_and_no_cookie()   // criterion 11

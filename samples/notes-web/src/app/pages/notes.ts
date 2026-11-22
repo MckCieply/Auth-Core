@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, inject, signal } from '@angular/core';
+import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -89,9 +89,23 @@ function isNote(value: unknown): value is Note {
             <button type="button" data-testid="delete-account" (click)="askToDelete()">{{ t.deleteAccount }}</button>
           }
         }
+        @if (orgs().length > 1) {
+          <!-- Spec 0015: the account belongs to more than one space. Choosing one moves the session there. -->
+          <label for="org-picker">{{ o.label }}</label>
+          <select id="org-picker" data-testid="org-picker" [disabled]="switching()" (change)="switchTo($event)">
+            @for (entry of orgs(); track entry.id) {
+              <option [value]="entry.id" [selected]="entry.current">{{ entry.kind === 'personal' ? o.private : entry.name }}</option>
+            }
+          </select>
+        }
         <button type="button" data-testid="sign-out" [disabled]="signingOut()" (click)="signOut()">{{ t.signOut }}</button>
       </header>
       <h1>{{ t.title }}</h1>
+      @if (switchProblem() === 'gone') {
+        <p class="status" role="status" data-testid="org-gone">{{ o.gone }}</p>
+      } @else if (switchProblem() === 'failed') {
+        <p class="error" role="alert" data-testid="org-switch-failed">{{ somethingWrong }}</p>
+      }
       @if (moved()) {
         <p class="status" role="status" data-testid="account-moved">{{ t.movedToCompany }}</p>
       }
@@ -149,6 +163,7 @@ function isNote(value: unknown): value is Note {
 })
 export class NotesPage implements OnInit {
   protected readonly t = texts.notes;
+  protected readonly o = texts.orgs;
   protected readonly somethingWrong = texts.common.somethingWrong;
   protected readonly password = texts.common.password;
   protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
@@ -159,6 +174,10 @@ export class NotesPage implements OnInit {
   private readonly injector = inject(Injector);
 
   protected readonly me = this.auth.me;
+  protected readonly orgs = this.auth.orgs;
+  protected readonly switching = signal(false);
+  // The last switch that did not go through: the company is gone from the account, or the call failed.
+  protected readonly switchProblem = signal<'gone' | 'failed' | null>(null);
   protected readonly canWrite = computed(() => this.me()?.permissions.includes('notes:write') ?? false);
   /** A company member who manages members gets the way to the team screen (spec 0010). */
   protected readonly canManageMembers = computed(() => this.me()?.permissions.includes('members:manage') ?? false);
@@ -185,6 +204,17 @@ export class NotesPage implements OnInit {
   protected readonly signingOut = signal(false);
   // The notes this page added, newest first. Whatever a list answer says, these are shown: the service has them.
   private added: Note[] = [];
+  // The notes are read again whenever the company of the session changes (spec 0015); the counter is what the page has already seen.
+  private seenOrgChanges = this.auth.orgChanges();
+  // Numbers the list requests: only the last one is shown, so an answer for a company the person has left is dropped.
+  private loadNumber = 0;
+
+  constructor() {
+    effect(() => {
+      const changes = this.auth.orgChanges();
+      untracked(() => this.orgChanged(changes));
+    });
+  }
 
   ngOnInit(): void {
     if (this.me() === null) {
@@ -227,6 +257,50 @@ export class NotesPage implements OnInit {
     } finally {
       this.busy.set(false);
     }
+  }
+
+  /** The picker: choosing another space moves the session there. */
+  protected async switchTo(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    const wanted = select.value;
+    const current = (): string => this.orgs().find((entry) => entry.current)?.id ?? this.me()?.org_id ?? '';
+    if (this.switching() || wanted === current()) {
+      select.value = current();
+      return;
+    }
+    this.switching.set(true);
+    this.switchProblem.set(null);
+    try {
+      const result = await this.auth.switchTo(wanted);
+      if (result === 'gone' || result === 'failed') {
+        this.switchProblem.set(result);
+      }
+    } finally {
+      this.switching.set(false);
+      // The select shows the space the session is in, whatever came of the choice.
+      select.value = current();
+    }
+  }
+
+  /** The company of the session changed (a switch here, or one of another tab found by a refresh): nothing of the old one stays. */
+  private orgChanged(changes: number): void {
+    if (changes === this.seenOrgChanges) {
+      return;
+    }
+    this.seenOrgChanges = changes;
+    this.added = [];
+    this.notes.set([]);
+    this.notesGone.set(false);
+    this.deleting.set(false);
+    this.deleteError.set(null);
+    this.reauthTicket.set(null);
+    this.moved.set(false);
+    this.addError.set(null);
+    this.loaded.set(false);
+    this.loadFailed.set(false);
+    this.authUnavailable.set(false);
+    this.switchProblem.set(null);
+    void this.load();
   }
 
   protected async signOut(): Promise<void> {
@@ -380,10 +454,11 @@ export class NotesPage implements OnInit {
   }
 
   private async load(): Promise<void> {
+    const mine = ++this.loadNumber;
     try {
       const list = await firstValueFrom(this.http.get<unknown>('/api/notes'));
-      if (this.notesGone()) {
-        return; // an answer that was asked for before the deletion does not bring the notes back
+      if (this.notesGone() || mine !== this.loadNumber) {
+        return; // an answer that was asked for before the deletion, or before a newer request, does not bring the notes back
       }
       if (!Array.isArray(list) || !list.every(isNote)) {
         throw new Error('not a list of notes');
@@ -395,7 +470,7 @@ export class NotesPage implements OnInit {
       this.authUnavailable.set(false);
       this.loaded.set(true);
     } catch (error) {
-      if (this.notesGone()) {
+      if (this.notesGone() || mine !== this.loadNumber) {
         return;
       }
       // Nothing of an older list is kept next to the message, only what this page added itself.

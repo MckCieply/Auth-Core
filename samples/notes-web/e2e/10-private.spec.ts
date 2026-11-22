@@ -113,7 +113,7 @@ test('an admin removes a member on /team after the confirmation that names the d
   await expect(page).toHaveURL(/\/team$/);
   const row = page.getByTestId('member').filter({ hasText: email });
   await row.getByTestId('remove').click();
-  await expect(row.getByTestId('remove-confirmation')).toHaveText("This person's account will be deleted.");
+  await expect(row.getByTestId('remove-confirmation')).toHaveText('This person loses access to this company. Their account is deleted if this company is their last.');
   await row.getByTestId('remove-confirm').click();
   await expect(page.getByTestId('member').filter({ hasText: email })).toHaveCount(0);
   expect(await loginStatus(email, password), 'the removed member still signs in').toBe(401);

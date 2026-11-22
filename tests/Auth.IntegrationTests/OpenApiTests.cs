@@ -11,13 +11,14 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
 {
     private const string DocumentUrl = "/auth/openapi/v1.json";
 
-    // Every endpoint of specs 0001–0011, as "METHOD path".
+    // Every endpoint of specs 0001–0011 and 0015, as "METHOD path".
     private static readonly string[] Endpoints =
     [
-        "POST /auth/login", "POST /auth/refresh", "POST /auth/logout",
+        "POST /auth/login", "POST /auth/refresh", "POST /auth/switch", "POST /auth/logout",
         "POST /auth/password/forgot", "POST /auth/password/reset", "POST /auth/email/verify/request", "POST /auth/email/verify",
         "GET /auth/.well-known/jwks.json", "GET /auth/health",
         "GET /auth/me",
+        "GET /auth/orgs",
         "DELETE /auth/account",
         "GET /auth/options",
         "POST /auth/signup",
@@ -159,12 +160,14 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     // Every operation can also say 429 (the per-IP limit), and every POST, PUT, PATCH and DELETE but refresh and logout 415 (spec 0008: the charset guard).
     [InlineData("POST /auth/login", "200,400,401,403,415,429")]
     [InlineData("POST /auth/refresh", "200,401,429,503")]
+    [InlineData("POST /auth/switch", "200,400,401,404,415,429,503")]
     [InlineData("POST /auth/logout", "204,429")]
     [InlineData("POST /auth/password/forgot", "202,400,415,429")]
     [InlineData("POST /auth/password/reset", "204,400,415,429")]
     [InlineData("POST /auth/email/verify/request", "202,400,415,429")]
     [InlineData("POST /auth/email/verify", "204,400,415,429")]
     [InlineData("GET /auth/me", "200,401,403,429")]
+    [InlineData("GET /auth/orgs", "200,401,403,429")]
     [InlineData("DELETE /auth/account", "204,400,401,403,415,429")]
     [InlineData("GET /auth/options", "200,429")]
     [InlineData("POST /auth/signup", "202,400,403,415,429")]
@@ -210,12 +213,16 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/login"], "401"));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/login"], "429"));
         Assert.Contains("invalid_grant", Description(operations["POST /auth/refresh"], "401"));
+        Assert.Contains("invalid_grant", Description(operations["POST /auth/switch"], "401"));   // spec 0015
+        Assert.Contains("not_found", Description(operations["POST /auth/switch"], "404"));
+        Assert.Contains("invalid_request", Description(operations["POST /auth/switch"], "400"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
+        Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/orgs"], "403")));
         Assert.All(["already_in_org", "invite_pending"], code => Assert.Contains(code, Description(operations["POST /auth/org/invites"], "409")));
         Assert.Contains("permission_not_held", Description(operations["POST /auth/org/invites"], "403"));
         Assert.All(["cannot_change_self", "last_manager"], code => Assert.Contains(code, Description(operations["DELETE /auth/org/members/{user_id}"], "409")));
@@ -271,6 +278,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/password/reset", "new_password,token")]
     [InlineData("POST /auth/email/verify/request", "email")]
     [InlineData("POST /auth/email/verify", "token")]
+    [InlineData("POST /auth/switch", "org_id")]
     [InlineData("POST /auth/invites/preview", "token")]
     [InlineData("POST /auth/invites/accept", "leave_private_account,password,token")]
     [InlineData("POST /auth/signup", "company_name,email,kind")]
@@ -305,6 +313,8 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         string[] Properties(string schema) => [.. schemas[schema]!["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal)];
 
         Assert.Equal(["email", "has_password", "linked_providers", "org_id", "org_kind", "org_name", "permissions", "roles", "sub"], Properties("MeResponse"));
+        Assert.Equal(["orgs"], Properties("OrgListResponse"));
+        Assert.Equal(["current", "id", "kind", "name", "role"], Properties("OrgListItem"));
         Assert.Equal(["email", "joined_at", "role", "user_id"], Properties("MemberItem"));
         Assert.Equal(["email", "expires_at", "id", "invited_at", "role"], Properties("InviteItem"));
         Assert.Equal(["id", "members", "name", "permissions"], Properties("RoleItem"));
@@ -358,7 +368,42 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task Refresh_and_logout_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the two
+    public async Task Every_company_operation_says_it_acts_on_the_company_of_the_token_and_the_removals_say_what_happens_to_the_account()   // spec 0015, criterion 33
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var document = await DescriptionAsync(factory);
+        var operations = Operations(document);
+
+        var checkedOperations = 0;
+        foreach (var (endpoint, operation) in operations)
+        {
+            var path = endpoint.Split(' ')[1];
+            if (path.StartsWith("/auth/org/", StringComparison.Ordinal) || path == "/auth/org" || endpoint is "GET /auth/me" or "DELETE /auth/account")
+            {
+                var text = operation["description"]?.GetValue<string>() ?? string.Empty;
+                Assert.True(text.Contains("token's company", StringComparison.Ordinal) && text.Contains("`org_id`", StringComparison.Ordinal), endpoint);
+                checkedOperations++;
+            }
+        }
+
+        Assert.Equal(16, checkedOperations);   // the 14 under /auth/org plus GET /auth/me and DELETE /auth/account
+
+        var bearer = document["components"]!["securitySchemes"]!["Bearer"]!["description"]!.GetValue<string>();
+        Assert.All(["POST /auth/login", "POST /auth/signup/complete", "POST /auth/refresh", "POST /auth/switch", "`org_id`"], part => Assert.Contains(part, bearer, StringComparison.Ordinal));
+
+        // The company deletion and the member removal keep an account that has another space (not the rule of spec 0010).
+        var company = operations["DELETE /auth/org"]["description"]!.GetValue<string>();
+        Assert.Contains("no other space", company, StringComparison.Ordinal);
+        Assert.Contains("keep their account", company, StringComparison.Ordinal);
+        Assert.DoesNotContain("no account is left without a space", company, StringComparison.Ordinal);
+        var member = operations["DELETE /auth/org/members/{user_id}"]["description"]!.GetValue<string>();
+        Assert.Contains("last space", member, StringComparison.Ordinal);
+        Assert.Contains("the account stays", member, StringComparison.Ordinal);
+        Assert.DoesNotContain("loses its only space", member, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Refresh_logout_and_switch_take_the_refresh_cookie_and_nothing_else_does()   // criterion 24: the request of the three; spec 0015: the switch also reads a body
     {
         await using var factory = new AuthAppFactory(postgres, keys);
 
@@ -371,6 +416,12 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
                 Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
                 Assert.Equal("string", cookie["schema"]!["type"]!.GetValue<string>());
                 Assert.Null(operation["requestBody"]);
+            }
+            else if (endpoint == "POST /auth/switch")
+            {
+                var cookie = Assert.Single(cookies)!;
+                Assert.Equal("auth_rt", cookie["name"]!.GetValue<string>());
+                Assert.NotNull(operation["requestBody"]);
             }
             else if (TicketEndpoints.Contains(endpoint))
             {
@@ -390,6 +441,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     [InlineData("POST /auth/login", "200")]
     [InlineData("POST /auth/signup/complete", "200")]
     [InlineData("POST /auth/refresh", "200")]
+    [InlineData("POST /auth/switch", "200")]
     [InlineData("POST /auth/logout", "204")]
     [InlineData("DELETE /auth/account", "204")]
     [InlineData("POST /auth/providers/exchange", "200")]
@@ -420,7 +472,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     public async Task No_other_answer_says_it_sets_a_cookie()   // criterion 24: spec 0005's answers never set one
     {
         await using var factory = new AuthAppFactory(postgres, keys);
-        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200"];
+        string[] setting = ["POST /auth/login 200", "POST /auth/signup/complete 200", "POST /auth/refresh 200", "POST /auth/switch 200", "POST /auth/logout 204", "DELETE /auth/account 204", "GET /auth/providers/{name}/start 302", "GET /auth/providers/{name}/callback 302", "POST /auth/providers/exchange 200", "POST /auth/providers/link 200", "POST /auth/providers/finish 200"];
 
         foreach (var (endpoint, operation) in Operations(await DescriptionAsync(factory)))
         {

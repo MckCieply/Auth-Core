@@ -98,13 +98,13 @@ def add(user: Principal = Depends(auth.require_permission("documents:write"))):
     return {"company": user.org_id}   # every query is filtered by user.org_id
 ```
 
-The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product `samples/notes-api`. A backend
+The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product [`samples/notes-api`](samples/notes-api/README.md) (its section "Multi-tenancy, step by step" shows how it serves several companies per account). A backend
 in another language checks the JWT with any library that reads a JWKS.
 
 ### 5. Connect your frontend
 
 An Angular app copies three files (a service, an interceptor and a guard) and adds the screens the mail links open. The guide is
-[`docs/integration/angular.md`](docs/integration/angular.md), with the working app `samples/notes-web`.
+[`docs/integration/angular.md`](docs/integration/angular.md), with the working app [`samples/notes-web`](samples/notes-web/README.md) (its section "Several companies" shows the company picker).
 
 The API is described in OpenAPI at `/auth/openapi/v1.json`.
 
@@ -125,6 +125,7 @@ scripts/e2e-email.sh            # verification → reset → sessions end → ma
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
 scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
 scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
+scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, removal keeps the account
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
@@ -144,8 +145,8 @@ auth() { docker compose -p "${COMPOSE_PROJECT_NAME:?set it to the project of you
 auth create-org --name "Acme"                                     # prints the company id
 auth invite --org <id> --email boss@acme.test --role admin
 auth list-orgs                                                    # id, name, number of members
-auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted
-auth delete-org --org <id> --confirm "Acme"                       # deletes the company and its members' accounts
+auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted only when that was its last space, else kept
+auth delete-org --org <id> --confirm "Acme"                       # deletes the company; members with no other space lose their accounts too
 ```
 
 The commands work on the database with the service's configuration and never migrate it. A product's permissions and default roles come from its manifest

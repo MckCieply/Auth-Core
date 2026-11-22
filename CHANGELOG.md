@@ -3,6 +3,45 @@
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
 (`v0.2.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
+## Unreleased
+
+Several companies per account ([spec 0015](docs/superpowers/specs/0015-multiple-companies.md), the first of three slices with 0016 and 0017): one
+person belongs to several companies (and at most one personal space) with one account and moves between them without signing in again. A product that
+never switches companies sees no change: every person has one company, the token carries the same claims and every endpoint answers as before. No
+endpoint makes a second membership yet (specs 0016 and 0017 add them): until then it exists only in tests and in the development seed.
+
+### Added
+
+- **`GET /auth/orgs`**: every space of the token's user (companies and the personal space, listed as `private` with `kind` `personal`), ordered by name, with the
+  role and `current` for the token's `org_id`; it counts against the `general` limit.
+- **`POST /auth/switch`** with `{"org_id"}` and the refresh cookie: a new access token and cookie for another space of the person, answered as `/auth/refresh`;
+  `404 not_found` for a space that is not the person's (the cookie is not used up), the uniform `401 invalid_grant` of a refresh that would fail. It counts against
+  the `refresh` limit with `/auth/refresh`.
+- **The session's company.** Every session works in one space: a sign-in sets it, a switch changes it, a refresh keeps it. The refresh token carries it as two
+  internal claims, `session_org_id` and `session_org_joined`; the access token gains no claim.
+- **The company used last.** A membership gains `LastUsedAt`, written by a sign-in and a switch (never by a refresh); a sign-in lands in the company used last,
+  so a person who never switched lands where they always did.
+- **One audit kind**, `org.switched` (29 in all), with `details.from_org_id`; none for a switch to the session's own company.
+- **`Auth:DevSeed:SecondOrgName`**: the development seed also creates that company and makes its first user a plain member of it.
+- **The sample**: a company picker in the account bar of `samples/notes-web`, and a reload of the notes when another tab switched.
+- **`scripts/e2e-orgs.sh`**: the live check of the sequence above against the development stack (the run sequences of `e2e-tenancy.sh` and `e2e-hardening.sh` name it).
+
+### Changed
+
+- **An account is deleted only when it loses its last space.** Removing a member and deleting a company delete the membership; an account left with no space is
+  deleted as before (`account.deleted`, now naming in `org_id` the space it lost), and one that has another space is kept (`member.removed` is written either way).
+  The sessions whose company was the removed one get `401 invalid_grant` at their next refresh or switch; the others go on. `remove-member` prints
+  "Member removed; the account is deleted." or "Member removed; the account is kept."; `delete-org` prints "Company deleted; members with no other space lose their accounts too."
+- `GET /auth/me`, every endpoint under `/auth/org` and `DELETE /auth/account` act on the token's company, checked against the database. `DELETE /auth/account`
+  with a personal-space token of an account that is also a company member answers `403 forbidden` (it was `403 permissions_changed`).
+- The per-IP limits count `POST /auth/switch` against the `refresh` policy and `GET /auth/orgs` against `general`. The OpenAPI description has 38 operations.
+- The threat model (residual risks 62 to 65, the session's company), the guides for Angular and Python, the design document and the audit runbook describe the feature.
+
+### Upgrading
+
+One migration adds `Memberships.LastUsedAt` (nullable; every existing row reads `null`); the service applies it at start. A refresh token issued before this
+version carries no company and refreshes into the space a sign-in would take.
+
 ## 0.2.0 - 2026-11-21
 
 Self-service sign-up ([spec 0009](docs/superpowers/specs/0009-self-service-signup.md)): a product can let a visitor start a company of their own. Off by default; an

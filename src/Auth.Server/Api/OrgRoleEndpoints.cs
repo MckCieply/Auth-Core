@@ -4,7 +4,7 @@ using Auth.Server.Tenancy;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// The roles of the caller's company (spec 0005 → Company API): list, create, replace, delete. Listing is open to
+/// The roles of the token's company (spec 0005 → Company API): list, create, replace, delete. Listing is open to
 /// <c>roles:manage</c> and to <c>members:manage</c>, because inviting needs the list; the rest need <c>roles:manage</c>.
 /// All are checked against the database.
 /// </summary>

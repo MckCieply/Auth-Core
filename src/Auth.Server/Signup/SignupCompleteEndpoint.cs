@@ -72,7 +72,7 @@ public static class SignupCompleteEndpoint
         {
             // Read inside the transaction of the completion (the same context): it sees the membership that is not committed yet.
             var account = done.Account!;
-            var tenant = await memberships.ReadAsync(account.Id, CancellationToken.None)
+            var tenant = await memberships.ReadSignInSpaceAsync(account.Id, CancellationToken.None)
                 ?? throw new InvalidOperationException("The account that was just made has no space.");
             if (tenant.CompanyId != done.CompanyId)
             {

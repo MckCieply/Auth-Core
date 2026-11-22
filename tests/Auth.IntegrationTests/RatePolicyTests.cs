@@ -8,6 +8,7 @@ public sealed class RatePolicyTests
     [Theory]
     [InlineData("POST", "/auth/login", RatePolicy.Login)]
     [InlineData("POST", "/auth/refresh", RatePolicy.Refresh)]
+    [InlineData("POST", "/auth/switch", RatePolicy.Refresh)]   // spec 0015: a switch shares the refresh budget
     [InlineData("POST", "/auth/password/forgot", RatePolicy.Email)]
     [InlineData("POST", "/auth/password/reset", RatePolicy.Email)]
     [InlineData("POST", "/auth/email/verify/request", RatePolicy.Email)]
@@ -18,6 +19,7 @@ public sealed class RatePolicyTests
     [InlineData("GET", "/auth/health", RatePolicy.General)]
     [InlineData("GET", "/auth/.well-known/jwks.json", RatePolicy.General)]
     [InlineData("GET", "/auth/me", RatePolicy.General)]
+    [InlineData("GET", "/auth/orgs", RatePolicy.General)]   // spec 0015: a GET, so no policy of its own
     [InlineData("PATCH", "/auth/org", RatePolicy.General)]
     [InlineData("DELETE", "/auth/account", RatePolicy.General)]   // spec 0010 → Limits, as DELETE /auth/org
     [InlineData("GET", "/auth/providers/google/start", RatePolicy.Login)]   // spec 0011 → Limits: each is a step of a sign-in

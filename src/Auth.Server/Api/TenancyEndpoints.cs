@@ -6,10 +6,14 @@ namespace Auth.Server.Api;
 
 public static class TenancyEndpoints
 {
+    /// <summary>The sentence of every company operation that has no other description (spec 0015, criterion 33).</summary>
+    private const string ActsOnTokenCompany = "Acts on the company of the token (its `org_id`), whichever company a sign-in would choose today.";
+
     /// <summary>
-    /// The endpoints of spec 0005: the caller's own data and the company API. Everything under <c>/auth/org</c> acts on
-    /// the caller's company, taken from the database, and needs an access token; the invitation endpoints that need
-    /// none are mapped beside it.
+    /// The endpoints of spec 0005: the caller's own data and the company API. <c>GET /auth/me</c> and everything under <c>/auth/org</c> act on
+    /// the token's company (its <c>org_id</c>), checked against the database on every call (spec 0015), and need an access token; the
+    /// invitation endpoints that need none are mapped beside it. <c>GET /auth/orgs</c> does not act on the token's company: it lists every
+    /// space of the account, so it deliberately does not go through <see cref="CompanyAccess"/>.
     /// </summary>
     public static IEndpointRouteBuilder MapTenancyApi(this IEndpointRouteBuilder app)
     {
@@ -18,7 +22,22 @@ public static class TenancyEndpoints
         app.MapGet(OrgEndpoints.MePath, OrgEndpoints.MeAsync)
             .RequireAuthorization()
             .WithTags("Company")
+            .WithDescription(
+                "The caller as the database says now, in the token's company (its `org_id`): the membership, role and permissions there, whichever "
+                + "company a sign-in would choose today. When the account is no longer a member of the token's company the answer is `403 permissions_changed`.")
             .Produces<MeResponse>()
+            .ProducesGuarded();
+
+        // Spec 0015: the spaces of the account, behind the access token only: it answers when the token's own company is gone.
+        app.MapGet(OrgListEndpoint.Path, OrgListEndpoint.ListAsync)
+            .RequireAuthorization()
+            .WithTags("Company")
+            .WithDescription(
+                "Every space the caller belongs to, as the database says now: companies and a personal space (`kind` `organization` or `personal`, "
+                + "as `org_kind` of `GET /auth/me`), each with the caller's role there. Ordered by `name`, ignoring case, then by `id`. `current` marks "
+                + "the space the token is for (its `org_id`); no entry is current when the account is no longer a member of it. An account that is gone "
+                + "or has no membership gets `403 permissions_changed`.")
+            .Produces<OrgListResponse>()
             .ProducesGuarded();
 
         // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.
@@ -30,8 +49,10 @@ public static class TenancyEndpoints
                 + "the queued mails, the pending sign-up and the login streak; the audit rows stay for their retention. Needs the caller's "
                 + "confirmation: the password, or for an account without one a provider ticket (below). "
                 + "The product deletes its own data under the token's `org_id` first: Auth-Core does not tell it. A token that says `org_kind` "
-                + "`personal` while the account has moved to a company or is gone is `403 permissions_changed`; a company member is `403 forbidden` "
-                + "(company accounts are managed by their admins). A wrong password counts in the login streak as a failed login does; while the "
+                + "`personal` while the account has no membership in the token's company any more (it moved to a company, or is gone) is "
+                + "`403 permissions_changed`. The token's company (its `org_id`) is what is judged, not the space a sign-in would choose today: a "
+                + "token of a company is `403 forbidden` (company accounts are managed by their admins), and so is a personal token of an account "
+                + "that is also a member of a company. A wrong password counts in the login streak as a failed login does; while the "
                 + "identifier is locked the answer is `429 too_many_attempts`. The body holds exactly one of `password` and `provider_ticket` (spec "
                 + "0011; both or neither is `400 invalid_request`): an account with a password needs it (`403 password_required` for a ticket), an "
                 + "account without one confirms with a provider, by a ticket of a round trip with `purpose=reauth` and the browser's `auth_pt` cookie "
@@ -73,20 +94,25 @@ public static class TenancyEndpoints
 
         var company = app.MapGroup(OrgEndpoints.OrgPath).RequireAuthorization().WithTags("Company");
 
+        // Every operation of this group acts on the token's company (its `org_id`), whichever company a sign-in would choose today.
         company.MapGet("", OrgEndpoints.GetAsync)
+            .WithDescription("The token's company (its `org_id`). An account that is no longer a member of it gets `403 permissions_changed`.")
             .Produces<OrgResponse>()
             .ProducesGuarded();
         company.MapPatch("", OrgEndpoints.RenameAsync)
+            .WithDescription("Renames the token's company (its `org_id`). " + ActsOnTokenCompany)
             .ReadsJson<RenameOrgRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesGuarded();
         company.MapDelete("", OrgEndpoints.DeleteAsync)
             .WithDescription(
-                "Deletes the caller's company with its roles, invitations and the mails queued for them, and the account of every member, the "
-                + "caller's included: no account is left without a space. Needs the permission `org:delete`, the company's name exactly and the "
-                + "caller's own password. An access token still held gets `403 permissions_changed`, the next refresh `401 invalid_grant`, a new "
-                + "login the `401` of an unknown address. "
+                "Deletes the token's company (its `org_id`), its memberships, roles and invitations and the mails queued for them, and the account of "
+                + "every member who has no other space (the caller's included when this was their last). Members with another space keep their "
+                + "account; their sessions in this company get `401` at the next refresh, and their next login lands in another space. Needs the "
+                + "permission `org:delete`, the company's name exactly and the caller's own password. An access token still held gets "
+                + "`403 permissions_changed`, the next refresh `401 invalid_grant`, and a new login by an account that is gone the `401` of an "
+                + "unknown address. "
                 + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`. "
                 + "An admin whose account has no password (made through Google or Microsoft) gets `403 reauth_required` for any password: nothing is counted or written and "
                 + "the company stays; they set a password with \"Forgot your password?\" first.")
@@ -98,9 +124,11 @@ public static class TenancyEndpoints
             .ProducesGuarded();
 
         company.MapGet("invites", OrgInviteEndpoints.ListAsync)
+            .WithDescription("The pending invitations of the token's company. " + ActsOnTokenCompany)
             .Produces<InvitesResponse>()
             .ProducesGuarded();
         company.MapPost("invites", OrgInviteEndpoints.SendAsync)
+            .WithDescription("Invites an address to the token's company. " + ActsOnTokenCompany)
             .ReadsJson<SendInviteRequest>()
             .Produces(StatusCodes.Status202Accepted)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
@@ -110,6 +138,7 @@ public static class TenancyEndpoints
             .ProducesTooManyAttempts()
             .ProducesGuarded();
         company.MapPost("invites/{id}/resend", OrgInviteEndpoints.ResendAsync)
+            .WithDescription("Sends a pending invitation of the token's company again. " + ActsOnTokenCompany)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
@@ -117,6 +146,7 @@ public static class TenancyEndpoints
             .ProducesTooManyAttempts()
             .ProducesGuarded();
         company.MapDelete("invites/{id}", OrgInviteEndpoints.CancelAsync)
+            .WithDescription("Cancels a pending invitation of the token's company. " + ActsOnTokenCompany)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
@@ -124,9 +154,11 @@ public static class TenancyEndpoints
             .ProducesGuarded();
 
         company.MapGet("members", OrgMemberEndpoints.ListAsync)
+            .WithDescription("The members of the token's company. " + ActsOnTokenCompany)
             .Produces<MembersResponse>()
             .ProducesGuarded();
         company.MapPut("members/{user_id}/role", OrgMemberEndpoints.ChangeRoleAsync)
+            .WithDescription("Changes the role of a member of the token's company. " + ActsOnTokenCompany)
             .ReadsJson<ChangeMemberRoleRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
@@ -136,8 +168,9 @@ public static class TenancyEndpoints
             .ProducesGuarded();
         company.MapDelete("members/{user_id}", OrgMemberEndpoints.RemoveAsync)
             .WithDescription(
-                "Removes a member. The account loses its only space and is deleted with its sessions and links; the address can be invited "
-                + "again or sign up, as a new account.")
+                "Removes a member of the token's company (its `org_id`). The membership is removed. When it was the account's last space, the "
+                + "account is deleted with its sessions and links (the address can then be invited again or sign up, as a new account); otherwise "
+                + "the account stays and only its sessions in this company get `401` at the next refresh.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)
@@ -146,9 +179,11 @@ public static class TenancyEndpoints
             .ProducesGuarded();
 
         company.MapGet("roles", OrgRoleEndpoints.ListAsync)
+            .WithDescription("The roles of the token's company and the catalog of permissions. " + ActsOnTokenCompany)
             .Produces<RolesResponse>()
             .ProducesGuarded();
         company.MapPost("roles", OrgRoleEndpoints.CreateAsync)
+            .WithDescription("Creates a role in the token's company. " + ActsOnTokenCompany)
             .ReadsJson<SaveRoleRequest>()
             .Produces<RoleItem>(StatusCodes.Status201Created)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.UnknownPermission)
@@ -156,6 +191,7 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleNameTaken)
             .ProducesGuarded();
         company.MapPut("roles/{id}", OrgRoleEndpoints.ReplaceAsync)
+            .WithDescription("Replaces a role of the token's company. " + ActsOnTokenCompany)
             .ReadsJson<SaveRoleRequest>()
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.UnknownPermission)
@@ -164,6 +200,7 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.RoleNameTaken, TenancyErrors.LastManager)
             .ProducesGuarded();
         company.MapDelete("roles/{id}", OrgRoleEndpoints.DeleteAsync)
+            .WithDescription("Deletes a role of the token's company. " + ActsOnTokenCompany)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.PermissionNotHeld)

@@ -114,10 +114,12 @@ public static class AdminCli
                 var removed = await operatorCommands.RemoveMemberAsync(remove.Org, remove.Email, remove.Force, cancellationToken);
                 if (!removed.Succeeded)
                 {
-                    return await RefusedAsync(removed, error);
+                    return await RefusedAsync(removed.Without, error);
                 }
 
-                await output.WriteLineAsync("Member removed; the account is deleted.");
+                await output.WriteLineAsync(removed.Value!.AccountDeleted
+                    ? "Member removed; the account is deleted."
+                    : "Member removed; the account is kept.");
                 return Done;
 
             case DeleteOrgCommand delete:
@@ -127,7 +129,7 @@ public static class AdminCli
                     return await RefusedAsync(deleted, error);
                 }
 
-                await output.WriteLineAsync("Company deleted; the accounts of its members are deleted.");
+                await output.WriteLineAsync("Company deleted; members with no other space lose their accounts too.");
                 return Done;
 
             default:

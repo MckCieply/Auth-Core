@@ -32,7 +32,7 @@ JWTs underneath, served from `/auth` on the consumer's own domain.
 | Not `MapIdentityApi` | Rejected                                                                        | Its bearer tokens are an opaque .NET format that Python consumers cannot verify |
 | Placement      | Reverse proxy at `/auth` on the consumer's domain                                     | Same origin: no CORS, no redirects, passkeys bind to the app's domain      |
 | Token storage  | Refresh token in an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie; access token in memory, 5–10 min | No tokens in localStorage and no separate BFF                              |
-| Tenancy        | Organizations inside an instance; global users with memberships; one org per user in the MVP | Schema is many-to-many from day one, so org switching is additive later    |
+| Tenancy        | Organizations inside an instance; global users with memberships; an account can belong to several companies, a session is in one at a time (spec 0015, `POST /auth/switch`) | Schema is many-to-many from day one, so org switching was additive (spec 0015) |
 | Authorization  | RBAC: a per-app permission catalog, roles map to permissions, permissions travel in the access token | Resource-level checks ("is this my draft?") stay in the consumer           |
 | Configuration  | `auth.yaml` manifest in the consumer's repo, applied idempotently                    | Config as code, reviewable in PRs                                          |
 | Stack          | .NET 10 LTS, ASP.NET Core Identity, OpenIddict, EF Core, PostgreSQL                   | OpenIddict is Apache 2.0; Identity handles passwords and lockout           |
@@ -108,7 +108,7 @@ and roles. Estimated effort is about 32 focused days before AI-assisted speed-up
 | Accounts         | Email and password, email verification, password reset, lockout                           | TOTP, passkeys, recovery codes, breached-password check |
 | Login providers  | Password only                                                                              | Google, Microsoft, GitHub with account linking    |
 | Tokens           | JWT access token, refresh rotation with reuse detection, logout with revocation, JWKS, persisted signing keys | Automated key rotation                            |
-| Tenancy          | Organizations, memberships, email invites, `org_id` claim, one org per user               | Org switching, self-service org signup            |
+| Tenancy          | Organizations, memberships, email invites, `org_id` claim, one org per user (several per account since spec 0015) | Self-service org signup                           |
 | RBAC             | Permissions and roles from the manifest, role per membership, `permissions` in the token   | Admin UI for roles                               |
 | Admin            | CLI: create org, invite owner, assign role                                                 | Admin panel, session and device management        |
 | Consumers        | Python FastAPI package; Angular screens, interceptor and guard inside speech-to-mail       | NuGet SDK, npm package, generated clients          |
@@ -297,7 +297,6 @@ it.
 | OpenTelemetry, automated key rotation, upgrade and migration tests    | 5             |
 | Social login (Google, Microsoft, GitHub) with account linking         | 4             |
 | Session and device management, full audit log                         | 4             |
-| Multiple orgs per user with org switching                             | 3             |
 | OpenID conformance suite in CI                                        | 3             |
 | ADRs, full threat model, runbook                                      | 3             |
 | Self-service org signup mode                                          | 2             |
@@ -328,7 +327,8 @@ a provider to it.
   and on the screen, that accepting moves them to the company and deletes their private space and its data; they keep
   their address and their password. A member of another company still cannot accept.
 - **No account without a space.** A person who is removed from a company, or whose company is deleted, loses their
-  account; the address is free to be invited again or to sign up.
+  account when that was their last space (spec 0015: a person who belongs to another company keeps the account); the
+  address is then free to be invited again or to sign up.
 - **"Continue with Google / Microsoft / GitHub".** The person signs in at the provider and comes back to the
   product. A provider already linked signs them in. A provider account whose email matches an existing account
   asks for that account's password once, then links. A new person names their company (when sign-up is on) and is
@@ -363,7 +363,7 @@ typed in a look-alike spelling never takes over an account or an earlier link; w
 *Spec 0010:* a private person signs up with an email address only and works in a hidden one-person space; the access token says
 `org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation warns a
 private person and moves the account only on purpose; an account that loses its only space is deleted (a removal, a company deletion, once
-at upgrade). The comeback of spec 0009, Amendment 3, was removed before any release.
+at upgrade; since spec 0015 only when it has no other space). The comeback of spec 0009, Amendment 3, was removed before any release.
 
 *As built (spec 0010):* built as described above. Private sign-up needs `private.signup: self-service` in the manifest and the
 same completion address as company sign-up; `GET /auth/options` tells a product's screens which of the two to offer. One
@@ -378,8 +378,15 @@ links with its password once; a new person finishes an account without a passwor
 accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
 registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
-**Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, several companies
-per user, and any provider beyond the three.
+*As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 is built, 0016 and 0017 are
+specified):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
+`GET /auth/orgs` lists the person's spaces and `POST /auth/switch` moves the device to another one with the refresh cookie alone; every
+session works in one company, the access token still names exactly one, and a sign-in lands in the company used last. A removal or a company
+deletion deletes an account only when it loses its last space. The sample has a company picker. No endpoint makes a second membership yet:
+0016 lets a signed-in person create another company and 0017 lets an invitation keep the other memberships; until then a second membership
+exists only in tests and in the development seed (`Auth:DevSeed:SecondOrgName`). What remains is in the threat model (risks 62 to 65).
+
+**Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, and any provider beyond the three.
 
 ## Repo bootstrap
 

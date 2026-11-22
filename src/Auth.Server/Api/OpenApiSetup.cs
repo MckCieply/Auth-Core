@@ -77,8 +77,9 @@ public static class OpenApiSetup
             Type = SecuritySchemeType.Http,
             Scheme = "bearer",
             BearerFormat = "JWT",
-            Description = "The access token of `POST /auth/login`, `POST /auth/signup/complete` or `POST /auth/refresh`. The company API "
-                + "reads the caller's membership and permissions from the database, not from the token.",
+            Description = "The access token of `POST /auth/login`, `POST /auth/signup/complete`, `POST /auth/refresh` or `POST /auth/switch`. "
+                + "The company API acts on the token's company (`org_id`) and reads the caller's membership and permissions there from the "
+                + "database, not from the token.",
         };
 
         // Two endpoints that are not routes of ours: the key set is OpenIddict's, the health check has no metadata. Like every

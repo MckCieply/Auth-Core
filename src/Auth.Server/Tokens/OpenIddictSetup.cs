@@ -14,7 +14,7 @@ public static class OpenIddictSetup
 {
     /// <summary>
     /// Registers the OpenIddict server: RS256 JWT access tokens (unencrypted) and reference refresh tokens from the
-    /// password and refresh-token flows, the token endpoint at <c>auth/login</c>, <c>auth/refresh</c> and <c>auth/signup/complete</c> in
+    /// password and refresh-token flows, the token endpoint at <c>auth/login</c>, <c>auth/refresh</c>, <c>auth/switch</c> and <c>auth/signup/complete</c> in
     /// pass-through mode, and the JWKS endpoint at <c>auth/.well-known/jwks.json</c>.
     /// Signing and encryption credentials come from the mounted <paramref name="keys"/>, never from a generated certificate.
     /// </summary>
@@ -64,6 +64,7 @@ public static class OpenIddictSetup
                     .SetTokenEndpointUris(
                         JsonLoginRequestHandler.LoginPath.TrimStart('/'),
                         RefreshRequestHandler.RefreshPath.TrimStart('/'),
+                        SessionPaths.Switch.TrimStart('/'),
                         SignupCompleteEndpoint.Path.TrimStart('/'),
                         ProviderPaths.Exchange.TrimStart('/'),
                         ProviderPaths.Link.TrimStart('/'),
@@ -90,6 +91,7 @@ public static class OpenIddictSetup
                 options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ExtractPostRequest<OpenIddictServerEvents.ExtractTokenRequestContext>.Descriptor)
                     .AddEventHandler(JsonLoginRequestHandler.Descriptor)
                     .AddEventHandler(RefreshRequestHandler.Descriptor)
+                    .AddEventHandler(SwitchRequestHandler.Descriptor)
                     .AddEventHandler(SignupCompleteRequestHandler.Descriptor)
                     .AddEventHandler(ProviderRequestHandler.Descriptor)
                     .AddEventHandler(UnhandledTokenRequestGuard.Descriptor);

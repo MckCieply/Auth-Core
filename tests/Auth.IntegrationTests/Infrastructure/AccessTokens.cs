@@ -6,6 +6,9 @@ namespace Auth.IntegrationTests.Infrastructure;
 /// <summary>Reads the payload of an access token without validating it: the tests ask what the token says.</summary>
 public static class AccessTokens
 {
+    /// <summary>The claims of an access token as the contract has them (sorted ordinally): OpenIddict's own metadata, <c>sub</c> and the tenancy claims; no session claim.</summary>
+    public static readonly string[] ContractClaims = ["aud", "exp", "iat", "iss", "jti", "oi_tkn_id", "org_id", "org_kind", "permissions", "roles", "sub"];
+
     public static JsonObject Payload(string jwt)
     {
         ArgumentNullException.ThrowIfNull(jwt);

@@ -164,13 +164,17 @@ startup by [`samples/notes-api/src/notes_api/db.py`](../../samples/notes-api/src
 [`samples/notes-api/src/notes_api/app.py`](../../samples/notes-api/src/notes_api/app.py) does:
 
 1. **The company is always the token's `org_id`.** Never read a company id from a path, a query string or a body: a
-   request that cannot name a company cannot reach another company's rows.
+   request that cannot name a company cannot reach another company's rows. `org_id` is the company the person works in
+   now (spec 0015): a person may belong to several companies and switch between them, so two requests of one person can
+   carry different `org_id` values, each token naming exactly one company. Read it from every token and keep no company
+   in your own session.
 2. **Every query is filtered by it**: reads, updates, deletes, and the lookup by id (`WHERE org_id = :org AND id = :id`).
    A row of another company is answered exactly as a row that does not exist (`404`), so ids reveal nothing.
 3. **Writes set it from the token**, whatever the body says. Unique constraints that should hold per company include
    `org_id`.
 
-The sample's list endpoint returns every note of the company with no paging. A real product should page its lists.
+The sample's list endpoint returns every note of the company with no paging. A real product should page its lists. The sample's
+[README](../../samples/notes-api/README.md) walks through these rules with several companies per account, and names the tests that show them.
 
 A product that **already has data** takes one more step, because the old rows belong to nobody yet. Create the first
 company with the CLI (step 7), which prints its id, and give that id to the migration that adds the column, so that the
@@ -260,6 +264,12 @@ operator's part (create the company, invite its first admin) with the CLI, the r
 
 Your backend never answers `permissions_changed`: it does not read the database.
 
+Several companies (spec 0015): after `POST /auth/switch` (or a refresh that finds the session in another company because
+another tab switched), the next token carries another `org_id` and your backend answers with that company's rows, so the
+frontend must reload what it shows when `org_id` changes ([Angular guide](angular.md), "Several companies"). Your backend needs
+no change. A person removed from a company is signed out only on the devices that work in that company, at their next
+refresh; the access token they already hold works at your endpoints until it expires.
+
 A person who signs in with Google or Microsoft (spec 0011) gets exactly the access token a password sign-in gives: nothing changes for your
 backend or for this package.
 
@@ -288,8 +298,9 @@ No permission is needed: a person may always delete their own data. Answer `204`
   email alone, then the completion at the link with `kind` `private` and the password twice. An invitation to an address that already has a
   private account shows a warning when the preview says `has_private_account`, with one button that sends `leave_private_account: true` and no
   password; without it the acceptance answers `409 private_account_exists`.
-- An admin who removes a member, or deletes the company, deletes the person's account. A team screen of your product should say so: "This
-  person's account will be deleted."
+- An admin who removes a member, or deletes the company, deletes the person's account only when that was the person's last space (spec 0015):
+  a person who belongs to another company or space keeps the account. A team screen of your product should say so: "This person's account
+  will be deleted." (when it is their last space; the sample's sentence does not distinguish).
 - A private account that accepts an invitation moves into the company; the data of its old space stays in your tables under an `org_id` no
   token will carry again. Auth-Core has no deletion feed yet.
 - Personal data after deletion: Auth-Core keeps its audit rows, with the account's id, address and client addresses, for 90 days by default on the
