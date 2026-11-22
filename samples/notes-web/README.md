@@ -38,6 +38,44 @@ Open `http://localhost:8088` and sign in as the development user of your `.env`.
 (Safari's engine) needs that address: it keeps Auth-Core's `Secure` refresh cookie but does not send it back over plain HTTP.
 Mails (reset, verification, invitation, sign-up) are in the mail catcher at `http://localhost:8025`; their links open this app.
 
+## Several companies
+
+One account can belong to several companies, and to a personal space (spec 0015). The sample shows the choice in the account bar of the
+notes screen (`pages/notes.ts`): when `GET /auth/orgs` lists more than one space, a "Company" picker appears, with each company by its name and
+the personal space as "Private", the current one selected. With one space there is no picker. The picker is disabled while a switch runs.
+
+The three calls it uses, all in `auth.service.ts` and `account-api.ts`:
+
+- `GET /auth/orgs` lists the spaces (`loadOrgs()`, after a sign-in, at the start of a resumed session and after a switch). It carries the access
+  token, because the path starts with `/auth/org`, which the interceptor already covers.
+- `POST /auth/switch` with `{"org_id": ...}` moves the session (`switchTo(orgId)`). It carries the refresh cookie and no access token, and it
+  answers with a new access token for the chosen space.
+- `GET /auth/me` says who and where the session is now (the account bar follows it, not the picker).
+
+What a switch does, and what it does not race with:
+
+- A switch spends the refresh cookie, like a refresh. So the two never run together: a switch asked while a refresh is on its way waits for
+  it, and a refresh asked while a switch is on its way joins it and takes its token (no `/auth/refresh` goes out meanwhile; when the switch changed
+  nothing, on `404` or `503`, the refresh then runs its own). A second switch
+  waits for the first. Without that, a refresh landing later would replace the switched token with the old company's.
+- On `200` the new token is kept as the same session, the person and the list are asked again, and the notes page clears and reloads the notes
+  of the new company (`orgChanged` in `notes.ts`): nothing of the old company stays on screen.
+- On `404` (the account is no longer a member there) the list is asked again and the page says "That company is no longer yours. The list is up
+  to date."
+- On `401` the session is over: it is dropped and `/login` opens. There is no refresh and no second try.
+- On `503` or any other answer (`400`, `429`), on a timeout (10 seconds) and on a `200` without a token, nothing changes: the page says "Something went wrong. Try again." and the picker
+  shows the current space again.
+- The refresh cookie is shared by every tab. After a refresh the service reads `GET /auth/me`; if `org_id` changed (another tab switched), the
+  notes are read again and the bar says "Switched to {name} in another tab." A switch made in this tab is not reported as news.
+
+To try it, the development stack puts the seed user in a second company as a plain member: `Auth:DevSeed:SecondOrgName`, set by
+`AUTH_DEV_SEED_SECOND_ORG_NAME=Beta` in `.env` (`.env.example` has that line). With the line missing, the compose file still uses `Beta`; with
+`AUTH_DEV_SEED_SECOND_ORG_NAME=` empty there is no second company. Sign in, choose "Beta" and the notes are Beta's.
+
+Covered by `auth.service.orgs.spec.ts` (the list, `switchTo` for each answer, the refresh and switch ordering, another tab),
+`account-api.orgs.spec.ts` (the calls and how each answer is read, including the 10-second timeout of the switch), `notes.orgs.spec.ts` (the picker and the reload) and, against the running stack, `e2e/12-orgs.spec.ts` (the picker lists both
+companies, a switch moves the notes and survives a reload and a new sign-in, and the seed user ends back in the first company).
+
 ## Work on the screens
 
 `ng serve` on `http://localhost:4200` with a proxy for `/auth` and `/api` to the stack on `:8088`, so the browser sees one

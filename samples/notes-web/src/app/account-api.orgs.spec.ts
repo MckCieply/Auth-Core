@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { AccountApi } from './account-api';
-import { AuthService } from './auth/auth.service';
+import { AuthService, REFRESH_TIMEOUT_MS } from './auth/auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const ACME = '22222222-2222-2222-2222-222222222222';
@@ -89,6 +89,22 @@ describe('AccountApi: the spaces of the account (spec 0015)', () => {
       const done = api.switchOrg(PRIVATE);
       ctrl.expectOne('/auth/switch').flush(body, status(code));
       expect(await done).toEqual(outcome);
+    });
+
+    it('an answer that does not come within ten seconds is a failure, and the request is cancelled', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }); // the timeout of rxjs runs on setInterval
+      try {
+        const done = api.switchOrg(PRIVATE);
+        const request = ctrl.expectOne('/auth/switch');
+        expect(REFRESH_TIMEOUT_MS).toBe(10_000);
+        vi.advanceTimersByTime(REFRESH_TIMEOUT_MS - 1);
+        expect(request.cancelled).toBe(false);
+        vi.advanceTimersByTime(2);
+        expect(await done).toEqual({ result: 'failed' });
+        expect(request.cancelled).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it.each([[{}], [{ access_token: '' }], [{ access_token: 5 }], ['<html>oops</html>'], [null]])(

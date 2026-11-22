@@ -229,6 +229,8 @@ the first seed user in a second company as a plain member) and from tests; no en
   `400` is a body that is not `{"org_id": "<uuid>"}` sent as `application/json` (a form post is `400`), `415` is a JSON body declared in a charset other than UTF-8; `503` keeps the session, as at a refresh. The sample's `auth.service.ts` has `orgs`
   (the last list), `loadOrgs()` and `switchTo(orgId)`, and `pages/notes.ts` draws the picker in the account bar when the list has more than
   one entry: each company by name, the personal space as "Private", the current one marked.
+- **The sample's walk-through** of the picker, the switch and its failures, and the tests that cover them, is in the
+  [README of `samples/notes-web`](../../samples/notes-web/README.md).
 - **The company used last:** a sign-in lands in the company the person used last (set by a sign-in or a switch; a refresh does not write
   it), so a person who never switched lands where they always did.
 - **Reload per-company data when `org_id` changes.** Your product keeps its data under the token's `org_id`, so everything on screen that

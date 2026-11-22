@@ -98,13 +98,13 @@ def add(user: Principal = Depends(auth.require_permission("documents:write"))):
     return {"company": user.org_id}   # every query is filtered by user.org_id
 ```
 
-The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product `samples/notes-api`. A backend
+The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product [`samples/notes-api`](samples/notes-api/README.md) (its section "Multi-tenancy, step by step" shows how it serves several companies per account). A backend
 in another language checks the JWT with any library that reads a JWKS.
 
 ### 5. Connect your frontend
 
 An Angular app copies three files (a service, an interceptor and a guard) and adds the screens the mail links open. The guide is
-[`docs/integration/angular.md`](docs/integration/angular.md), with the working app `samples/notes-web`.
+[`docs/integration/angular.md`](docs/integration/angular.md), with the working app [`samples/notes-web`](samples/notes-web/README.md) (its section "Several companies" shows the company picker).
 
 The API is described in OpenAPI at `/auth/openapi/v1.json`.
 

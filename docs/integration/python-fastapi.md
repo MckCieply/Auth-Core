@@ -173,7 +173,8 @@ startup by [`samples/notes-api/src/notes_api/db.py`](../../samples/notes-api/src
 3. **Writes set it from the token**, whatever the body says. Unique constraints that should hold per company include
    `org_id`.
 
-The sample's list endpoint returns every note of the company with no paging. A real product should page its lists.
+The sample's list endpoint returns every note of the company with no paging. A real product should page its lists. The sample's
+[README](../../samples/notes-api/README.md) walks through these rules with several companies per account, and names the tests that show them.
 
 A product that **already has data** takes one more step, because the old rows belong to nobody yet. Create the first
 company with the CLI (step 7), which prints its id, and give that id to the migration that adds the column, so that the
