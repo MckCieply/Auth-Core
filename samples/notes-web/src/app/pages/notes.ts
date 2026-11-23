@@ -4,6 +4,7 @@ import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, eff
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { AccountApi } from '../account-api';
 import { AuthService, LoginResult, errorCode } from '../auth/auth.service';
 import { texts } from '../texts';
 import { ProviderButtons } from './provider-buttons';
@@ -17,6 +18,8 @@ interface Note {
 }
 
 const MAX_NOTE_CHARACTERS = 1000;
+// The value of the picker's last option, "New company...": it is no company id, so it is never sent to POST /auth/switch.
+const NEW_COMPANY = 'new-company';
 
 // What .NET calls white space, which is what Auth-Core calls a blank password (spec 0010: 400 invalid_request).
 const BLANK = /^[\t-\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*$/;
@@ -89,20 +92,39 @@ function isNote(value: unknown): value is Note {
             <button type="button" data-testid="delete-account" (click)="askToDelete()">{{ t.deleteAccount }}</button>
           }
         }
-        @if (orgs().length > 1) {
-          <!-- Spec 0015: the account belongs to more than one space. Choosing one moves the session there. -->
+        @if (orgs().length > 1 || (orgCreation() && orgs().length > 0)) {
+          <!-- Spec 0015: the account belongs to more than one space. Choosing one moves the session there. Spec 0016: "New company..." opens a form. -->
           <label for="org-picker">{{ o.label }}</label>
-          <select id="org-picker" data-testid="org-picker" [disabled]="switching()" (change)="switchTo($event)">
+          <select id="org-picker" data-testid="org-picker" [disabled]="switching() || creatingBusy()" (change)="switchTo($event)">
             @for (entry of orgs(); track entry.id) {
               <option [value]="entry.id" [selected]="entry.current">{{ entry.kind === 'personal' ? o.private : entry.name }}</option>
+            }
+            @if (orgCreation()) {
+              <option [value]="newCompany">{{ o.newCompany }}</option>
             }
           </select>
         }
         <button type="button" data-testid="sign-out" [disabled]="signingOut()" (click)="signOut()">{{ t.signOut }}</button>
       </header>
+      @if (creating()) {
+        <form [formGroup]="companyForm" (ngSubmit)="createCompany()" novalidate data-testid="new-company-form">
+          <label for="new-company-name">{{ o.newCompanyName }}</label>
+          <input id="new-company-name" data-testid="new-company-name" type="text" formControlName="name" autocomplete="off" maxlength="100" />
+          <button type="submit" data-testid="new-company-submit" [disabled]="creatingBusy()">{{ o.createCompany }}</button>
+          <button type="button" data-testid="new-company-cancel" [disabled]="creatingBusy()" (click)="cancelCreate()">{{ t.cancel }}</button>
+          @if (createError(); as text) {
+            <p class="error" role="alert" data-testid="new-company-error">{{ text }}</p>
+          }
+        </form>
+      }
+      @if (creationOffNotice()) {
+        <p class="status" role="status" data-testid="new-company-off">{{ o.creationOff }}</p>
+      }
       <h1>{{ t.title }}</h1>
       @if (switchProblem() === 'gone') {
         <p class="status" role="status" data-testid="org-gone">{{ o.gone }}</p>
+      } @else if (switchProblem() === 'changed') {
+        <p class="status" role="status" data-testid="org-changed">{{ o.changed }}</p>
       } @else if (switchProblem() === 'failed') {
         <p class="error" role="alert" data-testid="org-switch-failed">{{ somethingWrong }}</p>
       }
@@ -169,6 +191,7 @@ export class NotesPage implements OnInit {
   protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
+  private readonly account = inject(AccountApi);
   private readonly router = inject(Router);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
@@ -176,8 +199,17 @@ export class NotesPage implements OnInit {
   protected readonly me = this.auth.me;
   protected readonly orgs = this.auth.orgs;
   protected readonly switching = signal(false);
+  // Spec 0016: GET /auth/options says `org_creation` `self-service`. Read once when the page starts; the picker of the next task uses it.
+  protected readonly orgCreation = signal(false);
+  protected readonly newCompany = NEW_COMPANY;
+  // The small form of "New company...", the request that is on its way, the text under the form, and the notice after a switch-off.
+  protected readonly creating = signal(false);
+  protected readonly creatingBusy = signal(false);
+  protected readonly createError = signal<string | null>(null);
+  protected readonly creationOffNotice = signal(false);
+  protected readonly companyForm = inject(NonNullableFormBuilder).group({ name: ['', Validators.required] });
   // The last switch that did not go through: the company is gone from the account, or the call failed.
-  protected readonly switchProblem = signal<'gone' | 'failed' | null>(null);
+  protected readonly switchProblem = signal<'gone' | 'changed' | 'failed' | null>(null);
   protected readonly canWrite = computed(() => this.me()?.permissions.includes('notes:write') ?? false);
   /** A company member who manages members gets the way to the team screen (spec 0010). */
   protected readonly canManageMembers = computed(() => this.me()?.permissions.includes('members:manage') ?? false);
@@ -221,6 +253,7 @@ export class NotesPage implements OnInit {
       void this.auth.loadMe();
     }
     void this.load();
+    void this.account.options().then((options) => this.orgCreation.set(options.orgCreation));
     if (this.reauthTicket() !== null) {
       this.deleting.set(true);
       this.focusDeleteSection();
@@ -264,6 +297,12 @@ export class NotesPage implements OnInit {
     const select = event.target as HTMLSelectElement;
     const wanted = select.value;
     const current = (): string => this.orgs().find((entry) => entry.current)?.id ?? this.me()?.org_id ?? '';
+    if (wanted === NEW_COMPANY) {
+      // Not a space: the select goes back to the current one and the form opens.
+      select.value = current();
+      this.openCreateForm();
+      return;
+    }
     if (this.switching() || wanted === current()) {
       select.value = current();
       return;
@@ -279,6 +318,71 @@ export class NotesPage implements OnInit {
       this.switching.set(false);
       // The select shows the space the session is in, whatever came of the choice.
       select.value = current();
+    }
+  }
+
+  private openCreateForm(): void {
+    if (this.creatingBusy()) {
+      return;
+    }
+    this.companyForm.reset();
+    this.createError.set(null);
+    this.creationOffNotice.set(false);
+    this.creating.set(true);
+  }
+
+  protected cancelCreate(): void {
+    if (this.creatingBusy()) {
+      return;
+    }
+    this.creating.set(false);
+    this.createError.set(null);
+  }
+
+  /** Spec 0016: POST /auth/orgs, then the session moves into the new company. The button is disabled while the request runs. */
+  protected async createCompany(): Promise<void> {
+    if (this.creatingBusy()) {
+      return;
+    }
+    const name = this.companyForm.controls.name.value;
+    if (name.trim() === '') {
+      this.createError.set(this.o.nameRule);
+      return;
+    }
+    this.creatingBusy.set(true);
+    this.createError.set(null);
+    this.switchProblem.set(null);
+    try {
+      const result = await this.auth.createCompany(name);
+      if (result === 'created') {
+        this.creating.set(false);
+      } else if (result === 'limit') {
+        this.createError.set(this.o.limitReached);
+      } else if (result === 'disabled') {
+        this.orgCreation.set(false);
+        this.creating.set(false);
+        this.creationOffNotice.set(true);
+      } else if (result === 'invalid') {
+        this.createError.set(this.o.nameRule);
+      } else if (result === 'changed') {
+        // permissions_changed: the list is asked again and the page says it is up to date.
+        await this.auth.loadOrgs();
+        this.creating.set(false);
+        this.switchProblem.set('changed');
+      } else if (result === 'gone') {
+        // The switch found the new company gone: `switchTo` has asked for the list again already.
+        this.creating.set(false);
+        this.switchProblem.set('gone');
+      } else if (result === 'switch-failed') {
+        // The company exists, only the switch failed (`switchTo` does not ask for the list then): the list shows it, the form is closed.
+        await this.auth.loadOrgs();
+        this.creating.set(false);
+        this.switchProblem.set('failed');
+      } else {
+        this.createError.set(this.somethingWrong);
+      }
+    } finally {
+      this.creatingBusy.set(false);
     }
   }
 
@@ -337,6 +441,9 @@ export class NotesPage implements OnInit {
     if (this.deleteBusy() || ticket === null) {
       return;
     }
+    if (await this.stillInACompany()) {
+      return;
+    }
     if (!(await this.deleteNotes())) {
       return;
     }
@@ -368,6 +475,9 @@ export class NotesPage implements OnInit {
       this.deleteError.set(this.t.passwordRequired);
       return;
     }
+    if (await this.stillInACompany()) {
+      return;
+    }
     if (!(await this.deleteNotes())) {
       return;
     }
@@ -377,6 +487,33 @@ export class NotesPage implements OnInit {
       return;
     }
     await this.refused(result);
+  }
+
+  /**
+   * Spec 0016: an account that is still a member of a company cannot be deleted, so nothing is deleted before the sample knows it is not
+   * (the server's `403 company_member` stays the guard, see `refused`). True when the deletion must stop: a company is listed, and the
+   * section says which; or the list could not be read, and the section says something went wrong. Nothing was deleted either way.
+   */
+  private async stillInACompany(): Promise<boolean> {
+    this.deleteBusy.set(true);
+    this.deleteError.set(null);
+    const names = await this.companyNames();
+    this.deleteBusy.set(false);
+    if (names === null) {
+      this.deleteError.set(this.somethingWrong);
+      return true;
+    }
+    if (names.length === 0) {
+      return false;
+    }
+    this.deleteError.set(this.o.companyMember(names.join(', ')));
+    return true;
+  }
+
+  /** The names of the companies in a fresh GET /auth/orgs, or null when the list cannot be read. */
+  private async companyNames(): Promise<string[] | null> {
+    const listed = await this.account.listOrgs();
+    return listed.ok ? listed.value.filter((entry) => entry.kind === 'organization').map((entry) => entry.name) : null;
   }
 
   /**
@@ -414,7 +551,9 @@ export class NotesPage implements OnInit {
 
   /** The refusals both deletions share, after the notes are gone. */
   private async refused(result: LoginResult & { ok: false }): Promise<void> {
-    if (result.failure.kind === 'password_required' || result.failure.kind === 'reauth_required') {
+    if (result.failure.kind === 'company_member' && (await this.refusedAsCompanyMember())) {
+      // The text with the names is shown; the account stays.
+    } else if (result.failure.kind === 'password_required' || result.failure.kind === 'reauth_required') {
       // Spec 0011: the account is not what this screen thought (a password was set, or it has none): draw the section that fits it now.
       this.reauthTicket.set(null);
       this.deleteForm.reset();
@@ -433,6 +572,17 @@ export class NotesPage implements OnInit {
       this.deleteError.set(`${this.somethingWrong} ${this.t.notesGone}`);
     }
     this.deleteBusy.set(false);
+  }
+
+  /** `403 company_member` after the notes are gone (a company was created since the check): the text with the names from a fresh list. */
+  private async refusedAsCompanyMember(): Promise<boolean> {
+    const names = await this.companyNames();
+    if (names === null || names.length === 0) {
+      return false;
+    }
+    this.deleteError.set(`${this.o.companyMember(names.join(', '))} ${this.t.notesGone}`);
+    this.deleteBusy.set(false);
+    return true;
   }
 
   /**

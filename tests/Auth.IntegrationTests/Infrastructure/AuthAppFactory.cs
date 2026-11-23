@@ -136,6 +136,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     /// <summary>The default manifest with <c>signup: self-service</c>.</summary>
     public const string SelfServiceManifest = DefaultManifest + "\nsignup: self-service\n";
 
+    /// <summary>The default manifest with <c>org_creation: self-service</c> (spec 0016).</summary>
+    public const string OrgCreationManifest = DefaultManifest + "\norg_creation: self-service\n";
+
     /// <summary>The block that turns private sign-up on (spec 0010), with two permissions of the default catalog for the private role.</summary>
     public const string PrivateBlock = "\nprivate:\n  signup: self-service\n  permissions: [reports:read, reports:approve]\n";
 
@@ -194,6 +197,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         WithManifest(SelfServiceManifest);
         return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
+
+    /// <summary>Turns creating another company on (spec 0016): the manifest says <c>org_creation: self-service</c>. Call it before the host is built.</summary>
+    public AuthAppFactory WithOrgCreation() => WithManifest(OrgCreationManifest);
 
     /// <summary>
     /// Turns private sign-up on (spec 0010) and, unless told otherwise, organization sign-up too: the manifest and the completion address.

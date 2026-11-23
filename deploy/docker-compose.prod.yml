@@ -134,6 +134,8 @@ services:
       Auth__RateLimit__Invite__PermitPerMinute: ${AUTH_RATE_LIMIT_INVITE:-}
       Auth__RateLimit__General__PermitPerMinute: ${AUTH_RATE_LIMIT_GENERAL:-}
       Auth__Audit__RetentionDays: ${AUTH_AUDIT_RETENTION_DAYS:-}
+      # How many companies an account may belong to before it can create another (1 to 1000); a blank value is 20.
+      Auth__Tenancy__MaxCompaniesPerAccount: ${AUTH_MAX_COMPANIES_PER_ACCOUNT:-}
     volumes:
       # The key files, readable by the container's user (uid 1654); see docs/operations/key-rotation.md for how to make them. The long
       # syntax with create_host_path: false, because the short one silently creates a missing host path (an empty directory), which would

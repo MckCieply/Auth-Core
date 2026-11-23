@@ -231,11 +231,11 @@ public sealed class OrgListTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
-    public async Task A_post_to_the_list_is_405_and_a_path_under_it_is_404()   // spec 0005's fallback for the new path
+    public async Task A_put_to_the_list_is_405_and_a_path_under_it_is_404()   // spec 0005's fallback for the new path; POST is spec 0016's creation
     {
         var (_, _, token) = await CompanyWithAdminAsync();
 
-        using (var post = await TenancyApi.Send(Client, HttpMethod.Post, Path, token))
+        using (var post = await TenancyApi.Send(Client, HttpMethod.Put, Path, token))
         {
             Assert.Equal(HttpStatusCode.MethodNotAllowed, post.StatusCode);
             AccountApi.AssertNeverStoredAndNoCookie(post);

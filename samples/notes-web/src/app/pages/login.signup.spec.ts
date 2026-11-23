@@ -36,7 +36,7 @@ describe('LoginPage: the link to sign-up', () => {
   });
 
   it('offers "Create an account" when only private sign-up is on (spec 0010)', async () => {
-    const fixture = await open({ signup: 'invite-only', private_signup: 'self-service' });
+    const fixture = await open({ signup: 'invite-only', private_signup: 'self-service', org_creation: 'self-service' });
     expect(has(fixture, 'a[href="/signup"][data-testid="create-account"]')).toBe(true);
   });
 

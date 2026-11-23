@@ -10,7 +10,7 @@ import { SignupPage } from './signup';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const sent = 'Check your inbox. We sent a message to this address.';
-const both = { signup: 'self-service', private_signup: 'self-service' };
+const both = { signup: 'self-service', private_signup: 'self-service', org_creation: 'self-service' };
 
 /** `options`: the answer of GET /auth/options; 'failed': a server error; 'none': no answer yet. */
 async function open(options: object | 'failed' | 'none') {
@@ -45,14 +45,14 @@ describe('SignupPage: organization or private person (spec 0010)', () => {
   });
 
   it('with only private sign-up on there is no choice and no company name', async () => {
-    const { fixture } = await open({ signup: 'invite-only', private_signup: 'self-service' });
+    const { fixture } = await open({ signup: 'invite-only', private_signup: 'self-service', org_creation: 'self-service' });
     expect(has(fixture, '[data-testid="signup-kind"]')).toBe(false);
     expect(has(fixture, '#company')).toBe(false);
     expect(pageText(fixture)).toContain('Enter your email address. We will send you a link to finish.');
   });
 
   it('with only organization sign-up on there is no choice', async () => {
-    const { fixture } = await open({ signup: 'self-service', private_signup: 'off' });
+    const { fixture } = await open({ signup: 'self-service', private_signup: 'off', org_creation: 'self-service' });
     expect(has(fixture, '[data-testid="signup-kind"]')).toBe(false);
     expect(has(fixture, '#company')).toBe(true);
   });
@@ -88,7 +88,7 @@ describe('SignupPage: organization or private person (spec 0010)', () => {
   });
 
   it('400 invalid_request on a private request: says to check the email address', async () => {
-    const { fixture, ctrl } = await open({ signup: 'invite-only', private_signup: 'self-service' });
+    const { fixture, ctrl } = await open({ signup: 'invite-only', private_signup: 'self-service', org_creation: 'self-service' });
     typeInto(fixture, '#email', 'ola@poczta.example');
     submitForm(fixture);
     ctrl.expectOne('/auth/signup').flush({ error: 'invalid_request' }, status(400));
@@ -100,14 +100,14 @@ describe('SignupPage: organization or private person (spec 0010)', () => {
     const { fixture, ctrl } = await open('none');
     expect(has(fixture, '#email')).toBe(false);
     expect(has(fixture, '#company')).toBe(false);
-    ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'self-service' });
+    ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'self-service', org_creation: 'self-service' });
     await settle(fixture);
     expect(has(fixture, '#email')).toBe(true);
     expect(has(fixture, '#company')).toBe(false);
   });
 
   it.each([
-    ['both switches off', { signup: 'invite-only', private_signup: 'off' }],
+    ['both switches off', { signup: 'invite-only', private_signup: 'off', org_creation: 'self-service' }],
     ['an options call that failed', 'failed'],
   ] as const)('with %s the organization form stays, and Auth-Core answers the request: 403 says that sign-up is closed', async (_name, options) => {
     const { fixture, ctrl } = await open(options);

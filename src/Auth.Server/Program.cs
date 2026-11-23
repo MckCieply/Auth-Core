@@ -51,6 +51,7 @@ builder.Services.AddSingleton(providerSettings);
 var proxies = ProxySettings.Load(builder.Configuration);
 builder.Services.AddSingleton(proxies);
 builder.Services.AddSingleton(RateLimitSettings.Load(builder.Configuration));
+builder.Services.AddSingleton(CompanyLimitSettings.Load(builder.Configuration));
 builder.Services.AddSingleton(AuditSettings.Load(builder.Configuration));
 builder.Services.AddSingleton<SlidingWindowLimiter>();
 builder.Services.AddSingleton<RateLimitAudit>();

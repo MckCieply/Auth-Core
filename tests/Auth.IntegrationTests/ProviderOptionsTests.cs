@@ -29,7 +29,7 @@ public sealed class ProviderOptionsTests(PostgresFixture postgres, KeyMaterialFi
     {
         await using var factory = new AuthAppFactory(postgres, keys);
 
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(factory, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(factory, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(factory, "/auth/health"));
     }
 

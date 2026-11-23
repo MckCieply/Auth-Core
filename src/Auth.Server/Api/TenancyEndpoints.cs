@@ -40,6 +40,28 @@ public static class TenancyEndpoints
             .Produces<OrgListResponse>()
             .ProducesGuarded();
 
+        // Spec 0016: a signed-in account creates another company. Behind the access token only, as the list; the same path, so that a 405 names both.
+        app.MapPost(OrgCreateEndpoint.Path, OrgCreateEndpoint.CreateAsync)
+            .RequireAuthorization()
+            .WithTags("Company")
+            .WithDescription(
+                "Creates another company for the caller, who becomes its first admin (the first role of the manifest's `default_roles` that holds `*`, "
+                + "else the first that holds `members:manage`), when the product's manifest says `org_creation: self-service` (`GET /auth/options`); "
+                + "any account may create, a private one included, and its personal space stays. The body is `{\"name\"}`: 1 to 100 characters, no "
+                + "control, format or noncharacters, no leading or trailing space; names are not unique. The checks run in this order: no valid access "
+                + "token `401`; creation off `403 org_creation_disabled` (before the body is read); a body or name that breaks the rules `400 "
+                + "invalid_request`; an account that is gone or has no membership `403 permissions_changed` (the token's own company need not still "
+                + "be one); the account already in `Auth:Tenancy:MaxCompaniesPerAccount` companies (the personal space is not counted) `409 "
+                + "company_limit_reached`. The answer is `201` with the new space as `GET /auth/orgs` lists it, `current` always `false`. The session "
+                + "does not change (no cookie is set, the token and the refresh cookie keep their company): the product calls `POST /auth/switch` with "
+                + "the new `id` to go into it. A refused creation writes nothing.")
+            .ReadsJson<CreateOrgRequest>()
+            .Produces<OrgListItem>(StatusCodes.Status201Created)
+            .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
+            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.OrgCreationDisabled)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.CompanyLimitReached)
+            .ProducesGuarded();
+
         // Spec 0010: a private account deletes itself. Behind the access token like the company API; its own path, outside /auth/org.
         app.MapDelete(AccountDeletionEndpoint.Path, AccountDeletionEndpoint.DeleteAsync)
             .RequireAuthorization()
@@ -50,9 +72,11 @@ public static class TenancyEndpoints
                 + "confirmation: the password, or for an account without one a provider ticket (below). "
                 + "The product deletes its own data under the token's `org_id` first: Auth-Core does not tell it. A token that says `org_kind` "
                 + "`personal` while the account has no membership in the token's company any more (it moved to a company, or is gone) is "
-                + "`403 permissions_changed`. The token's company (its `org_id`) is what is judged, not the space a sign-in would choose today: a "
-                + "token of a company is `403 forbidden` (company accounts are managed by their admins), and so is a personal token of an account "
-                + "that is also a member of a company. A wrong password counts in the login streak as a failed login does; while the "
+                + "`403 permissions_changed`. Only an account whose only membership is its personal space may delete itself: an account that "
+                + "holds a personal space and at least one company, whichever space the token names, is `403 company_member` (it deletes its "
+                + "companies or has their admins remove it first); an account with companies only is `403 forbidden` (company accounts are "
+                + "managed by their admins). These are judged on the database before the body is read and again under the lock, and nothing is "
+                + "counted, no password is evaluated and no row is written. A wrong password counts in the login streak as a failed login does; while the "
                 + "identifier is locked the answer is `429 too_many_attempts`. The body holds exactly one of `password` and `provider_ticket` (spec "
                 + "0011; both or neither is `400 invalid_request`): an account with a password needs it (`403 password_required` for a ticket), an "
                 + "account without one confirms with a provider, by a ticket of a round trip with `purpose=reauth` and the browser's `auth_pt` cookie "
@@ -68,7 +92,7 @@ public static class TenancyEndpoints
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(
                 StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PasswordRequired, TenancyErrors.ReauthRequired,
-                TenancyErrors.ReauthFailed)
+                TenancyErrors.ReauthFailed, TenancyErrors.CompanyMember)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 

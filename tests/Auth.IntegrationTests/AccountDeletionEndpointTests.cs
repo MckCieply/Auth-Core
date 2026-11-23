@@ -200,7 +200,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
 
         using var response = await DeleteAsync(session.AccessToken);
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "company_member");
         Assert.Equal(1, await UsersAsync(user));
         Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
     }
@@ -333,7 +333,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
     }
 
     [Fact]
-    public async Task A_personal_token_of_an_account_that_is_also_a_company_member_is_forbidden()   // criterion 25
+    public async Task A_personal_token_of_an_account_that_is_also_a_company_member_is_company_member()   // criterion 25
     {
         var (user, space, session) = await PrivateAsync();   // the token is the personal space's
         Assert.Equal("personal", AccessTokens.Text(session.AccessToken, "org_kind"));
@@ -342,7 +342,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
 
         using var response = await DeleteAsync(session.AccessToken);
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "company_member");
         var cancellation = TestContext.Current.CancellationToken;
         Assert.Equal(1, await UsersAsync(user));
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user && m.CompanyId == space, cancellation)));
@@ -353,7 +353,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
     }
 
     [Fact]
-    public async Task A_company_member_that_gains_a_personal_space_meanwhile_is_forbidden_under_the_lock()   // criterion 25
+    public async Task A_company_member_that_gains_a_personal_space_meanwhile_is_company_member_under_the_lock()   // criterion 25
     {
         var (user, _, session) = await PrivateAsync();
         var company = await DevCompanyIdAsync();
@@ -369,7 +369,7 @@ public sealed class AccountDeletionEndpointTests : AuditTestBase
         }
 
         using var response = await pending;
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "forbidden");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "company_member");
         Assert.Equal(1, await UsersAsync(user));
         Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
         Assert.Empty(await AuditAsync(AuditKinds.AccountDeleted));

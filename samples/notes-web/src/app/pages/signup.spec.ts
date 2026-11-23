@@ -23,7 +23,7 @@ async function open() {
   const harness = await RouterTestingHarness.create();
   await harness.navigateByUrl('/signup', SignupPage);
   const ctrl = TestBed.inject(HttpTestingController);
-  ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off' }); // the form is drawn once the options are read
+  ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'off', org_creation: 'self-service' }); // the form is drawn once the options are read
   await settle(harness.fixture);
   return { fixture: harness.fixture, ctrl };
 }

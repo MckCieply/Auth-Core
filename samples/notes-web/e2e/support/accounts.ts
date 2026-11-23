@@ -61,3 +61,50 @@ export async function signUpPrivatelyByApi(email: string, password: string, wait
 export async function loginStatus(email: string, password: string): Promise<number> {
   return (await postJson('/auth/login', { email, password })).status;
 }
+
+/**
+ * Deletes a company of the account by the API (the sample has no screen for DELETE /auth/org): signs in, lists the account's spaces, switches
+ * into the company named (POST /auth/switch needs the refresh cookie of the sign-in) and deletes it with its name and the password.
+ * Returns false when the account has no company of that name (already gone), so a clean-up can run twice.
+ */
+export async function deleteCompanyByApi(email: string, password: string, companyName: string): Promise<boolean> {
+  const login = await postJson('/auth/login', { email, password });
+  if (login.status !== 200) {
+    throw new Error(`the account could not sign in by the API: ${login.status}`);
+  }
+  const loginBody = (await login.json()) as { access_token?: unknown };
+  const cookie = login.headers
+    .getSetCookie()
+    .map((line) => line.split(';')[0])
+    .join('; ');
+  if (typeof loginBody.access_token !== 'string' || cookie === '') {
+    throw new Error('the sign-in gave no token or no refresh cookie');
+  }
+  const listed = await fetch(`${apiUrl()}/auth/orgs`, { headers: { Authorization: `Bearer ${loginBody.access_token}` } });
+  if (listed.status !== 200) {
+    throw new Error(`the list of companies answered ${listed.status}, not 200`);
+  }
+  const spaces = ((await listed.json()) as { orgs: { id: string; name: string; kind: string }[] }).orgs;
+  const target = spaces.find((entry) => entry.kind === 'organization' && entry.name === companyName);
+  if (target === undefined) {
+    return false;
+  }
+  const switched = await fetch(`${apiUrl()}/auth/switch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ org_id: target.id }),
+  });
+  const switchedBody = (await switched.json()) as { access_token?: unknown };
+  if (switched.status !== 200 || typeof switchedBody.access_token !== 'string') {
+    throw new Error(`the switch into the company answered ${switched.status}, not 200`);
+  }
+  const deleted = await fetch(`${apiUrl()}/auth/org`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${switchedBody.access_token}` },
+    body: JSON.stringify({ name: companyName, password }),
+  });
+  if (deleted.status !== 204) {
+    throw new Error(`deleting the company answered ${deleted.status}, not 204`);
+  }
+  return true;
+}

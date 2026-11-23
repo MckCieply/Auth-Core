@@ -9,7 +9,7 @@ import { InvitePage } from './invite';
 import { LoginPage } from './login';
 import { SignupPage } from './signup';
 
-const both = { signup: 'self-service', private_signup: 'self-service' };
+const both = { signup: 'self-service', private_signup: 'self-service', org_creation: 'self-service' };
 const preview = { org_name: 'Acme', email: 'new@acme.example', role: 'viewer' };
 
 async function open(path: string, page: Type<unknown>, options: object, query = '') {

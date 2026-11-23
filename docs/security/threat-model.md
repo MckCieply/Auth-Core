@@ -229,7 +229,7 @@ the account lost).
 
 ## Residual risks
 
-Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 65 are the risks accepted by specs 0002 to 0011 and 0015 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's; 52 to 61 are spec 0011's; 62 to 65 are spec 0015's).
+Accepted, with the decision that accepted each. None of them is hidden by a mitigation above. Items 1 to 67 are the risks accepted by specs 0002 to 0011, 0015 and 0016 (41 to 44 by Decision 15; 45 is what Decision 14 leaves; 46 is spec 0009, Decision 11; 47 is spec 0009's; 48 to 51 are spec 0010's; 52 to 61 are spec 0011's; 62 to 65 are spec 0015's; 66 and 67 are spec 0016's).
 
 1. **A key change signs everyone out.** No previous keys are kept for verification or decryption; rotation is a runbook (spec 0008, Decision 7).
 2. **A distributed guesser below the per-IP limits** on many addresses is stopped only by the per-identifier lockout, which an attacker can use to keep a chosen account locked, at one request per cooldown (spec 0003, Decision 8 and Deferred / follow-ups; spec 0008, Residual risks).
@@ -304,6 +304,13 @@ Accepted, with the decision that accepted each. None of them is hidden by a miti
 65. **A forged switch from another site** is held off by the refresh cookie's `SameSite=Strict`, by the absence of CORS,
     and by the JSON-only body (a form post is `400`). A sibling host of the same site is not covered, as for
     `/auth/refresh` (risk 60).
+66. **One account can create companies up to its limit** (20 by default), each with a copy of the default roles. The
+    per-IP `invite` limit slows a script, the per-account limit bounds one account, and every account needs a
+    confirmed mailbox or a provider; many accounts multiply the rows. Each such company has its creator as a member and
+    manager, who can delete it.
+67. **A member of another company cannot delete their own account alone.** No one leaves a company on their own, so a
+    person who wants their account erased while they are a plain member of someone else's company needs that company's
+    admin, or the operator (`remove-member`). Their own companies they can delete themselves.
 
 ### Accepted earlier and closed by spec 0008
 

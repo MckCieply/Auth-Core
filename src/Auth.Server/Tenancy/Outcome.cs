@@ -38,16 +38,22 @@ public static class TenancyErrors
     public const string EmailNotVerified = "email_not_verified";
     public const string NoMembership = "no_membership";
 
+    // Spec 0016: creating another company.
+    public const string OrgCreationDisabled = "org_creation_disabled";
+    public const string CompanyMember = "company_member";
+    public const string CompanyLimitReached = "company_limit_reached";
+
     public static int StatusOf(string error) => error switch
     {
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
         Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled
             or NoEmail or NoAccount or AddressMismatch or PasswordRequired or ReauthRequired or ReauthFailed or EmailNotVerified or NoMembership
+            or OrgCreationDisabled or CompanyMember
             => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
-            or PrivateAccountExists or ProviderAlreadyLinked => StatusCodes.Status409Conflict,
+            or PrivateAccountExists or ProviderAlreadyLinked or CompanyLimitReached => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };

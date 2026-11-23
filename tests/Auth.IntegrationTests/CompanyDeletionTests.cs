@@ -107,6 +107,35 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
     }
 
     [Fact]
+    public async Task A_member_who_gains_a_membership_while_the_company_is_deleted_keeps_the_account()   // spec 0017 recount
+    {
+        var (a, _, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        var worker = await AddMemberAsync(a, "worker@acme.test", "user");
+        var roleInB = await RoleIdAsync(b, "user");
+
+        Task<HttpResponseMessage> deletion;
+        await using (var held = await HeldLock.AccountRowAsync(Factory, worker))
+        {
+            deletion = SendFromCallerAsync(HttpMethod.Delete, OrgEndpoints.OrgPath, token, new { name = "Acme", password = UserPassword });
+            await HeldLock.WaitForWaitersAsync(Factory, 1, deletion);   // the deletion waits for the account row of the worker
+
+            await held.InsertMembershipAsync(worker, b, roleInB);
+            await held.ReleaseAsync();
+        }
+
+        using (var response = await deletion)
+        {
+            await TenancyApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal(0, await CountAsync(db => db.Companies.CountAsync(c => c.Id == a, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
+        Assert.Equal([b], await MembershipsOfAsync(worker));
+        Assert.DoesNotContain(await AuditAsync(AuditKinds.AccountDeleted), r => r.SubjectUserId == worker);
+    }
+
+    [Fact]
     public async Task Members_with_another_membership_keep_their_accounts_and_the_others_are_deleted()   // criterion 28
     {
         var (a, boss, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");

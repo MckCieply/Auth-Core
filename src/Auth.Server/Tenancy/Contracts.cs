@@ -22,6 +22,9 @@ public sealed record OrgListResponse(IReadOnlyList<OrgListItem> Orgs);
 /// </summary>
 public sealed record OrgListItem(Guid Id, string Name, string Kind, RoleRef Role, bool Current);
 
+/// <summary>Request of <c>POST /auth/orgs</c> (spec 0016): the new company's name. Documents the body for OpenAPI; the endpoint reads it itself.</summary>
+public sealed record CreateOrgRequest(string Name);
+
 /// <summary>Request of <c>PATCH /auth/org</c>.</summary>
 public sealed record RenameOrgRequest(string Name);
 

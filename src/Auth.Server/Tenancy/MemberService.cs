@@ -164,12 +164,13 @@ public sealed class MemberService(AuthDbContext db, CompanyGuard guard, Manifest
 
         // Another space left: the account is kept, with its other sessions. A plain read, no account row lock (spec 0017 → Locks): the
         // routine locks the account itself, and only for an account that has none left.
-        var deleted = !await db.Memberships.AsNoTracking().AnyAsync(m => m.UserId == userId, cancellationToken);
-        if (deleted)
+        var deleted = false;
+        if (!await db.Memberships.AsNoTracking().AnyAsync(m => m.UserId == userId, cancellationToken))
         {
             // The account lost its last space, so it is deleted (spec 0010): its sessions and links go with it, and its own row is staged
             // and names this company. Under the company lock only: no address lock (spec 0010 → Locks).
-            await deletion.DeleteAsync(userId, AccountDeletionReason.MemberRemoved, current, companyId, cancellationToken);
+            // The routine counts again under the account row and keeps an account that gained a membership meanwhile: its answer is the truth.
+            deleted = await deletion.DeleteAsync(userId, AccountDeletionReason.MemberRemoved, current, companyId, cancellationToken) > 0;
         }
 
         await db.SaveChangesAsync(cancellationToken);

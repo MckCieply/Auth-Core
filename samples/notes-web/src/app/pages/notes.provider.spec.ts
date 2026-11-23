@@ -1,12 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Component } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { AuthService, Me } from '../auth/auth.service';
-import { clickOn, has, pageText, privateMe, providerMe, realLocation, settle, signedInAs, submitForm, typeInto } from '../../testing/helpers';
+import { answerOrgs, clickOn, has, pageText, privateMe, providerMe, realLocation, settle, signedInAs, submitForm, typeInto } from '../../testing/helpers';
 import { NotesPage } from './notes';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -45,6 +45,7 @@ async function open(me: Me, reauthTicket: string | null = null) {
   await router.navigateByUrl('/notes', reauthTicket === null ? {} : { state: { reauthTicket } });
   harness.detectChanges();
   ctrl.expectOne('/api/notes').flush([]);
+  ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
   await settle(harness.fixture);
   await settle(harness.fixture); // the navigation that takes the ticket out of the history entry lands here
   const navigateByUrl = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
@@ -52,6 +53,12 @@ async function open(me: Me, reauthTicket: string | null = null) {
 }
 
 type Opened = Awaited<ReturnType<typeof open>>;
+
+/** The check before the notes are deleted (spec 0016): GET /auth/orgs, answered with the personal space only unless a test says otherwise. */
+async function passGuard(opened: { ctrl: HttpTestingController; fixture: ComponentFixture<unknown> }): Promise<void> {
+  answerOrgs(opened.ctrl);
+  await settle(opened.fixture);
+}
 
 function links(opened: Opened): (string | null)[] {
   return [...(opened.fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="delete-section"] a')].map((a) => a.getAttribute('href'));
@@ -61,6 +68,7 @@ function links(opened: Opened): (string | null)[] {
 async function confirmDeletion(opened: Opened): Promise<void> {
   clickOn(opened.fixture, '[data-testid="delete-confirm"]');
   await settle(opened.fixture);
+  await passGuard(opened);
   opened.ctrl.expectOne('/api/me').flush(null, status(204));
   await settle(opened.fixture);
 }
@@ -177,6 +185,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     TestBed.inject(Router).initialNavigation();
     await settle(harness.fixture);
     ctrl.expectOne('/api/notes').flush([]);
+    ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
     await settle(harness.fixture);
     expect(has(harness.fixture, '[data-testid="delete-account"]')).toBe(true);
     expect(has(harness.fixture, '[data-testid="delete-section"]')).toBe(false);
@@ -188,6 +197,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     const opened = await open(providerMe, TICKET);
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectNone('/auth/account'); // not before the notes service said 204
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
@@ -205,8 +215,10 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     const opened = await open(providerMe, TICKET);
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     opened.ctrl.expectOne('/auth/account').flush(null, status(204));
@@ -262,6 +274,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     typeInto(opened.fixture, '#delete-password', 'Pw-1 x');
     submitForm(opened.fixture, 'form[data-testid="delete-form"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     const request = opened.ctrl.expectOne('/auth/account');
@@ -277,6 +290,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     typeInto(opened.fixture, '#delete-password', 'Pw-1 x');
     submitForm(opened.fixture, 'form[data-testid="delete-form"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     opened.ctrl.expectOne('/auth/account').flush({ error: 'reauth_required' }, status(403));
@@ -314,6 +328,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     // another try uses the same ticket
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     expect(opened.ctrl.expectOne('/auth/account').request.body).toEqual({ provider_ticket: TICKET });
@@ -335,6 +350,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     const opened = await open(providerMe, TICKET);
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush('oops', status(500));
     await settle(opened.fixture);
     opened.ctrl.expectNone('/auth/account');
@@ -343,6 +359,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     // the same ticket is used for the next try
     clickOn(opened.fixture, '[data-testid="delete-confirm"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     expect(opened.ctrl.expectOne('/auth/account').request.body).toEqual({ provider_ticket: TICKET });
@@ -356,6 +373,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     typeInto(opened.fixture, '#delete-password', 'Pw-1 x');
     submitForm(opened.fixture, 'form[data-testid="delete-form"]');
     await settle(opened.fixture);
+    await passGuard(opened);
     opened.ctrl.expectOne('/api/me').flush(null, status(204));
     await settle(opened.fixture);
     const request = opened.ctrl.expectOne('/auth/account');
@@ -385,6 +403,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
       typeInto(opened.fixture, '#delete-password', 'Pw-1 x');
       submitForm(opened.fixture, 'form[data-testid="delete-form"]');
       await settle(opened.fixture);
+      await passGuard(opened);
       expect(cancelOf(opened)?.disabled).toBe(true);
       cancelOf(opened)?.click();
       await settle(opened.fixture);
@@ -401,6 +420,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
       const opened = await open(providerMe, TICKET);
       clickOn(opened.fixture, '[data-testid="delete-confirm"]');
       await settle(opened.fixture);
+      await passGuard(opened);
       expect(cancelOf(opened)?.disabled).toBe(true);
       cancelOf(opened)?.click();
       await settle(opened.fixture);
@@ -430,5 +450,47 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
       await settle(opened.fixture);
       expect(cancelOf(opened)?.disabled).toBe(false);
     });
+  });
+});
+
+describe('NotesPage: "Delete account" with a ticket and the companies of the account (spec 0016)', () => {
+  afterEach(() => {
+    TestBed.inject(HttpTestingController).verify();
+    history.replaceState(null, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('delete_account_with_a_company_listed_shows_the_company_member_text_and_deletes_no_notes', async () => {
+    const opened = await open(providerMe, TICKET);
+    clickOn(opened.fixture, '[data-testid="delete-confirm"]');
+    await settle(opened.fixture);
+    opened.ctrl
+      .expectOne('/auth/orgs')
+      .flush({ orgs: [{ id: 'c1', name: 'Acme', kind: 'organization', role: { id: 'r1', name: 'admin' }, current: false }] });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain(
+      'You are still a member of Acme. Delete those companies or ask their admins to remove you, then delete your account.',
+    );
+    opened.ctrl.expectNone('/api/me');
+    opened.ctrl.expectNone('/auth/account');
+    expect(has(opened.fixture, '[data-testid="delete-confirm"]')).toBe(true); // the ticket is still there, nothing was spent
+  });
+
+  it('delete_account_on_403_company_member_shows_the_text_with_the_names', async () => {
+    const opened = await open(providerMe, TICKET);
+    clickOn(opened.fixture, '[data-testid="delete-confirm"]');
+    await settle(opened.fixture);
+    await passGuard(opened);
+    opened.ctrl.expectOne('/api/me').flush(null, status(204));
+    await settle(opened.fixture);
+    opened.ctrl.expectOne('/auth/account').flush({ error: 'company_member' }, status(403));
+    await settle(opened.fixture);
+    opened.ctrl
+      .expectOne('/auth/orgs')
+      .flush({ orgs: [{ id: 'c1', name: 'Gamma', kind: 'organization', role: { id: 'r1', name: 'admin' }, current: false }] });
+    await settle(opened.fixture);
+    expect(pageText(opened.fixture)).toContain('You are still a member of Gamma.');
+    expect(opened.navigateByUrl).not.toHaveBeenCalled();
   });
 });

@@ -116,7 +116,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(38, operations.Count);   // spec 0015: GET /auth/orgs, POST /auth/switch
+        Assert.Equal(39, operations.Count);   // spec 0015: GET /auth/orgs, POST /auth/switch; spec 0016: POST /auth/orgs
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -150,7 +150,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(25, covered);   // spec 0011: the exchange, the link and the finish; spec 0015: the switch
+        Assert.Equal(26, covered);   // spec 0011: the exchange, the link and the finish; spec 0015: the switch; spec 0016: POST /auth/orgs
     }
 
     [Fact]

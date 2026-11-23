@@ -56,6 +56,7 @@ needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_S
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
 The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
 `providers: [google, microsoft]` is optional too (no key, no provider): it offers "Continue with Google" and "Continue with Microsoft", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token (spec 0011).
+`org_creation: self-service` is optional as well (the default is `off`): a signed-in person may create another company (`POST /auth/orgs`, off until the key is there), and `GET /auth/options` tells your screens whether to offer it. It needs no address; the number of companies an account may belong to before it can create another (joined ones count too) is `AUTH_MAX_COMPANIES_PER_ACCOUNT` (20 by default; spec 0016).
 
 ### 2. Run it on your server
 
@@ -126,6 +127,7 @@ scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules
 scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
 scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
 scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, removal keeps the account
+scripts/e2e-orgs-create.sh      # creating another company: POST /auth/orgs, switch into it, delete it; a private person cannot delete the account while in one
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v

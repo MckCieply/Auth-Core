@@ -8,7 +8,7 @@
 # the development company invites; SEED = the development admin). Each step names the criteria it touches; the guarding tests are in
 # docs/superpowers/plans/0011-acceptance-map.md.
 #   1. health is Healthy; the fake answers; GET /auth/options -> {"signup":"self-service","private_signup":"self-service",
-#      "providers":["google","microsoft"]}; the OpenAPI description names the five provider paths - criteria 2, 29.
+#      "providers":["google","microsoft"],"org_creation":"self-service"}; the OpenAPI description names the five provider paths - criteria 2, 29.
 #   2. the start: an unknown name -> 404 not_found; another purpose -> 400 invalid_request; Google and Microsoft -> 302 to the fake with the
 #      client id, the callback address on this origin, the code flow, the scopes, S256, a state, a nonce and prompt=select_account; the
 #      request-forgery cookie is HttpOnly, Secure, SameSite=Lax, Path=/auth/providers - criteria 5, 6.
@@ -374,7 +374,7 @@ START_TS="$(psql_value "SELECT now()")"
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"]}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"self-service"}'
 expect_no_store "step 1: the options"
 call GET /auth/openapi/v1.json
 expect_status "step 1: the OpenAPI description" 200

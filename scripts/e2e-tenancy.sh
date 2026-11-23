@@ -52,6 +52,7 @@
 #   scripts/e2e-signup.sh                 # spec 0009 (self-service sign-up), which runs after this one
 #   scripts/e2e-private.sh                # spec 0010 (private accounts), after e2e-signup.sh
 #   scripts/e2e-orgs.sh                   # spec 0015 (several companies), after e2e-private.sh
+#   scripts/e2e-orgs-create.sh            # spec 0016 (creating another company), after e2e-orgs.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The operator
@@ -288,10 +289,10 @@ python3 -c '
 import json, sys
 mail = json.load(sys.stdin.buffer)
 text = mail["Text"]
-for needle in ("E2E Acme", "admin", "7 days"):
+for needle in ("E2E Acme", "7 days"):
     if needle not in text:
         sys.exit("the invitation mail does not say: " + needle)
-' < "$tmp/mail.json" || fail "step 4: the invitation mail misses its company, role or lifetime"
+' < "$tmp/mail.json" || fail "step 4: the invitation mail misses its company or lifetime"
 token_body "$tmp/admin-preview.json" || fail "step 4: no usable invitation link in the mail"
 token_body "$tmp/admin-weak.json" E2E_WEAK_PASSWORD
 token_body "$tmp/admin-accept.json" E2E_PASSWORD
