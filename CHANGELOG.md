@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.2.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.3.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
-## Unreleased
+## 0.3.0 - 2026-11-23
 
 Several companies per account ([spec 0015](docs/superpowers/specs/0015-multiple-companies.md), the first of three slices with 0016 and 0017): one
 person belongs to several companies (and at most one personal space) with one account and moves between them without signing in again. A product that
