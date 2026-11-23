@@ -28,7 +28,8 @@ public static class InviteEndpoints
 
         var preview = await acceptance.PreviewAsync(fields[0], http.RequestAborted);
         return preview.Succeeded
-            ? ApiResults.Ok(new InvitePreviewResponse(preview.Value!.OrgName, preview.Value.Email, preview.Value.Role, preview.Value.HasPrivateAccount))
+            ? ApiResults.Ok(new InvitePreviewResponse(
+                preview.Value!.OrgName, preview.Value.Email, preview.Value.Role, preview.Value.HasPrivateAccount, preview.Value.HasAccount, preview.Value.OrgId))
             : ApiResults.Error(preview.Error!);
     }
 

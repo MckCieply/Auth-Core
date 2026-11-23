@@ -31,7 +31,7 @@ export type Failure =
   | { kind: 'already_registered' }
   | { kind: 'signup_disabled' }
   | { kind: 'wrong_password' }
-  | { kind: 'private_account_exists' }
+  | { kind: 'private_account_exists' } // spec 0017: the server no longer sends it; kept for an older server
   | { kind: 'invalid_request' }
   | { kind: 'invalid_ticket' }
   | { kind: 'no_email' }

@@ -108,6 +108,15 @@ public abstract class TenancyTestBase : MailTestBase
             return 0;
         });
 
+    /// <summary>An invitation of the company to the address, dispatched: the token as its mail holds it.</summary>
+    protected async Task<string> InvitationTokenAsync(Guid companyId, string email, string role = "user")
+    {
+        var invite = await AddInviteAsync(companyId, email, role);
+        await EnqueueInvitationAsync(invite, email);
+        await DispatchAsync();
+        return TokenIn(Mail.Sent.Last(m => m.To == email));
+    }
+
     protected Task<Invite?> InviteAsync(Guid inviteId) =>
         InDbAsync(db => db.Invites.AsNoTracking().SingleOrDefaultAsync(i => i.Id == inviteId, TestContext.Current.CancellationToken));
 

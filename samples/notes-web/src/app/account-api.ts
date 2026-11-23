@@ -8,12 +8,14 @@ export const OPTIONS_TIMEOUT_MS = 10_000;
 
 export type Outcome<T = void> = { ok: true; value: T } | { ok: false; failure: Failure };
 
-/** What POST /auth/invites/preview answers: who invites, for whom, as what, and whether the address has a private account (spec 0010). */
+/** What POST /auth/invites/preview answers: who invites, for whom, as what, and whether the address has an account (`has_account`, with the company's `org_id`, spec 0017; `has_private_account` is spec 0010's). */
 export interface InvitePreview {
   org_name: string;
   email: string;
   role: string;
   has_private_account: boolean;
+  has_account: boolean;
+  org_id: string | null;
 }
 
 /** The sign-in providers this app has buttons for (spec 0011). */
@@ -198,16 +200,24 @@ export class AccountApi {
     ) {
       return {
         ok: true,
-        // Anything but a true boolean means "no private account": the screen of spec 0005, which asks for a password.
-        value: { org_name: body['org_name'], email: body['email'], role: body['role'], has_private_account: body['has_private_account'] === true },
+        // Anything but a true boolean means "no account": the screen of spec 0005, which asks for a password (spec 0017).
+        // A missing or empty org_id is null: the page then does not switch after the acceptance.
+        value: {
+          org_name: body['org_name'],
+          email: body['email'],
+          role: body['role'],
+          has_private_account: body['has_private_account'] === true,
+          has_account: body['has_account'] === true,
+          org_id: typeof body['org_id'] === 'string' && body['org_id'] !== '' ? body['org_id'] : null,
+        },
       };
     }
     return { ok: false, failure: { kind: 'other' } };
   }
 
-  /** With `leavePrivateAccount` (spec 0010) the private account moves into the company on purpose, and no password is sent. */
-  acceptInvite(token: string, password: string | null, leavePrivateAccount = false): Promise<Outcome> {
-    return this.post('/auth/invites/accept', leavePrivateAccount ? { token, leave_private_account: true } : { token, password });
+  /** With no password (an existing account, spec 0017) the token goes alone: the account keeps its password and what it has. */
+  acceptInvite(token: string, password: string | null): Promise<Outcome> {
+    return this.post('/auth/invites/accept', password === null ? { token } : { token, password });
   }
 
   /**

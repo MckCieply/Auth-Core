@@ -205,6 +205,52 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
     }
 
     [Fact]
+    public async Task The_preview_describes_has_account_org_id_and_already_member_for_this_company()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var preview = Operations(await DescriptionAsync(factory))["POST /auth/invites/preview"];
+
+        var operationText = preview["description"]!.GetValue<string>();
+        Assert.Contains("has_account", operationText);
+        Assert.Contains("org_id", operationText);
+        Assert.Contains("member of this company", operationText);   // the 409 response text is only the code list ("Error: already_member")
+        Assert.Contains("already_member", Description(preview, "409"));
+    }
+
+    [Fact]
+    public async Task The_acceptance_says_an_existing_account_joins_with_the_token_alone()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var accept = Operations(await DescriptionAsync(factory))["POST /auth/invites/accept"];
+
+        var text = accept["description"]!.GetValue<string>();
+        Assert.Contains("token alone", text);
+        Assert.Contains("other memberships", text);
+        Assert.Contains("leave_private_account", text);
+        Assert.Contains("personal space", text);
+        Assert.Contains("no session", text);
+        var conflicts = Description(accept, "409");
+        Assert.Contains("already_member", conflicts);
+        Assert.DoesNotContain("private_account_exists", conflicts);
+        Assert.DoesNotContain("private_account_exists", text);
+    }
+
+    [Fact]
+    public async Task The_exchange_describes_already_registered_for_an_invitation()   // spec 0017, criterion 22
+    {
+        await using var factory = new AuthAppFactory(postgres, keys);
+        var exchange = Operations(await DescriptionAsync(factory))["POST /auth/providers/exchange"];
+
+        var text = exchange["description"]!.GetValue<string>();
+        Assert.Contains("invite", text);
+        Assert.Contains("whose identity is its login joins", text);
+        Assert.Contains("signed in", text);
+        Assert.Contains("409 already_registered", text);
+        Assert.Contains("not its login", text);
+        Assert.DoesNotContain("private_account_exists", text);
+    }
+
+    [Fact]
     public async Task The_error_codes_of_the_contract_are_in_the_descriptions()   // criterion 24
     {
         await using var factory = new AuthAppFactory(postgres, keys);
@@ -219,7 +265,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_request", Description(operations["POST /auth/switch"], "400"));
         Assert.All(["invalid_request", "invalid_token", "weak_password"], code => Assert.Contains(code, Description(operations["POST /auth/invites/accept"], "400")));
         Assert.Contains("already_member", Description(operations["POST /auth/invites/accept"], "409"));
-        Assert.Contains("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
+        Assert.DoesNotContain("private_account_exists", Description(operations["POST /auth/invites/accept"], "409"));
         Assert.All(["forbidden", "permissions_changed", "wrong_password"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["password_required", "reauth_failed", "reauth_required"], code => Assert.Contains(code, Description(operations["DELETE /auth/account"], "403")));
         Assert.All(["permissions_changed", "forbidden"], code => Assert.Contains(code, Description(operations["GET /auth/org/members"], "403")));
@@ -244,8 +290,9 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Contains("invalid_token", Description(operations["POST /auth/providers/exchange"], "400"));
         Assert.Contains("address_mismatch", Description(operations["POST /auth/providers/exchange"], "403"));
         Assert.All(
-            ["already_member", "private_account_exists", "provider_already_linked"],
+            ["already_member", "provider_already_linked"],
             code => Assert.Contains(code, Description(operations["POST /auth/providers/exchange"], "409")));
+        Assert.DoesNotContain("private_account_exists", Description(operations["POST /auth/providers/exchange"], "409"));
         Assert.Contains("invalid_credentials", Description(operations["POST /auth/providers/link"], "401"));
         Assert.All(["email_not_verified", "no_email", "no_membership"], code => Assert.Contains(code, Description(operations["POST /auth/providers/link"], "403")));
         Assert.Contains("too_many_attempts", Description(operations["POST /auth/providers/link"], "429"));
@@ -322,7 +369,7 @@ public sealed class OpenApiTests(PostgresFixture postgres, KeyMaterialFixture ke
         Assert.Equal(["catalog", "roles"], Properties("RolesResponse"));
         Assert.Equal(["org_creation", "private_signup", "providers", "signup"], Properties("OptionsResponse"));
         Assert.Equal(["company_name", "email", "kind"], Properties("SignupPreviewResponse"));
-        Assert.Equal(["email", "has_private_account", "org_name", "role"], Properties("InvitePreviewResponse"));
+        Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], Properties("InvitePreviewResponse"));
         Assert.Equal(["access_token", "status"], Properties("LoginResponse"));
         Assert.Equal(["error", "retry_after_seconds"], Properties("TooManyAttemptsBody"));
         Assert.Equal(["error", "rules"], Properties("WeakPasswordBody"));

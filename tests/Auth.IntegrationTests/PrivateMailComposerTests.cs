@@ -87,57 +87,67 @@ public sealed class PrivateMailComposerTests
     }
 
     [Fact]
-    public void The_invitation_to_a_private_account_in_english_has_the_changed_intro_and_the_paragraph()   // criteria 16, 31
+    public void The_invitation_to_an_existing_account_in_english_has_the_intro_and_the_paragraph()   // criteria 21, 31
     {
-        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme", privateAccount: true);
+        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme", accountExists: true);
 
         Assert.Contains("You have been invited to join Acme on speech-to-mail. Use the link below to accept the invitation.", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains(
-            "You already have a private account on speech-to-mail with this email address. If you accept, you move to Acme: the space of your "
-            + "private account is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of Acme.",
+            "You already have an account on speech-to-mail with this email address. If you accept, your account also joins Acme and keeps "
+            + "everything it has now, with the same email address and the same way of signing in.",
             mail.TextBody,
             StringComparison.Ordinal);
         Assert.DoesNotContain("choose a password", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("private account on", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
         AssertHtmlHoldsTheText(mail);
-        AssertParagraphBetweenIntroAndLink(mail, "You have been invited", "You already have a private account");
+        AssertParagraphBetweenIntroAndLink(mail, "You have been invited", "You already have an account");
     }
 
     [Fact]
-    public void The_invitation_to_a_private_account_in_polish_has_the_changed_intro_and_the_paragraph()   // criteria 16, 31
+    public void The_invitation_to_an_existing_account_in_polish_has_the_intro_and_the_paragraph()   // criteria 21, 31
     {
-        var mail = Composer("pl").Compose(MailKind.Invitation, "ola@poczta.test", Token, "Żółw i Spółka", privateAccount: true);
+        var mail = Composer("pl").Compose(MailKind.Invitation, "ola@poczta.test", Token, "Żółw i Spółka", accountExists: true);
 
         Assert.Contains("Zaproszono Cię do firmy Żółw i Spółka w speech-to-mail. Użyj poniższego linku, aby przyjąć zaproszenie.", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains(
-            "Masz już konto prywatne w speech-to-mail z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, przejdziesz do firmy Żółw i Spółka: przestrzeń "
-            + "Twojego konta prywatnego zostanie usunięta razem z całą zawartością. Samo konto zostaje, z tym samym adresem e-mail i hasłem, i stanie się "
-            + "kontem członka firmy Żółw i Spółka.",
+            "Masz już konto w speech-to-mail z tym adresem e-mail. Jeśli przyjmiesz zaproszenie, Twoje konto dołączy także do firmy Żółw i Spółka i zachowa wszystko, co ma teraz, z tym samym adresem e-mail i tym samym sposobem logowania.",
             mail.TextBody,
             StringComparison.Ordinal);
         Assert.Contains("Żółw i Spółka", mail.HtmlBody, StringComparison.Ordinal);   // letters stay letters
         AssertHtmlHoldsTheText(mail);
-        AssertParagraphBetweenIntroAndLink(mail, "Zaproszono Cię", "Masz już konto prywatne");
+        AssertParagraphBetweenIntroAndLink(mail, "Zaproszono Cię", "Masz już konto w");
     }
 
     [Fact]
     public void The_company_is_encoded_in_the_html_of_the_paragraph_and_never_in_the_subject()   // criterion 31
     {
-        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Tom & <Jerry>", privateAccount: true);
+        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Tom & <Jerry>", accountExists: true);
 
-        Assert.Contains("If you accept, you move to Tom & <Jerry>:", mail.TextBody, StringComparison.Ordinal);
-        Assert.Contains("If you accept, you move to Tom &amp; &lt;Jerry&gt;:", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("If you accept, your account also joins Tom & <Jerry> and keeps", mail.TextBody, StringComparison.Ordinal);
+        Assert.Contains("If you accept, your account also joins Tom &amp; &lt;Jerry&gt; and keeps", mail.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("<Jerry>", mail.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("<b>", mail.HtmlBody, StringComparison.Ordinal);
         Assert.DoesNotContain("Jerry", mail.Subject, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Any_other_invitation_is_the_mail_of_spec_0005()   // criterion 16
+    public void Any_other_invitation_is_the_mail_of_spec_0005()   // criterion 21
     {
-        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme");
+        var mail = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme", accountExists: false);
 
         Assert.Contains("Use the link below to choose a password and accept the invitation.", mail.TextBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("private account", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("account on", mail.TextBody + mail.HtmlBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_private_flag_no_longer_changes_an_invitation()   // criterion 21
+    {
+        var plain = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme");
+        var flagged = Composer().Compose(MailKind.Invitation, "ola@poczta.test", Token, "Acme", privateAccount: true);
+
+        Assert.Equal(plain.TextBody, flagged.TextBody);
+        Assert.Equal(plain.HtmlBody, flagged.HtmlBody);
+        Assert.Contains("Use the link below to choose a password and accept the invitation.", flagged.TextBody, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -150,7 +160,7 @@ public sealed class PrivateMailComposerTests
         Assert.DoesNotContain("{1}", signup.Intro, StringComparison.Ordinal);
         Assert.Null(signup.Paragraph);
 
-        var invitation = MailTexts.InvitationToPrivateAccount(locale);
+        var invitation = MailTexts.InvitationToExistingAccount(locale);
         Assert.All(Holes, hole => Assert.Contains(hole, invitation.Intro, StringComparison.Ordinal));
         Assert.DoesNotContain("{2}", invitation.Intro, StringComparison.Ordinal);
         Assert.NotNull(invitation.Paragraph);
@@ -165,7 +175,7 @@ public sealed class PrivateMailComposerTests
     public void An_unknown_language_has_neither_new_text()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => MailTexts.PrivateSignup("xx"));
-        Assert.Throws<ArgumentOutOfRangeException>(() => MailTexts.InvitationToPrivateAccount("xx"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => MailTexts.InvitationToExistingAccount("xx"));
     }
 
     [Fact]

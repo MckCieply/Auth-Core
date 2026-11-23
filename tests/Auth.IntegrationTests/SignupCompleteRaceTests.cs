@@ -153,8 +153,7 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         if (completionFirst)
         {
             Assert.Equal(HttpStatusCode.OK, completed.StatusCode);
-            Assert.Equal(HttpStatusCode.Conflict, accepted.StatusCode);
-            Assert.Equal("""{"error":"already_member"}""", await accepted.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);   // spec 0017: the completed account joins the inviting company
             Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Name == Name, TestContext.Current.CancellationToken)));
         }
         else
@@ -165,7 +164,9 @@ public sealed class SignupCompleteRaceTests(PostgresFixture postgres, KeyMateria
         }
 
         var user = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.NormalizedEmail == normalized, TestContext.Current.CancellationToken));
-        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user.Id, TestContext.Current.CancellationToken)));
+        // The completed account holds its own company and the inviting one; the accepted one holds the inviting company only.
+        Assert.Equal(completionFirst ? 2 : 1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user.Id, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user.Id && m.CompanyId == company, TestContext.Current.CancellationToken)));
         Assert.DoesNotContain(await PendingAsync(), p => p.NormalizedEmail == normalized);
     }
 

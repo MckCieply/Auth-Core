@@ -4,14 +4,18 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
-import { has, pageText, settle, submitForm, typeInto, valueOf, realLocation } from '../../testing/helpers';
+import { AuthService, Me } from '../auth/auth.service';
+import { clickOn, has, pageText, settle, submitForm, typeInto, valueOf, realLocation } from '../../testing/helpers';
 import { InvitePage } from './invite';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const invalid = 'This invitation has expired or was already used. Ask for a new one.';
 const preview = { org_name: 'Acme', email: 'new@acme.example', role: 'viewer' };
 
-async function open(query = '?token=tok-i', previewAnswer: 'ok' | 'wait' = 'ok') {
+const existing = { ...preview, has_private_account: false, has_account: true, org_id: 'org-acme' };
+const alreadyMember = 'You are already a member of this company. Sign in to open it.';
+
+async function open(query = '?token=tok-i', previewAnswer: 'ok' | 'wait' = 'ok', answer: object = preview) {
   TestBed.configureTestingModule({
     providers: [provideRouter([{ path: 'invite', component: InvitePage }]), provideHttpClient(), provideHttpClientTesting(), realLocation],
   });
@@ -22,10 +26,21 @@ async function open(query = '?token=tok-i', previewAnswer: 'ok' | 'wait' = 'ok')
   const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
   const ctrl = TestBed.inject(HttpTestingController);
   if (previewAnswer === 'ok') {
-    ctrl.expectOne('/auth/invites/preview').flush(preview);
+    ctrl.expectOne('/auth/invites/preview').flush(answer);
     await settle(harness.fixture);
   }
-  return { fixture: harness.fixture, ctrl, navigate };
+  return { fixture: harness.fixture, ctrl, navigate, auth: TestBed.inject(AuthService) };
+}
+
+/** A session of this person: only `email` matters to the page. */
+function signedIn(auth: AuthService, email: string): void {
+  vi.spyOn(auth, 'me').mockReturnValue({ email } as Me);
+}
+
+async function accept(opened: Opened, body: object | null = null, code = 204): Promise<void> {
+  clickOn(opened.fixture, '[data-testid="accept"]');
+  opened.ctrl.expectOne('/auth/invites/accept').flush(body, status(code));
+  await settle(opened.fixture);
 }
 
 type Opened = Awaited<ReturnType<typeof open>>;
@@ -95,12 +110,12 @@ describe('InvitePage', () => {
     expect(opened.navigate).not.toHaveBeenCalled();
   });
 
-  it('409 already_member on accept: "This account already belongs to a company."', async () => {
+  it('409 already_member on accept: "You are already a member of this company. Sign in to open it."', async () => {
     const opened = await open();
     choose(opened, 'Joined-Passw0rd');
     opened.ctrl.expectOne('/auth/invites/accept').flush({ error: 'already_member' }, status(409));
     await settle(opened.fixture);
-    expect(pageText(opened.fixture)).toContain('This account already belongs to a company.');
+    expect(pageText(opened.fixture)).toContain(alreadyMember);
     expect(has(opened.fixture, 'form')).toBe(false);
   });
 
@@ -108,8 +123,108 @@ describe('InvitePage', () => {
     const { fixture, ctrl } = await open('?token=tok-i', 'wait');
     ctrl.expectOne('/auth/invites/preview').flush({ error: 'already_member' }, status(409));
     await settle(fixture);
-    expect(pageText(fixture)).toContain('This account already belongs to a company.');
+    expect(pageText(fixture)).toContain(alreadyMember);
     expect(has(fixture, 'form')).toBe(false);
+  });
+
+  it('has_account true: the line with the email and the company, the Accept the invitation button, the provider buttons, and no password field', async () => {
+    const { fixture } = await open('?token=tok-i', 'ok', existing);
+    const line = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="invite-existing"]');
+    expect(line?.textContent?.trim()).toBe(
+      'You already have an account with new@acme.example. Accepting adds Acme to it; everything else stays as it is.',
+    );
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-testid="accept"]')?.textContent?.trim()).toBe('Accept the invitation');
+    expect(has(fixture, 'app-provider-buttons')).toBe(true);
+    expect(has(fixture, '#password')).toBe(false);
+    expect(has(fixture, '#repeat')).toBe(false);
+    expect(has(fixture, 'form')).toBe(false);
+  });
+
+  it('has_account false: the password form and the provider buttons, as before', async () => {
+    const { fixture } = await open('?token=tok-i', 'ok', { ...preview, has_account: false, org_id: 'org-acme' });
+    expect(has(fixture, '#password')).toBe(true);
+    expect(has(fixture, 'app-provider-buttons')).toBe(true);
+    expect(has(fixture, '[data-testid="accept"]')).toBe(false);
+    expect(has(fixture, '[data-testid="invite-existing"]')).toBe(false);
+    expect(pageText(fixture)).toContain('Join');
+  });
+
+  it('Accept the invitation sends the token alone', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    clickOn(opened.fixture, '[data-testid="accept"]');
+    const request = opened.ctrl.expectOne('/auth/invites/accept');
+    expect(request.request.body).toEqual({ token: 'tok-i' });
+    request.flush(null, status(204));
+  });
+
+  it("an existing account's Accept sends one request for a double click", async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    clickOn(opened.fixture, '[data-testid="accept"]');
+    clickOn(opened.fixture, '[data-testid="accept"]');
+    opened.ctrl.expectOne('/auth/invites/accept').flush(null, status(204));
+  });
+
+  it('204 for an existing account with the same person signed in: switches to org_id and opens /notes', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    signedIn(opened.auth, 'NEW@Acme.example'); // other ASCII capitals: the same person
+    const switchTo = vi.spyOn(opened.auth, 'switchTo').mockResolvedValue('switched');
+    await accept(opened);
+    expect(switchTo).toHaveBeenCalledExactlyOnceWith('org-acme');
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/notes']);
+  });
+
+  it('204 for an existing account while another person is signed in: no switch, /login with the invited email', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    signedIn(opened.auth, 'someone.else@acme.example');
+    const switchTo = vi.spyOn(opened.auth, 'switchTo').mockResolvedValue('switched');
+    await accept(opened);
+    expect(switchTo).not.toHaveBeenCalled();
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+  });
+
+  it('204 for an existing account with no session: /login with the email', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    const switchTo = vi.spyOn(opened.auth, 'switchTo').mockResolvedValue('switched');
+    await accept(opened);
+    expect(switchTo).not.toHaveBeenCalled();
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+  });
+
+  it('204 for an existing account with no org_id in the preview: no switch, /login with the email', async () => {
+    const opened = await open('?token=tok-i', 'ok', { ...existing, org_id: null });
+    signedIn(opened.auth, 'new@acme.example');
+    const switchTo = vi.spyOn(opened.auth, 'switchTo').mockResolvedValue('switched');
+    await accept(opened);
+    expect(switchTo).not.toHaveBeenCalled();
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+  });
+
+  it.each(['gone', 'failed', 'signed-out'] as const)(
+    'the switch answers %s (404 or 401): /login with the email in the navigation state',
+    async (result) => {
+      const opened = await open('?token=tok-i', 'ok', existing);
+      signedIn(opened.auth, 'new@acme.example');
+      vi.spyOn(opened.auth, 'switchTo').mockResolvedValue(result);
+      await accept(opened);
+      expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+    },
+  );
+
+  it('the switch rejects after the 204: /login with the email in the navigation state', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    signedIn(opened.auth, 'new@acme.example');
+    vi.spyOn(opened.auth, 'switchTo').mockRejectedValue(new Error('network'));
+    await accept(opened);
+    expect(opened.navigate).toHaveBeenCalledExactlyOnceWith(['/login'], { state: { email: 'new@acme.example' } });
+  });
+
+  it('409 already_member on the accept of an existing account: the sentence of the member, no switch', async () => {
+    const opened = await open('?token=tok-i', 'ok', existing);
+    signedIn(opened.auth, 'new@acme.example');
+    const switchTo = vi.spyOn(opened.auth, 'switchTo').mockResolvedValue('switched');
+    await accept(opened, { error: 'already_member' }, 409);
+    expect(pageText(opened.fixture)).toContain(alreadyMember);
+    expect(switchTo).not.toHaveBeenCalled();
   });
 
   it('invalid_token on the preview: "This invitation has expired or was already used. Ask for a new one." and no link to /forgot', async () => {

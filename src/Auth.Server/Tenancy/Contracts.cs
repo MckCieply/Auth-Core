@@ -52,12 +52,16 @@ public sealed record SendInviteRequest(string Email, Guid RoleId);
 /// <summary>Request of <c>POST /auth/invites/preview</c>.</summary>
 public sealed record PreviewInviteRequest(string Token);
 
-/// <summary>Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a private account.</summary>
-public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount);
+/// <summary>
+/// Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a personal space; <c>has_account</c>
+/// (spec 0017): it has an account of any kind; <c>org_id</c>: the invited company.
+/// </summary>
+public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount, bool HasAccount, Guid OrgId);
 
 /// <summary>
 /// Request of <c>POST /auth/invites/accept</c>: the password of a new account (not used for an account that exists), and
-/// <c>leave_private_account</c>, a JSON boolean, which a private account needs to move (spec 0010).
+/// <c>leave_private_account</c>, a JSON boolean, with which a private account moves into the company on purpose (spec 0010; since spec 0017
+/// a private account joins without it and keeps its personal space).
 /// </summary>
 public sealed record AcceptInviteRequest(string Token, string? Password = null, bool? LeavePrivateAccount = null);
 

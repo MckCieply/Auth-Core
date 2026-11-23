@@ -39,6 +39,8 @@ export class ProviderReturnPage implements OnInit {
   private readonly fragment = new URLSearchParams(this.route.snapshot.fragment ?? '');
   private readonly ticket = this.fragment.get('ticket') ?? '';
   private asking = false;
+  // Kept for show(): the message after "Try again" depends on it too.
+  private purpose: string | null = null;
 
   protected readonly message = signal<string | null>(null);
   protected readonly limited = signal(false);
@@ -59,6 +61,7 @@ export class ProviderReturnPage implements OnInit {
     const armed = takeReauth();
     const error = this.fragment.get('error');
     const purpose = this.fragment.get('purpose');
+    this.purpose = purpose;
     if (error !== null) {
       // An own member only: the fragment is the visitor's text, and `constructor` or `__proto__` must not reach Object.prototype.
       this.message.set(Object.hasOwn(this.t.errors, error) ? this.t.errors[error] : this.t.errors['provider_error']);
@@ -118,14 +121,14 @@ export class ProviderReturnPage implements OnInit {
   }
 
   private show(failure: Failure): void {
+    const invite = this.purpose === 'invite';
     const messages: Partial<Record<Failure['kind'], string>> = {
       invalid_ticket: this.t.invalidTicket,
       no_account: this.t.noAccount,
       no_email: this.t.noEmail,
-      already_registered: this.t.alreadyRegistered,
+      already_registered: invite ? this.t.alreadyRegisteredInvite : this.t.alreadyRegistered,
       address_mismatch: this.t.addressMismatch,
-      already_member: this.t.alreadyMember,
-      private_account_exists: this.t.privateAccountExists,
+      already_member: invite ? texts.invite.alreadyMember : this.t.alreadyMember,
       provider_already_linked: this.t.providerAlreadyLinked,
       invalid_token: this.t.invalidToken,
       no_membership: texts.login.noMembership,

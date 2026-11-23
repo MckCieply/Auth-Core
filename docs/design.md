@@ -323,9 +323,11 @@ a provider to it.
   them.
 - **Deleting one's own account.** A private person deletes their account with their password, after the product has
   deleted their data; the address is then free for a new sign-up. A company account is deleted by the company's admins.
-- **An invitation to a private person.** The inviter sees nothing different. The invited person is warned, in the mail
-  and on the screen, that accepting moves them to the company and deletes their private space and its data; they keep
-  their address and their password. A member of another company still cannot accept.
+- **An invitation to an address that has an account.** The inviter sees nothing different. The mail tells the invited
+  person that their account joins the company and keeps everything it has; accepting adds the company and nothing
+  else changes: the password, the private space, the other companies and the open sessions stay. A person who wants the
+  private space gone can still ask for the move (`leave_private_account: true`), which the sample no longer offers. A
+  member of another company accepts the same way.
 - **No account without a space.** A person who is removed from a company, or whose company is deleted, loses their
   account when that was their last space (spec 0015: a person who belongs to another company keeps the account); the
   address is then free to be invited again or to sign up.
@@ -361,8 +363,8 @@ address it stays off and health says `Degraded`. `GET /auth/options` tells a pro
 typed in a look-alike spelling never takes over an account or an earlier link; what remains is in the threat model (risk 47).
 
 *Spec 0010:* a private person signs up with an email address only and works in a hidden one-person space; the access token says
-`org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation warns a
-private person and moves the account only on purpose; an account that loses its only space is deleted (a removal, a company deletion, once
+`org_kind`. A private person deletes their own account (`DELETE /auth/account`) after the product has deleted its data; an invitation moved a
+private person's account only on purpose (spec 0017: an invitation now only adds the company, and the move stays a request of its own); an account that loses its only space is deleted (a removal, a company deletion, once
 at upgrade; since spec 0015 only when it has no other space). The comeback of spec 0009, Amendment 3, was removed before any release.
 
 *As built (spec 0010):* built as described above. Private sign-up needs `private.signup: self-service` in the manifest and the
@@ -378,19 +380,26 @@ links with its password once; a new person finishes an account without a passwor
 accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
 registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
-*As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 and 0016 are built, 0017 is
-specified):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
+*As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 to 0017 are built):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
 `GET /auth/orgs` lists the person's spaces and `POST /auth/switch` moves the device to another one with the refresh cookie alone; every
 session works in one company, the access token still names exactly one, and a sign-in lands in the company used last. A removal or a company
 deletion deletes an account only when it loses its last space. The sample has a company picker. A second membership comes from `POST /auth/orgs`
-(spec 0016: a signed-in person creates another company) and from the development seed (`Auth:DevSeed:SecondOrgName`); 0017 lets an
-invitation keep the other memberships. What remains is in the threat model (risks 62 to 65).
+(spec 0016: a signed-in person creates another company), from an invitation to an account that exists (spec 0017) and from the development
+seed (`Auth:DevSeed:SecondOrgName`). What remains is in the threat model (risks 62 to 65).
 
 *As built (spec 0016, the second slice):* a signed-in person creates another company with `POST /auth/orgs` (off until the manifest says
 `org_creation: self-service`; `GET /auth/options` tells the product's screens). The creator is its first admin; the session does not move, so
 the frontend calls `POST /auth/switch`. One account holds at most `Auth:Tenancy:MaxCompaniesPerAccount` companies (20 by default), judged under
 the address lock. An account that is still in a company cannot delete itself (`403 company_member`). The sample has "New company...". What
 remains is in the threat model (risks 66 and 67).
+
+*As built (spec 0017, the third slice):* an invitation to an address that has an account of any kind adds the company to that account, with no
+password and nothing lost: the other memberships, the personal space, the password, the linked providers and the sessions stay, and the company
+is in `GET /auth/orgs` at once. The preview says `has_account` and `org_id`; `409 already_member` means a member of the invited company only;
+`409 private_account_exists` is no longer answered, and `leave_private_account: true` stays as the request for the move. Through a provider an
+account joins when the identity is one of its logins, and `409 already_registered` otherwise. The mail names the application and the company and
+says the account joins. The sample has one button and moves a signed-in invited person into the company. What remains is in the threat model
+(risks 68 to 70).
 
 **Still out:** connected accounts (a product acting on a person's mailbox), a hosted login page, and any provider beyond the three.
 

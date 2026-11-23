@@ -2,7 +2,9 @@ using System.Net;
 using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Providers;
 using Auth.Server.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -10,11 +12,19 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Auth.IntegrationTests;
 
-public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixture keys) : TenancyTestBase(postgres, keys)
+public sealed class InviteAcceptTests : TenancyTestBase
 {
     private const string Address = "worker@acme.test";
     private const string Password = "Chosen-Passw0rd";
     private const string InvalidToken = """{"error":"invalid_token"}""";
+
+    private readonly OldRefreshTokens _oldTokens;
+
+    public InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        _oldTokens = OldRefreshTokens.Install(Factory);
+    }
 
     /// <summary>An invitation of the company, with its mail composed: returns the invitation and the token as the mail holds it.</summary>
     private async Task<(Guid Invite, string Token)> MailedAsync(Guid company, string address = Address, string role = "user")
@@ -59,8 +69,10 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         using (var preview = await TenancyApi.Preview(Client, token))
         {
             var body = await TenancyApi.ReadOkAsync(preview);
-            Assert.Equal(["email", "has_private_account", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], body.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
             Assert.False(body.GetProperty("has_private_account").GetBoolean());   // spec 0010: an address without an account
+            Assert.False(body.GetProperty("has_account").GetBoolean());           // spec 0017
+            Assert.Equal(company.ToString(), body.GetProperty("org_id").GetString());
             Assert.Equal(Address, body.GetProperty("email").GetString());
             Assert.Equal("Acme", body.GetProperty("org_name").GetString());
             Assert.Equal("user", body.GetProperty("role").GetString());
@@ -78,6 +90,119 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     // ---- preview
+
+    [Theory]
+    [InlineData("member")]
+    [InlineData("private")]
+    [InlineData("both")]
+    [InlineData("none")]
+    [InlineData("no_account")]
+    public async Task The_preview_says_has_account_and_org_id_for_every_kind_of_address(string kind)   // spec 0017, criterion 1
+    {
+        var company = await CreateCompanyAsync("Acme");
+        switch (kind)
+        {
+            case "member":
+                await CreateUserAsync(Address, confirmed: true);
+                break;
+            case "private":
+                await CreatePrivateAccountAsync(Address);
+                break;
+            case "both":
+                var (user, _) = await CreatePrivateAccountAsync(Address);
+                await AddMembershipAsync(user, await DevCompanyIdAsync(), "user");
+                break;
+            case "none":
+                await CreateUserAsync(Address, confirmed: true, member: false);
+                break;
+        }
+
+        var (invite, token) = await MailedAsync(company);
+        var before = await InviteAsync(invite);
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.Equal(kind != "no_account", body.GetProperty("has_account").GetBoolean());
+        Assert.Equal(company, Guid.Parse(body.GetProperty("org_id").GetString()!));
+        Assert.Equal("Acme", body.GetProperty("org_name").GetString());
+        Assert.Equal(Address, body.GetProperty("email").GetString());
+        Assert.Equal("user", body.GetProperty("role").GetString());
+        var after = await InviteAsync(invite);
+        Assert.NotNull(after);
+        Assert.Equal(before!.TokenHash, after.TokenHash);
+    }
+
+    [Fact]
+    public async Task A_member_of_the_invited_company_is_409_already_member_in_the_preview()   // spec 0017, criterion 3
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var user = await CreateUserAsync(Address, confirmed: true);   // a member of the development company
+        await AddMembershipAsync(user.Id, company, "user");
+        var (invite, token) = await MailedAsync(company);
+
+        using var preview = await TenancyApi.Preview(Client, token);
+
+        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+        Assert.NotNull(await InviteAsync(invite));
+    }
+
+    [Fact]
+    public async Task The_preview_decides_again_when_the_link_is_used_in_both_directions()   // Review Focus 1, preview half
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var token = await InvitationTokenAsync(company, Address);   // no account yet
+        using (var first = await TenancyApi.Preview(Client, token))
+        {
+            Assert.False((await TenancyApi.ReadOkAsync(first)).GetProperty("has_account").GetBoolean());
+        }
+
+        await CreateUserAsync(Address, confirmed: true);   // the person signed up before using the link
+        using (var second = await TenancyApi.Preview(Client, token))
+        {
+            Assert.True((await TenancyApi.ReadOkAsync(second)).GetProperty("has_account").GetBoolean());
+        }
+
+        using (var joins = await TenancyApi.AcceptWithoutPassword(Client, token))   // the acceptance decides again too: the token alone joins
+        {
+            await TenancyApi.AssertEmptyAsync(joins, HttpStatusCode.NoContent);
+        }
+
+        const string other = "gone@acme.test";
+        var gone = await CreateUserAsync(other, confirmed: true, member: false);
+        var goneToken = await InvitationTokenAsync(company, other);
+        await InDbAsync(db => db.Users.Where(u => u.Id == gone.Id).ExecuteDeleteAsync(TestContext.Current.CancellationToken));   // deleted before the link is used
+        using (var third = await TenancyApi.Preview(Client, goneToken))
+        {
+            Assert.False((await TenancyApi.ReadOkAsync(third)).GetProperty("has_account").GetBoolean());
+        }
+
+        using (var alone = await TenancyApi.AcceptWithoutPassword(Client, goneToken))
+        {
+            await TenancyApi.AssertErrorAsync(alone, HttpStatusCode.BadRequest, "invalid_request");
+        }
+
+        using var again = await TenancyApi.Accept(Client, goneToken, Password);   // the invitation stayed usable
+        await TenancyApi.AssertEmptyAsync(again, HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task A_refresh_token_without_a_company_moves_into_the_invited_company_after_an_acceptance()   // spec 0017, Review Focus 3
+    {
+        await CreateUserAsync(Address, confirmed: true);   // a member of the development company
+        var old = await _oldTokens.LoginAsync(Client, Address, UserPassword);   // a refresh token from before spec 0015: no company in it
+        Clock.Advance(TimeSpan.FromMinutes(1));
+        var company = await CreateCompanyAsync("Acme");
+        var (_, token) = await MailedAsync(company);
+
+        using (var accepted = await TenancyApi.AcceptWithoutPassword(Client, token))
+        {
+            await TenancyApi.AssertEmptyAsync(accepted, HttpStatusCode.NoContent);
+        }
+
+        var refreshed = await SessionApi.RefreshOk(Client, old.RefreshToken);   // still signed in, now in the invited company
+        Assert.Equal(company.ToString(), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+    }
 
     [Fact]
     public async Task Preview_leaves_the_token_usable()   // criterion 3
@@ -284,6 +409,50 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
+    public async Task A_member_of_company_a_accepts_company_b_with_the_token_alone_and_keeps_everything()   // spec 0017, criterion 4
+    {
+        var a = await CreateCompanyAsync("Alpha");
+        var b = await CreateCompanyAsync("Beta");
+        var userId = await AddMemberAsync(a, Address, "user");
+        await InDbAsync(async db =>
+        {
+            ProviderLogins.Add(db, userId, "google", "google-key-1");
+            return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        });
+        var session = await SessionApi.LoginAsync(Client, Address, UserPassword);
+        var before = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken));
+        var (invite, token) = await MailedAsync(b, role: "admin");
+
+        using (var accepted = await TenancyApi.AcceptWithoutPassword(Client, token))
+        {
+            await TenancyApi.AssertEmptyAsync(accepted, HttpStatusCode.NoContent);
+        }
+
+        var memberships = await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == userId).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { a, b }.Order(), memberships.Select(m => m.CompanyId).Order());
+        Assert.Equal(await RoleIdAsync(a, "user"), memberships.Single(m => m.CompanyId == a).RoleId);
+        Assert.Equal(await RoleIdAsync(b, "admin"), memberships.Single(m => m.CompanyId == b).RoleId);
+        var after = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == userId, TestContext.Current.CancellationToken));
+        Assert.Equal(before.PasswordHash, after.PasswordHash);
+        Assert.Equal(before.SecurityStamp, after.SecurityStamp);
+        Assert.Equal(1, await InDbAsync(db => db.UserLogins.CountAsync(l => l.UserId == userId, TestContext.Current.CancellationToken)));
+        Assert.Null(await InviteAsync(invite));
+
+        var refreshed = await SessionApi.RefreshOk(Client, session.RefreshToken);   // no session ended
+        Assert.Equal(a.ToString(), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+
+        var row = Assert.Single(await InDbAsync(db => db.AuditEvents.AsNoTracking().Where(e => e.Kind == AuditKinds.InviteAccepted).ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(b, row.OrgId);
+        Assert.Equal("admin", AuditApi.Text(row, "role"));
+
+        using var list = await TenancyApi.Get(Client, "/auth/orgs", session.AccessToken);   // the new company is there at once
+        var entries = (await TenancyApi.ReadOkAsync(list)).GetProperty("orgs").EnumerateArray().ToList();
+        Assert.Equal(2, entries.Count);
+        Assert.False(entries.Single(e => e.GetProperty("id").GetString() == b.ToString()).GetProperty("current").GetBoolean());
+        Assert.True(entries.Single(e => e.GetProperty("id").GetString() == a.ToString()).GetProperty("current").GetBoolean());
+    }
+
+    [Fact]
     public async Task Accept_signs_nobody_in()   // spec 0005 → POST /auth/invites/accept
     {
         var company = await CreateCompanyAsync("Acme");
@@ -326,7 +495,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
-    public async Task An_account_without_a_space_joins_with_the_password_it_has_and_its_sessions_end()   // spec 0010: no password is set for an existing account
+    public async Task An_account_without_a_space_joins_with_the_password_it_has_and_keeps_its_sessions()   // spec 0010: no password is set for an existing account; spec 0017: no session ends
     {
         var company = await CreateCompanyAsync("Acme");
         var leaver = await AddMemberAsync(company, Address, "user");
@@ -339,8 +508,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
             Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
         }
 
-        using var refreshed = await SessionApi.Refresh(Client, session.RefreshToken);
-        await SessionApi.AssertInvalidGrantAsync(refreshed);
+        _ = await SessionApi.RefreshOk(Client, session.RefreshToken);   // the session it set up is still there
         using var sent = await LoginApi.Login(Client, Address, Password);
         Assert.Equal(HttpStatusCode.Unauthorized, sent.StatusCode);   // the password of the acceptance is not used
         _ = await SessionApi.LoginAsync(Client, Address, UserPassword);
@@ -433,23 +601,33 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     }
 
     [Fact]
-    public async Task Accepting_confirms_an_unconfirmed_account_lifts_a_lockout_and_removes_its_other_links()   // spec 0005 → Effects
+    public async Task Accepting_confirms_an_unconfirmed_account_and_keeps_its_lockout_its_links_and_its_sessions()   // spec 0017, criterion 10
     {
-        await CreateUserAsync(Address, confirmed: false, member: false);
+        var userId = (await CreateUserAsync(Address, confirmed: true)).Id;
+        var session = await SessionApi.LoginAsync(Client, Address, UserPassword);
+        await InDbAsync(db => db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(
+            set => set.SetProperty(u => u.EmailConfirmed, false), TestContext.Current.CancellationToken));   // unconfirmed since the session began
         await EnqueueAsync(MailKind.EmailVerification, Address);
         await DispatchAsync();
         Assert.Single(await InDbAsync(db => db.EmailTokens.ToListAsync(TestContext.Current.CancellationToken)));
         await LockoutApi.FailAsync(Client, Clock, Address, 10);   // locked out
+        var streaks = await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, streaks);
+        var stamp = (await UserAsync(Address))!.SecurityStamp;
         var company = await CreateCompanyAsync("Acme");
         var (_, token) = await MailedAsync(company);
 
-        using var accepted = await TenancyApi.Accept(Client, token, Password);
+        using var accepted = await TenancyApi.AcceptWithoutPassword(Client, token);
 
         Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
-        Assert.True((await UserAsync(Address))!.EmailConfirmed);
-        Assert.Empty(await InDbAsync(db => db.EmailTokens.ToListAsync(TestContext.Current.CancellationToken)));
-        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
-        _ = await SessionApi.LoginAsync(Client, Address, UserPassword);   // first try; spec 0010: the account keeps its password
+        var confirmed = await InDbAsync(db => db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.EmailConfirmed).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.True(confirmed);   // in the database, not only on a tracked entity
+        Assert.Equal(stamp, (await UserAsync(Address))!.SecurityStamp);
+        Assert.Single(await InDbAsync(db => db.EmailTokens.ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(streaks, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
+        using var locked = await LoginApi.Login(Client, Address, UserPassword);
+        _ = await LockoutApi.AssertLockedAsync(locked);   // the lockout stays
+        _ = await SessionApi.RefreshOk(Client, session.RefreshToken);   // the earlier session still refreshes
     }
 
     [Fact]
@@ -511,7 +689,7 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
     // ---- an address that belongs to a member of another company
 
     [Fact]
-    public async Task For_a_member_of_another_company_preview_and_accept_say_already_member_and_the_invitation_stays()   // criterion 8
+    public async Task For_a_member_of_another_company_the_preview_says_has_account_and_the_acceptance_joins()   // criterion 8; spec 0017
     {
         var acme = await CreateCompanyAsync("Acme");
         var globex = await CreateCompanyAsync("Globex");
@@ -520,36 +698,81 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
 
         using (var preview = await TenancyApi.Preview(Client, token))
         {
-            await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
+            var body = await TenancyApi.ReadOkAsync(preview);   // spec 0017: only a member of the invited company is already_member
+            Assert.True(body.GetProperty("has_account").GetBoolean());
+            Assert.False(body.GetProperty("has_private_account").GetBoolean());
         }
 
         using (var accept = await TenancyApi.Accept(Client, token, Password))
         {
-            await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");
+            await TenancyApi.AssertEmptyAsync(accept, HttpStatusCode.NoContent);
         }
 
-        Assert.NotNull(await InviteAsync(invite));                          // still usable until it expires
+        Assert.Null(await InviteAsync(invite));                             // used up
         using var login = await LoginApi.Login(Client, Address, UserPassword);
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);                  // the password was not replaced
-        Assert.Equal(globex, (await NonSeedMembershipsAsync()).Single().CompanyId);
+        Assert.Equal(new[] { acme, globex }.Order(), (await NonSeedMembershipsAsync()).Select(m => m.CompanyId).Order());
     }
 
-    [Fact]
-    public async Task A_weak_password_for_an_address_that_is_already_a_member_elsewhere_is_already_member()   // already_member comes before the password policy
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("Sent-Strong-Passw0rd")]
+    public async Task A_password_sent_for_an_existing_account_is_not_used_weak_or_not(string sent)   // spec 0017, criterion 8
     {
         var acme = await CreateCompanyAsync("Acme");
         var globex = await CreateCompanyAsync("Globex");
         await AddMemberAsync(globex, Address, "user");
-        var (invite, token) = await MailedAsync(acme);
+        var (_, token) = await MailedAsync(acme);
 
-        using var response = await TenancyApi.Accept(Client, token, "abc");
+        using (var response = await TenancyApi.Accept(Client, token, sent))
+        {
+            await TenancyApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);   // never weak_password
+        }
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_member");
-        Assert.NotNull(await InviteAsync(invite));
+        using var old = await LoginApi.Login(Client, Address, UserPassword);
+        Assert.Equal(HttpStatusCode.OK, old.StatusCode);
+        using var wrong = await LoginApi.Login(Client, Address, sent);
+        Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
     }
 
     [Fact]
-    public async Task Accepting_one_invitation_leaves_the_others_of_the_address_as_they_are_and_they_then_say_already_member()   // spec 0005 → Effects
+    public async Task A_member_of_the_invited_company_is_409_already_member_and_changes_nothing()   // spec 0017, criterion 9
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var user = await CreateUserAsync(Address, confirmed: true);   // a member of the development company
+        await AddMembershipAsync(user.Id, company, "user");
+        var (invite, token) = await MailedAsync(company);
+        var memberships = await MembershipsAsync();
+        var companies = await InDbAsync(db => db.Companies.CountAsync(TestContext.Current.CancellationToken));
+        var audit = await InDbAsync(db => db.AuditEvents.CountAsync(TestContext.Current.CancellationToken));
+
+        using (var withPassword = await TenancyApi.Accept(Client, token, Password))
+        {
+            await TenancyApi.AssertErrorAsync(withPassword, HttpStatusCode.Conflict, "already_member");
+        }
+
+        using (var tokenAlone = await TenancyApi.AcceptWithoutPassword(Client, token))
+        {
+            await TenancyApi.AssertErrorAsync(tokenAlone, HttpStatusCode.Conflict, "already_member");
+        }
+
+        using (var leaving = await TenancyApi.AcceptLeaving(Client, token))
+        {
+            await TenancyApi.AssertErrorAsync(leaving, HttpStatusCode.Conflict, "already_member");
+        }
+
+        Assert.Equal(memberships.Count, (await MembershipsAsync()).Count);
+        Assert.Equal(companies, await InDbAsync(db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(audit, await InDbAsync(db => db.AuditEvents.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.NotNull(await InviteAsync(invite));
+
+        await RemoveMembershipAsync(user.Id, company);
+        using var afterwards = await TenancyApi.AcceptWithoutPassword(Client, token);   // the invitation works once the membership is gone
+        await TenancyApi.AssertEmptyAsync(afterwards, HttpStatusCode.NoContent);
+    }
+
+    [Fact]
+    public async Task Accepting_one_invitation_leaves_the_others_of_the_address_usable_and_they_join_too()   // spec 0005 → Effects; spec 0017
     {
         var acme = await CreateCompanyAsync("Acme");
         var globex = await CreateCompanyAsync("Globex");
@@ -562,14 +785,17 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
         }
 
         Assert.NotNull(await InviteAsync(globexInvite));
-        using var second = await TenancyApi.Accept(Client, globexToken, "Another-Passw0rd");
-        await TenancyApi.AssertErrorAsync(second, HttpStatusCode.Conflict, "already_member");
+        using (var second = await TenancyApi.Accept(Client, globexToken, "Another-Passw0rd"))
+        {
+            await TenancyApi.AssertEmptyAsync(second, HttpStatusCode.NoContent);
+        }
+
         _ = await SessionApi.LoginAsync(Client, Address, Password);   // the first password stands
-        Assert.Equal(acme, Assert.Single(await NonSeedMembershipsAsync()).CompanyId);
+        Assert.Equal(new[] { acme, globex }.Order(), (await NonSeedMembershipsAsync()).Select(m => m.CompanyId).Order());
     }
 
     [Fact]
-    public async Task Two_invitations_of_two_companies_accepted_at_once_make_one_membership()
+    public async Task Two_invitations_of_two_companies_accepted_at_once_both_join()   // spec 0017, criterion 19
     {
         var acme = await CreateCompanyAsync("Acme");
         var globex = await CreateCompanyAsync("Globex");
@@ -582,10 +808,37 @@ public sealed class InviteAcceptTests(PostgresFixture postgres, KeyMaterialFixtu
             return response.StatusCode;
         })));
 
-        Assert.Equal(1, statuses.Count(s => s == HttpStatusCode.NoContent));
-        Assert.Equal(1, statuses.Count(s => s == HttpStatusCode.Conflict));
-        Assert.Single(await NonSeedMembershipsAsync());
-        Assert.Equal(1, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));   // the refused one stays
+        Assert.All(statuses, s => Assert.Equal(HttpStatusCode.NoContent, s));
+        Assert.Equal(new[] { acme, globex }.Order(), (await NonSeedMembershipsAsync()).Select(m => m.CompanyId).Order());
+        Assert.Equal(0, await InDbAsync(db => db.Invites.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Email == Address, TestContext.Current.CancellationToken)));
+    }
+
+    [Theory]
+    [InlineData("existing")]
+    [InlineData("new")]
+    public async Task An_acceptance_writes_last_used_at_with_joined_at_and_the_next_login_takes_the_invited_company(string kind)   // spec 0017, criterion 11
+    {
+        if (kind == "existing")
+        {
+            await CreateUserAsync(Address, confirmed: true);   // a member of the development company
+            _ = await SessionApi.LoginAsync(Client, Address, UserPassword);   // writes the LastUsedAt of that membership
+            Clock.Advance(TimeSpan.FromMinutes(1));
+        }
+
+        var company = await CreateCompanyAsync("Acme");
+        var (_, token) = await MailedAsync(company);
+
+        using (var accepted = await TenancyApi.Accept(Client, token, Password))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+        }
+
+        var user = Assert.IsType<ApplicationUser>(await UserAsync(Address));
+        var joined = await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == user.Id && m.CompanyId == company).Select(m => m.JoinedAt).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(joined, await LastUsedAtAsync(user.Id, company));
+        var login = await SessionApi.LoginAsync(Client, Address, kind == "new" ? Password : UserPassword);
+        Assert.Equal(company.ToString(), AccessTokens.Text(login.AccessToken, "org_id"));
     }
 
     // ---- what is never logged

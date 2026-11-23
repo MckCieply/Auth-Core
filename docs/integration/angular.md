@@ -110,7 +110,7 @@ for a product with company sign-up only), so a product does not repeat its manif
 | --- | --- | --- |
 | `/reset?token=` | new password, twice; the rules it did not meet; "link used up" | `POST /auth/password/reset` |
 | `/verify?token=` | confirms on opening; a form to ask for a new link when it is used up | `POST /auth/email/verify`, `POST /auth/email/verify/request` |
-| `/invite?token=` | "Join {company} as {role}" and the email; the password, twice; for an address with a private account (the preview's `has_private_account`) the warning in red instead and one button, "Move me to the company and delete my private account", which sends `leave_private_account: true` and no password | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
+| `/invite?token=` | "Join {company} as {role}" and, for an address with no account (the preview's `has_account` `false`), the email and the password, twice; for an address that has an account of any kind (`has_account` `true`) the line "You already have an account with {email}. Accepting adds {company} to it; everything else stays as it is." and one button, "Accept the invitation", which sends the token alone and no password; below it the provider buttons | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
 | `/signup` | "Organization / Private person" when `GET /auth/options` says both are on (with one on, that one); the email, and for an organization the company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` (`kind` `private` for a private person, with no `company_name`) |
 | `/complete-signup?token=` | the address (read-only); for an organization the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview` (it says `kind`), `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 | `/forgot` | email; always the same answer | `POST /auth/password/forgot` |
@@ -216,7 +216,7 @@ because tabs are not synchronised; and a token in memory can be read by script r
 One account can belong to several companies (and at most one personal space), each with its own role. Every session works in one of them,
 the **session's company**: the access token's `org_id` names it, a refresh keeps it, and the other devices of the person keep theirs. A
 product that never switches sees no change. Today a second membership comes from the development seed (`Auth:DevSeed:SecondOrgName`, which puts
-the first seed user in a second company as a plain member), from tests and, since spec 0016, from `POST /auth/orgs` ("Creating another company" below); spec 0017 adds the invitation.
+the first seed user in a second company as a plain member), from tests, from `POST /auth/orgs` ("Creating another company" below) and, since spec 0017, from an invitation to an account that already exists ("Private accounts" below).
 
 - **Listing:** `GET /auth/orgs` with the access token answers `{"orgs":[{"id","name","kind","role":{"id","name"},"current"}]}`: every
   space of the person, ordered by name (ignoring case), then id; `current` is `true` for the one named by the token's `org_id`. A personal space
@@ -285,9 +285,17 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
   after its `204`: Auth-Core does not tell your product that an account is gone. Warn first ("This deletes your account and all your notes. It
   cannot be undone."), ask for the password on the same screen, and on `403 wrong_password` say what happened: the data is gone, the account
   is not. A `429 too_many_attempts` is the lockout: show the wait. On success open the sign-in screen.
-- **An invitation to a private account:** when the preview says `has_private_account`, show the warning (the paragraph of the mail) and one
-  button that sends `leave_private_account: true` with no password: the account keeps its own. Without it the acceptance answers
-  `409 private_account_exists` ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)).
+- **An invitation to an address that has an account** (spec 0017), a private account or a company member's: the preview answers
+  `has_account` `true` (and `org_id`, the invited company's id). Show one line saying the company is added to the account and
+  nothing else changes, with one button that sends `{"token"}` and no password; a `password` that is sent is not used. The acceptance
+  adds the membership and nothing more: the account keeps its password, its other companies, its personal space and its sessions, and
+  the new company is in `GET /auth/orgs` at once with `current` `false`. After the `204` move only the same person, and only
+  with `POST /auth/switch` and the preview's `org_id`: the sample does it when `GET /auth/me` names the invited address (equal up to
+  ASCII case) and otherwise opens `/login` with the address, because the open session may be another person's. `409 already_member`
+  now means a member of the invited company only. `leave_private_account: true` is still accepted for a screen built for spec 0010: it
+  deletes the personal space on purpose, and the sample no longer sends it
+  ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)). The server no longer answers `409 private_account_exists`; the
+  sample keeps the string for an older server and shows the generic error for it.
 - **Removing a member deletes the account only with its last space** (spec 0015), and deleting a company does the same for every member, the
   admin included: a person who is a member of another space keeps the account. Say so in the confirmation of your own team screen, with the
   sample's sentence: "This person loses access to this company. Their account is deleted if this company is their last."
@@ -301,7 +309,7 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
 
 When `GET /auth/options` lists `providers` (`["google","microsoft"]`, in the manifest's order), draw one button per name, first on the
 sign-in, sign-up and invitation screens, then "or" and the form. **A button is a link, not a call**: `<a href="/auth/providers/google/start">`
-(on `/invite` with `?invite=<the token>`, for an address without a private account only). The browser leaves for the provider and comes back
+(on `/invite` with `?invite=<the token>`). The browser leaves for the provider and comes back
 to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src/app/pages/provider-buttons.ts)).
 
 - **The return screen** (the sample's `/provider-return`, the address of `Auth:App:FrontendUrls:ProviderReturn`) reads the fragment once,
@@ -320,8 +328,10 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
 - **The exchange.** `POST /auth/providers/exchange` `{"ticket"}` answers as a login does (the token and the refresh cookie), or
   `{"next":"link","email","email_verified"}` (open the link screen), or `{"next":"finish_signup","email","kinds"}` (open the finish
   screen), or an error that the sample words one by one: `invalid_ticket` (too late, used, or another browser: start again), `no_email`,
-  `no_account`, `already_registered`, `no_membership`, and for an invitation `invalid_token`, `address_mismatch`, `already_member`,
-  `private_account_exists` and `provider_already_linked`. A `429` keeps the ticket and shows "Try again". The cookie `auth_pt` goes along by
+  `no_account`, `already_registered`, `no_membership`, and for an invitation `invalid_token`, `address_mismatch`, `already_member`
+  (a member of the invited company), `already_registered` (spec 0017: the address has an account and the provider's identity is not one of its
+  logins; the person accepts with the button of `/invite` and signs in) and `provider_already_linked`. When the identity is one of the
+  account's logins, an invitation joins the company and signs the person in to it, with the answer of a login. A `429` keeps the ticket and shows "Try again". The cookie `auth_pt` goes along by
   itself; the call needs no access token, so leave the provider paths out of the interceptor's token paths.
 - **The link screen** asks the password of the existing account once (`POST /auth/providers/link`); when `email_verified` is `false` it
   says so and adds a link to sign-up above the same password form, because the provider did not prove the address and the person may have

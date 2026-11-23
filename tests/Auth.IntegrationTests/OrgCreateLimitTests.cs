@@ -111,7 +111,7 @@ public sealed class OrgCreateLimitTests : AuditTestBase
     [Fact]
     public async Task Invitation_acceptance_is_not_limited()   // Review Focus 4
     {
-        // An account that already holds more companies than the limit: whatever its invitation is answered, the limit is not the reason.
+        // An account that already holds more companies than the limit: its invitation is joined (204) and the company-creation limit is ignored.
         var (_, admin, _) = await CompanyWithAdminAsync();
         await JoinNewCompanyAsync(admin, "Globex");
         await JoinNewCompanyAsync(admin, "Initech");
@@ -119,10 +119,11 @@ public sealed class OrgCreateLimitTests : AuditTestBase
         var invite = await AddInviteAsync(crowded, Boss, "user");
         await EnqueueInvitationAsync(invite, Boss);
         await DispatchAsync();
-        using (var refused = await TenancyApi.Accept(Client, TokenIn(Mail.Sent.Last(m => m.To == Boss)), "Invited-Passw0rd"))
+        using (var joined = await TenancyApi.Accept(Client, TokenIn(Mail.Sent.Last(m => m.To == Boss)), "Invited-Passw0rd"))
         {
-            Assert.NotEqual("company_limit_reached", await ErrorOfAsync(refused));
+            Assert.Equal(HttpStatusCode.NoContent, joined.StatusCode);   // spec 0017: an existing account joins whatever it holds
         }
+        Assert.Equal(4, await CompanyCountOfAsync(admin));   // three before, one more by the join: the limit (2) did not stop it
 
         // An address with no account: the invitation makes the account and the membership, as ever.
         var other = await CreateCompanyAsync("Hooli");

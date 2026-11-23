@@ -51,50 +51,81 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
         using var forNew = await TenancyApi.Preview(Client, newToken);
 
         var mine = await TenancyApi.ReadOkAsync(forPrivate);
-        Assert.Equal(["email", "has_private_account", "org_name", "role"], mine.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["email", "has_account", "has_private_account", "org_id", "org_name", "role"], mine.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.True(mine.GetProperty("has_private_account").GetBoolean());
+        Assert.True(mine.GetProperty("has_account").GetBoolean());
         Assert.Equal("Acme", mine.GetProperty("org_name").GetString());
-        Assert.False((await TenancyApi.ReadOkAsync(forNew)).GetProperty("has_private_account").GetBoolean());
+        var fresh = await TenancyApi.ReadOkAsync(forNew);
+        Assert.False(fresh.GetProperty("has_private_account").GetBoolean());
+        Assert.False(fresh.GetProperty("has_account").GetBoolean());
     }
 
     [Fact]
-    public async Task A_company_members_address_is_still_already_member()   // criterion 17
+    public async Task The_preview_says_has_private_account_true_also_for_an_account_with_a_company()   // spec 0017, criterion 2
     {
-        await AddMemberAsync(await DevCompanyIdAsync(), "member@poczta.test", "user");
-        var (_, invite, token) = await InvitedAsync("member@poczta.test");
+        var (user, _) = await CreatePrivateAccountAsync(Private);
+        await AddMembershipAsync(user, await DevCompanyIdAsync(), "user");
+        var (_, _, token) = await InvitedAsync(Private);
 
         using var preview = await TenancyApi.Preview(Client, token);
-        using var accept = await TenancyApi.AcceptLeaving(Client, token);
 
-        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
-        await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");
-        Assert.NotNull(await InviteAsync(invite));
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.True(body.GetProperty("has_private_account").GetBoolean());
+        Assert.True(body.GetProperty("has_account").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_member_of_another_company_joins_and_a_leave_private_account_true_is_ignored()   // spec 0017, criteria 3 and 7
+    {
+        var member = await AddMemberAsync(await DevCompanyIdAsync(), "member@poczta.test", "user");
+        var (company, invite, token) = await InvitedAsync("member@poczta.test");
+
+        using (var preview = await TenancyApi.Preview(Client, token))
+        {
+            var body = await TenancyApi.ReadOkAsync(preview);   // the invitation is for Acme: a member of another company gets 200
+            Assert.False(body.GetProperty("has_private_account").GetBoolean());
+        }
+
+        using (var accept = await TenancyApi.AcceptLeaving(Client, token))   // no personal space: the flag is ignored
+        {
+            await TenancyApi.AssertEmptyAsync(accept, HttpStatusCode.NoContent);
+        }
+
+        Assert.Null(await InviteAsync(invite));
+        Assert.Equal(
+            new[] { await DevCompanyIdAsync(), company }.Order(),
+            (await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == member).ToListAsync(TestContext.Current.CancellationToken))).Select(m => m.CompanyId).Order());
+        var row = await SingleAsync(AuditKinds.InviteAccepted);
+        Assert.Equal(["role"], AuditApi.DetailNames(row));   // no left_private_account
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData(false)]
-    public async Task Accepting_without_leave_private_account_is_409_private_account_exists_and_changes_nothing(bool? leave)   // criterion 18
+    public async Task Accepting_without_leave_private_account_joins_and_keeps_the_personal_space(bool? leave)   // spec 0017, criteria 5 and 13
     {
         var (user, space) = await CreatePrivateAccountAsync(Private);
         var before = await SessionApi.LoginAsync(Client, Private, UserPassword);
-        var (_, invite, token) = await InvitedAsync();
-        var hash = (await InviteAsync(invite))!.TokenHash;
+        var (company, invite, token) = await InvitedAsync();
+        var spaceRole = await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == space, TestContext.Current.CancellationToken));
         object body = leave is null
             ? new { token, password = Ignored }
             : new { token, password = Ignored, leave_private_account = leave.Value };
 
-        using var response = await TenancyApi.Send(Client, HttpMethod.Post, TenancyApi.AcceptPath, null, body);
+        using (var response = await TenancyApi.Send(Client, HttpMethod.Post, TenancyApi.AcceptPath, null, body))
+        {
+            await TenancyApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);   // never private_account_exists
+        }
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "private_account_exists");
         Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user && m.CompanyId == space, TestContext.Current.CancellationToken)));
-        Assert.Equal(hash, (await InviteAsync(invite))!.TokenHash);   // the invitation still works
-        Assert.Empty(await AuditAsync(AuditKinds.InviteAccepted));
-        _ = await SessionApi.RefreshOk(Client, before.RefreshToken);   // the session from before the refusal is not ended
-        var session = await SessionApi.LoginAsync(Client, Private, UserPassword);
-        Assert.Equal("personal", AccessTokens.Text(session.AccessToken, "org_kind"));
-        using var moved = await TenancyApi.AcceptLeaving(Client, token);
-        Assert.Equal(HttpStatusCode.NoContent, moved.StatusCode);
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
+        Assert.Equal(spaceRole, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == space, TestContext.Current.CancellationToken)));
+        Assert.True(spaceRole > 0);
+        Assert.Equal(1, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user && m.CompanyId == company, TestContext.Current.CancellationToken)));
+        Assert.Null(await InviteAsync(invite));   // used up
+        var refreshed = await SessionApi.RefreshOk(Client, before.RefreshToken);   // the personal session goes on
+        Assert.Equal("personal", AccessTokens.Text(refreshed.AccessToken, "org_kind"));
+        Assert.Equal(company.ToString(), (await SingleAsync(AuditKinds.InviteAccepted)).OrgId.ToString());
     }
 
     [Theory]
@@ -115,10 +146,18 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
     }
 
     [Fact]
-    public async Task Accepting_with_leave_private_account_moves_the_account_and_deletes_its_space()   // criterion 19
+    public async Task Accepting_with_leave_private_account_moves_the_account_and_deletes_its_space()   // criterion 19; spec 0017, criterion 6
     {
         var (user, space) = await CreatePrivateAccountAsync(Private);
-        var before = await SessionApi.LoginAsync(Client, Private, UserPassword);
+        var dev = await DevCompanyIdAsync();
+        await AddMembershipAsync(user, dev, "user");
+        var stamp = await InDbAsync(db => db.Users.AsNoTracking().Where(u => u.Id == user).Select(u => u.SecurityStamp).SingleAsync(TestContext.Current.CancellationToken));
+        var first = await SessionApi.LoginAsync(Client, Private, UserPassword);
+        var personal = await SessionApi.SwitchOk(Client, first.RefreshToken, space);   // a session in the personal space
+        var second = await SessionApi.LoginAsync(Client, Private, UserPassword);
+        var elsewhere = await SessionApi.SwitchOk(Client, second.RefreshToken, dev);   // a session in the development company
+        Assert.Equal("personal", AccessTokens.Text(personal.AccessToken, "org_kind"));
+        Clock.Advance(TimeSpan.FromMinutes(1));   // the move's LastUsedAt is then later than the switches', so the next login takes the company
         var (company, invite, token) = await InvitedAsync(role: "user");
 
         using (var accepted = await TenancyApi.AcceptLeaving(Client, token, Ignored))
@@ -128,15 +167,19 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
 
         Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
         Assert.Equal(0, await InDbAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == space, TestContext.Current.CancellationToken)));
-        var membership = Assert.Single(await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == user).ToListAsync(TestContext.Current.CancellationToken)));
-        Assert.Equal(company, membership.CompanyId);
-        Assert.Equal(await RoleIdAsync(company, "user"), membership.RoleId);
+        var memberships = await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == user).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { dev, company }.Order(), memberships.Select(m => m.CompanyId).Order());   // the company membership it had stays
+        Assert.Equal(await RoleIdAsync(company, "user"), memberships.Single(m => m.CompanyId == company).RoleId);
         Assert.Null(await InviteAsync(invite));
+        Assert.Equal(stamp, await InDbAsync(db => db.Users.AsNoTracking().Where(u => u.Id == user).Select(u => u.SecurityStamp).SingleAsync(TestContext.Current.CancellationToken)));
 
-        using (var refresh = await SessionApi.Refresh(Client, before.RefreshToken))
+        using (var refresh = await SessionApi.Refresh(Client, personal.RefreshToken))
         {
-            await SessionApi.AssertInvalidGrantAsync(refresh);   // every session ended
+            await SessionApi.AssertInvalidGrantAsync(refresh);   // the session of the personal space is over
         }
+
+        var stillThere = await SessionApi.RefreshOk(Client, elsewhere.RefreshToken);   // the session that went to the development company goes on
+        Assert.Equal(dev.ToString(), AccessTokens.Text(stillThere.AccessToken, "org_id"));
 
         using (var sent = await LoginApi.Login(Client, Private, Ignored))
         {
@@ -160,7 +203,7 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
     }
 
     [Fact]
-    public async Task The_move_ends_the_mail_links_and_the_streak_of_the_account()   // criterion 19: as at any acceptance
+    public async Task The_move_keeps_the_mail_links_and_the_streak_of_the_account()   // spec 0017, criterion 10
     {
         var (user, _) = await CreatePrivateAccountAsync(Private);
         await EnqueueAsync(MailKind.PasswordReset, Private);
@@ -170,7 +213,7 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
             Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         }
 
-        Assert.Equal(1, await InDbAsync(db => db.EmailTokens.CountAsync(t => t.UserId == user, TestContext.Current.CancellationToken)));   // what the move must end
+        Assert.Equal(1, await InDbAsync(db => db.EmailTokens.CountAsync(t => t.UserId == user, TestContext.Current.CancellationToken)));
         Assert.Equal(1, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
 
         var (_, _, token) = await InvitedAsync();
@@ -179,33 +222,31 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
             Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
         }
 
-        Assert.Equal(0, await InDbAsync(db => db.EmailTokens.CountAsync(t => t.UserId == user, TestContext.Current.CancellationToken)));
-        Assert.Equal(0, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.EmailTokens.CountAsync(t => t.UserId == user, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(db => db.LoginStreaks.CountAsync(TestContext.Current.CancellationToken)));
     }
 
     [Fact]
-    public async Task An_account_with_a_company_membership_besides_the_personal_one_is_already_member()   // a state only a direct change of the database leaves
+    public async Task An_account_with_a_company_and_a_personal_space_moves_and_keeps_the_company()   // spec 0017
     {
         var (user, space) = await CreatePrivateAccountAsync(Private);
         var elsewhere = await DevCompanyIdAsync();
-        var role = await RoleIdAsync(elsewhere, "user");
-        await InDbAsync(async db =>
-        {
-            // Joined later than the personal space, so that the earliest membership is the personal one.
-            db.Memberships.Add(new Membership { UserId = user, CompanyId = elsewhere, RoleId = role, JoinedAt = StorableTime.Now(Clock).AddHours(1) });
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-            return 0;
-        });
-        var (_, invite, token) = await InvitedAsync();
+        await AddMembershipAsync(user, elsewhere, "user");   // joined later than the personal space
+        var (company, invite, token) = await InvitedAsync();
 
         using var preview = await TenancyApi.Preview(Client, token);
-        using var accept = await TenancyApi.AcceptLeaving(Client, token);
+        using (var accept = await TenancyApi.AcceptLeaving(Client, token))
+        {
+            await TenancyApi.AssertEmptyAsync(accept, HttpStatusCode.NoContent);
+        }
 
-        await TenancyApi.AssertErrorAsync(preview, HttpStatusCode.Conflict, "already_member");
-        await TenancyApi.AssertErrorAsync(accept, HttpStatusCode.Conflict, "already_member");
-        Assert.NotNull(await InviteAsync(invite));
-        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
-        Assert.Equal(2, await InDbAsync(db => db.Memberships.CountAsync(m => m.UserId == user, TestContext.Current.CancellationToken)));
+        var body = await TenancyApi.ReadOkAsync(preview);
+        Assert.True(body.GetProperty("has_private_account").GetBoolean());
+        Assert.Null(await InviteAsync(invite));
+        Assert.Equal(0, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == space, TestContext.Current.CancellationToken)));
+        Assert.Equal(
+            new[] { elsewhere, company }.Order(),
+            (await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == user).ToListAsync(TestContext.Current.CancellationToken))).Select(m => m.CompanyId).Order());
     }
 
     [Theory]
@@ -267,9 +308,8 @@ public sealed class PrivateInvitationTests(PostgresFixture postgres, KeyMaterial
     }
 
     [Fact]
-    public void The_new_error_is_a_409()
+    public void private_account_exists_is_no_longer_a_code_of_the_server()   // spec 0017, criterion 13
     {
-        Assert.Equal(409, TenancyErrors.StatusOf(TenancyErrors.PrivateAccountExists));
-        Assert.Equal("private_account_exists", TenancyErrors.PrivateAccountExists);
+        Assert.Throws<ArgumentOutOfRangeException>(() => TenancyErrors.StatusOf("private_account_exists"));
     }
 }

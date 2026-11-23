@@ -282,24 +282,18 @@ public sealed partial class MailDispatcher(
         var invite = invites[0];
         var companyName = await db.Companies.AsNoTracking().Where(c => c.Id == invite.CompanyId).Select(c => c.Name).SingleAsync(cancellationToken);
 
-        // Spec 0010: an address that has a private account, spelled as the invitation spells it up to ASCII case, is told what accepting does to
-        // it. Decided now, when the mail is composed; the preview decides again when the link is used.
+        // Spec 0017: an address that has an account of any kind, spelled as the invitation spells it up to ASCII case, is told that accepting adds
+        // the company to it. Decided now, when the mail is composed; the preview decides again when the link is used.
         var account = await db.Users.AsNoTracking()
             .Where(u => u.NormalizedEmail == invite.NormalizedEmail)
             .OrderBy(u => u.Id)
-            .Select(u => new { u.Id, u.Email })
+            .Select(u => new { u.Email })
             .FirstOrDefaultAsync(cancellationToken);
-        var privateAccount = account is { Email: { } stored }
-            && EmailInput.IsSameAddress(stored, invite.Email)
-            && await (
-                from membership in db.Memberships.AsNoTracking()
-                join space in db.Companies.AsNoTracking() on membership.CompanyId equals space.Id
-                where membership.UserId == account.Id && space.Kind == CompanyKind.Personal
-                select membership.UserId).AnyAsync(cancellationToken);
+        var accountExists = account is { Email: { } stored } && EmailInput.IsSameAddress(stored, invite.Email);
         return async () =>
         {
             var token = await InviteTokens.IssueAsync(db, invite.Id, now, cancellationToken);
-            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, privateAccount);
+            return composer.Compose(MailKind.Invitation, invite.Email, token, companyName, accountExists: accountExists);
         };
     }
 

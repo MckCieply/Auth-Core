@@ -363,7 +363,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     [InlineData("member")]
     [InlineData("unconfirmed")]
     [InlineData("no_space")]
-    public async Task A_company_members_address_is_409_already_member_and_the_invitation_stays(string which)   // criterion 22; an account with no space is refused the same way
+    public async Task An_account_whose_identity_is_not_its_login_is_409_already_registered_and_the_invitation_stays(string which)   // spec 0017, criterion 15; an account with no space is refused the same way
     {
         var (_, invite, token) = await InvitationAsync();
         var existing = await CreateUserAsync(Invited, confirmed: which != "unconfirmed", member: which != "no_space");   // a member of the development company, or of none
@@ -373,7 +373,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
 
         using var response = await ProviderApi.Exchange(Client, ticket);
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_member");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_registered");
         await AssertRefusedAsync(before, invite, token);
         var after = await InDbAsync(db => db.Users.AsNoTracking().SingleAsync(u => u.Id == existing.Id, TestContext.Current.CancellationToken));
         Assert.Equal((hash, which != "unconfirmed"), (after.PasswordHash, after.EmailConfirmed));   // not taken over: password kept, email not confirmed by a provider
@@ -381,7 +381,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task A_private_accounts_address_is_409_private_account_exists_and_the_invitation_stays()   // criterion 22, Settled 15
+    public async Task A_private_accounts_address_with_an_identity_that_is_not_its_login_is_409_already_registered()   // spec 0017, criteria 13 and 15
     {
         var (_, invite, token) = await InvitationAsync();
         await CreatePrivateAccountAsync(Invited);
@@ -390,10 +390,78 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
 
         using var response = await ProviderApi.Exchange(Client, ticket);
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "private_account_exists");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_registered");
         await AssertRefusedAsync(before, invite, token);
-        using var moved = await TenancyApi.AcceptLeaving(Client, token);   // the move of spec 0010 still works
-        Assert.Equal(HttpStatusCode.NoContent, moved.StatusCode);
+        using var joined = await TenancyApi.AcceptWithoutPassword(Client, token);   // the invitation stayed usable: the button of the screen
+        Assert.Equal(HttpStatusCode.NoContent, joined.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_member_of_the_invited_company_is_409_already_member_and_the_invitation_and_ticket_stay()   // spec 0017, criterion 16
+    {
+        var (acme, invite, token) = await InvitationAsync();
+        var existing = await CreateUserAsync(Invited, confirmed: true);
+        await AddMembershipAsync(existing.Id, acme, "user");
+        await LinkAsync(existing.Id, "google", JanSubject);   // the identity is its login: still already_member, never a second membership
+        var ticket = await InviteTicketAsync(token, Jan());
+        var before = await CountsAsync();
+
+        using var response = await ProviderApi.Exchange(Client, ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_member");
+        await AssertRefusedAsync(before, invite, token);
+    }
+
+    [Theory]
+    [InlineData("member")]
+    [InlineData("private")]
+    public async Task An_account_whose_identity_is_its_login_joins_and_is_signed_in_to_the_invited_company(string kind)   // spec 0017, criteria 11 and 14
+    {
+        var (acme, invite, token) = await InvitationAsync();
+        Guid userId, own;
+        if (kind == "member")
+        {
+            userId = (await CreateUserAsync(Invited, confirmed: true)).Id;
+            own = await DevCompanyIdAsync();
+            // Strictly later than the acceptance's now: an equal value would leave the choice to the order of the ids.
+            await InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == own)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastUsedAt, (DateTimeOffset?)(Clock.GetUtcNow() + TimeSpan.FromHours(1))), TestContext.Current.CancellationToken));
+        }
+        else
+        {
+            (userId, own) = await CreatePrivateAccountAsync(Invited);
+        }
+
+        await LinkAsync(userId, "google", JanSubject);
+        var earlier = await SessionApi.LoginAsync(Client, Invited, UserPassword);
+        var ticket = await InviteTicketAsync(token, Jan());
+
+        using var response = await ProviderApi.Exchange(Client, ticket);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var session = await SessionApi.ReadSessionAsync(response);
+        ProviderApi.AssertBindingCleared(response);
+        Assert.Equal(acme.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
+        Assert.Equal(userId.ToString(), AccessTokens.Text(session.AccessToken, "sub"));
+        _ = await SessionApi.RefreshOk(Client, session.RefreshToken);
+        var kept = await SessionApi.RefreshOk(Client, earlier.RefreshToken);   // the earlier session goes on in its own company
+        Assert.Equal(own.ToString(), AccessTokens.Text(kept.AccessToken, "org_id"));
+        var memberships = await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == userId).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(new[] { acme, own }.Order(), memberships.Select(m => m.CompanyId).Order());
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == own, TestContext.Current.CancellationToken)));   // the other space is kept
+        Assert.Equal(1, await AccountsAsync());
+        Assert.Equal(1, await LoginsAsync());
+        Assert.Null(await InviteAsync(invite));
+        Assert.Equal(0, await TicketCountAsync());
+        var accepted = await SingleAsync(AuditKinds.InviteAccepted);
+        Assert.Equal(["provider", "role"], AuditApi.DetailNames(accepted));
+        Assert.Equal("google", AuditApi.Text(accepted, "provider"));
+        Assert.Equal(userId, accepted.SubjectUserId);
+        var signedIn = Assert.Single(await AuditAsync(AuditKinds.LoginSucceeded), r => AuditApi.DetailNames(r).Contains("provider"));
+        Assert.Equal("google", AuditApi.Text(signedIn, "provider"));
+        Assert.Equal(acme, signedIn.OrgId);
+        var joinedAt = await InDbAsync(db => db.Memberships.AsNoTracking().Where(m => m.UserId == userId && m.CompanyId == acme).Select(m => m.JoinedAt).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.True(await LastUsedAtAsync(userId, acme) >= joinedAt);
     }
 
     [Fact]
@@ -446,7 +514,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     [Theory]
     [InlineData("member")]
     [InlineData("private")]
-    public async Task An_address_with_an_account_is_409_before_the_identity_is_judged(string kind)   // criterion 22: the account's answer comes before provider_already_linked
+    public async Task An_identity_of_another_account_is_409_provider_already_linked_also_when_the_address_has_an_account(string kind)   // spec 0017, criterion 16: step 5 before step 6
     {
         var (_, invite, token) = await InvitationAsync();
         if (kind == "member")
@@ -464,7 +532,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
 
         using var response = await ProviderApi.Exchange(Client, ticket);
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, kind == "member" ? "already_member" : "private_account_exists");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "provider_already_linked");
         await AssertRefusedAsync(before, invite, token);
     }
 
@@ -703,7 +771,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task A_sign_up_completion_ahead_of_the_exchange_makes_the_account_and_the_exchange_is_409_already_member_with_the_invitation_kept()   // spec 0011 → exchange: account created meanwhile; criterion 20
+    public async Task A_sign_up_completion_ahead_of_the_exchange_makes_the_account_and_the_exchange_is_409_already_registered_with_the_invitation_kept()   // spec 0011 → exchange: account created meanwhile; criterion 20
     {
         var (_, invite, token) = await InvitationAsync();
         var ticket = await InviteTicketAsync(token, Jan());
@@ -722,7 +790,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         using var completed = await completion;
         using var refused = await exchange;
         Assert.Equal(HttpStatusCode.OK, completed.StatusCode);
-        await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.Conflict, "already_member");
+        await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.Conflict, "already_registered");
         Assert.Equal(1, await AccountsAsync());
         Assert.Equal(0, await LoginsAsync());
         Assert.Equal(1, await TicketCountAsync());
@@ -741,7 +809,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         using var response = await ExchangeWhileLockedAsync(
             ticket, () => kind == "company" ? CreateUserAsync(Invited, confirmed: true) : CreatePrivateAccountAsync(Invited));
 
-        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, kind == "company" ? "already_member" : "private_account_exists");
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Conflict, "already_registered");
         Assert.Equal(1, await AccountsAsync());
         Assert.Equal(0, await LoginsAsync());
         Assert.Equal(1, await TicketCountAsync());
@@ -822,7 +890,7 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
     }
 
     [Fact]
-    public async Task An_account_that_a_removal_deletes_between_the_read_of_it_and_the_read_of_its_space_is_made_anew()   // spec 0011 → exchange: removed meanwhile; as spec 0010's acceptance
+    public async Task An_account_that_a_removal_deletes_while_the_exchange_waits_for_its_row_is_made_anew()   // spec 0011 → exchange: removed meanwhile; as spec 0010's acceptance
     {
         var (acme, _, _) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
         var worker = await AddMemberAsync(acme, Invited, "user");
@@ -830,10 +898,10 @@ public sealed class ProviderInvitationTests(PostgresFixture postgres, KeyMateria
         var ticket = await InviteTicketAsync(token, Jan());
 
         Task<HttpResponseMessage> exchange;
-        await using (var held = await HeldLock.MembershipsAsync(Factory))
+        await using (var held = await HeldLock.AccountRowAsync(Factory, worker))
         {
             exchange = ProviderApi.Exchange(Client, ticket);
-            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the account is read; the read of its space waits for the memberships
+            await HeldLock.WaitForWaitersAsync(Factory, 1, exchange);   // the account is read; its row lock waits for the held row
             await held.DeleteAccountAsync(worker);            // the removal's effect: the account and its membership go, and commit with the release
             await held.ReleaseAsync();
         }
