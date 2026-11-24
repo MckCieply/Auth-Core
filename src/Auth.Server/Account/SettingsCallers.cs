@@ -64,6 +64,15 @@ internal static class SettingsCallers
         ArgumentNullException.ThrowIfNull(memberships);
         ArgumentNullException.ThrowIfNull(caller);
 
+        // Spec 0015's order: the membership row before the account's row (which the endpoints take next), under the address lock.
+        if (!await SpaceLocks.LockRowAsync(db, caller.UserId, caller.Tenant.CompanyId, CancellationToken.None))
+        {
+            // The membership went while the request waited: with the account (a deletion) the session is gone, without it (a removal) the space is.
+            return await db.Users.AsNoTracking().AnyAsync(u => u.Id == caller.UserId, CancellationToken.None)
+                ? Refused(TenancyErrors.NoMembership)
+                : Refused(TenancyErrors.SessionRequired);
+        }
+
         var session = await DeviceSessions.ReadAsync(db, caller.Session.TokenId, caller.UserId, now, CancellationToken.None);
         return session is null
             ? Refused(TenancyErrors.SessionRequired)

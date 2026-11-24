@@ -588,11 +588,11 @@ public sealed class AccountPasswordTests : ProviderTestBase
         var worker = await AddMemberAsync(company, Ola, "user");
         var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
         await ResetTokenAsync();
-        _race.Pattern = "FOR KEY SHARE";   // the first such command of the change is its read of the account's row
+        _race.Pattern = "FOR NO KEY UPDATE";   // the first such command of the change is the lock of its membership row (spec 0015's order)
         _race.Skip = 0;
         _race.Before = async () =>
         {
-            // The removal takes no address lock: it deletes the account and commits while the change, past its re-reads, is about to lock the row.
+            // The removal takes no address lock: it deletes the account and commits while the change, past its re-reads, is about to lock its membership row.
             using var removed = await TenancyApi.Send(Client, HttpMethod.Delete, $"/auth/org/members/{worker}", adminToken);
             Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
         };

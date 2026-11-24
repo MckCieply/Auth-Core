@@ -71,10 +71,10 @@ public sealed class ProviderUnlinkRaceTests : ProviderTestBase
     private Func<Task<HttpResponseMessage>> UnlinkWhileTheSignInHoldsTheLogin(SessionApi.Session session) =>
         StopAndSend(AccountHold, 1, () => SettingsApi.Unlink(Client, session, "google"));
 
-    /// <summary>Stops the next sign-in before its login read and unlinks the login then: the unlink commits first.</summary>
+    /// <summary>Stops the next sign-in before it takes its membership row (the first lock of its order) and unlinks the login then: the unlink commits first.</summary>
     private void UnlinkBeforeTheSignInReadsTheLogin(SessionApi.Session session)
     {
-        _race.Pattern = LoginHold;
+        _race.Pattern = "FOR NO KEY UPDATE";
         _race.Before = async () =>
         {
             using var unlinked = await SettingsApi.Unlink(Client, session, "google");   // commits before the sign-in reads the login again

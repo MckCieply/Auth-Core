@@ -3,6 +3,7 @@ using Auth.Server.Account;
 using Auth.Server.Api;
 using Auth.Server.Audit;
 using Auth.Server.Email;
+using Auth.Server.Login;
 using Auth.Server.Requests;
 using Auth.Server.Tenancy;
 using OpenIddict.Abstractions;
@@ -110,6 +111,13 @@ public static class ProviderConnectEndpoint
         if (again.Caller is not { } current)
         {
             return again.Refusal!;
+        }
+
+        // The account's row under a share lock, after the membership row ReadAgainAsync took: an account deletion locks it and then deletes
+        // the logins, so a login added for an account that is going would otherwise be a foreign-key failure.
+        if (!await AtomicSignInResult.AccountExistsAsync(db, current.UserId, CancellationToken.None))
+        {
+            return ApiResults.Error(TenancyErrors.SessionRequired);
         }
 
         if (!current.Session.IsConfirmedAt(now))

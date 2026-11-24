@@ -443,6 +443,33 @@ public sealed class ProviderConnectTests(PostgresFixture postgres, KeyMaterialFi
     }
 
     [Fact]
+    public async Task A_connect_for_an_account_whose_deletion_holds_its_rows_is_refused_cleanly_and_never_a_500()   // lock order: the membership row, then the account's
+    {
+        var (userId, session) = await AccountAsync();
+        var ticket = await ConnectTicketAsync();
+        var companyId = await InDbAsync(db => db.Memberships.Where(m => m.UserId == userId).Select(m => m.CompanyId).SingleAsync(TestContext.Current.CancellationToken));
+
+        HttpResponseMessage pending;
+        await using (var held = await HeldLock.MembershipRowAsync(Factory, userId, companyId))
+        {
+            var sent = SettingsApi.Connect(Client, session, ticket);
+            await HeldLock.WaitForWaitersAsync(Factory, 1, sent);
+            await held.DeleteMembershipAsync(userId, companyId);
+            await held.DeleteAccountAsync(userId);
+            await held.ReleaseAsync();
+            pending = await sent;
+        }
+
+        using (pending)
+        {
+            await TenancyApi.AssertErrorAsync(pending, HttpStatusCode.Unauthorized, "session_required");   // the account is gone with its membership
+        }
+
+        Assert.Empty(await LoginsOfAsync(userId));
+        Assert.Equal(0, await NoticeCountAsync());
+    }
+
+    [Fact]
     public async Task Two_connects_of_two_identities_of_one_provider_at_once_add_one_and_the_other_is_409_provider_in_use()   // criterion 13
     {
         var (userId, session) = await AccountAsync();

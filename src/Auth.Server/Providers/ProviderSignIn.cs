@@ -49,6 +49,13 @@ internal static class ProviderSignIn
                 return ApiResults.Error(TenancyErrors.InvalidTicket);
             }
 
+            // The membership before the account's row and the login's (spec 0015's order); the session's own lock on it is then the same one.
+            if (!await SpaceLocks.LockRowAsync(db, account.Id, tenant.CompanyId, http.RequestAborted))
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.InvalidTicket);
+            }
+
             // The login this sign-in signs in with, held to the commit. An unlink that committed first leaves none: nothing is signed in.
             if (!await ProviderLogins.HoldAsync(db, account.Id, ticket.Provider, ticket.IdentityKey, http.RequestAborted))
             {

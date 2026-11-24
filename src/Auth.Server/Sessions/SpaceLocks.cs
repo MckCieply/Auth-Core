@@ -45,6 +45,21 @@ public static class SpaceLocks
         return true;
     }
 
+    /// <summary>
+    /// Locks the user's membership in a company <c>FOR NO KEY UPDATE</c>, the mode a sign-in takes it in, and writes nothing (spec 0012 → Lock
+    /// order: a settings change and a provider sign-in take it before the account's row, as spec 0015's order says; the session it renews then
+    /// takes the same lock again). <see langword="false"/> when the row is gone.
+    /// </summary>
+    public static async Task<bool> LockRowAsync(AuthDbContext db, Guid userId, Guid companyId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var found = await db.Database
+            .SqlQuery<int>($"""SELECT 1 AS "Value" FROM "Memberships" WHERE "UserId" = {userId} AND "CompanyId" = {companyId} FOR NO KEY UPDATE""")
+            .ToListAsync(cancellationToken);
+        return found.Count == 1;
+    }
+
     /// <summary>Locks the row <c>FOR KEY SHARE</c> and writes nothing. <see langword="false"/> in the cases of <see cref="TakeAsync"/>.</summary>
     public static async Task<bool> HoldAsync(AuthDbContext db, Guid userId, SessionSpace space, CancellationToken cancellationToken)
     {
