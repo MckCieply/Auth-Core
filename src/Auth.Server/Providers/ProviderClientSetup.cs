@@ -10,7 +10,8 @@ namespace Auth.Server.Providers;
 /// itself), the state for 10 minutes, protected by the instance's own key files (the client needs signing and encryption credentials), the request-forgery cookie
 /// <c>SameSite=Lax</c> on <c>/auth/providers</c> (Amendment A4), userinfo off (the claims come from the identity token alone), and the client's URI
 /// the return address's origin (Amendment A2; without it a callback that reaches the server under another scheme or host than the start fails as an invalid state). A provider is registered only when its two keys and the return address are set: the web
-/// providers of Google and Microsoft (tenant <c>common</c>), or, with the test issuer (Development), plain OpenID Connect registrations of it.
+/// providers of Google, Microsoft (tenant <c>common</c>) and GitHub, or, with the test issuer (Development), plain registrations of it (OpenID Connect for the
+/// first two, OAuth 2.0 for GitHub, spec 0012). <see cref="GitHubReader"/> reads GitHub's identity in both modes.
 /// </summary>
 public static class ProviderClientSetup
 {
@@ -20,6 +21,16 @@ public static class ProviderClientSetup
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(keys);
 
+        // Spec 0012, Amendment A4: the GitHub reader's own client, one attempt per call (OpenIddict's own clients retry), with GitHub's headers.
+        // It follows no redirect: a 3xx is "not 200" (provider_error), not a second request, and a revocation is never repeated at another address.
+        // It keeps no cookies: the factory pools the handler, and a cookie of one person's answer must never go out with another's request.
+        builder.Services.AddHttpClient(GitHubReader.HttpClientName, client =>
+        {
+            client.Timeout = GitHubReader.CallBound;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Auth-Core");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
+
         return builder.AddClient(options =>
         {
             options.AllowAuthorizationCodeFlow();
@@ -28,6 +39,7 @@ public static class ProviderClientSetup
             options.AddSigningCertificate(keys.Signing).AddEncryptionCertificate(keys.Encryption);
             options.DisableWebServicesFederationClaimMapping();
             options.AddEventHandler(UserInfoOff.Descriptor);
+            options.AddEventHandler(GitHubReader.Descriptor);
             if (settings.ReturnOrigin is { } origin)
             {
                 options.SetClientUri(origin);
@@ -57,7 +69,7 @@ public static class ProviderClientSetup
                 {
                     if (settings.KeysOf(provider) is { } testKeys)
                     {
-                        options.AddRegistration(new OpenIddictClientRegistration
+                        var registration = new OpenIddictClientRegistration
                         {
                             Issuer = settings.TestIssuerOf(provider),
                             ProviderName = provider,
@@ -65,8 +77,15 @@ public static class ProviderClientSetup
                             ClientId = testKeys.ClientId,
                             ClientSecret = testKeys.ClientSecret,
                             RedirectUri = settings.CallbackUriOf(provider),
-                            Scopes = { Scopes.OpenId, Scopes.Email, Scopes.Profile },
-                        });
+                        };
+
+                        // GitHub is OAuth 2.0 (spec 0012, Amendment A5): the scope user:email and no openid, so no identity token is asked for.
+                        foreach (var scope in provider == ProviderNames.GitHub ? GitHubScopes : OpenIdScopes)
+                        {
+                            registration.Scopes.Add(scope);
+                        }
+
+                        options.AddRegistration(registration);
                     }
                 }
 
@@ -96,8 +115,24 @@ public static class ProviderClientSetup
                     .SetProviderName(ProviderNames.Microsoft)
                     .SetProviderDisplayName(ProviderNames.DisplayNameOf(ProviderNames.Microsoft)));
             }
+
+            if (settings.GitHub is { } gitHub)
+            {
+                // Spec 0012: an OAuth App; OpenIddict's provider requires GitHub's `iss` on the answer (Amendment A6) and sends PKCE (A7).
+                web.AddGitHub(registration => registration
+                    .SetClientId(gitHub.ClientId)
+                    .SetClientSecret(gitHub.ClientSecret)
+                    .SetRedirectUri(settings.CallbackUriOf(ProviderNames.GitHub))
+                    .AddScopes(GitHubScopes)
+                    .SetProviderName(ProviderNames.GitHub)
+                    .SetProviderDisplayName(ProviderNames.DisplayNameOf(ProviderNames.GitHub)));
+            }
         });
     }
+
+    private static readonly string[] OpenIdScopes = [Scopes.OpenId, Scopes.Email, Scopes.Profile];
+
+    private static readonly string[] GitHubScopes = ["user:email"];
 
     /// <summary>
     /// Turns userinfo off before OpenIddict decides to call it (it is on by default): the identity rules read the identity token only, and a userinfo

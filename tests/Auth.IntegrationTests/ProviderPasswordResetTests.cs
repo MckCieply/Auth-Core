@@ -1,5 +1,6 @@
 using System.Net;
 using Auth.FakeOidc;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
@@ -110,5 +111,23 @@ public sealed class ProviderPasswordResetTests(PostgresFixture postgres, KeyMate
 
         Assert.Equal(1, await InDbAsync(db => db.UserLogins.CountAsync(l => l.UserId == userId, TestContext.Current.CancellationToken)));
         Assert.NotNull(await InDbAsync(db => db.Users.Where(u => u.Id == userId).Select(u => u.PasswordHash).SingleAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_reset_keeps_the_logins_and_queues_no_password_changed_mail()   // spec 0012, criterion 20
+    {
+        var (userId, _) = await PrivateThroughProviderAsync("google", GooglePerson());
+        var token = await ResetTokenAsync(Ola);
+        var sent = Mail.Sent.Count;
+
+        using (var reset = await AccountApi.Reset(Client, token, Chosen))
+        {
+            await AccountApi.AssertEmptyAsync(reset, HttpStatusCode.NoContent);
+        }
+
+        await DispatchAsync();
+        Assert.Equal(sent, Mail.Sent.Count);
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(r => r.Kind == MailKind.PasswordChanged, TestContext.Current.CancellationToken)));
+        Assert.Single(await InDbAsync(db => db.UserLogins.Where(l => l.UserId == userId).ToListAsync(TestContext.Current.CancellationToken)));
     }
 }

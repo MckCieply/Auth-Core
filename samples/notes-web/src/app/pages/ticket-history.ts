@@ -14,3 +14,13 @@ export async function keepTicketOutOfHistory(router: Router): Promise<void> {
     // the entry keeps the state; the ticket is still only good for a few minutes and once
   }
 }
+
+/**
+ * The ticket of a confirmation that /provider-return handed on in the navigation state (spec 0011; "Delete account" and "Delete company"), or
+ * null. Only in memory: never in a URL or in storage. It is read by the routed page, in a field initializer or its constructor, while the
+ * navigation that brought it is current; a component created later by the page's template finds no navigation, so the page passes it down.
+ */
+export function reauthTicketOf(router: Router): string | null {
+  const ticket: unknown = router.currentNavigation()?.extras.state?.['reauthTicket'];
+  return typeof ticket === 'string' && ticket !== '' ? ticket : null;
+}

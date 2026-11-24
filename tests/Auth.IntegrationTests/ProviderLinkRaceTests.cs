@@ -1,6 +1,7 @@
 using System.Net;
 using Auth.FakeOidc;
 using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Microsoft.AspNetCore.Identity;
@@ -18,6 +19,8 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
     private const string OlaNormalized = "OLA@GMAIL.TEST";
 
     private Task<int> LoginCountAsync() => InDbAsync(db => db.UserLogins.CountAsync(TestContext.Current.CancellationToken));
+
+    private Task<int> MailRowsAsync() => InDbAsync(db => db.MailRequests.CountAsync(TestContext.Current.CancellationToken));
 
     /// <summary>Sends the link while the address lock is held, waits until the request is queued behind it, runs <paramref name="change"/>, releases.</summary>
     private async Task<HttpResponseMessage> LinkWhileLockedAsync(ProviderApi.Ticket ticket, Func<HeldLock, Task> change)
@@ -42,6 +45,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.False(response.Headers.Contains("Set-Cookie"));
         Assert.Equal(0, await LoginCountAsync());
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(0, await MailRowsAsync());   // no notice for a link that did not happen
         Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
     }
 
@@ -58,6 +62,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(0, await TicketCountAsync());   // used up once, by the sign-in
         Assert.Equal(1, await LoginCountAsync());
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(0, await MailRowsAsync());   // no notice for a link that did not happen
         Assert.Equal("google", AuditApi.Text(await SingleAsync(AuditKinds.LoginSucceeded), "provider"));
     }
 
@@ -75,6 +80,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(0, await LoginCountAsync());
         Assert.Equal(1, await TicketCountAsync());
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(0, await MailRowsAsync());   // no notice for a link that did not happen
     }
 
     [Fact]
@@ -95,6 +101,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(1, await TicketCountAsync());
         Assert.False(await InDbAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.EmailConfirmed).SingleAsync(TestContext.Current.CancellationToken)));
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(0, await MailRowsAsync());   // no notice for a link that did not happen
         Assert.Empty(await AuditAsync(AuditKinds.LoginSucceeded));
         var row = await SingleAsync(AuditKinds.LoginFailed);   // as DELETE /auth/account writes the old password judged against the new hash
         Assert.Equal("wrong_password", AuditApi.Text(row, "reason"));
@@ -115,6 +122,7 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(0, await LoginCountAsync());
         Assert.Equal(1, await TicketCountAsync());
         Assert.Empty(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(0, await MailRowsAsync());   // no notice for a link that did not happen
         var row = await SingleAsync(AuditKinds.LoginFailed);
         Assert.Equal("no_company", AuditApi.Text(row, "reason"));
         Assert.Equal("google", AuditApi.Text(row, "provider"));
@@ -145,7 +153,49 @@ public sealed class ProviderLinkRaceTests(PostgresFixture postgres, KeyMaterialF
         Assert.Equal(user.Id.ToString(), AccessTokens.Text((await SessionApi.ReadSessionAsync(ok[0])).AccessToken, "sub"));
         Assert.Equal(1, await LoginCountAsync());
         Assert.Single(await AuditAsync(AuditKinds.ProviderLinked));
+        Assert.Equal(MailKind.ProviderLinked, Assert.Single(await InDbAsync(db => db.MailRequests.ToListAsync(TestContext.Current.CancellationToken))).Kind);   // one notice
         Assert.Single(await AuditAsync(AuditKinds.LoginSucceeded));
         Assert.Equal(0, await TicketCountAsync());
+    }
+
+    [Fact]
+    public async Task Two_accounts_with_two_addresses_linking_one_identity_at_once_link_one_and_the_other_signs_in_to_it()   // the identity lock
+    {
+        var ola = await CreateUserAsync(Ola, confirmed: true);
+        var kim = await CreateUserAsync("kim@firma.test", confirmed: true);
+        var olasTicket = await TicketAsync("google", GooglePerson());
+        var kimsTicket = await TicketAsync("google", GooglePerson(email: "kim@firma.test"));   // the same identity, the address Google says now
+
+        // Each takes the lock of its own address, so only the identity lock makes the second wait: the test holds it, and both queue behind it.
+        Task<HttpResponseMessage>[] pending;
+        await using (var held = await HeldLock.IdentityAsync(Factory, "google", FakePeople.GoogleSubject))
+        {
+            pending = [ProviderApi.Link(Client, olasTicket, UserPassword), ProviderApi.Link(Client, kimsTicket, UserPassword)];
+            await HeldLock.WaitForWaitersAsync(Factory, 2, pending);
+            await held.ReleaseAsync();
+        }
+
+        var answers = await Task.WhenAll(pending);
+        try
+        {
+            Assert.All(answers, answer => Assert.Equal(HttpStatusCode.OK, answer.StatusCode));   // the loser signs in the account that owns the identity by now
+            var owner = Assert.Single(await InDbAsync(db => db.UserLogins.ToListAsync(TestContext.Current.CancellationToken))).UserId;
+            Assert.Contains(owner, new[] { ola.Id, kim.Id });
+            foreach (var answer in answers)
+            {
+                Assert.Equal(owner.ToString(), AccessTokens.Text((await SessionApi.ReadSessionAsync(answer)).AccessToken, "sub"));
+            }
+
+            Assert.Equal(owner, (await SingleAsync(AuditKinds.ProviderLinked)).SubjectUserId);
+            Assert.Equal(1, await MailRowsAsync());
+            Assert.Equal(0, await TicketCountAsync());
+        }
+        finally
+        {
+            foreach (var answer in answers)
+            {
+                answer.Dispose();
+            }
+        }
     }
 }

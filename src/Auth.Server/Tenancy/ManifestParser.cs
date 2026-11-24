@@ -168,12 +168,12 @@ public static class ManifestParser
 
         List<string> privatePermissions = [.. privateListed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
 
-        // Spec 0011: the key `providers`. `providers:` with no value is none; every name must be one of the two exactly; duplicates fold and the
-        // first place is kept, because the order is the order of the buttons.
+        // Specs 0011 and 0012: the key `providers`. `providers:` with no value is none; every name must be one of the three exactly; duplicates
+        // fold and the first place is kept, because the order is the order of the buttons.
         var providersListed = (document.Providers ?? []).Select(p => p ?? "").ToList();
         if (providersListed.FirstOrDefault(p => !ProviderNames.IsName(p)) is { } refused)
         {
-            return Fail($"providers holds '{refused}', which is not '{ProviderNames.Google}' or '{ProviderNames.Microsoft}'");
+            return Fail($"providers holds '{refused}', which is not one of {string.Join(", ", ProviderNames.All.Select(name => "'" + name + "'"))}");
         }
 
         List<string> providers = [.. providersListed.Distinct(StringComparer.Ordinal)];

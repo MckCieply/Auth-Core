@@ -22,7 +22,8 @@ internal static class ProviderSignIn
     /// <summary>
     /// Signs in to the account the identity is a login of (the exchange, step 3.1; the link, step 3): an account with no membership is
     /// <c>403 no_membership</c>, as at login; otherwise, in one transaction, the ticket is used up and the session issued. A ticket used meanwhile,
-    /// and an account deleted meanwhile, are <c>400 invalid_ticket</c>. The login streak is neither consulted nor cleared (Settled 12).
+    /// and an account deleted meanwhile, are <c>400 invalid_ticket</c>. The login row is read again under a share lock in that transaction (spec 0012):
+    /// one deleted meanwhile is <c>400 invalid_ticket</c> too. The login streak is neither consulted nor cleared (Settled 12).
     /// </summary>
     public static async Task<IResult> LinkedAsync(
         HttpContext http, AuthDbContext db, UserManager<ApplicationUser> users, MembershipReader memberships, TokenOptions tokens, TimeProvider clock,
@@ -48,6 +49,20 @@ internal static class ProviderSignIn
                 return ApiResults.Error(TenancyErrors.InvalidTicket);
             }
 
+            // The membership before the account's row and the login's (spec 0015's order); the session's own lock on it is then the same one.
+            if (!await SpaceLocks.LockRowAsync(db, account.Id, tenant.CompanyId, http.RequestAborted))
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.InvalidTicket);
+            }
+
+            // The login this sign-in signs in with, held to the commit. An unlink that committed first leaves none: nothing is signed in.
+            if (!await ProviderLogins.HoldAsync(db, account.Id, ticket.Provider, ticket.IdentityKey, http.RequestAborted))
+            {
+                await transaction.DisposeAsync();
+                return ApiResults.Error(TenancyErrors.InvalidTicket);
+            }
+
             return Session(http, account, tenant, ticket.Provider, transaction, tokens, clock, InvalidTicketAsync);
         }
         catch
@@ -58,9 +73,10 @@ internal static class ProviderSignIn
     }
 
     /// <summary>The answer of a sign-in through a provider, in <paramref name="transaction"/>, which the result owns from now on.</summary>
+    /// <param name="alsoCommitted">Runs after the commit too (the link wakes the dispatcher for the notice it queued).</param>
     public static IResult Session(
         HttpContext http, ApplicationUser account, TenantContext tenant, string provider, IDbContextTransaction transaction, TokenOptions tokens,
-        TimeProvider clock, Func<Task<IResult>>? whenGone = null) =>
+        TimeProvider clock, Func<Task<IResult>>? whenGone = null, Action<HttpContext>? alsoCommitted = null) =>
         new AtomicSignInResult(
             SessionPrincipal.Create(http, account, tenant, tokens.Audience, clock),
             new AuditEntry
@@ -75,7 +91,11 @@ internal static class ProviderSignIn
             },
             transaction,
             whenGone,
-            whenCommitted: context => ProviderBindingCookie.Clear(context.Response));
+            whenCommitted: context =>
+            {
+                ProviderBindingCookie.Clear(context.Response);
+                alsoCommitted?.Invoke(context);
+            });
 
     private static Task<IResult> InvalidTicketAsync() => Task.FromResult(ApiResults.Error(TenancyErrors.InvalidTicket));
 }

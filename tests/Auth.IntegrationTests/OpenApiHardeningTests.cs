@@ -39,12 +39,28 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             schema = document["components"]!["schemas"]![reference.GetValue<string>().Split('/')[^1]]!.AsObject();
         }
 
-        Assert.Equal(["name", "password"], schema["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));
+        Assert.Equal(["name", "password", "provider_ticket"], schema["properties"]!.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));   // spec 0012
         Assert.Equal(["204", "400", "401", "403", "415", "429"], operation["responses"]!.AsObject().Select(r => r.Key).Order(StringComparer.Ordinal));
-        Assert.All(["forbidden", "permissions_changed", "permission_not_held", "wrong_password", "reauth_required"], code => Assert.Contains(code, Description(operation, "403")));
+        Assert.All(
+            ["forbidden", "permissions_changed", "permission_not_held", "wrong_password", "reauth_required", "password_required", "reauth_failed"],
+            code => Assert.Contains(code, Description(operation, "403")));
         Assert.Contains("invalid_request", Description(operation, "400"));
         Assert.All(["too_many_attempts", "too_many_requests"], code => Assert.Contains(code, Description(operation, "429")));
         Assert.NotNull(operation["security"]);
+    }
+
+    [Fact]
+    public async Task The_delete_org_description_names_the_accounts_that_stay()   // spec 0012 Amendment B7: only accounts with no other space go with the company
+    {
+        var (_, operations) = await DescriptionAsync();
+
+        var description = operations["DELETE /auth/org"]["description"]!.GetValue<string>();
+
+        Assert.Contains("who has no other space", description, StringComparison.Ordinal);
+        Assert.Contains("Members with another space keep their account", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("the account of every member, the caller's included", description, StringComparison.Ordinal);   // the sentence of before spec 0015
+        Assert.DoesNotContain("no account is left without a space", description, StringComparison.Ordinal);   // its second sentence
+        Assert.Contains("the ticket is checked inside the deletion, after the company lock and before the name", description, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -87,6 +103,9 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
         var start = operations["GET /auth/providers/{name}/start"];
         var query = start["parameters"]!.AsArray().Where(p => p!["in"]!.GetValue<string>() == "query").Select(p => p!["name"]!.GetValue<string>());
         Assert.Equal(["invite", "purpose"], query.Order(StringComparer.Ordinal));
+        var purpose = start["parameters"]!.AsArray().Single(p => p!["name"]!.GetValue<string>() == "purpose")!["description"]!.GetValue<string>();
+        Assert.All(["reauth", "connect"], name => Assert.Contains(name, purpose, StringComparison.Ordinal));   // spec 0012
+        Assert.Contains("purpose=connect", start["description"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.NotNull(start["responses"]!["302"]!["headers"]!["Location"]);
         Assert.Contains("OpenIddict.Client.State", start["responses"]!["302"]!["headers"]!["Set-Cookie"]!["description"]!.GetValue<string>());
 
@@ -116,7 +135,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(39, operations.Count);   // spec 0015: GET /auth/orgs, POST /auth/switch; spec 0016: POST /auth/orgs
+        Assert.Equal(43, operations.Count);   // spec 0012: the four settings endpoints; spec 0015: GET /auth/orgs, POST /auth/switch; spec 0016: POST /auth/orgs
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -150,7 +169,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(26, covered);   // spec 0011: the exchange, the link and the finish; spec 0015: the switch; spec 0016: POST /auth/orgs
+        Assert.Equal(30, covered);   // spec 0011: the exchange, the link and the finish; spec 0012: the four settings endpoints; spec 0015: the switch; spec 0016: POST /auth/orgs
     }
 
     [Fact]

@@ -24,7 +24,11 @@ public static class TenancyEndpoints
             .WithTags("Company")
             .WithDescription(
                 "The caller as the database says now, in the token's company (its `org_id`): the membership, role and permissions there, whichever "
-                + "company a sign-in would choose today. When the account is no longer a member of the token's company the answer is `403 permissions_changed`.")
+                + "company a sign-in would choose today. When the account is no longer a member of the token's company the answer is `403 permissions_changed`. "
+                + "`confirmed_until` is the window of this device's session (spec 0012), null when it is closed or the session is unknown.")
+            .ReadsRefreshCookie(
+                "The session of this device, for `confirmed_until`; read, never redeemed. Missing, or of no session of this account: "
+                + "`confirmed_until` is null.")
             .Produces<MeResponse>()
             .ProducesGuarded();
 
@@ -139,16 +143,26 @@ public static class TenancyEndpoints
                 "Deletes the token's company (its `org_id`), its memberships, roles and invitations and the mails queued for them, and the account of "
                 + "every member who has no other space (the caller's included when this was their last). Members with another space keep their "
                 + "account; their sessions in this company get `401` at the next refresh, and their next login lands in another space. Needs the "
-                + "permission `org:delete`, the company's name exactly and the caller's own password. An access token still held gets "
+                + "permission `org:delete`, the company's name exactly and the caller's confirmation (password or provider ticket). An access token still held gets "
                 + "`403 permissions_changed`, the next refresh `401 invalid_grant`, and a new login by an account that is gone the `401` of an "
                 + "unknown address. "
                 + "A wrong password counts in the caller's login streak as a failed login does; while the identifier is locked the answer is `429 too_many_attempts`. "
-                + "An admin whose account has no password (made through Google or Microsoft) gets `403 reauth_required` for any password: nothing is counted or written and "
-                + "the company stays; they set a password with \"Forgot your password?\" first.")
+                + "The body holds the name and exactly one of `password` and `provider_ticket` (spec 0012; both, neither or a member of the wrong "
+                + "type is `400 invalid_request`). An admin with a password confirms with it (`403 password_required` for a ticket); an admin whose "
+                + "account has no password (made through a provider) confirms with a ticket of a round trip with `purpose=reauth` and the browser's "
+                + "`auth_pt` (`403 reauth_required` for a password); neither is counted or written. A ticket that is unknown, used, expired (5 "
+                + "minutes), of another purpose, without its `auth_pt` or of an identity that is not a login of the caller is `403 reauth_failed`, "
+                + "recorded, and nothing is deleted; it is used up inside the deletion, so a deletion refused afterwards keeps it, and the answer "
+                + "clears `auth_pt`. With a provider ticket in place of the password, the ticket is checked inside the deletion, after the company lock "
+                + "and before the name.")
             .ReadsJson<DeleteOrgRequest>()
+            .ReadsCookie(ProviderBindingCookie.Name, "With `provider_ticket`: the binding of the ticket, set by the callback that made it.")
             .Produces(StatusCodes.Status204NoContent)
+            .SetsHeader(StatusCodes.Status204NoContent, "Set-Cookie", $"With `provider_ticket`: `{ProviderBindingCookie.Name}` emptied, with `Max-Age=0`.")
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
-            .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired)
+            .ProducesError(
+                StatusCodes.Status403Forbidden, TenancyErrors.WrongPassword, TenancyErrors.PermissionNotHeld, TenancyErrors.ReauthRequired,
+                TenancyErrors.PasswordRequired, TenancyErrors.ReauthFailed)
             .ProducesTooManyAttempts()
             .ProducesGuarded();
 

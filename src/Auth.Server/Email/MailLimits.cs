@@ -11,8 +11,9 @@ namespace Auth.Server.Email;
 /// </summary>
 public static class MailLimits
 {
+    /// <param name="rule">The numbers of the limit; spec 0004's (<see cref="MailLimitRule.Requests"/>) when left out.</param>
     public static async Task<MailLimitDecision> RegisterAsync(
-        AuthDbContext db, byte[] identifierHash, MailKind kind, DateTimeOffset now, CancellationToken cancellationToken)
+        AuthDbContext db, byte[] identifierHash, MailKind kind, DateTimeOffset now, CancellationToken cancellationToken, MailLimitRule? rule = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(identifierHash);
@@ -31,7 +32,7 @@ public static class MailLimits
         var row = rows.Single();
 
         var (next, decision) = MailLimitPolicy.Register(
-            new MailLimitState(row.WindowStartedAt, row.WindowCount, row.LastAcceptedAt), now);
+            new MailLimitState(row.WindowStartedAt, row.WindowCount, row.LastAcceptedAt), now, rule ?? MailLimitRule.Requests);
         if (decision.Allowed)
         {
             row.WindowStartedAt = next.WindowStartedAt;

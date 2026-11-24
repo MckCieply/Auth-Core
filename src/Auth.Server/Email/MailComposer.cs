@@ -19,7 +19,7 @@ public sealed class ComposedMail
 }
 
 /// <summary>
-/// Builds the mails of specs 0004, 0005, 0009 and 0010 in the configured language, each as plain text and as HTML with the same
+/// Builds the mails of specs 0004, 0005, 0009, 0010 and 0012 in the configured language, each as plain text and as HTML with the same
 /// content. Only configuration, the token and the names below go into a mail: an invitation names its company and role, and an
 /// organization sign-up the company its visitor typed (a private sign-up names none). They are encoded in the HTML part and are never in
 /// a header; nothing else a requester submitted goes in.
@@ -143,6 +143,51 @@ public sealed class MailComposer(MailSettings settings)
                 <p>{Html.Encode(hint)}</p>
                 <p>{Html.Encode(text.Deliberate)}</p>
                 <p style="font-size: 14px; color: #52606d;">{Html.Encode(text.Ignore)}</p>
+                </body>
+                </html>
+                """,
+        };
+    }
+
+    /// <summary>
+    /// A notice of spec 0012 → Mails: what changed on the account, and what to do if it was not the reader. No link and no token: it names the
+    /// product's sign-in screen in words only. The address and the provider's display name are in the body, encoded in its HTML part; the subject
+    /// names the application and the provider only.
+    /// </summary>
+    public ComposedMail ComposeNotice(MailKind kind, string recipient, string? providerDisplayName)
+    {
+        ArgumentNullException.ThrowIfNull(recipient);
+        if (kind is not (MailKind.ProviderLinked or MailKind.ProviderUnlinked or MailKind.PasswordChanged))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a notice.");
+        }
+
+        if (kind != MailKind.PasswordChanged && providerDisplayName is null)
+        {
+            throw new ArgumentException("A provider notice names its provider.", nameof(providerDisplayName));
+        }
+
+        var text = MailTexts.Notice(settings.Locale, kind);
+        string Format(string template) => string.Format(CultureInfo.InvariantCulture, template, settings.AppName, providerDisplayName, recipient);
+        var subject = Format(text.Subject);
+        var intro = Format(text.Intro);
+        var advice = Format(text.Advice);
+        var noLink = Format(text.NoLink);
+
+        return new ComposedMail
+        {
+            To = recipient,
+            Subject = subject,
+            TextBody = string.Join("\r\n", text.Greeting, "", intro, "", advice, "", noLink, ""),
+            HtmlBody = $"""
+                <!DOCTYPE html>
+                <html lang="{settings.Locale}">
+                <head><meta charset="utf-8"><title>{Html.Encode(subject)}</title></head>
+                <body style="{BodyStyle}">
+                <p>{Html.Encode(text.Greeting)}</p>
+                <p>{Html.Encode(intro)}</p>
+                <p>{Html.Encode(advice)}</p>
+                <p style="font-size: 14px; color: #52606d;">{Html.Encode(noLink)}</p>
                 </body>
                 </html>
                 """,

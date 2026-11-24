@@ -131,7 +131,7 @@ public sealed class OrgCreateTests : AuditTestBase
         using var details = JsonDocument.Parse(row.Details!);
         Assert.Equal(["via"], details.RootElement.EnumerateObject().Select(p => p.Name));
         Assert.Equal("api", details.RootElement.GetProperty("via").GetString());
-        Assert.Equal(29, AuditKinds.All.Count);   // no new kind
+        Assert.Equal(33, AuditKinds.All.Count);   // no new kind
     }
 
     [Fact]

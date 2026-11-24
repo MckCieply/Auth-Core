@@ -111,6 +111,11 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
     [InlineData("POST", "/auth/providers/exchange", 3)]
     [InlineData("POST", "/auth/providers/link", 3)]
     [InlineData("POST", "/auth/providers/finish", 3)]
+    [InlineData("POST", "/auth/account/confirm", 3)]   // spec 0012 -> Limits
+    [InlineData("POST", "/auth/providers/connect", 3)]
+    [InlineData("POST", "/auth/account/password", 3)]
+    [InlineData("POST", "/auth/account/logins/unlink", 5)]
+    [InlineData("POST", "/auth/testing/end-confirmation", 5)]   // the setting is off here: a 404, counted as general
     [InlineData("GET", "/auth/health", 5)]
     [InlineData("GET", "/auth/.well-known/jwks.json", 5)]
     [InlineData("POST", "/auth/logout", 5)]
@@ -243,6 +248,25 @@ public sealed class RateLimitMiddlewareTests : SessionTestBase
         using var refused = await UnknownLogin(2);
 
         await RateLimitApi.AssertTooManyRequestsAsync(refused);
+    }
+
+    [Fact]
+    public async Task The_confirmation_and_the_login_share_one_limit()   // spec 0012 -> Limits: one login bucket per address
+    {
+        for (var i = 1; i <= 2; i++)
+        {
+            using var login = await UnknownLogin(i);
+            Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
+        }
+
+        using (var confirm = await Send(HttpMethod.Post, "/auth/account/confirm"))
+        {
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, confirm.StatusCode);   // the third request of the bucket of three
+        }
+
+        using var over = await Send(HttpMethod.Post, "/auth/account/password");
+
+        await RateLimitApi.AssertTooManyRequestsAsync(over);
     }
 
     [Fact]

@@ -188,6 +188,14 @@ public abstract class TenancyTestBase : MailTestBase
             return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         });
 
+    /// <summary>Gives an account a personal space straight in the database, next to the memberships it has.</summary>
+    protected Task AddPersonalSpaceAsync(Guid userId) =>
+        InDbAsync(async db =>
+        {
+            PersonalSpaces.Add(db, userId, StorableTime.Now(Clock));
+            return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        });
+
     /// <summary>Ends the one membership of an account in a company, straight in the database; its other memberships stay.</summary>
     protected Task RemoveMembershipAsync(Guid userId, Guid companyId) =>
         InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId).ExecuteDeleteAsync(TestContext.Current.CancellationToken));

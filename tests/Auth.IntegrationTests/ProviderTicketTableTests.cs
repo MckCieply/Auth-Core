@@ -58,4 +58,13 @@ public sealed class ProviderTicketTableTests(PostgresFixture postgres, KeyMateri
 
         Assert.Empty(foreignKeys);
     }
+
+    [Fact]
+    public void The_purposes_are_stored_as_numbers_and_connect_is_the_fourth()   // spec 0012 → Provider tickets: `connect` (smallint 4)
+    {
+        Assert.Equal(
+            [(short)1, (short)2, (short)3, (short)4],
+            Enum.GetValues<ProviderTicketPurpose>().Select(p => (short)p));
+        Assert.Equal((short)4, (short)ProviderTicketPurpose.Connect);
+    }
 }

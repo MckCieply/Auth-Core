@@ -1,9 +1,12 @@
 using System.Net;
+using Auth.Infrastructure.Identity;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
 using Auth.Server.Lockout;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Auth.IntegrationTests;
 
@@ -135,6 +138,8 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
     [InlineData("""{"name":"   ","password":"Another-Passw0rd"}""")]
     [InlineData("""{"name":1,"password":"Another-Passw0rd"}""")]
     [InlineData("""{"name":"Acme","password":["Another-Passw0rd"]}""")]
+    [InlineData("""{"name":"Acme","password":"Another-Passw0rd","provider_ticket":"x"}""")]   // spec 0012: exactly one of the two
+    [InlineData("""{"name":"Acme","provider_ticket":1}""")]
     public async Task A_malformed_body_is_400_invalid_request_and_counts_for_nothing(string body)   // table row 3
     {
         var (company, _, token) = await CompanyWithAdminAsync();
@@ -179,6 +184,32 @@ public sealed class OrgDeleteEndpointTests(PostgresFixture postgres, KeyMaterial
 
         await TenancyApi.AssertErrorAsync(plainResponse, HttpStatusCode.BadRequest, "invalid_request");
         await TenancyApi.AssertErrorAsync(utf16Response, HttpStatusCode.UnsupportedMediaType, "unsupported_media_type");
+    }
+
+    [Fact]
+    public async Task A_password_stored_in_an_older_format_is_accepted_and_a_refused_deletion_does_not_rewrite_it()   // spec 0012: the hash is only verified
+    {
+        var (company, admin, token) = await CompanyWithAdminAsync();
+        var legacy = new PasswordHasher<ApplicationUser>(
+            Options.Create(new PasswordHasherOptions { CompatibilityMode = PasswordHasherCompatibilityMode.IdentityV2 }))
+            .HashPassword(new ApplicationUser(), UserPassword);
+        await InDbAsync(db => db.Users.Where(u => u.Id == admin).ExecuteUpdateAsync(
+            s => s.SetProperty(u => u.PasswordHash, legacy), TestContext.Current.CancellationToken));
+        // The precondition: the default hasher would store a new hash after a check with this one.
+        Assert.Equal(
+            PasswordVerificationResult.SuccessRehashNeeded,
+            new PasswordHasher<ApplicationUser>().VerifyHashedPassword(new ApplicationUser(), legacy, UserPassword));
+
+        using (var refused = await DeleteAsync(token, name: "acme"))   // the right password, a wrong name: refused after the password
+        {
+            await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.BadRequest, "invalid_request");
+        }
+
+        Assert.Equal(legacy, await InDbAsync(db => db.Users.Where(u => u.Id == admin).Select(u => u.PasswordHash).SingleAsync(TestContext.Current.CancellationToken)));
+        using var response = await DeleteAsync(token);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, await CompaniesAsync(company));
     }
 
     [Fact]

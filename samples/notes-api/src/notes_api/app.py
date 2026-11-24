@@ -133,6 +133,21 @@ def create_app(
             session.commit()
         return Response(status_code=204)
 
+    @app.delete("/api/org", status_code=204)
+    def delete_company_data(user: Principal = Depends(auth.current_user)):
+        """The sample's "delete the company's data" (Auth-Core spec 0012): the company's notes go before Auth-Core deletes the company.
+
+        For a company member whose token holds org:delete; a private account and any other member are refused. Any such holder wipes the
+        company's notes before Auth-Core has judged the confirmation (the threat model's risk 51): the web sample confirms the password first.
+        """
+        if user.org_kind != "organization" or "org:delete" not in user.permissions:
+            return _error(403, "forbidden")
+        org_id = _org_id(user)
+        with Session(engine) as session:
+            session.execute(delete(Note).where(Note.org_id == org_id))  # every note of the token's company, and no other
+            session.commit()
+        return Response(status_code=204)
+
     return app
 
 

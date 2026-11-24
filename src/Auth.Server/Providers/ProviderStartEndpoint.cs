@@ -51,12 +51,19 @@ public static class ProviderStartEndpoint
         }
         else if (purposeText.Count == 1)
         {
-            if (!string.Equals(purposeText[0], ProviderPurposes.ReauthName, StringComparison.Ordinal))
+            // reauth or connect (spec 0012); sign_in and invite are never named by this parameter.
+            if (string.Equals(purposeText[0], ProviderPurposes.ReauthName, StringComparison.Ordinal))
+            {
+                purpose = ProviderTicketPurpose.Reauth;
+            }
+            else if (string.Equals(purposeText[0], ProviderPurposes.ConnectName, StringComparison.Ordinal))
+            {
+                purpose = ProviderTicketPurpose.Connect;
+            }
+            else
             {
                 return ApiResults.InvalidRequest();
             }
-
-            purpose = ProviderTicketPurpose.Reauth;
         }
 
         // RedirectUri is set on purpose: left out, OpenIddict keeps the address of this request, the invitation token included, in the state.
@@ -77,9 +84,10 @@ public static class ProviderStartEndpoint
         else
         {
             properties.Parameters["prompt"] = "select_account";
-            if (purpose == ProviderTicketPurpose.Reauth)
+            if (purpose == ProviderTicketPurpose.Reauth && name == ProviderNames.Google)
             {
-                // Google: the account chooser stays, and max_age=0 asks for a fresh sign-in (Google has no prompt=login).
+                // Google: the account chooser stays, and max_age=0 asks for a fresh sign-in (Google has no prompt=login). GitHub can be asked
+                // for neither and gets no max_age for any purpose (spec 0012, Amendment A7): the account picker alone.
                 properties.Parameters["max_age"] = 0;
             }
         }

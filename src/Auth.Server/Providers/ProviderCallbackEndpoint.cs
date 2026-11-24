@@ -21,7 +21,7 @@ public static class ProviderCallbackErrors
 /// <summary>
 /// <c>GET /auth/providers/{name}/callback</c> (spec 0011). By the time it runs, OpenIddict's client has judged the request in the authentication
 /// step, which runs before this endpoint: the state (its signature, its age, its single use, the request-forgery cookie of the browser that started), the code (redeemed
-/// with the PKCE verifier), the identity token (signature, issuer, audience, nonce, expiry). This reads the outcome and always answers a redirect to
+/// with the PKCE verifier), the identity token (signature, issuer, audience, nonce, expiry), or for GitHub the reader's reads (spec 0012). This reads the outcome and always answers a redirect to
 /// the product's return screen, never a page of its own and never the provider's <c>error_description</c>: a ticket and <c>auth_pt</c> on success,
 /// one of four codes otherwise, and nothing stored then. Neither the outcome's items (they hold the raw tokens) nor the query is logged.
 /// </summary>
@@ -73,8 +73,13 @@ public static partial class ProviderCallbackEndpoint
             return Refuse(logger, returnUrl, name, ProviderCallbackErrors.ProviderUnavailable, purposeName);   // dropped from the manifest meanwhile
         }
 
-        var identityToken = result.Properties!.GetParameter<ClaimsPrincipal>(ClientProperties.BackchannelIdentityTokenPrincipal);
-        if (ProviderIdentities.Read(name, identityToken, normalizer, checkMicrosoftIssuer: settings.TestIssuer is null) is not { } identity)
+        // GitHub has no identity token: its reader handed over what it read (spec 0012, Amendment A3). The others' identity is their token's.
+        var identity = name == ProviderNames.GitHub
+            ? (GitHubItems.Read(items) is { } account ? ProviderIdentities.FromGitHub(account, normalizer) : null)
+            : ProviderIdentities.Read(
+                name, result.Properties!.GetParameter<ClaimsPrincipal>(ClientProperties.BackchannelIdentityTokenPrincipal), normalizer,
+                checkMicrosoftIssuer: settings.TestIssuer is null);
+        if (identity is null)
         {
             return Refuse(logger, returnUrl, name, ProviderCallbackErrors.ProviderError, purposeName);   // a claim the identity needs is missing
         }

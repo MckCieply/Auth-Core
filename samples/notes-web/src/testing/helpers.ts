@@ -19,6 +19,7 @@ export const adminMe: Me = {
   permissions: ['notes:read', 'notes:write'],
   has_password: true,
   linked_providers: [],
+  confirmed_until: null,
 };
 
 /** A private account (spec 0010): its space is named "private", its role is "private". */
@@ -32,6 +33,7 @@ export const privateMe: Me = {
   permissions: ['notes:read', 'notes:write'],
   has_password: true,
   linked_providers: [],
+  confirmed_until: null,
 };
 
 /** A private account made through Google (spec 0011): no password, Google signs it in. */
@@ -49,6 +51,11 @@ export const viewerMe: Me = {
   roles: ['viewer'],
   permissions: ['notes:read'],
 };
+
+/** The person with a confirmation window that ends at `until` (spec 0012: GET /auth/me says it; null means closed). */
+export function withWindow(me: Me, until: Date | null): Me {
+  return { ...me, confirmed_until: until === null ? null : until.toISOString().replace(/\.\d{3}Z$/, 'Z') };
+}
 
 /** Gives the service a token the way the app does: by a refresh that the test answers. */
 export async function holdToken(auth: AuthService, ctrl: HttpTestingController, token: string): Promise<void> {

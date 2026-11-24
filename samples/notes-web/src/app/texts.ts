@@ -25,6 +25,8 @@ export const texts = {
     waitSeconds: (seconds: number): string => `Wait ${counted(seconds, 'second', 'seconds')} before asking again.`,
     signInLink: 'Sign in.',
     backToSignIn: 'Back to sign in',
+    cancel: 'Cancel',
+    passwordRequired: 'Enter your password.',
   },
 
   // The bar above every screen. The keys are the notices of AuthService.
@@ -39,8 +41,8 @@ export const texts = {
 
   // The provider buttons (spec 0011). The names are the providers' own; the words around them say what the button does.
   providers: {
-    names: { google: 'Google', microsoft: 'Microsoft' } as Record<string, string>,
-    either: 'Google or Microsoft',
+    names: { google: 'Google', microsoft: 'Microsoft', github: 'GitHub' } as Record<string, string>,
+    either: 'Google, Microsoft or GitHub',
     continueWith: (name: string): string => `Continue with ${name}`,
     signUpWith: (name: string): string => `Sign up with ${name}`,
     acceptWith: (name: string): string => `Accept with ${name}`,
@@ -57,6 +59,9 @@ export const texts = {
     noMembership: 'Your account does not belong to a company.',
     createAccount: 'Create an account',
     accountDeleted: 'Your account was deleted.',
+    // Spec 0012: 401 session_required at a settings endpoint.
+    sessionEnded: 'Your session ended. Sign in again.',
+    companyDeleted: 'The company was deleted.',
     tooManyAttempts: (seconds: number): string =>
       `Too many attempts. Try again in ${counted(minutesFrom(seconds), 'minute', 'minutes')}.`,
   },
@@ -140,17 +145,17 @@ export const texts = {
       cancelled: 'Sign-in was cancelled.',
       invalid_state: 'The sign-in took too long or was started in another browser. Try again.',
       provider_unavailable: 'This way to sign in is not available.',
-      provider_error: 'Google or Microsoft could not sign you in. Try again.',
+      provider_error: 'Google, Microsoft or GitHub could not sign you in. Try again.',
     } as Record<string, string>,
     invalidTicket: 'This sign-in took too long. Start again.',
     noAccount: 'You have no account. Ask your company for an invitation.',
-    noEmail: 'Your Microsoft or Google account has no email address we can use. Sign in with your password.',
+    noEmail: 'Your Google, Microsoft or GitHub account has no email address we can use. Sign in with your password.',
     alreadyRegistered: 'An account with this address exists. Sign in with your password.',
-    addressMismatch: 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.',
+    addressMismatch: 'Use the Google, Microsoft or GitHub account of the invited address, or open the invitation link again and choose a password.',
     alreadyMember: 'This account already belongs to a company.',
     // Spec 0017: an invitation for an address that has an account is accepted with the button on /invite, then the person signs in.
     alreadyRegisteredInvite: 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.',
-    providerAlreadyLinked: 'This Google or Microsoft account already signs in to another account.',
+    providerAlreadyLinked: 'This Google, Microsoft or GitHub account already signs in to another account.',
     invalidToken: 'This invitation has expired or was already used. Ask for a new one.',
   },
 
@@ -163,6 +168,9 @@ export const texts = {
     createAccount: 'Create an account',
     submit: 'Connect and sign in',
     wrongPassword: "Wrong password. No password yet? Use 'Forgot your password?' to set one.",
+    // Spec 0012: one login per provider per account.
+    providerInUse: (provider: string): string =>
+      `This account already has a ${provider} account connected. Sign in with it or with your password.`,
   },
 
   providerFinish: {
@@ -176,17 +184,16 @@ export const texts = {
     signOut: 'Sign out',
     privateAccount: 'Private account',
     team: 'Team',
+    settings: 'Settings',
     deleteAccount: 'Delete account',
     deleteWarning: 'This deletes your account and all your notes. It cannot be undone.',
     deleteConfirm: 'Delete my account',
-    cancel: 'Cancel',
     // The notes are deleted first (spec 0010): a wrong password then leaves the account without them, and the screen says so.
     wrongPassword: 'The password is wrong, so your account was not deleted. Your notes are already gone.',
     // Said next to every refusal that comes after the notes were deleted.
     notesGone: 'Your notes are already gone.',
     // The account moved into a company while the person was deleting it (an invitation was accepted in another tab).
     movedToCompany: 'Your account now belongs to a company, so it cannot be deleted here.',
-    passwordRequired: 'Enter your password.',
     // Spec 0011: the provider confirmation of an account without a password did not hold (wrong account, too late, used).
     reauthFailed:
       'The confirmation did not work or took too long, so your account was not deleted. Your notes are already gone. Confirm again.',
@@ -219,17 +226,68 @@ export const texts = {
       `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`,
   },
 
+  // Spec 0012: the settings screen. {Provider} is the provider's name, {email} the account's address.
+  settings: {
+    title: 'Settings',
+    loading: 'Loading...',
+    back: 'Back to the notes',
+    methods: 'Sign-in methods',
+    password: 'Password',
+    set: 'Set',
+    notSet: 'Not set',
+    connected: 'Connected',
+    connect: 'Connect',
+    disconnect: 'Disconnect',
+    disconnectBlocked: 'Set a password or connect another provider before you disconnect this one.',
+    changePassword: 'Change password',
+    currentPassword: 'Current password',
+    currentRequired: 'Enter your current password.',
+    wrongCurrent: 'The current password is wrong.',
+    passwordChanged: 'Password changed.',
+    setPassword: 'Set a password',
+    sendLink: 'Send me a link',
+    linkSent: 'Check your inbox: the link sets your password. Setting it signs you out everywhere.',
+    connectedNow: (provider: string): string => `${provider} connected.`,
+    disconnectedNow: (provider: string): string => `${provider} disconnected.`,
+    lastLogin: 'Set a password or connect another provider first.',
+    providerInUse: (provider: string): string => `You already have a ${provider} account connected. Disconnect it first.`,
+    providerAlreadyLinked: (provider: string): string => `This ${provider} account belongs to another account.`,
+    addressMismatch: (provider: string, email: string): string => `This ${provider} account has another address. Connect the one with ${email}.`,
+    emailNotVerified: (provider: string): string => `${provider} has not verified this address.`,
+    noEmail: (provider: string): string => `This ${provider} account has no email address we can use.`,
+    invalidTicket: 'This took too long. Start again.',
+    reauthFailed: 'The confirmation did not work or took too long. Confirm again.',
+    wrongPassword: 'The password is wrong.',
+    notFound: 'This sign-in method is no longer connected.',
+    connectAgain: (provider: string): string => `Confirmed. Connect ${provider} again.`,
+    disconnectAgain: (provider: string): string => `Confirmed. Disconnect ${provider} again.`,
+    // The confirmation dialog.
+    confirmTitle: "Confirm it's you",
+    confirm: 'Confirm',
+    noMethod: 'None of your sign-in methods can confirm here. Set a password first.',
+  },
+
   team: {
     title: 'Team',
     loading: 'Loading...',
     back: 'Back to the notes',
     remove: 'Remove',
-    cancel: 'Cancel',
     // Spec 0015: removing a member deletes the account only when this company was its last space. A product's own team screen says the same.
     removeConfirm: 'This person loses access to this company. Their account is deleted if this company is their last.',
     permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',
     lastManager: 'The company needs at least one person who manages its members.',
     cannotChangeSelf: 'You cannot remove yourself.',
     notAllowed: "You don't have access to this.",
+    // Spec 0012: "Delete company", for a holder of org:delete.
+    deleteCompany: 'Delete company',
+    deleteCompanyWarning:
+      'This deletes the company and all its notes. A member who has no other space loses the account too. It cannot be undone.',
+    companyName: "Type the company's name",
+    nameMismatch: "Type the company's name exactly.",
+    permissionNotHeldDelete: 'A member has permissions you do not have, so you cannot delete the company.',
+    wrongPassword: 'The password is wrong.',
+    reauthFailed:
+      'The confirmation did not work or took too long, so the company was not deleted. Its notes are already gone. Confirm again.',
+    notesGone: "The company's notes are already gone.",
   },
 };

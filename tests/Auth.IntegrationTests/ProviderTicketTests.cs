@@ -2,6 +2,7 @@ using System.Net;
 using Auth.FakeOidc;
 using Auth.IntegrationTests.Infrastructure;
 using Auth.Server.Audit;
+using Microsoft.EntityFrameworkCore;
 
 namespace Auth.IntegrationTests;
 
@@ -90,4 +91,70 @@ public sealed class ProviderTicketTests(PostgresFixture postgres, KeyMaterialFix
         await TenancyApi.AssertErrorAsync(older, HttpStatusCode.BadRequest, "invalid_ticket");
         Assert.Equal(HttpStatusCode.OK, newer.StatusCode);
     }
+
+    [Fact]
+    public async Task A_connect_ticket_is_refused_by_the_exchange_the_link_and_the_finish_as_invalid_ticket()   // spec 0012, criterion 14
+    {
+        await CreateUserAsync(FakePeople.GoogleEmail, confirmed: true);
+        var ticket = await TicketAsync("google", GooglePerson(), "?purpose=connect");
+        Assert.Equal("connect", ticket.Purpose);   // the fragment says purpose=connect
+
+        using var exchanged = await ProviderApi.Exchange(Client, ticket);
+        using var linked = await ProviderApi.Link(Client, ticket, UserPassword);
+        using var finished = await ProviderApi.Finish(Client, ticket, "private");
+
+        await TenancyApi.AssertErrorAsync(exchanged, HttpStatusCode.BadRequest, "invalid_ticket");
+        await TenancyApi.AssertErrorAsync(linked, HttpStatusCode.BadRequest, "invalid_ticket");
+        await TenancyApi.AssertErrorAsync(finished, HttpStatusCode.BadRequest, "invalid_ticket");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Null(ProviderApi.BindingCookieOf(exchanged));   // none of them used the ticket up, so none cleared auth_pt
+        Assert.Null(ProviderApi.BindingCookieOf(linked));
+        Assert.Null(ProviderApi.BindingCookieOf(finished));
+        Assert.Equal(0, await InDbAsync(db => db.UserLogins.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_connect_ticket_is_refused_by_the_account_deletion_and_the_confirmation_as_reauth_failed()   // spec 0012, criterion 14
+    {
+        var (_, session) = await PrivateThroughProviderAsync("google", GooglePerson());
+        var ticket = await TicketAsync("google", GooglePerson(), "?purpose=connect");
+
+        using var confirm = await SettingsApi.ConfirmWithTicket(Client, session, ticket);
+        using var deleteAccount = await ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = ticket.Value }, ticket.Binding);
+
+        await TenancyApi.AssertErrorAsync(confirm, HttpStatusCode.Forbidden, "reauth_failed");
+        await TenancyApi.AssertErrorAsync(deleteAccount, HttpStatusCode.Forbidden, "reauth_failed");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Null(ProviderApi.BindingCookieOf(confirm));
+        Assert.Null(ProviderApi.BindingCookieOf(deleteAccount));
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Email == FakePeople.GoogleEmail, TestContext.Current.CancellationToken)));   // the account is still there
+    }
+
+    [Fact]
+    public async Task A_connect_ticket_lives_ten_minutes()   // spec 0012 → Provider tickets
+    {
+        var before = StorableTimeNow();
+        await TicketAsync("google", GooglePerson(), "?purpose=connect");
+
+        var expires = await InDbAsync(db => db.ProviderTickets.Select(t => t.ExpiresAt).SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(before + TimeSpan.FromMinutes(10), expires);
+    }
+
+    [Fact]
+    public async Task A_connect_ticket_is_refused_by_the_company_deletion_as_reauth_failed()   // spec 0012, criterion 14
+    {
+        var (company, adminId, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        await InDbAsync(db => db.Users.Where(u => u.Id == adminId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, (string?)null), TestContext.Current.CancellationToken));
+        await LinkAsync(adminId, "google", "100000000000000000055");
+        var ticket = await TicketAsync("google", GooglePerson(email: "boss@acme.test", subject: "100000000000000000055"), "?purpose=connect");
+
+        using var response = await OrgApi.DeleteWithTicket(Client, token, "Acme", ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "reauth_failed");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Equal(1, await InDbAsync(db => db.Companies.CountAsync(c => c.Id == company, TestContext.Current.CancellationToken)));
+    }
+
+    private DateTimeOffset StorableTimeNow() => Auth.Server.Email.StorableTime.Now(Clock);
 }

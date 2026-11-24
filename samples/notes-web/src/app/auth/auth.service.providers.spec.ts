@@ -46,12 +46,21 @@ describe('AuthService: /auth/me and the answers of spec 0011', () => {
   });
 
   it.each([
-    [['google', 'github'], ['google']],
+    [['google', 'gitlab', 'github'], ['google', 'github']],   // spec 0012: github is a name
     [['microsoft', 'google'], ['microsoft', 'google']],
     ['google', []],
     [undefined, []],
   ])('linked_providers %j reads as %j', async (value, expected) => {
     expect((await meFor({ ...privateMe, linked_providers: value }))?.linked_providers).toEqual(expected);
+  });
+
+  it.each([
+    ['2026-05-04T18:35:00Z', '2026-05-04T18:35:00Z'],
+    [null, null],
+    [undefined, null],
+    [42, null],
+  ])('confirmed_until %j reads as %j (spec 0012)', async (value, expected) => {
+    expect((await meFor({ ...privateMe, confirmed_until: value }))?.confirmed_until).toBe(expected);
   });
 
   it.each([

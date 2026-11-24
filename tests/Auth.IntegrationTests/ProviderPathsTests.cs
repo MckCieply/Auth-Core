@@ -13,7 +13,8 @@ public sealed class ProviderPathsTests
     [InlineData("/auth/providers/google/callback/", true)]
     [InlineData("/auth/providers/google/callback//", false)]
     [InlineData("/auth/providers/google/callback/extra", false)]
-    [InlineData("/auth/providers/github/callback", false)]
+    [InlineData("/auth/providers/github/callback", true)]   // spec 0012
+    [InlineData("/auth/providers/gitlab/callback", false)]
     [InlineData("/auth/providers/google/start", false)]
     [InlineData("/auth/providers/exchange", false)]
     [InlineData("/", false)]

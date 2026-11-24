@@ -1,4 +1,5 @@
 using Auth.Infrastructure.Persistence;
+using Auth.Server.Providers;
 using Auth.Server.Requests;
 using Auth.Server.Signup;
 using Auth.Server.Tenancy;
@@ -19,6 +20,7 @@ namespace Auth.Server.Email;
 /// A sign-up request (specs 0009 and 0010) names a pending sign-up, not an account, and is decided here: the switch of its kind first, then any
 /// account under the address gets the mail that says so (no link), and otherwise a live pending sign-up gets a new link in the variant of its kind;
 /// with neither there is nothing to send. A request queued before the manifest or the settings turned its kind off is dropped when it comes up.
+/// A notice (spec 0012) needs an account of the address, whatever its confirmation, and carries no token.
 /// </summary>
 public sealed partial class MailDispatcher(
     IServiceScopeFactory scopes, TimeProvider clock, MailComposer composer, IMailTransport transport, SignupGate gate, ILogger<MailDispatcher> logger)
@@ -52,6 +54,9 @@ public sealed partial class MailDispatcher(
     {
         var now = StorableTime.Now(clock);
         var passwordReset = (short)MailKind.PasswordReset;
+        var providerLinked = (short)MailKind.ProviderLinked;
+        var providerUnlinked = (short)MailKind.ProviderUnlinked;
+        var passwordChanged = (short)MailKind.PasswordChanged;
         var invitation = (short)MailKind.Invitation;
         var signup = (short)MailKind.Signup;
         var organization = (short)SignupKind.Organization;
@@ -85,7 +90,7 @@ public sealed partial class MailDispatcher(
                                SELECT 1 FROM "AspNetUsers" u
                                WHERE u."NormalizedEmail" = r."NormalizedEmail"
                                  AND u."Email" IS NOT NULL
-                                 AND (r."Kind" = {passwordReset} OR NOT u."EmailConfirmed"))))
+                                 AND (r."Kind" IN ({passwordReset}, {providerLinked}, {providerUnlinked}, {passwordChanged}) OR NOT u."EmailConfirmed"))))
                 FOR UPDATE OF r SKIP LOCKED)
             """,
             cancellationToken);
@@ -108,6 +113,9 @@ public sealed partial class MailDispatcher(
         // is never handled one by one ahead of the real mails. SKIP LOCKED: a second instance takes another row
         // instead of waiting for this one.
         var passwordReset = (short)MailKind.PasswordReset;
+        var providerLinked = (short)MailKind.ProviderLinked;
+        var providerUnlinked = (short)MailKind.ProviderUnlinked;
+        var passwordChanged = (short)MailKind.PasswordChanged;
         var invitation = (short)MailKind.Invitation;
         var signup = (short)MailKind.Signup;
         var due = await db.MailRequests
@@ -127,7 +135,7 @@ public sealed partial class MailDispatcher(
                                     SELECT 1 FROM "AspNetUsers" u
                                     WHERE u."NormalizedEmail" = r."NormalizedEmail"
                                       AND u."Email" IS NOT NULL
-                                      AND (r."Kind" = {passwordReset} OR NOT u."EmailConfirmed")))))
+                                      AND (r."Kind" IN ({passwordReset}, {providerLinked}, {providerUnlinked}, {passwordChanged}) OR NOT u."EmailConfirmed")))))
                    OR r."RequestedAt" <= {givenUp}
                 ORDER BY r."NextAttemptAt", r."Id"
                 LIMIT 1
@@ -153,6 +161,7 @@ public sealed partial class MailDispatcher(
         {
             MailKind.Invitation => await PrepareInvitationAsync(db, request, now, cancellationToken),
             MailKind.Signup => await PrepareSignupMailAsync(db, request, now, cancellationToken),
+            MailKind.ProviderLinked or MailKind.ProviderUnlinked or MailKind.PasswordChanged => await PrepareNoticeAsync(db, request, cancellationToken),
             _ => await PrepareAccountMailAsync(db, request, now, cancellationToken),
         };
         if (makeMail is null)
@@ -210,6 +219,26 @@ public sealed partial class MailDispatcher(
             var token = await EmailTokens.IssueAsync(db, user.Id, request.Kind, now, cancellationToken);
             return composer.Compose(request.Kind, user.Email, token);
         };
+    }
+
+    /// <summary>
+    /// A notice (spec 0012 → Mails): to the stored address of the account, confirmed or not, with the provider of the row and no token. A row whose
+    /// address has no account any more (deleted meanwhile), or a provider notice without a provider, is dropped.
+    /// </summary>
+    private async Task<Func<Task<ComposedMail>>?> PrepareNoticeAsync(AuthDbContext db, MailRequest request, CancellationToken cancellationToken)
+    {
+        var email = await db.Users.AsNoTracking()
+            .Where(u => u.NormalizedEmail == request.NormalizedEmail)
+            .OrderBy(u => u.Id)
+            .Select(u => u.Email)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (email is null || (request.Kind != MailKind.PasswordChanged && request.Provider is null))
+        {
+            return null;
+        }
+
+        var provider = request.Provider is null ? null : ProviderNames.DisplayNameOf(request.Provider);
+        return () => Task.FromResult(composer.ComposeNotice(request.Kind, email, provider));
     }
 
     /// <summary>

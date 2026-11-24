@@ -25,6 +25,8 @@ public sealed class ProviderSettings
     public const string MicrosoftClientIdKey = "Auth:Providers:Microsoft:ClientId";
     public const string MicrosoftClientSecretKey = "Auth:Providers:Microsoft:ClientSecret";
     public const string MicrosoftSecretExpiresOnKey = "Auth:Providers:Microsoft:ClientSecretExpiresOn";
+    public const string GitHubClientIdKey = "Auth:Providers:GitHub:ClientId";
+    public const string GitHubClientSecretKey = "Auth:Providers:GitHub:ClientSecret";
     public const string TestIssuerKey = "Auth:Providers:TestIssuer";
 
     private const string DateFormat = "yyyy-MM-dd";
@@ -40,10 +42,13 @@ public sealed class ProviderSettings
 
     public ProviderKeys? Microsoft { get; private init; }
 
+    /// <summary>The client id and secret of the GitHub OAuth App (spec 0012).</summary>
+    public ProviderKeys? GitHub { get; private init; }
+
     /// <summary>The day the Microsoft client secret lapses at Microsoft; <see langword="null"/>: nothing is checked.</summary>
     public DateOnly? MicrosoftSecretExpiresOn { get; private init; }
 
-    /// <summary>The fake provider's address (Development only): both providers are then plain OpenID Connect clients of it.</summary>
+    /// <summary>The fake provider's address (Development only): the providers are then plain clients of it (OpenID Connect for Google and Microsoft, OAuth 2.0 for GitHub).</summary>
     public Uri? TestIssuer { get; private init; }
 
     /// <summary>The origin of the return screen: the origin of every callback address, and the client's own URI (Amendment A2).</summary>
@@ -53,6 +58,7 @@ public sealed class ProviderSettings
     {
         ProviderNames.Google => Google,
         ProviderNames.Microsoft => Microsoft,
+        ProviderNames.GitHub => GitHub,
         _ => null,
     };
 
@@ -63,7 +69,7 @@ public sealed class ProviderSettings
     public Uri CallbackUriOf(string provider) =>
         new(ReturnOrigin ?? throw new InvalidOperationException("The return address is not set."), ProviderPaths.CallbackPathOf(provider));
 
-    /// <summary>The issuer of a provider under the test issuer: <c>{TestIssuer}/google</c> or <c>{TestIssuer}/microsoft</c>.</summary>
+    /// <summary>The issuer of a provider under the test issuer: <c>{TestIssuer}/google</c>, <c>{TestIssuer}/microsoft</c> or <c>{TestIssuer}/github</c>.</summary>
     public Uri TestIssuerOf(string provider) =>
         new((TestIssuer ?? throw new InvalidOperationException("No test issuer is set.")).GetLeftPart(UriPartial.Path).TrimEnd('/') + "/" + provider);
 
@@ -86,12 +92,16 @@ public sealed class ProviderSettings
         missing[ProviderNames.Google] = googleMissing;
         var microsoft = KeysAt(configuration, MicrosoftClientIdKey, MicrosoftClientSecretKey, returnUrl is null, out var microsoftMissing);
         missing[ProviderNames.Microsoft] = microsoftMissing;
+        // Every name of ProviderNames.All needs its entry: MissingKeysOf is a lookup, and the catalog asks it for each listed provider.
+        var gitHub = KeysAt(configuration, GitHubClientIdKey, GitHubClientSecretKey, returnUrl is null, out var gitHubMissing);
+        missing[ProviderNames.GitHub] = gitHubMissing;
 
         return new ProviderSettings(missing)
         {
             ReturnUrl = returnUrl,
             Google = google,
             Microsoft = microsoft,
+            GitHub = gitHub,
             MicrosoftSecretExpiresOn = SecretDate(configuration),
             TestIssuer = TestIssuerAt(configuration, isDevelopment),
         };

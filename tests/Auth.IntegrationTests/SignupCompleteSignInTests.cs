@@ -211,6 +211,21 @@ public sealed class SignupCompleteSignInTests : SignupTestBase
     }
 
     [Fact]
+    public async Task The_completion_records_the_start_of_its_session_and_opens_its_window_of_five_minutes()   // spec 0012 → Sessions: every new session has its row
+    {
+        var token = await MailedAsync();
+        var now = StorableTime.Now(Clock);
+
+        using var done = await SignupApi.Complete(Client, token, Password, CompanyName);
+
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
+        var row = await InDbAsync(db => db.SessionStates.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds()), row.SessionStart);
+        Assert.Equal(now + TimeSpan.FromMinutes(5), row.ConfirmedUntil);
+        Assert.Equal(1L, await AuthorizationRowsAsync());
+    }
+
+    [Fact]
     public async Task The_session_carries_the_stamp_of_the_account_so_a_password_change_ends_it()   // spec 0004 -> Effects of a reset
     {
         var token = await MailedAsync();

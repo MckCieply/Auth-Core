@@ -237,7 +237,7 @@ public sealed class InviteAcceptance(
     /// </summary>
     private async Task<LockedInvitation> LockInvitationAsync(
         byte[] hash, Func<DateTimeOffset, Task<bool>>? useTicket, Func<Invite, string?>? judgeInvite, bool lockPersonalMembership,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Func<Task>? afterAddressLock = null)
     {
         // The company first, as every change to a company's members does; then the invitation. Of parallel accepts with
         // one token the lock lets one in at a time, and the later one finds the invitation gone.
@@ -281,6 +281,12 @@ public sealed class InviteAcceptance(
         // One address at a time, after the company lock (spec 0010 → Locks): two invitations accepted at once, a self-deletion and a sign-up
         // completion of the address wait for each other here.
         await AddressLock.AcquireAsync(db, invite.NormalizedEmail, cancellationToken);
+
+        // A provider acceptance takes the identity's lock right here (spec 0012): after the address lock, before any membership or account row.
+        if (afterAddressLock is not null)
+        {
+            await afterAddressLock();
+        }
 
         // The lookup matches by the normalised address, which folds look-alikes together (µ and μ, ς and σ…). The link
         // proves the invited mailbox only: an account under another spelling is not touched, and nothing changes.
@@ -374,7 +380,8 @@ public sealed class InviteAcceptance(
                     ? TenancyErrors.AddressMismatch
                     : null,
                 lockPersonalMembership: false,
-                cancellationToken);
+                cancellationToken,
+                () => IdentityLock.AcquireAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken));
             if (locked.Error is { } refusal)
             {
                 return ProviderRefused(refusal);
@@ -418,7 +425,9 @@ public sealed class InviteAcceptance(
                 return new ProviderAcceptance(null, user, invite.CompanyId, transaction);
             }
 
-            if (owner is not null)
+            // The identity's lock is held since the address lock (another account with another address may hold a ticket of the same
+            // identity): the owner is read again, nothing can link it meanwhile.
+            if (await ProviderLogins.FindAccountAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken) is not null)
             {
                 return ProviderRefused(TenancyErrors.ProviderAlreadyLinked);
             }

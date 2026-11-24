@@ -1,0 +1,158 @@
+using Auth.Infrastructure.Identity;
+using Auth.Infrastructure.Persistence;
+using Auth.Server.Api;
+using Auth.Server.Audit;
+using Auth.Server.Email;
+using Auth.Server.Sessions;
+using Auth.Server.Tenancy;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using OpenIddict.Abstractions;
+using static OpenIddict.Abstractions.OpenIddictConstants;
+
+namespace Auth.Server.Account;
+
+/// <summary>The caller of a settings endpoint (spec 0012 → General rules): the account, its membership in the token's company and the session of this device, as read now.</summary>
+internal sealed record SettingsCaller(
+    Guid UserId, string Email, string NormalizedEmail, string? PasswordHash, TenantContext Tenant, DeviceSession Session);
+
+/// <summary>The caller, or the answer that refuses them.</summary>
+internal readonly record struct SettingsRead(SettingsCaller? Caller, IResult? Refusal);
+
+/// <summary>
+/// Step 2 of the four settings endpoints, in one place: the session of this device (<c>401 session_required</c>, after the access token's own
+/// <c>401</c>), the account (an account deleted meanwhile has no session), and its membership (<c>403 no_membership</c>, nothing written). The
+/// endpoints read it first, then again inside their transaction under the address lock, where its answer is the one that counts.
+/// </summary>
+internal static class SettingsCallers
+{
+    public const string ConfirmAction = "confirm";
+    public const string PasswordAction = "password";
+
+    public static async Task<SettingsRead> ReadAsync(
+        HttpContext http, AuthDbContext db, IOpenIddictTokenManager tokens, MembershipReader memberships, TimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tokens);
+        ArgumentNullException.ThrowIfNull(memberships);
+        ArgumentNullException.ThrowIfNull(clock);
+
+        // The sub of a token this service issued is always a user id; without one there is no session of it either.
+        if (!Guid.TryParse(http.User.FindFirst(Claims.Subject)?.Value, out var userId))
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        var session = await DeviceSessions.FindAsync(http, db, tokens, userId, StorableTime.Now(clock), cancellationToken);
+        if (session is null)
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        // The membership read is the one in the company of the token (spec 0015); a token that names none has no membership to read.
+        return Guid.TryParse(http.User.FindFirst(TenantClaims.OrgId)?.Value, out var companyId)
+            ? await CallerOfAsync(db, memberships, userId, companyId, session, cancellationToken)
+            : Refused(TenancyErrors.NoMembership);
+    }
+
+    /// <summary>The same checks under the caller's lock: the session by its token, read afresh, the account and the membership.</summary>
+    public static async Task<SettingsRead> ReadAgainAsync(AuthDbContext db, MembershipReader memberships, SettingsCaller caller, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(memberships);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        // Spec 0015's order: the membership row before the account's row (which the endpoints take next), under the address lock.
+        if (!await SpaceLocks.LockRowAsync(db, caller.UserId, caller.Tenant.CompanyId, CancellationToken.None))
+        {
+            // The membership went while the request waited: with the account (a deletion) the session is gone, without it (a removal) the space is.
+            return await db.Users.AsNoTracking().AnyAsync(u => u.Id == caller.UserId, CancellationToken.None)
+                ? Refused(TenancyErrors.NoMembership)
+                : Refused(TenancyErrors.SessionRequired);
+        }
+
+        var session = await DeviceSessions.ReadAsync(db, caller.Session.TokenId, caller.UserId, now, CancellationToken.None);
+        return session is null
+            ? Refused(TenancyErrors.SessionRequired)
+            // A token's claims never change, so the company the first read found is the one this session names.
+            : await CallerOfAsync(db, memberships, caller.UserId, caller.Tenant.CompanyId, session with { Company = caller.Session.Company }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Whether the password is the account's. The hash is only verified: <c>UserManager.CheckPasswordAsync</c> would also store a new hash when the
+    /// old one is out of date, an update of a row that a change under the lock is about to write.
+    /// </summary>
+    public static bool PasswordIsRight(UserManager<ApplicationUser> users, string hash, string password)
+    {
+        ArgumentNullException.ThrowIfNull(users);
+        ArgumentNullException.ThrowIfNull(hash);
+        ArgumentNullException.ThrowIfNull(password);
+
+        return users.PasswordHasher.VerifyHashedPassword(new ApplicationUser(), hash, password) != PasswordVerificationResult.Failed;
+    }
+
+    /// <summary>An audit row of the caller's own change: the caller is actor and subject, in their space.</summary>
+    public static AuditEntry Entry(string kind, SettingsCaller caller, IReadOnlyDictionary<string, object?>? details = null)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+
+        return new AuditEntry
+        {
+            Kind = kind,
+            ActorUserId = caller.UserId,
+            SubjectUserId = caller.UserId,
+            SubjectEmail = caller.Email,
+            OrgId = caller.Tenant.CompanyId,
+            OrgName = caller.Tenant.CompanyName,
+            Details = details,
+        };
+    }
+
+    /// <summary><c>account.confirm_refused</c> (spec 0012 → Audit events), written alone: the refusal changes nothing else.</summary>
+    public static Task RefuseAsync(AuditLog audit, SettingsCaller caller, string reason, string action)
+    {
+        ArgumentNullException.ThrowIfNull(audit);
+
+        return audit.WriteAloneAsync(Entry(
+            AuditKinds.AccountConfirmRefused, caller, new Dictionary<string, object?> { ["reason"] = reason, ["action"] = action }));
+    }
+
+    private static async Task<SettingsRead> CallerOfAsync(
+        AuthDbContext db, MembershipReader memberships, Guid userId, Guid companyId, DeviceSession session, CancellationToken cancellationToken)
+    {
+        var account = await db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.Email, u.NormalizedEmail, u.PasswordHash })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (account is not { Email: { } email, NormalizedEmail: { } normalized })
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        if (await memberships.ReadInCompanyAsync(userId, companyId, cancellationToken) is not { } tenant)
+        {
+            return Refused(TenancyErrors.NoMembership);
+        }
+
+        // A settings call acts in the company of its access token (spec 0012 B2), and the renewal keeps the session where it is (B3): the two
+        // must be the session's own company, and the membership the one the session names (a membership removed and made again has a later
+        // JoinedAt). Otherwise the call is not of this session. The same rule as the refresh's, and it runs before anything is written.
+        // A token with only one of the claims, or one that does not read, is refused as the refresh does; a token with neither is one of before
+        // spec 0015, and the caller's company stands for it.
+        // After this check the caller's company is the session's, so the renewal's claims come from it.
+        var named = session.Company;
+        if (named.Present
+            && (named.Space is not { } space
+                || space.CompanyId != tenant.CompanyId
+                || space.JoinedMicros != SessionCompany.MicrosOf(tenant.JoinedAt)))
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        return new SettingsRead(new SettingsCaller(userId, email, normalized, account.PasswordHash, tenant, session), null);
+    }
+
+    private static SettingsRead Refused(string code) => new(null, ApiResults.Error(code));
+}

@@ -35,9 +35,9 @@ public sealed class AuditProviderFlowsTests(PostgresFixture postgres, KeyMateria
     private static bool Names(AuditEvent row, params string[] names) => AuditApi.DetailNames(row).SequenceEqual(names);
 
     [Fact]
-    public void The_audit_log_knows_twenty_nine_kinds()   // criterion 28; spec 0015: org.switched
+    public void The_audit_log_knows_thirty_three_kinds()   // spec 0011, criterion 28; spec 0012, criterion 25; spec 0015: org.switched
     {
-        Assert.Equal(29, AuditKinds.All.Count);
+        Assert.Equal(33, AuditKinds.All.Count);
         Assert.Contains("org.switched", AuditKinds.All);
         Assert.Contains("provider.linked", AuditKinds.All);
         Assert.Contains("provider.reauthenticated", AuditKinds.All);
@@ -121,7 +121,7 @@ public sealed class AuditProviderFlowsTests(PostgresFixture postgres, KeyMateria
         Assert.Equal((anna.Id, anna.Id, "anna@firma.test"), (link.ActorUserId!.Value, link.SubjectUserId!.Value, link.SubjectEmail));
         Assert.NotNull(link.OrgId);
         Assert.NotNull(link.OrgName);
-        Assert.True(Names(link, "provider"));
+        Assert.True(Names(link, "provider", "via"));   // spec 0012: via sign_in
 
         var completed = await SingleAsync(AuditKinds.SignupCompleted);
         Assert.True(Names(completed, "kind", "provider"));

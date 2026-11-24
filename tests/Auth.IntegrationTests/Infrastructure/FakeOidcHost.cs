@@ -1,4 +1,5 @@
 using Auth.FakeOidc;
+using Auth.Server.Providers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -54,8 +55,9 @@ public sealed class FakeOidcHost : IAsyncDisposable
 }
 
 /// <summary>
-/// Sends every request of OpenIddict's named HTTP clients, whose names start with the name of their assembly, to the fake. The
-/// primary handler must stay an <c>HttpClientHandler</c>, so the fake is put in as an additional handler that never calls the inner one.
+/// Sends every request of OpenIddict's named HTTP clients, whose names start with the name of their assembly, and of the GitHub reader's own
+/// client (spec 0012, Amendment A4) to the fake. The primary handler must stay an <c>HttpClientHandler</c>, so the fake is put in as an
+/// additional handler that never calls the inner one.
 /// </summary>
 internal sealed class FakeOidcRouting(HttpMessageHandler fake) : IPostConfigureOptions<HttpClientFactoryOptions>
 {
@@ -65,7 +67,8 @@ internal sealed class FakeOidcRouting(HttpMessageHandler fake) : IPostConfigureO
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (name is null || !name.StartsWith(OpenIddictClients, StringComparison.Ordinal))
+        if (name is null
+            || !(name.StartsWith(OpenIddictClients, StringComparison.Ordinal) || string.Equals(name, GitHubReader.HttpClientName, StringComparison.Ordinal)))
         {
             return;
         }

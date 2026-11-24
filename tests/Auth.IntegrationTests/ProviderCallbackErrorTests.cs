@@ -180,7 +180,7 @@ public sealed class ProviderCallbackErrorTests(PostgresFixture postgres, KeyMate
     [Fact]
     public async Task A_name_that_is_no_provider_is_404_and_a_post_is_405()
     {
-        using var unknown = await Browser.GetAsync("/auth/providers/github/callback?code=x&state=y", TestContext.Current.CancellationToken);
+        using var unknown = await Browser.GetAsync("/auth/providers/gitlab/callback?code=x&state=y", TestContext.Current.CancellationToken);
         using var posted = await Browser.PostAsync(
             "/auth/providers/google/callback", new FormUrlEncodedContent([new("code", "x"), new("state", "y")]), TestContext.Current.CancellationToken);
 

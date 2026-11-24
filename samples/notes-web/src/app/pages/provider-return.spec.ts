@@ -11,7 +11,7 @@ import { ProviderReturnPage } from './provider-return';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const TICKET = 'TICKET-abcdefghijklmnopqrstuvwxyz-0123456789A';
-const GENERIC = 'Google or Microsoft could not sign you in. Try again.';
+const GENERIC = 'Google, Microsoft or GitHub could not sign you in. Try again.';
 
 /** The screens the return screen sends the person to; each keeps the navigation state it was opened with. */
 @Component({ template: '<p>landed</p>' })
@@ -36,6 +36,7 @@ async function open(fragment: string | null, removal: 'works' | 'false' | 'rejec
       provideRouter([
         { path: 'provider-return', component: ProviderReturnPage },
         { path: 'notes', component: Landing },
+        { path: 'settings', component: Landing },
         { path: 'login', component: Landing },
         { path: 'provider-link', component: Landing },
         { path: 'provider-finish', component: Landing },
@@ -197,11 +198,11 @@ describe('ProviderReturnPage (spec 0011)', () => {
     expect(history.length).toBe(opened.entries);
   });
 
-  it('reauth after "Confirm with ...": the notes screen with the ticket in the navigation state, and no call', async () => {
-    armReauth();
+  it('reauth after "Confirm with ..." for a deletion: the settings screen with the ticket in the navigation state, and no call', async () => {
+    armReauth('delete_account');
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     opened.ctrl.expectNone('/auth/providers/exchange');
-    expect(opened.router.url).toBe('/notes');
+    expect(opened.router.url).toBe('/settings');
     expect(Landing.state).toEqual({ reauthTicket: TICKET });
     expect(window.location.href).not.toContain(TICKET);
     expect(stored()).not.toContain(TICKET);
@@ -221,9 +222,9 @@ describe('ProviderReturnPage (spec 0011)', () => {
   });
 
   it('the flag is one-shot: the return that used it clears it, and a second reauth link in the same tab goes to /login', async () => {
-    armReauth();
+    armReauth('delete_account');
     const first = await open(`ticket=${TICKET}&purpose=reauth`);
-    expect(first.router.url).toBe('/notes');
+    expect(first.router.url).toBe('/settings');
     expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
     TestBed.resetTestingModule();
     const second = await open(`ticket=${TICKET}&purpose=reauth`);
@@ -235,7 +236,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   it.each([`error=cancelled&purpose=reauth`, `ticket=${TICKET}&purpose=sign_in`])(
     'any return clears the flag, so that an abandoned confirmation cannot arm a later forged link (%s)',
     async (fragment) => {
-      armReauth();
+      armReauth('delete_account');
       const opened = await open(fragment);
       opened.ctrl.match('/auth/providers/exchange'); // the sign-in asks; its answer does not matter here
       expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
@@ -243,7 +244,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   );
 
   it('storage that throws on read counts as no flag: /login, nothing handed on', async () => {
-    armReauth();
+    armReauth('delete_account');
     const failing = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied');
     });
@@ -261,7 +262,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(new Date('2026-05-02T12:10:00.001Z'));
       const opened = await open(`ticket=${TICKET}&purpose=reauth`);
       opened.ctrl.expectNone('/auth/providers/exchange');
@@ -277,10 +278,10 @@ describe('ProviderReturnPage (spec 0011)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(new Date('2026-05-02T12:09:59Z'));
       const opened = await open(`ticket=${TICKET}&purpose=reauth`);
-      expect(opened.router.url).toBe('/notes');
+      expect(opened.router.url).toBe('/settings');
       expect(Landing.state).toEqual({ reauthTicket: TICKET });
     } finally {
       vi.useRealTimers();
@@ -393,12 +394,12 @@ describe('ProviderReturnPage (spec 0011)', () => {
   it.each([
     [400, 'invalid_ticket', 'This sign-in took too long. Start again.'],
     [403, 'no_account', 'You have no account. Ask your company for an invitation.'],
-    [403, 'no_email', 'Your Microsoft or Google account has no email address we can use. Sign in with your password.'],
+    [403, 'no_email', 'Your Google, Microsoft or GitHub account has no email address we can use. Sign in with your password.'],
     [409, 'already_registered', 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.'],
-    [403, 'address_mismatch', 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.'],
+    [403, 'address_mismatch', 'Use the Google, Microsoft or GitHub account of the invited address, or open the invitation link again and choose a password.'],
     [409, 'already_member', 'You are already a member of this company. Sign in to open it.'],
     [409, 'private_account_exists', 'Something went wrong. Try again.'],
-    [409, 'provider_already_linked', 'This Google or Microsoft account already signs in to another account.'],
+    [409, 'provider_already_linked', 'This Google, Microsoft or GitHub account already signs in to another account.'],
     [400, 'invalid_token', 'This invitation has expired or was already used. Ask for a new one.'],
     [403, 'no_membership', 'Your account does not belong to a company.'],
     [400, 'invalid_request', 'Something went wrong. Try again.'],

@@ -9,6 +9,9 @@ public enum ProviderTicketPurpose : short
     /// <summary>The acceptance of an invitation.</summary>
     Invite = 2,
 
-    /// <summary>The confirmation of a self-deletion.</summary>
+    /// <summary>The confirmation of a self-deletion, of a company deletion and of the settings screen (spec 0012).</summary>
     Reauth = 3,
+
+    /// <summary>Spec 0012: an identity to connect to the account that is signed in.</summary>
+    Connect = 4,
 }

@@ -3,7 +3,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DEFAULT_RETURN_URL } from '../auth/auth.guard';
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
-import { rememberedProvider, takeReauth } from './provider-buttons';
+import { ProviderName } from '../account-api';
+import { providerTitle, rememberedProvider, takePending, takePendingConnect, takeReauth } from './provider-buttons';
 
 /**
  * Spec 0011: Auth-Core sends the browser here after the provider, with `#ticket=...&purpose=...` or `#error=...&purpose=...`. The fragment is
@@ -22,7 +23,7 @@ import { rememberedProvider, takeReauth } from './provider-buttons';
         <p class="error" role="alert" data-testid="provider-message">{{ text }}</p>
         <p><a routerLink="/login" data-testid="provider-back">{{ common.backToSignIn }}</a></p>
       } @else if (limited()) {
-        <button type="button" data-testid="try-again" (click)="exchange()">{{ common.tryAgain }}</button>
+        <button type="button" data-testid="try-again" (click)="retry()">{{ common.tryAgain }}</button>
       } @else {
         <p class="status" role="status">{{ t.working }}</p>
       }
@@ -39,6 +40,8 @@ export class ProviderReturnPage implements OnInit {
   private readonly fragment = new URLSearchParams(this.route.snapshot.fragment ?? '');
   private readonly ticket = this.fragment.get('ticket') ?? '';
   private asking = false;
+  // What "Try again" repeats after a rate limit: the ticket is still good.
+  private action: 'exchange' | 'confirm' | 'connect' = 'exchange';
   // Kept for show(): the message after "Try again" depends on it too.
   private purpose: string | null = null;
 
@@ -64,12 +67,30 @@ export class ProviderReturnPage implements OnInit {
     this.purpose = purpose;
     if (error !== null) {
       // An own member only: the fragment is the visitor's text, and `constructor` or `__proto__` must not reach Object.prototype.
-      this.message.set(Object.hasOwn(this.t.errors, error) ? this.t.errors[error] : this.t.errors['provider_error']);
+      const message = Object.hasOwn(this.t.errors, error) ? this.t.errors[error] : this.t.errors['provider_error'];
+      if ((armed === 'connect' && purpose === 'connect') || (armed === 'confirm' && purpose === 'reauth')) {
+        // The settings screen started this round trip: the sentence goes there, and a connect that waited for it is over.
+        takePendingConnect();
+        await this.go('/settings', { notice: message });
+      } else {
+        this.message.set(message);
+      }
     } else if (this.ticket === '') {
       await this.go('/login');
     } else if (purpose === 'reauth') {
-      // The notes screen opens "Delete account" ready to confirm: the ticket is spent there, not here. Only for a confirmation this tab started.
-      await (armed ? this.go(DEFAULT_RETURN_URL, { reauthTicket: this.ticket }) : this.go('/login'));
+      // Only for a confirmation this tab started, and to the screen it was started for (spec 0012: the flag's target).
+      if (armed === 'delete_account') {
+        // The settings screen opens "Delete account" ready to confirm: the ticket is spent there, not here.
+        await this.go('/settings', { reauthTicket: this.ticket });
+      } else if (armed === 'delete_company') {
+        await this.go('/team', { reauthTicket: this.ticket });
+      } else if (armed === 'confirm') {
+        await this.confirm();
+      } else {
+        await this.go('/login');
+      }
+    } else if (purpose === 'connect') {
+      await (armed === 'connect' ? this.connect() : this.go('/login'));
     } else if (purpose === 'sign_in' || purpose === 'invite') {
       await this.exchange();
     } else {
@@ -86,6 +107,17 @@ export class ProviderReturnPage implements OnInit {
     }
     // No navigation is needed (and `false` is the answer) when there was nothing to remove.
     return !/[#?]/.test(this.router.url);
+  }
+
+  /** "Try again" after a rate limit: the same action with the same ticket. */
+  protected async retry(): Promise<void> {
+    if (this.action === 'confirm') {
+      await this.confirm();
+    } else if (this.action === 'connect') {
+      await this.connect();
+    } else {
+      await this.exchange();
+    }
   }
 
   protected async exchange(): Promise<void> {
@@ -109,6 +141,100 @@ export class ProviderReturnPage implements OnInit {
       }
     } finally {
       this.asking = false;
+    }
+  }
+
+  /** Spec 0012: the confirmation of the settings screen. Then /settings, which says so when a connect waits for it. */
+  private async confirm(): Promise<void> {
+    if (this.asking) {
+      return;
+    }
+    this.asking = true;
+    this.limited.set(false);
+    try {
+      await this.confirmOnce();
+    } finally {
+      this.asking = false;
+    }
+  }
+
+  private async confirmOnce(): Promise<void> {
+    const result = await this.auth.confirmWithTicket(this.ticket);
+    if (!result.ok && result.failure.kind === 'too_many_requests') {
+      // The bar says when to try again; the ticket and the connect that waits for it are kept.
+      this.action = 'confirm';
+      this.limited.set(true);
+      return;
+    }
+    const pending = takePending();
+    if (result.ok) {
+      const again = pending === null ? null : pending.kind === 'connect' ? texts.settings.connectAgain : texts.settings.disconnectAgain;
+      await this.go('/settings', pending === null || again === null ? undefined : { notice: again(providerTitle(pending.provider)) });
+    } else if (result.failure.kind !== 'session_required') {
+      await this.go('/settings', { notice: await this.sentenceOf(result.failure) });
+    }
+  }
+
+  /**
+   * Spec 0012: the connect of the settings screen. A closed window hands the ticket back to /settings in the navigation state, which asks for
+   * a confirmation and sends it again; every other answer is a sentence there.
+   */
+  private async connect(): Promise<void> {
+    if (this.asking) {
+      return;
+    }
+    this.asking = true;
+    this.limited.set(false);
+    try {
+      await this.connectOnce();
+    } finally {
+      this.asking = false;
+    }
+  }
+
+  private async connectOnce(): Promise<void> {
+    const provider = rememberedProvider();
+    const result = await this.auth.connect(this.ticket);
+    if (!result.ok && result.failure.kind === 'too_many_requests') {
+      this.action = 'connect';
+      this.limited.set(true);
+      return;
+    }
+    if (result.ok) {
+      await this.go('/settings', { notice: texts.settings.connectedNow(providerTitle(provider)) });
+    } else if (result.failure.kind === 'confirmation_required') {
+      await this.go('/settings', { connectTicket: this.ticket, provider });
+    } else if (result.failure.kind !== 'session_required') {
+      await this.go('/settings', { notice: await this.sentenceOf(result.failure, provider) });
+    }
+  }
+
+  private async sentenceOf(failure: Failure, provider: ProviderName | null = null): Promise<string> {
+    const s = texts.settings;
+    const title = providerTitle(provider);
+    switch (failure.kind) {
+      case 'provider_in_use':
+        return s.providerInUse(title);
+      case 'provider_already_linked':
+        return s.providerAlreadyLinked(title);
+      case 'address_mismatch': {
+        if (this.auth.me() === null) {
+          await this.auth.loadMe();
+        }
+        return s.addressMismatch(title, this.auth.me()?.email ?? '');
+      }
+      case 'email_not_verified':
+        return s.emailNotVerified(title);
+      case 'no_email':
+        return s.noEmail(title);
+      case 'invalid_ticket':
+        return s.invalidTicket;
+      case 'reauth_failed':
+        return s.reauthFailed;
+      case 'no_membership':
+        return texts.login.noMembership;
+      default:
+        return this.common.somethingWrong;
     }
   }
 

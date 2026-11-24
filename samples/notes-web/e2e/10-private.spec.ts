@@ -5,6 +5,7 @@ import { setting } from './support/env';
 import { openMailLink, waitForLink } from './support/mail';
 import { expectCleanAddressBar, expectNoEmailInAddressBar } from './support/page';
 import { signIn } from './support/session';
+import { openSettings } from './support/settings';
 
 // The request and the API invitation wake the server's dispatcher, so a mail comes within seconds. Each wait is below the test's timeout.
 const MAIL_WAIT_MS = 100_000;
@@ -64,7 +65,8 @@ test('a private person signs up through the mail, works alone, deletes the accou
   await page.getByRole('button', { name: 'Add note' }).click();
   await expect(page.getByText(note)).toBeVisible();
 
-  // "Delete account": the warning, the password, and the sign-in screen with the notice.
+  // "Delete account" (on the settings screen since spec 0012): the warning, the password, and the sign-in screen with the notice.
+  await openSettings(page);
   await page.getByTestId('delete-account').click();
   await expect(page.getByTestId('delete-warning')).toHaveText('This deletes your account and all your notes. It cannot be undone.');
   await page.locator('#delete-password').fill(password);

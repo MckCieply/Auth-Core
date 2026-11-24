@@ -8,7 +8,7 @@ namespace Auth.Server.Api;
 public static class ProviderRoutes
 {
     /// <summary>
-    /// The endpoints of spec 0011: the round trip with Google or Microsoft and what a product's screens do with its ticket. Mapped here, with what
+    /// The endpoints of spec 0011: the round trip with Google, Microsoft or GitHub and what a product's screens do with its ticket. Mapped here, with what
     /// each takes and answers, so that the OpenAPI description says it all in one place.
     /// </summary>
     public static IEndpointRouteBuilder MapProviderApi(this IEndpointRouteBuilder app)
@@ -18,15 +18,19 @@ public static class ProviderRoutes
         app.MapGet(ProviderPaths.Start, ProviderStartEndpoint.Handle)
             .WithTags("Providers")
             .WithDescription(
-                "Starts a sign-in with Google or Microsoft: a product's button is a link here (a navigation, not a call). The answer is `302` to the "
-                + "provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`, a `nonce`, the scopes `openid email "
-                + "profile` and the callback address built from the configured return address, never from the request. No query: a sign-in, a link or a "
+                "Starts a sign-in with Google, Microsoft or GitHub: a product's button is a link here (a navigation, not a call). The answer is `302` to the "
+                + "provider's authorization endpoint: the authorization code flow with PKCE (`S256`), a `state`, a `nonce` and the scopes `openid email "
+                + "profile` (GitHub: no `nonce` and the scope `user:email`), and the callback address built from the configured return address, never from the request. No query: a sign-in, a link or a "
                 + "sign-up (the exchange decides); `invite=<link token>`: the acceptance of that invitation; `purpose=reauth`: the confirmation of a "
-                + "self-deletion, with a fresh sign-in asked for. It reads no account and no invitation. A name that is not `google` or `microsoft`, or a "
+                + "self-deletion or of the settings screen, with a fresh sign-in asked for where the provider can be asked; `purpose=connect`: the connection of a provider "
+                + "to the account that is signed in, with the account chooser. It reads no account and no invitation. A name that is not `google`, `microsoft` or `github`, or a "
                 + "provider that is not offered, is `404 not_found`; a malformed `invite`, another `purpose`, both, or one of them given twice is "
                 + "`400 invalid_request`. Other parameters are ignored.")
             .ReadsQuery(ProviderStartEndpoint.InviteParameter, "The link token of an invitation (43 base64url characters): the round trip accepts it.")
-            .ReadsQuery(ProviderStartEndpoint.PurposeParameter, "`reauth`: the round trip confirms the deletion of the caller's private account.")
+            .ReadsQuery(
+                ProviderStartEndpoint.PurposeParameter,
+                "`reauth`: the round trip confirms who the caller is (a self-deletion, a company deletion, `POST /auth/account/confirm`); `connect`: "
+                + "it connects a provider on the settings screen (spec 0012). Not together with `invite`.")
             .Produces(StatusCodes.Status302Found)
             .SetsHeader(StatusCodes.Status302Found, "Location", "The provider's authorization endpoint with the request of the round trip.")
             .SetsHeader(
@@ -36,14 +40,15 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest)
             .ProducesError(StatusCodes.Status404NotFound, TenancyErrors.NotFound);
 
-        // GET only: both providers answer in the response mode `query` (the default of the code flow, which is not even sent); a form post would be a cross-site form, which the JSON-only rule refuses.
+        // GET only: the providers answer in the response mode `query` (the default of the code flow, which is not even sent); a form post would be a cross-site form, which the JSON-only rule refuses.
         app.MapGet(ProviderPaths.Callback, ProviderCallbackEndpoint.HandleAsync)
             .WithTags("Providers")
             .WithDescription(
                 "Where the provider sends the browser back. OpenIddict checks the state (its signature, its age, its single use, the request-forgery "
-                + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token. The answer is always "
+                + "cookie of the browser that started), redeems the code with the PKCE verifier and validates the identity token (GitHub has none: its identity is read from its API, `/user` and "
+                + "`/user/emails`, and its access token is revoked at once). The answer is always "
                 + "`302` to the product's return screen (`Auth:App:FrontendUrls:ProviderReturn`), never a page: on success "
-                + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
+                + "`#ticket=<43 characters>&purpose=<sign_in|invite|reauth|connect>` and the cookie `auth_pt`; on failure `#error=<code>&purpose=<purpose>` "
                 + "(`purpose` left out when the state could not be read) with the codes `cancelled`, `invalid_state`, `provider_unavailable` and "
                 + "`provider_error`, and nothing stored. The ticket lives 10 minutes (5 for `reauth`) and works only with the `auth_pt` of this browser. "
                 + "A name that is not a provider, or an instance without the return address, is `404 not_found`.")
@@ -67,7 +72,7 @@ public static class ProviderRoutes
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":false}`, whether or not an account has it; an account with the address "
                 + "`{\"next\":\"link\",\"email\",\"email_verified\":true}`; an account under a look-alike spelling `409 already_registered`; no account "
                 + "`{\"next\":\"finish_signup\",\"email\",\"kinds\"}` while sign-up is on, else `403 no_account`. A ticket that is unknown, used, "
-                + "expired, of the purpose `reauth` or without its `auth_pt` is `400 invalid_ticket`. A ticket of an invitation (`invite`) accepts it "
+                + "expired, of the purpose `reauth` or `connect`, or without its `auth_pt` is `400 invalid_ticket`. A ticket of an invitation (`invite`) accepts it "
                 + "and signs in: the invitation unknown, used, expired, cancelled or replaced is `400 invalid_token`; the ticket's address missing, "
                 + "unverified or not the invited one `403 address_mismatch`; an account that is a member of the invited company `409 already_member`; "
                 + "an identity that is a login of another account `409 provider_already_linked`; an existing account whose identity is not its login "
@@ -94,7 +99,8 @@ public static class ProviderRoutes
                 + "locked the answer is `429 too_many_attempts`. No account with the address (spelled the same up to ASCII case), an account without a "
                 + "password, and a wrong password are the same `401 invalid_credentials`, and the ticket stays usable. With the right password an "
                 + "unconfirmed address is confirmed when the provider verified it (else `403 email_not_verified`), and an account with no membership is "
-                + "`403 no_membership`. Then the login, `provider.linked`, the use of the ticket and the session are one change: `200` as a login "
+                + "`403 no_membership`; an account that already has a login of the ticket's provider `409 provider_in_use`, the ticket kept (spec 0012). Then "
+                + "the login, `provider.linked` (`via` `sign_in`), the mail \"provider connected\", the use of the ticket and the session are one change: `200` as a login "
                 + "answers, `auth_pt` cleared. An identity linked meanwhile signs in without the password being judged. A ticket without an address is "
                 + "`403 no_email`; one that is unknown, used, expired, not of the purpose `sign_in` or without its `auth_pt` is `400 invalid_ticket`.")
             .ReadsJson<ProviderLinkRequest>()
@@ -105,6 +111,7 @@ public static class ProviderRoutes
             .ProducesError(StatusCodes.Status400BadRequest, TenancyErrors.InvalidRequest, TenancyErrors.InvalidTicket)
             .ProducesError(StatusCodes.Status401Unauthorized, LoginEndpoint.InvalidCredentialsError)
             .ProducesError(StatusCodes.Status403Forbidden, TenancyErrors.NoEmail, TenancyErrors.EmailNotVerified, TenancyErrors.NoMembership)
+            .ProducesError(StatusCodes.Status409Conflict, TenancyErrors.ProviderInUse)
             .ProducesTooManyAttempts();
 
         app.MapPost(ProviderPaths.Finish, ProviderFinishEndpoint.HandleAsync)

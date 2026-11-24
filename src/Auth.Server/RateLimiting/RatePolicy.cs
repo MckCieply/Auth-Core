@@ -1,3 +1,4 @@
+using Auth.Server.Account;
 using Auth.Server.Api;
 using Auth.Server.Providers;
 using Auth.Server.Sessions;
@@ -16,6 +17,13 @@ public enum RatePolicy
 
 public static class RatePolicies
 {
+    /// <summary>
+    /// Spec 0012 → Limits: the settings endpoints that judge a password or end a provider round trip count against <c>login</c>, by exact path as
+    /// the provider token paths do. The unlink and the testing endpoint are general, as every other POST.
+    /// </summary>
+    private static readonly string[] LoginPolicyPaths =
+        [AccountConfirmEndpoint.Path, ProviderPaths.Connect, SettingsRequestHandler.PasswordPath];
+
     public static string NameOf(RatePolicy policy) => policy switch
     {
         RatePolicy.Login => "login",
@@ -66,7 +74,8 @@ public static class RatePolicies
         }
 
         if (trimmed.Equals("/auth/login", StringComparison.OrdinalIgnoreCase)
-            || ProviderPaths.TokenPaths.Any(tokenPath => trimmed.Equals(tokenPath, StringComparison.OrdinalIgnoreCase)))
+            || ProviderPaths.TokenPaths.Any(tokenPath => trimmed.Equals(tokenPath, StringComparison.OrdinalIgnoreCase))
+            || LoginPolicyPaths.Any(loginPath => trimmed.Equals(loginPath, StringComparison.OrdinalIgnoreCase)))
         {
             return RatePolicy.Login;
         }

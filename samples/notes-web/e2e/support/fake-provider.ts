@@ -2,7 +2,7 @@ import { Page, expect } from '@playwright/test';
 
 declare const process: { env: Record<string, string | undefined> };
 
-export type FakeProvider = 'Google' | 'Microsoft';
+export type FakeProvider = 'Google' | 'Microsoft' | 'GitHub';
 
 /** The fake OpenID provider of spec 0011 (tests/Auth.FakeOidc/compose.yml): its sign-in page is where the browser lands. */
 export function fakeUrl(): string {

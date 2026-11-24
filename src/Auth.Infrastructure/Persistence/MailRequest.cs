@@ -19,6 +19,12 @@ public sealed class MailRequest
     /// </summary>
     public Guid? InviteId { get; init; }
 
+    /// <summary>
+    /// The provider a notice names (spec 0012 → Mails: "provider connected" and "provider disconnected"); <see langword="null"/> for every other
+    /// kind. Never a token: a notice carries no link.
+    /// </summary>
+    public string? Provider { get; init; }
+
     public required DateTimeOffset RequestedAt { get; init; }
 
     /// <summary>Failed sends so far.</summary>

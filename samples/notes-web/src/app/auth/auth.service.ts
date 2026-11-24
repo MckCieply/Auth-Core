@@ -1,4 +1,4 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpContextToken, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, Injector, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom, timeout } from 'rxjs';
@@ -14,11 +14,16 @@ export interface Me {
   org_kind: 'organization' | 'personal';
   roles: string[];
   permissions: string[];
-  /** Spec 0011: false for an account made through Google or Microsoft that has never set a password. */
+  /** Spec 0011: false for an account made through a provider that has never set a password. */
   has_password: boolean;
   /** The providers that sign in to this account, sorted (spec 0011). */
   linked_providers: ProviderName[];
+  /** Spec 0012: the end of the confirmation window of this device's session, UTC with seconds, or null when it is closed. */
+  confirmed_until: string | null;
 }
+
+/** Marks the request of an unlink or a password change: it is the one request to /auth/ that is not held while it runs (spec 0012). */
+export const RENEWAL = new HttpContextToken<boolean>(() => false);
 
 /** What went wrong with a call to an account endpoint, as far as a screen cares. */
 export type Failure =
@@ -41,6 +46,13 @@ export type Failure =
   | { kind: 'reauth_failed' }
   | { kind: 'password_required' }
   | { kind: 'reauth_required' }
+  | { kind: 'session_required' }
+  | { kind: 'confirmation_required' }
+  | { kind: 'provider_in_use' }
+  | { kind: 'last_login' }
+  | { kind: 'password_not_set' }
+  | { kind: 'not_found' }
+  | { kind: 'permission_not_held' }
   | { kind: 'org_creation_disabled' }
   | { kind: 'company_limit_reached' }
   | { kind: 'company_member' }
@@ -149,7 +161,7 @@ export function failureOf(error: unknown): Failure {
   return providerFailureOf(error.status, code);
 }
 
-/** The answers of spec 0011, each with the status of the contract; anything else is "other". */
+/** The answers of specs 0011 and 0012, each with the status of the contract; anything else is "other". */
 function providerFailureOf(status: number, code: string | undefined): Failure {
   if (status === 400 && code === 'invalid_ticket') {
     return { kind: 'invalid_ticket' };
@@ -157,8 +169,21 @@ function providerFailureOf(status: number, code: string | undefined): Failure {
   if (status === 409 && code === 'provider_already_linked') {
     return { kind: 'provider_already_linked' };
   }
+  // Spec 0012: the settings screen.
+  if (status === 409 && (code === 'provider_in_use' || code === 'last_login')) {
+    return { kind: code };
+  }
+  if (status === 401 && code === 'session_required') {
+    return { kind: 'session_required' };
+  }
+  if (status === 404 && code === 'not_found') {
+    return { kind: 'not_found' };
+  }
   if (status !== 403) {
     return { kind: 'other' };
+  }
+  if (code === 'confirmation_required' || code === 'password_not_set') {
+    return { kind: code };
   }
   if (code === 'no_email') {
     return { kind: 'no_email' };
@@ -189,6 +214,17 @@ export function formFailureOf(error: unknown): Failure {
   return error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request'
     ? { kind: 'invalid_request' }
     : failureOf(error);
+}
+
+/**
+ * The answers of DELETE /auth/org (spec 0008, spec 0012): those of the forms (a name that is not the company's is `400 invalid_request`;
+ * `permissions_changed` is read as everywhere), and the refusal of the company API that the "Delete company" section names.
+ */
+function companyFailureOf(error: unknown): Failure {
+  if (error instanceof HttpErrorResponse && error.status === 403 && errorCode(error) === 'permission_not_held') {
+    return { kind: 'permission_not_held' };
+  }
+  return formFailureOf(error);
 }
 
 interface LoginBody {
@@ -242,6 +278,8 @@ function asMe(body: unknown): Me | null {
       // Anything but false keeps the password screens of spec 0010: an Auth-Core before spec 0011 does not send the member.
       has_password: body['has_password'] !== false,
       linked_providers: providerNamesOf(body['linked_providers']),
+      // Anything but a string is a closed window: an Auth-Core before spec 0012 does not send the member.
+      confirmed_until: typeof body['confirmed_until'] === 'string' ? body['confirmed_until'] : null,
     };
   }
   return null;
@@ -260,6 +298,10 @@ export class AuthService {
   private readonly orgsState = signal<OrgEntry[]>([]);
   private readonly orgChangesState = signal(0);
   private refreshing: Promise<RefreshResult> | null = null;
+  // The refresh that the 401 of a renewal's own request starts (spec 0012): never shared with a plain refresh.
+  private renewalRefreshing: Promise<RefreshResult> | null = null;
+  // Spec 0012: an unlink or a password change in flight. Its answer replaces the refresh cookie, so nothing else that carries it may leave.
+  private renewing: Promise<void> | null = null;
   // The call of /auth/switch that is on its way. It spends the same refresh cookie as a refresh, so the two never run together: a refresh
   // asked meanwhile waits for it (and takes its token), a switch asked while a refresh runs waits for that.
   private switching: Promise<SwitchResult> | null = null;
@@ -428,22 +470,126 @@ export class AuthService {
   }
 
   /**
+   * Spec 0012: DELETE /auth/org with the company's name and the caller's confirmation (the password, or the ticket of a `reauth` round trip).
+   * On `204` the session is over here too: the company's devices are signed out; the account stays when it has another space (spec 0015).
+   * The product deletes the company's data before it calls this.
+   */
+  async deleteCompany(name: string, confirmation: { password: string } | { provider_ticket: string }): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.delete('/auth/org', { body: { name, ...confirmation } }));
+    } catch (error) {
+      return { ok: false, failure: companyFailureOf(error) };
+    }
+    this.dropSession();
+    return { ok: true };
+  }
+
+  /** The unlink or the password change in flight, or null: the interceptor holds every other request to /auth/ until it settles. */
+  get renewal(): Promise<void> | null {
+    return this.renewing;
+  }
+
+  /** POST /auth/account/confirm with the password (spec 0012): the window of this device's session opens for five minutes. */
+  confirmPassword(password: string): Promise<LoginResult> {
+    return this.settingsCall('/auth/account/confirm', { password });
+  }
+
+  /** The same with the ticket of a `reauth` round trip; the auth_pt cookie goes with it by itself. */
+  confirmWithTicket(ticket: string): Promise<LoginResult> {
+    return this.settingsCall('/auth/account/confirm', { provider_ticket: ticket });
+  }
+
+  /** POST /auth/providers/connect with the ticket of a `connect` round trip. */
+  connect(ticket: string): Promise<LoginResult> {
+    return this.settingsCall('/auth/providers/connect', { ticket });
+  }
+
+  /** POST /auth/account/logins/unlink: every other device is signed out, and this one gets a new session in the answer. */
+  unlink(provider: string): Promise<LoginResult> {
+    return this.renewSession('/auth/account/logins/unlink', { provider });
+  }
+
+  /** POST /auth/account/password, against the current password: as the unlink, a new session for this device. */
+  changePassword(current: string, next: string): Promise<LoginResult> {
+    return this.renewSession('/auth/account/password', { current_password: current, new_password: next });
+  }
+
+  /** A settings call that answers 204: then the person is read again (the window, the logins). */
+  private async settingsCall(url: string, body: unknown): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.post(url, body));
+    } catch (error) {
+      return { ok: false, failure: failureOf(error) };
+    }
+    await this.loadMe(REFRESH_TIMEOUT_MS);
+    return { ok: true };
+  }
+
+  /**
+   * A call whose answer is a login's (spec 0012 -> Sessions): the new access token is stored in the same session of this tab (the refresh cookie
+   * is already the new one). Until it is stored, every other request to /auth/ waits, so that none carries the cookie the answer replaces.
+   * It starts only when nothing else that spends the refresh cookie is on its way: a switch (its token must be the one the call is sent with),
+   * a refresh, or another renewal.
+   */
+  private async renewSession(url: string, body: unknown): Promise<LoginResult> {
+    // The wait and the claim of `renewing` are one step with no await between them, so two waiters never both go through.
+    while (this.switching !== null || this.refreshing !== null || this.renewing !== null) {
+      await (this.switching ?? this.refreshing ?? this.renewing)?.catch(() => undefined);
+    }
+    const started = this.generation;
+    let release = (): void => undefined;
+    this.renewing = new Promise<void>((resolve) => (release = resolve));
+    let result: LoginResult;
+    try {
+      const answer = await firstValueFrom(
+        this.http.post<LoginBody | null>(url, body, { context: new HttpContext().set(RENEWAL, true) }),
+      );
+      const token = answer?.access_token;
+      if (answer?.status !== 'authenticated' || typeof token !== 'string' || token === '' || this.generation !== started) {
+        result = { ok: false, failure: { kind: 'other' } };
+      } else {
+        this.accessToken.set(token);
+        result = { ok: true };
+      }
+    } catch (error) {
+      result = { ok: false, failure: failureOf(error) };
+    } finally {
+      this.renewing = null;
+      release();
+    }
+    if (result.ok) {
+      await this.loadMe(REFRESH_TIMEOUT_MS);
+    }
+    return result;
+  }
+
+  /**
    * Exchanges the refresh cookie for a new access token. Callers that ask while a refresh runs get that refresh:
    * there is never more than one request at a time. A refresh that started before the person signed out hands its callers
    * 'rejected' when it ends, whatever the cookie said: the session it was for is gone (the interceptor then leaves the page alone).
    * A switch that is on its way (spec 0015) spends the same refresh cookie: the refresh waits for it and takes its token ('ok'), or its end
    * of the session ('rejected'); when the switch renewed nothing (404, 503) the refresh goes on to its own request.
    */
-  refresh(): Promise<RefreshResult> {
-    this.refreshing ??= this.renew().finally(() => {
+  refresh(forRenewal = false): Promise<RefreshResult> {
+    if (forRenewal) {
+      // Never shared with a plain refresh: one started while the renewal runs has its request held behind the renewal, and the renewal's
+      // own refresh would wait for it (until its 10 seconds) if it joined it. Its own promise, its own request, marked as part of the renewal.
+      this.renewalRefreshing ??= this.renew(true).finally(() => {
+        this.renewalRefreshing = null;
+      });
+      return this.renewalRefreshing;
+    }
+    this.refreshing ??= this.renew(false).finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
   }
 
-  private async renew(): Promise<RefreshResult> {
+  private async renew(forRenewal: boolean): Promise<RefreshResult> {
     const asked = this.generation;
-    while (this.switching !== null) {
+    // The refresh of a renewal's own 401 does not wait for a switch: the switch's request is held by the interceptor until the renewal is over,
+    // so waiting for it would wait for the renewal itself (spec 0012). The gate already keeps the cookie safe.
+    while (!forRenewal && this.switching !== null) {
       const switched = await this.switching;
       if (switched === 'switched') {
         return 'ok';
@@ -453,7 +599,7 @@ export class AuthService {
         return 'rejected';
       }
     }
-    return this.exchange();
+    return this.exchange(forRenewal);
   }
 
   /**
@@ -618,11 +764,14 @@ export class AuthService {
     this.noticeState.set(null);
   }
 
-  private async exchange(): Promise<RefreshResult> {
+  private async exchange(forRenewal: boolean): Promise<RefreshResult> {
     const started = this.generation;
     try {
+      // The refresh that the 401 of a renewal's own request starts is marked as part of the renewal, so that the interceptor does not hold it
+      // behind that request (spec 0012). No other caller passes `forRenewal`: theirs wait for the renewal as before.
+      const options = forRenewal ? { context: new HttpContext().set(RENEWAL, true) } : {};
       const body = await firstValueFrom(
-        this.http.post<RefreshBody | null>('/auth/refresh', null).pipe(timeout(REFRESH_TIMEOUT_MS)),
+        this.http.post<RefreshBody | null>('/auth/refresh', null, options).pipe(timeout(REFRESH_TIMEOUT_MS)),
       );
       if (this.generation !== started) {
         // The person signed out while this was on its way: the session it would renew is gone. (The interceptor then goes

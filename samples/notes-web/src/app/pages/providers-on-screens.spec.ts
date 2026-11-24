@@ -46,10 +46,26 @@ describe('the provider buttons on the screens (spec 0011)', () => {
   });
 
   it('/login: an unknown name draws no button and a duplicated name only one', async () => {
-    const { fixture } = await open('login', LoginPage, { ...both, providers: ['github', 'google', 'google', 'Microsoft'] });
+    const { fixture } = await open('login', LoginPage, { ...both, providers: ['gitlab', 'google', 'google', 'Microsoft'] });
     const links = [...(fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="provider-buttons"] a')];
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/auth/providers/google/start']);
-    expect(pageText(fixture)).not.toContain('github');
+    expect(pageText(fixture)).not.toContain('gitlab');
+  });
+
+  it('/login, /signup and /invite: GitHub gets its button beside the others, in the order of the options (spec 0012)', async () => {
+    const providers = ['google', 'microsoft', 'github'];
+    const login = await open('login', LoginPage, { ...both, providers });
+    expect(before(login.fixture, '#email')).toBe('Sign in Continue with Google Continue with Microsoft Continue with GitHub or Email');
+    expect(has(login.fixture, 'a[href="/auth/providers/github/start"]')).toBe(true);
+    TestBed.resetTestingModule();
+    const signup = await open('signup', SignupPage, { ...both, providers });
+    expect(before(signup.fixture, '[data-testid="signup-kind"]')).toContain('Sign up with Google Sign up with Microsoft Sign up with GitHub or');
+    TestBed.resetTestingModule();
+    const invite = await open('invite', InvitePage, { ...both, providers }, '?token=tok-i');
+    invite.ctrl.expectOne('/auth/invites/preview').flush({ ...preview, has_private_account: false });
+    await settle(invite.fixture);
+    expect(before(invite.fixture, '#password')).toContain('Accept with Google Accept with Microsoft Accept with GitHub or');
+    expect(has(invite.fixture, 'a[href="/auth/providers/github/start?invite=tok-i"]')).toBe(true);
   });
 
   it('/login: a failed options call draws no button and the form still works', async () => {

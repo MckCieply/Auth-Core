@@ -5,6 +5,7 @@ import { cancelAtFake, chooseAtFake, expectNoTicketInAddressBar, signInAtFake } 
 import { openMailLink, waitForLink } from './support/mail';
 import { expectCleanAddressBar } from './support/page';
 import { signOut } from './support/session';
+import { openSettings } from './support/settings';
 
 // Spec 0011, criterion 32: the provider buttons against the fake provider, which Auth-Core trusts as its test issuer on this stack.
 const MAIL_WAIT_MS = 100_000;
@@ -38,7 +39,8 @@ test('a new person signs up privately with Google, signs out, and signs in again
   // The buttons come first on the sign-in screen, in the order of the manifest, then "or" and the form.
   await page.goto('/login');
   const buttons = page.getByTestId('provider-buttons').getByRole('link');
-  await expect(buttons).toHaveText(['Continue with Google', 'Continue with Microsoft']);
+  // Spec 0012: three buttons.
+  await expect(buttons).toHaveText(['Continue with Google', 'Continue with Microsoft', 'Continue with GitHub']);
   await expect(page.getByTestId('provider-or')).toHaveText('or');
   const lastButton = await buttons.last().boundingBox();
   const separator = await page.getByTestId('provider-or').boundingBox();
@@ -137,14 +139,15 @@ test('a private person without a password deletes the account with "Confirm with
   await page.getByRole('button', { name: 'Add note' }).click();
   await expect(page.getByText(note)).toBeVisible();
 
+  await openSettings(page);
   await page.getByTestId('delete-account').click();
   await expect(page.getByTestId('delete-warning')).toHaveText('This deletes your account and all your notes. It cannot be undone.');
   await expect(page.locator('#delete-password')).toHaveCount(0);
   await page.getByRole('link', { name: 'Confirm with Google' }).click();
   await signInAtFake(page, 'Google', email, true);
 
-  // Back on the notes with the section open, ready to confirm; the ticket is in no URL.
-  await expect(page).toHaveURL(/\/notes$/);
+  // Back on the settings with the section open, ready to confirm; the ticket is in no URL.
+  await expect(page).toHaveURL(/\/settings$/);
   expectNoTicketInAddressBar(page);
   await expect(page.getByTestId('delete-section')).toBeVisible();
   await page.getByRole('button', { name: 'Delete my account' }).click();

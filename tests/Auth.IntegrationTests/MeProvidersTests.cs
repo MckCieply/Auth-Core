@@ -119,4 +119,39 @@ public sealed class MeProvidersTests(PostgresFixture postgres, KeyMaterialFixtur
         Assert.Contains("\"linked_providers\":[\"google\"]", raw, StringComparison.Ordinal);
         Assert.DoesNotContain(FakePeople.GoogleSubject, raw, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Confirmed_until_is_the_end_of_the_window_of_this_devices_session_in_utc_with_seconds()   // spec 0012, criterion 23
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+
+        using var response = await SettingsApi.Me(Client, session);
+
+        var me = await TenancyApi.ReadOkAsync(response);
+        var until = me.GetProperty("confirmed_until").GetString()!;
+        Assert.Matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$", until);
+        Assert.Equal(SettingsApi.Window(Auth.Server.Email.StorableTime.Now(Clock) + Auth.Server.Sessions.ConfirmationWindow.Lifetime), until);
+    }
+
+    [Fact]
+    public async Task Confirmed_until_is_null_without_the_refresh_cookie()   // spec 0012, criterion 23
+    {
+        var session = await SessionApi.LoginAsync(Client, Factory);
+
+        var me = await MeAsync(session.AccessToken);   // TenancyApi sends no cookie
+
+        Assert.Equal(JsonValueKind.Null, me.GetProperty("confirmed_until").ValueKind);
+    }
+
+    [Fact]
+    public async Task A_github_login_is_listed_among_the_providers_sorted()   // spec 0012, criterion 23
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", FakePeople.GoogleSubject);
+        await LinkAsync(user.Id, "github", FakePeople.GitHubId);
+
+        var me = await MeAsync((await SessionApi.LoginAsync(Client, Ola, UserPassword)).AccessToken);
+
+        Assert.Equal(["github", "google"], Providers(me));
+    }
 }

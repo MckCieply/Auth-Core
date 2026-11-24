@@ -5,10 +5,12 @@ namespace Auth.Server.Tenancy;
 /// <summary>
 /// Response of <c>GET /auth/me</c>: the caller as the database says now. <c>org_kind</c> is <c>organization</c> or <c>personal</c> (spec
 /// 0010); a private account's space is named <c>private</c> and its role is <c>private</c>. <c>has_password</c>: the account has a password;
-/// <c>linked_providers</c>: the providers of its logins, sorted ordinally (spec 0011).
+/// <c>linked_providers</c>: the providers of its logins, sorted ordinally (spec 0011). <c>confirmed_until</c>: the end of the confirmation window of
+/// the session of this device, while it is in the future (spec 0012); <see langword="null"/> otherwise.
 /// </summary>
 public sealed record MeResponse(
-    Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions, bool HasPassword, string[] LinkedProviders);
+    Guid Sub, string Email, Guid OrgId, string OrgName, string OrgKind, string[] Roles, string[] Permissions, bool HasPassword, string[] LinkedProviders,
+    string? ConfirmedUntil);
 
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);
@@ -28,8 +30,11 @@ public sealed record CreateOrgRequest(string Name);
 /// <summary>Request of <c>PATCH /auth/org</c>.</summary>
 public sealed record RenameOrgRequest(string Name);
 
-/// <summary>Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password.</summary>
-public sealed record DeleteOrgRequest(string Name, string Password);
+/// <summary>
+/// Request of <c>DELETE /auth/org</c>: the company's name, exactly, and the caller's own password. Spec 0012: exactly one of <c>password</c> and
+/// <c>provider_ticket</c>.
+/// </summary>
+public sealed record DeleteOrgRequest(string Name, string? Password = null, string? ProviderTicket = null);
 
 /// <summary>
 /// Request of <c>DELETE /auth/account</c>: exactly one of the caller's own password (spec 0010) and a re-authentication ticket of a provider

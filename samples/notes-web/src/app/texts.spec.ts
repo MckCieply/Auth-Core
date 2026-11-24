@@ -22,6 +22,29 @@ function leaves(value: unknown, path: string, into: [string, string][]): [string
 }
 
 describe('texts', () => {
+  it('words the settings sentences of the confirmation, connect and disconnect flows', () => {
+    const s = texts.settings;
+    expect(s.connectedNow('GitHub')).toBe('GitHub connected.');
+    expect(s.disconnectedNow('GitHub')).toBe('GitHub disconnected.');
+    expect(s.lastLogin).toBe('Set a password or connect another provider first.');
+    expect(s.providerInUse('Google')).toBe('You already have a Google account connected. Disconnect it first.');
+    expect(s.providerAlreadyLinked('Google')).toBe('This Google account belongs to another account.');
+    expect(s.addressMismatch('Google', 'a@b.example')).toBe('This Google account has another address. Connect the one with a@b.example.');
+    expect(s.emailNotVerified('Google')).toBe('Google has not verified this address.');
+    expect(s.noEmail('Google')).toBe('This Google account has no email address we can use.');
+    expect(s.invalidTicket).toBe('This took too long. Start again.');
+    expect(s.reauthFailed).toBe('The confirmation did not work or took too long. Confirm again.');
+    expect(s.wrongPassword).toBe('The password is wrong.');
+    expect(s.notFound).toBe('This sign-in method is no longer connected.');
+    expect(s.connectAgain('Google')).toBe('Confirmed. Connect Google again.');
+    expect(s.disconnectAgain('Google')).toBe('Confirmed. Disconnect Google again.');
+    expect(s.confirmTitle).toBe("Confirm it's you");
+    expect(s.confirm).toBe('Confirm');
+    expect(texts.common.cancel).toBe('Cancel');
+    expect(texts.common.passwordRequired).toBe('Enter your password.');
+    expect(s.noMethod).toBe('None of your sign-in methods can confirm here. Set a password first.');
+  });
+
   it('rounds the wait of a lockout up to whole minutes', () => {
     expect(texts.login.tooManyAttempts(1)).toBe('Too many attempts. Try again in 1 minute.');
     expect(texts.login.tooManyAttempts(60)).toBe('Too many attempts. Try again in 1 minute.');

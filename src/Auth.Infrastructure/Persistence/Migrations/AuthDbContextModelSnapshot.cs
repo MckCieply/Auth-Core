@@ -350,6 +350,10 @@ namespace Auth.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Provider")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<DateTimeOffset>("RequestedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -497,6 +501,22 @@ namespace Auth.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("ProviderTickets");
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.SessionState", b =>
+                {
+                    b.Property<string>("AuthorizationId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("ConfirmedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("SessionStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("AuthorizationId");
+
+                    b.ToTable("SessionStates");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -895,6 +915,15 @@ namespace Auth.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CompanyId", "RoleId")
                         .HasPrincipalKey("CompanyId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Auth.Infrastructure.Persistence.SessionState", b =>
+                {
+                    b.HasOne("OpenIddict.EntityFrameworkCore.Models.OpenIddictEntityFrameworkCoreAuthorization", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

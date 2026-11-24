@@ -92,4 +92,73 @@ public sealed class MailComposerTests
     [Fact]
     public void Composed_mail_does_not_print_its_content() =>
         Assert.DoesNotContain(Token, Composer().Compose(MailKind.PasswordReset, "user@example.com", Token).ToString());
+
+    public static TheoryData<string, MailKind, string?> Notices => new()
+    {
+        { "en", MailKind.ProviderLinked, "GitHub" },
+        { "en", MailKind.ProviderUnlinked, "Google" },
+        { "en", MailKind.PasswordChanged, null },
+        { "pl", MailKind.ProviderLinked, "Microsoft" },
+        { "pl", MailKind.ProviderUnlinked, "GitHub" },
+        { "pl", MailKind.PasswordChanged, null },
+    };
+
+    [Theory]
+    [MemberData(nameof(Notices))]
+    public void A_notice_names_the_provider_and_the_address_in_both_parts_and_holds_no_link(string locale, MailKind kind, string? provider)   // spec 0012, criterion 22
+    {
+        var mail = Composer(locale).ComposeNotice(kind, "user@example.com", provider);
+
+        Assert.Equal("user@example.com", mail.To);
+        Assert.Contains("speech-to-mail", mail.Subject, StringComparison.Ordinal);
+        Assert.Contains("<html lang=\"" + locale + "\">", mail.HtmlBody, StringComparison.Ordinal);
+        foreach (var body in new[] { mail.TextBody, mail.HtmlBody })
+        {
+            Assert.Contains("user@example.com", body, StringComparison.Ordinal);
+            if (provider is not null)
+            {
+                Assert.Contains(provider, body, StringComparison.Ordinal);
+            }
+
+            Assert.DoesNotContain("http", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("href", body, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("app.example.com", body, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("en", MailKind.ProviderLinked)]
+    [InlineData("en", MailKind.ProviderUnlinked)]
+    [InlineData("en", MailKind.PasswordChanged)]
+    [InlineData("pl", MailKind.ProviderLinked)]
+    [InlineData("pl", MailKind.ProviderUnlinked)]
+    [InlineData("pl", MailKind.PasswordChanged)]
+    public void Every_language_and_notice_has_every_text(string locale, MailKind kind)   // spec 0012 → Mails: Polish and English
+    {
+        var text = MailTexts.Notice(locale, kind);
+
+        Assert.All(
+            [text.Subject, text.Greeting, text.Intro, text.Advice, text.NoLink],
+            value => Assert.False(string.IsNullOrWhiteSpace(value)));
+        Assert.Contains("{0}", text.Subject, StringComparison.Ordinal);
+        Assert.Contains("{2}", text.Intro, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_notice_encodes_the_address_and_the_application_in_the_html_part_only()   // spec 0012 → Mails
+    {
+        var mail = Composer(appName: "A&B <Notes>").ComposeNotice(MailKind.ProviderLinked, "a&b@example.com", "GitHub");
+
+        Assert.Contains("a&amp;b@example.com", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("A&amp;B &lt;Notes&gt;", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("a&b@example.com", mail.TextBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("example.com", mail.Subject, StringComparison.Ordinal);   // the address stays out of the header
+    }
+
+    [Fact]
+    public void A_provider_notice_without_a_provider_and_another_kind_are_refused()
+    {
+        Assert.Throws<ArgumentException>(() => Composer().ComposeNotice(MailKind.ProviderLinked, "user@example.com", null));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Composer().ComposeNotice(MailKind.PasswordReset, "user@example.com", null));
+    }
 }

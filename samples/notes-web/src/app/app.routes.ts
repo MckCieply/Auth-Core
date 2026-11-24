@@ -10,6 +10,7 @@ import { ProviderFinishPage } from './pages/provider-finish';
 import { ProviderLinkPage } from './pages/provider-link';
 import { ProviderReturnPage } from './pages/provider-return';
 import { ResetPage } from './pages/reset';
+import { SettingsPage } from './pages/settings';
 import { SignupPage } from './pages/signup';
 import { TeamPage } from './pages/team';
 import { VerifyPage } from './pages/verify';
@@ -36,5 +37,6 @@ export const routes: Routes = [
   { path: 'provider-finish', component: ProviderFinishPage, title: texts.providerFinish.title },
   { path: 'notes', component: NotesPage, canActivate: [authGuard], title: texts.notes.title },
   { path: 'team', component: TeamPage, canActivate: [authGuard], title: texts.team.title },
+  { path: 'settings', component: SettingsPage, canActivate: [authGuard], title: texts.settings.title },
   { path: '**', redirectTo: toNotes },
 ];

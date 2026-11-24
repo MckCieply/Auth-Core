@@ -144,7 +144,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Theory]
-    [InlineData("github")]
+    [InlineData("gitlab")]   // spec 0012: github is a name now
     [InlineData("Google")]
     [InlineData("password")]
     public async Task An_unknown_name_is_404_not_found(string name)   // criterion 6
@@ -164,6 +164,14 @@ public sealed class ProviderStartTests : ProviderTestBase
         await TenancyApi.AssertErrorAsync(response, HttpStatusCode.NotFound, "not_found");
     }
 
+    [Fact]
+    public async Task GitHub_that_the_manifest_does_not_list_is_404_not_found()   // spec 0012 → Configuration: keyed is not offered
+    {
+        using var response = await Browser.GetAsync("/auth/providers/github/start");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.NotFound, "not_found");
+    }
+
     public static TheoryData<string> BadQueries => new()
     {
         "?invite=abc",
@@ -178,6 +186,9 @@ public sealed class ProviderStartTests : ProviderTestBase
         "?purpose=REAUTH",
         "?invite=" + Invite43 + "&purpose=reauth",
         "?purpose=reauth&purpose=reauth",
+        "?purpose=CONNECT",
+        "?invite=" + Invite43 + "&purpose=connect",
+        "?purpose=connect&purpose=reauth",
         "?invite=" + Invite43 + "&invite=" + Invite43,
     };
 
@@ -191,7 +202,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     }
 
     [Theory]
-    [InlineData("github", "?purpose=login")]
+    [InlineData("gitlab", "?purpose=login")]
     [InlineData("password", "?invite=abc")]
     public async Task An_unknown_name_with_a_bad_query_is_404_not_400(string name, string query)   // spec 0011 → start: step 1 comes before step 2
     {
@@ -221,6 +232,7 @@ public sealed class ProviderStartTests : ProviderTestBase
     [Theory]
     [InlineData("")]
     [InlineData("?purpose=reauth")]
+    [InlineData("?purpose=connect")]
     [InlineData("?invite=" + Invite43)]
     public async Task The_start_reads_no_account_and_no_invitation(string query)   // criterion 6: statement capture
     {
@@ -235,5 +247,19 @@ public sealed class ProviderStartTests : ProviderTestBase
             || sql.Contains("\"Invites\"", StringComparison.Ordinal)
             || sql.Contains("\"PendingSignups\"", StringComparison.Ordinal)
             || sql.Contains("\"Memberships\"", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("google")]
+    [InlineData("microsoft")]
+    public async Task A_connect_start_asks_for_the_account_chooser_and_its_callback_says_purpose_connect(string provider)   // spec 0012, criterion 14
+    {
+        var start = await StartAsync(provider, "?purpose=connect");
+
+        Assert.Equal("select_account", start.Query["prompt"]);
+        Assert.False(start.Query.ContainsKey("max_age"));
+        var callback = await CallbackAsync(
+            await AuthorizeAsync(start, provider == "google" ? GooglePerson() : PersonalMicrosoft()), start.StateCookie);
+        Assert.Equal("connect", ProviderApi.FragmentOf(callback)["purpose"]);
     }
 }

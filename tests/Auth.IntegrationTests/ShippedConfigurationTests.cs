@@ -5,6 +5,7 @@ using Auth.Server.Email;
 using Auth.Server.Providers;
 using Auth.Server.Signup;
 using Auth.Server.Tenancy;
+using Auth.Server.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -51,7 +52,8 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
             var colon = trimmed.IndexOf(": ", StringComparison.Ordinal);
             if (trimmed.StartsWith("Auth__", StringComparison.Ordinal) && colon > 0)
             {
-                settings[trimmed[..colon].Replace("__", ":", StringComparison.Ordinal)] = trimmed[(colon + 2)..];
+                // A quoted value ("true") is the text inside the quotes, as Compose reads it.
+                settings[trimmed[..colon].Replace("__", ":", StringComparison.Ordinal)] = trimmed[(colon + 2)..].Trim('"');
             }
         }
 
@@ -84,35 +86,39 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
     }
 
     [Fact]
-    public void The_notes_manifest_lists_both_providers_and_the_development_manifest_none()   // spec 0011 → Samples
+    public void The_notes_manifest_lists_the_three_providers_and_the_development_manifest_none()   // spec 0012 → Sample backend
     {
         var notes = ManifestParser.Parse(File.ReadAllText(RepositoryFile("samples/notes-api/auth.yaml")));
         var development = ManifestParser.Parse(File.ReadAllText(RepositoryFile("deploy/auth.yaml")));
 
         Assert.Null(notes.Error);
-        Assert.Equal(["google", "microsoft"], notes.Manifest!.Providers);
+        Assert.Equal(["google", "microsoft", "github"], notes.Manifest!.Providers);
         Assert.Null(development.Error);
         Assert.Empty(development.Manifest!.Providers);
-        Assert.Contains("# providers: [google, microsoft]", File.ReadAllText(RepositoryFile("deploy/auth.yaml")), StringComparison.Ordinal);
+        Assert.Contains("# providers: [google, microsoft, github]", File.ReadAllText(RepositoryFile("deploy/auth.yaml")), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void The_fake_overlay_names_the_test_issuer_both_keys_and_the_return_address_and_the_notes_stacks_use_it()   // spec 0011 → Samples
+    public void The_fake_overlay_names_the_test_issuer_the_keys_the_return_address_and_the_testing_endpoint_and_the_notes_stacks_use_it()   // specs 0011 and 0012
     {
         var settings = OverlaySettings();
 
         Assert.Equal("http://fake-oidc:8099", settings[ProviderSettings.TestIssuerKey]);
         Assert.Equal("https://localhost:8443/provider-return", settings[ProviderSettings.ReturnUrlKey]);
         Assert.All(
-            [ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.MicrosoftClientIdKey, ProviderSettings.MicrosoftClientSecretKey],
+            [
+                ProviderSettings.GoogleClientIdKey, ProviderSettings.GoogleClientSecretKey, ProviderSettings.MicrosoftClientIdKey,
+                ProviderSettings.MicrosoftClientSecretKey, ProviderSettings.GitHubClientIdKey, ProviderSettings.GitHubClientSecretKey,
+            ],
             key => Assert.False(string.IsNullOrWhiteSpace(settings[key])));
+        Assert.Equal("true", settings[TestingSettings.WindowEndpointKey]);   // spec 0012: the browser tests end a window by it
         Assert.All(
             ["scripts/e2e-web.sh", "scripts/e2e-notes.sh", "scripts/e2e-providers.sh"],
             script => Assert.Contains("tests/Auth.FakeOidc/compose.yml", ComposeCommand(script), StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task A_development_host_with_the_notes_manifest_and_the_overlay_offers_both_providers_and_is_healthy()   // spec 0011 → Samples
+    public async Task A_development_host_with_the_notes_manifest_and_the_overlay_offers_the_three_providers_and_is_healthy()   // spec 0011 → Samples
     {
         await using var factory = new AuthAppFactory(postgres, keys)
             .WithSetting(ManifestSettings.PathKey, "../../samples/notes-api/auth.yaml")
@@ -124,9 +130,9 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
 
         using var client = factory.CreateClient();
 
-        Assert.Equal(["google", "microsoft"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
+        Assert.Equal(["google", "microsoft", "github"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
         Assert.Equal(
-            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"self-service"}""",
+            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"],"org_creation":"self-service"}""",
             await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
@@ -154,6 +160,8 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
     [InlineData("Auth__Providers__Microsoft__ClientId", "AUTH_MICROSOFT_CLIENT_ID")]
     [InlineData("Auth__Providers__Microsoft__ClientSecret", "AUTH_MICROSOFT_CLIENT_SECRET")]
     [InlineData("Auth__Providers__Microsoft__ClientSecretExpiresOn", "AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES")]
+    [InlineData("Auth__Providers__GitHub__ClientId", "AUTH_GITHUB_CLIENT_ID")]   // spec 0012
+    [InlineData("Auth__Providers__GitHub__ClientSecret", "AUTH_GITHUB_CLIENT_SECRET")]
     public void The_production_compose_file_passes_each_provider_variable_as_optional_and_the_example_lists_it(string setting, string variable)   // spec 0011 → Documents
     {
         var compose = File.ReadAllText(RepositoryFile("deploy/docker-compose.prod.yml"));
@@ -227,7 +235,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
     }
 
     [Fact]
-    public async Task A_production_host_with_the_six_provider_variables_blank_is_healthy_and_offers_no_provider()   // spec 0011, criteria 3 and 30
+    public async Task A_production_host_with_the_eight_provider_variables_blank_is_healthy_and_offers_no_provider()   // spec 0011, criteria 3 and 30
     {
         await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup()
             .WithSetting(ProviderSettings.ReturnUrlKey, "")
@@ -235,7 +243,9 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
             .WithSetting(ProviderSettings.GoogleClientSecretKey, "")
             .WithSetting(ProviderSettings.MicrosoftClientIdKey, "")
             .WithSetting(ProviderSettings.MicrosoftClientSecretKey, "")
-            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "");
+            .WithSetting(ProviderSettings.MicrosoftSecretExpiresOnKey, "")
+            .WithSetting(ProviderSettings.GitHubClientIdKey, "")
+            .WithSetting(ProviderSettings.GitHubClientSecretKey, "");
         using var client = factory.CreateClient();
 
         Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));

@@ -49,9 +49,9 @@ public static class ProviderExchangeEndpoint
 
         ProviderBindingCookie.TryRead(http.Request, out var binding);
         var ticket = await ProviderTickets.FindAsync(db, ticketText, binding, StorableTime.Now(clock), http.RequestAborted);
-        if (ticket is null || ticket.Purpose == ProviderTicketPurpose.Reauth)
+        if (ticket is null || ticket.Purpose is ProviderTicketPurpose.Reauth or ProviderTicketPurpose.Connect)
         {
-            return ApiResults.Error(TenancyErrors.InvalidTicket);   // unknown, used, expired, without its binding, or a re-authentication
+            return ApiResults.Error(TenancyErrors.InvalidTicket);   // unknown, used, expired, without its binding, a re-authentication or a connect
         }
 
         // 4: an invitation, accepted with the provider's address in place of a password.

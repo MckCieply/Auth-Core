@@ -15,10 +15,10 @@
 # org_creation   "self-service" lets a signed-in account create another company of its own (spec 0016) and be its first admin; it needs
 #                no address. "off" (the default when the key is absent) means companies are made by the operator or by sign-up.
 #                Off in production unless the product's manifest says so.
-# providers      the sign-in providers of spec 0011 (google, microsoft), offered in the order of the list. Each needs its keys and the
+# providers      the sign-in providers of specs 0011 and 0012 (google, microsoft, github), offered in the order of the list. Each needs its keys and the
 #                return address in the environment (docs/deployment/provider-keys.md); a listed provider without them is not offered
 #                and /auth/health says "Degraded". Off here, so that the development stack needs no keys; the line to turn them on:
-# providers: [google, microsoft]
+# providers: [google, microsoft, github]
 #
 # A broken file never stops the service: the last valid manifest stays active and /auth/health says "Degraded".
 permissions: [documents:read, documents:write, documents:approve]

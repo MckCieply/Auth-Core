@@ -104,11 +104,52 @@ public sealed class ProviderOptionsTests(PostgresFixture postgres, KeyMaterialFi
         }
 
         await using var second = new AuthAppFactory(postgres, keys, database)
-            .WithManifest(AuthAppFactory.DefaultManifest + "\nproviders: [google, github]\n")
+            .WithManifest(AuthAppFactory.DefaultManifest + "\nproviders: [google, gitlab]\n")   // spec 0012: github is a provider now
             .WithProviderKeys();
 
         Assert.Equal(["google"], await ProvidersAsync(second));   // the stored manifest of the first start
         Assert.Equal("Degraded", await BodyAsync(second, "/auth/health"));
         Assert.True(second.Services.GetRequiredService<ManifestHolder>().State.IsDegraded);
+    }
+
+    [Theory]
+    [InlineData("", "github,google")]
+    [InlineData(ProviderSettings.GitHubClientIdKey, "google")]
+    [InlineData(ProviderSettings.GitHubClientSecretKey, "google")]
+    public async Task GitHub_is_listed_in_the_order_of_the_manifest_only_with_both_its_keys(string blank, string expected)   // spec 0012, criterion 1
+    {
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithManifest(AuthAppFactory.DefaultManifest + "\nproviders: [github, google]\n")
+            .WithProviderKeys();
+        if (blank.Length > 0)
+        {
+            factory.WithSetting(blank, "");
+        }
+
+        Assert.Equal(expected.Split(','), await ProvidersAsync(factory));
+        Assert.Equal(blank.Length > 0 ? "Degraded" : "Healthy", await BodyAsync(factory, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task GitHub_without_the_return_address_is_not_offered()   // spec 0012 → Configuration: offered as spec 0011 says
+    {
+        await using var factory = new AuthAppFactory(postgres, keys)
+            .WithManifest(AuthAppFactory.DefaultManifest + "\nproviders: [github]\n")
+            .WithProviderKeys()
+            .WithSetting(ProviderSettings.ReturnUrlKey, "");
+
+        Assert.Empty(await ProvidersAsync(factory));
+        Assert.Equal("Degraded", await BodyAsync(factory, "/auth/health"));
+    }
+
+    [Fact]
+    public async Task A_github_with_its_keys_that_is_not_listed_is_not_offered_and_health_is_healthy()   // spec 0012, criterion 1
+    {
+        await using var factory = new AuthAppFactory(postgres, keys).WithManifest(AuthAppFactory.DefaultManifest + AuthAppFactory.ProvidersLine).WithProviderKeys();
+        using var client = factory.CreateClient();
+
+        Assert.False(factory.Services.GetRequiredService<ProviderCatalog>().IsOffered(ProviderNames.GitHub));
+        Assert.Equal(["google", "microsoft"], await ProvidersAsync(factory));
+        Assert.Equal("Healthy", await BodyAsync(factory, "/auth/health"));
     }
 }

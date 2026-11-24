@@ -177,6 +177,7 @@ public sealed class SignupService(
         {
             // The lock of the completion and of the acceptance: of those running at once for one address, one makes the account.
             await AddressLock.AcquireAsync(db, normalized, cancellationToken);
+            await IdentityLock.AcquireAsync(db, ticket.Provider, ticket.IdentityKey, cancellationToken);   // after the address lock, always
 
             // Read after the wait: a ticket that expired while this request queued is expired.
             var now = StorableTime.Now(clock);

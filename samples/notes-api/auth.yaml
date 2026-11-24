@@ -9,7 +9,7 @@
 #                DELETE /api/me deletes that space's notes before the account is deleted.
 # org_creation   "self-service": a signed-in account may create another company of its own (spec 0016) and is its first admin; the web
 #                sample's company switcher offers it.
-# providers      the sign-in providers of spec 0011, in the order of the buttons. Their keys come from the environment: the end-to-end
+# providers      the sign-in providers of specs 0011 and 0012, in the order of the buttons. Their keys come from the environment: the end-to-end
 #                stack takes them from the fake provider's overlay (tests/Auth.FakeOidc/compose.yml); a listed provider without its
 #                keys is not offered and /auth/health says "Degraded".
 permissions: [notes:read, notes:write]
@@ -18,7 +18,7 @@ org_creation: self-service
 private:
   signup: self-service
   permissions: [notes:read, notes:write]
-providers: [google, microsoft]
+providers: [google, microsoft, github]
 default_roles:
   admin:  ["*"]
   user:   [notes:read, notes:write]

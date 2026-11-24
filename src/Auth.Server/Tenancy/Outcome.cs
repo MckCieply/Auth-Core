@@ -37,6 +37,13 @@ public static class TenancyErrors
     public const string EmailNotVerified = "email_not_verified";
     public const string NoMembership = "no_membership";
 
+    // Spec 0012.
+    public const string SessionRequired = "session_required";
+    public const string ConfirmationRequired = "confirmation_required";
+    public const string ProviderInUse = "provider_in_use";
+    public const string LastLogin = "last_login";
+    public const string PasswordNotSet = "password_not_set";
+
     // Spec 0016: creating another company.
     public const string OrgCreationDisabled = "org_creation_disabled";
     public const string CompanyMember = "company_member";
@@ -44,15 +51,16 @@ public static class TenancyErrors
 
     public static int StatusOf(string error) => error switch
     {
+        SessionRequired => StatusCodes.Status401Unauthorized,
         InvalidRequest or InvalidToken or WeakPassword or UnknownPermission or InvalidTicket => StatusCodes.Status400BadRequest,
         Forbidden or PermissionsChanged or PermissionNotHeld or WrongPassword or SignupDisabled
             or NoEmail or NoAccount or AddressMismatch or PasswordRequired or ReauthRequired or ReauthFailed or EmailNotVerified or NoMembership
-            or OrgCreationDisabled or CompanyMember
+            or ConfirmationRequired or PasswordNotSet or OrgCreationDisabled or CompanyMember
             => StatusCodes.Status403Forbidden,
         NotFound => StatusCodes.Status404NotFound,
         UnsupportedMediaType => StatusCodes.Status415UnsupportedMediaType,
         AlreadyInOrg or AlreadyMember or InvitePending or LastManager or CannotChangeSelf or RoleInUse or RoleNameTaken or AlreadyRegistered
-            or ProviderAlreadyLinked or CompanyLimitReached => StatusCodes.Status409Conflict,
+            or ProviderAlreadyLinked or ProviderInUse or LastLogin or CompanyLimitReached => StatusCodes.Status409Conflict,
         TooManyAttempts or TooManyRequests => StatusCodes.Status429TooManyRequests,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "Unknown error code."),
     };

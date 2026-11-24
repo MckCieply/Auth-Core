@@ -7,6 +7,7 @@ using Auth.Server.Providers;
 using Auth.Server.RateLimiting;
 using Auth.Server.Seeding;
 using Auth.Server.Tenancy;
+using Auth.Server.Testing;
 using TokenOptions = Auth.Server.Tokens.TokenOptions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
@@ -83,7 +84,11 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[ProviderSettings.MicrosoftClientIdKey] = "";
         _settings[ProviderSettings.MicrosoftClientSecretKey] = "";
         _settings[ProviderSettings.MicrosoftSecretExpiresOnKey] = "";
+        _settings[ProviderSettings.GitHubClientIdKey] = "";
+        _settings[ProviderSettings.GitHubClientSecretKey] = "";
         _settings[ProviderSettings.TestIssuerKey] = "";
+        // Spec 0012: the testing endpoint is off unless a test turns it on (TestingEndpointTests).
+        _settings[TestingSettings.WindowEndpointKey] = "";
         _settings[MailSettingsLoader.FromKey] = DefaultFrom;
         _settings[MailSettingsLoader.SmtpHostKey] = "smtp.invalid";
         _settings[MailSettingsLoader.SmtpPortKey] = "587";
@@ -157,8 +162,15 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     public const string MicrosoftClientId = "6f1a2b3c-0000-4000-8000-00000000c11e";
     public const string MicrosoftClientSecret = "microsoft-client-secret-of-the-tests";
 
-    /// <summary>The line that lists both providers (spec 0011 → Manifest).</summary>
+    /// <summary>A GitHub OAuth App's client id has this shape; nothing at GitHub knows this one.</summary>
+    public const string GitHubClientId = "Ov23liGitHubClientIdTest";
+    public const string GitHubClientSecret = "github-client-secret-of-the-tests";
+
+    /// <summary>The line that lists Google and Microsoft (spec 0011 → Manifest).</summary>
     public const string ProvidersLine = "\nproviders: [google, microsoft]\n";
+
+    /// <summary>The line that lists the three providers (spec 0012 → Manifest).</summary>
+    public const string AllProvidersLine = "\nproviders: [google, microsoft, github]\n";
 
     /// <summary>The effective seed email: the default, or the value set via <see cref="WithSetting"/>.</summary>
     public string SeedEmail => _settings[DevUserSeeder.EmailKey] ?? "";
@@ -212,22 +224,25 @@ public class AuthAppFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// Lists both providers in the manifest file as it stands and gives both their keys and the return address (spec 0011). Call it after
-    /// <see cref="WithManifest"/>, <see cref="WithSignup"/> or <see cref="WithPrivateSignup"/>, which write the file anew.
+    /// Lists Google and Microsoft (and with <paramref name="github"/> GitHub too) in the manifest file as it stands and gives every provider its keys
+    /// and the return address (specs 0011 and 0012). Call it after <see cref="WithManifest"/>, <see cref="WithSignup"/> or
+    /// <see cref="WithPrivateSignup"/>, which write the file anew.
     /// </summary>
-    public AuthAppFactory WithProviders()
+    public AuthAppFactory WithProviders(bool github = false)
     {
-        File.AppendAllText(ManifestPath, ProvidersLine);
+        File.AppendAllText(ManifestPath, github ? AllProvidersLine : ProvidersLine);
         return WithProviderKeys();
     }
 
-    /// <summary>Both providers' keys and the return address, without listing them in the manifest.</summary>
+    /// <summary>Every provider's keys and the return address, without listing them in the manifest: the manifest decides what is offered.</summary>
     public AuthAppFactory WithProviderKeys() =>
         WithSetting(ProviderSettings.ReturnUrlKey, DefaultProviderReturnUrl)
             .WithSetting(ProviderSettings.GoogleClientIdKey, GoogleClientId)
             .WithSetting(ProviderSettings.GoogleClientSecretKey, GoogleClientSecret)
             .WithSetting(ProviderSettings.MicrosoftClientIdKey, MicrosoftClientId)
-            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, MicrosoftClientSecret);
+            .WithSetting(ProviderSettings.MicrosoftClientSecretKey, MicrosoftClientSecret)
+            .WithSetting(ProviderSettings.GitHubClientIdKey, GitHubClientId)
+            .WithSetting(ProviderSettings.GitHubClientSecretKey, GitHubClientSecret);
 
     /// <summary>Removes the manifest file, as if the product had not shipped one.</summary>
     public AuthAppFactory WithoutManifestFile()

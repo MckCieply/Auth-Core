@@ -54,6 +54,11 @@ public sealed class LoginScopeTests
     [InlineData("password", "/auth/providers/finish/extra", false)]
     [InlineData("refresh_token", "/auth/providers/exchange", false)]
     [InlineData("password", "/auth/providers/google/callback", false)]
+    [InlineData("password", "/auth/account/logins/unlink", true)]   // spec 0012: the renewals answer as a login
+    [InlineData("password", "/auth/account/password", true)]
+    [InlineData("password", "/AUTH/ACCOUNT/PASSWORD/", true)]
+    [InlineData("password", "/auth/account/confirm", false)]
+    [InlineData("password", "/auth/providers/connect", false)]
     public void ShouldShape_requires_a_password_grant_on_the_login_or_completion_path(string grantType, string path, bool expected)
     {
         var request = new OpenIddictRequest { GrantType = grantType };

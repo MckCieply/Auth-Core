@@ -5,8 +5,8 @@
 #     -f tests/Auth.FakeOidc/compose.yml --env-file .env up -d --build
 #
 # Relative paths in this file are resolved from deploy/ (the directory of the FIRST -f file), not from here.
-# Auth-Core trusts it as its test issuer (Development only; any other environment refuses to start with it): the two providers are
-# http://fake-oidc:8099/google and http://fake-oidc:8099/microsoft on the compose network, and a browser reaches the fake's sign-in page
+# Auth-Core trusts it as its test issuer (Development only; any other environment refuses to start with it): the three providers are
+# http://fake-oidc:8099/google, /microsoft and /github on the compose network, and a browser reaches the fake's sign-in page
 # at http://localhost:8099 (loopback only). The keys below are the fake's own: it accepts any secret, and no real provider knows them.
 services:
   fake-oidc:
@@ -34,5 +34,11 @@ services:
       Auth__Providers__Google__ClientSecret: fake-google-secret
       Auth__Providers__Microsoft__ClientId: 6f1a2b3c-0000-4000-8000-0000000e2e01
       Auth__Providers__Microsoft__ClientSecret: fake-microsoft-secret
+      # Spec 0012: GitHub through the fake's /github test issuer.
+      Auth__Providers__GitHub__ClientId: fake-github-client-id
+      Auth__Providers__GitHub__ClientSecret: fake-github-secret
+      # Spec 0012 (Development only): POST /auth/testing/end-confirmation ends a confirmation window, for the browser tests and
+      # scripts/e2e-settings.sh, so that the real 5 minutes need not pass.
+      Auth__Testing__WindowEndpoint: "true"
       # Where the round trip ends (the web sample's screen); the callback is this origin's /auth/providers/{name}/callback (spec 0011).
       Auth__App__FrontendUrls__ProviderReturn: https://localhost:8443/provider-return
