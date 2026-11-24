@@ -15,7 +15,7 @@ export function rememberProvider(name: ProviderName): void {
   try {
     sessionStorage.setItem(PROVIDER_KEY, name);
   } catch {
-    // the return screen then says "Google or Microsoft"
+    // the return screen then says "Google, Microsoft or GitHub"
   }
 }
 
@@ -61,7 +61,7 @@ export function takeReauth(): boolean {
   }
 }
 
-/** The provider's name for a sentence, or "Google or Microsoft" when it is not known. */
+/** The provider's name for a sentence, or "Google, Microsoft or GitHub" when it is not known. */
 export function providerTitle(name: ProviderName | null): string {
   return name === null ? texts.providers.either : (texts.providers.names[name] ?? texts.providers.either);
 }

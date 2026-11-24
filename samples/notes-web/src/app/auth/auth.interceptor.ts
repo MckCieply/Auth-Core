@@ -8,12 +8,19 @@ import {
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { Observable, catchError, defer, from, last, of, switchMap, tap, throwError, timeout } from 'rxjs';
-import { AuthService, errorCode, retryAfterOf } from './auth.service';
+import { AuthService, RENEWAL, errorCode, retryAfterOf } from './auth.service';
 
 /** Paths that start like this get the access token. A product edits these two lists (guide, step 3). */
 export const TOKEN_PATH_PREFIXES: readonly string[] = ['/api/', '/auth/org'];
-/** Paths that are exactly this get it too. */
-export const TOKEN_PATHS: readonly string[] = ['/auth/me', '/auth/account'];
+/** Paths that are exactly this get it too (spec 0012: the four endpoints of the settings screen). */
+export const TOKEN_PATHS: readonly string[] = [
+  '/auth/me',
+  '/auth/account',
+  '/auth/account/confirm',
+  '/auth/providers/connect',
+  '/auth/account/logins/unlink',
+  '/auth/account/password',
+];
 /**
  * A call to the app's own origin that has not been answered after this long fails, so no screen waits for ever. A product with
  * calls that take longer (an upload) raises it, or ends the call itself.
@@ -39,9 +46,24 @@ export function wantsToken(url: string, origin: string = window.location.origin)
   return path !== undefined && (TOKEN_PATHS.includes(path) || TOKEN_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)));
 }
 
+/** True for a request that carries the refresh cookie: the cookie's path is /auth (spec 0002). */
+function carriesRefreshCookie(req: HttpRequest<unknown>): boolean {
+  const path = ownUrl(req.url)?.pathname;
+  return path !== undefined && (path === '/auth' || path.startsWith('/auth/'));
+}
+
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
-  const answer = wantsToken(req.url) ? send(req, next, auth, inject(Router)) : next(req);
+  const router = inject(Router);
+  const sent = wantsToken(req.url) ? send(req, next, auth, router) : next(req);
+  // Spec 0012: while an unlink or a password change is in flight, no other request with the refresh cookie leaves (its answer replaces it).
+  const answer =
+    carriesRefreshCookie(req) && !req.context.get(RENEWAL)
+      ? defer(() => {
+          const renewal = auth.renewal;
+          return renewal === null ? sent : from(renewal).pipe(switchMap(() => sent));
+        })
+      : sent;
   // Built from observables, never promises: when the time is up the timeout unsubscribes, and that cancels the request in flight
   // and ends the chain (no refresh, no second try, no /login) for a caller that has already been told it failed. A 429 from any endpoint
   // of the app's own origin is announced on the way out, whatever the endpoint is.
@@ -80,12 +102,18 @@ function send(
         if (!(error instanceof HttpErrorResponse)) {
           return throwError(() => error);
         }
+        if (error.status === 401 && errorCode(error) === 'session_required') {
+          // Spec 0012: the session of this device is over. Not the access token's 401: no refresh, the person signs in again.
+          auth.dropSession();
+          void router.navigate(['/login'], { state: { notice: 'session' } });
+          return throwError(() => error);
+        }
         const permissionsChanged = error.status === 403 && errorCode(error) === 'permissions_changed';
         if (error.status !== 401 && !permissionsChanged) {
           announce(error, auth);
           return throwError(() => error);
         }
-        return tokenIsRenewed(auth, router, sentWith, sentIn).pipe(
+        return tokenIsRenewed(auth, router, sentWith, sentIn, req.context.get(RENEWAL)).pipe(
           switchMap((renewed) => {
             if (!renewed) {
               return throwError(() => error);
@@ -103,7 +131,13 @@ function send(
 }
 
 /** True when the request may be sent again with the token the service holds now. */
-function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | null, sentIn: number): Observable<boolean> {
+function tokenIsRenewed(
+  auth: AuthService,
+  router: Router,
+  sentWith: string | null,
+  sentIn: number,
+  forRenewal: boolean,
+): Observable<boolean> {
   return defer(() => {
     const current = auth.token();
     if (current === null) {
@@ -123,7 +157,8 @@ function tokenIsRenewed(auth: AuthService, router: Router, sentWith: string | nu
     // One refresh at a time: the service shares a running one. What the answer means for the session (the bar, the way to /login)
     // is done here, in the promise, not in an operator: it must happen even when this caller has given up (timeout) and has
     // unsubscribed, or a session that ended would leave the person on a page that no longer works.
-    const renewed = auth.refresh().then((result) => {
+    // An unlink or a password change that met an expired token: its refresh is not held behind it (spec 0012).
+    const renewed = auth.refresh(forRenewal).then((result) => {
       if (result === 'ok') {
         return true;
       }

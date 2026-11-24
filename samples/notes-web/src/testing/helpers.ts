@@ -19,6 +19,7 @@ export const adminMe: Me = {
   permissions: ['notes:read', 'notes:write'],
   has_password: true,
   linked_providers: [],
+  confirmed_until: null,
 };
 
 /** A private account (spec 0010): its space is named "private", its role is "private". */
@@ -32,6 +33,7 @@ export const privateMe: Me = {
   permissions: ['notes:read', 'notes:write'],
   has_password: true,
   linked_providers: [],
+  confirmed_until: null,
 };
 
 /** A private account made through Google (spec 0011): no password, Google signs it in. */

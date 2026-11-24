@@ -203,7 +203,7 @@ describe('ProviderButtons (spec 0011)', () => {
   });
 
   it('reads nothing it does not know, and survives storage that throws', () => {
-    sessionStorage.setItem('notes-web.provider', 'github');
+    sessionStorage.setItem('notes-web.provider', 'gitlab');
     expect(rememberedProvider()).toBeNull();
     const failing = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied');

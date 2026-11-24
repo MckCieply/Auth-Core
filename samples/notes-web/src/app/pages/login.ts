@@ -14,9 +14,13 @@ function startEmail(router: Router): string {
   return typeof email === 'string' ? email : '';
 }
 
-/** The notice the notes screen passes on after a deleted account (spec 0010), in the navigation state. */
+/** The notice another screen passes on in the navigation state: a deleted account (spec 0010), a session that ended (spec 0012). */
 function startNotice(router: Router): string | null {
-  return router.currentNavigation()?.extras.state?.['notice'] === 'deleted' ? texts.login.accountDeleted : null;
+  const notice: unknown = router.currentNavigation()?.extras.state?.['notice'];
+  if (notice === 'deleted') {
+    return texts.login.accountDeleted;
+  }
+  return notice === 'session' ? texts.login.sessionEnded : null;
 }
 
 @Component({

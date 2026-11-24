@@ -18,13 +18,13 @@ export interface InvitePreview {
   org_id: string | null;
 }
 
-/** The sign-in providers this app has buttons for (spec 0011). */
-export const PROVIDER_NAMES = ['google', 'microsoft'] as const;
+/** The sign-in providers this app has buttons for (spec 0011; GitHub since spec 0012). */
+export const PROVIDER_NAMES = ['google', 'microsoft', 'github'] as const;
 
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 
 export function isProviderName(value: unknown): value is ProviderName {
-  return value === 'google' || value === 'microsoft';
+  return value === 'google' || value === 'microsoft' || value === 'github';
 }
 
 /** The names of a JSON value that this app knows, in their order, each once: anything else is dropped. */
@@ -36,15 +36,22 @@ export function providerNamesOf(value: unknown): ProviderName[] {
 }
 
 /**
- * The address of a provider button: Auth-Core's start, plain, with the invitation token, or for the confirmation of a deletion (spec 0011).
- * A link, not a call: the browser leaves the app for the provider and comes back to /provider-return.
+ * The address of a provider button: Auth-Core's start, plain, with the invitation token, for a confirmation (spec 0011; spec 0012: also of the
+ * settings screen), or for a connect (spec 0012). A link, not a call: the browser leaves the app for the provider and comes back to
+ * /provider-return.
  */
-export function providerStartUrl(name: ProviderName, how: { invite: string } | { reauth: true } | null = null): string {
+export function providerStartUrl(
+  name: ProviderName,
+  how: { invite: string } | { reauth: true } | { connect: true } | null = null,
+): string {
   const start = `/auth/providers/${name}/start`;
   if (how === null) {
     return start;
   }
-  return 'invite' in how ? `${start}?invite=${encodeURIComponent(how.invite)}` : `${start}?purpose=reauth`;
+  if ('invite' in how) {
+    return `${start}?invite=${encodeURIComponent(how.invite)}`;
+  }
+  return 'connect' in how ? `${start}?purpose=connect` : `${start}?purpose=reauth`;
 }
 
 /**

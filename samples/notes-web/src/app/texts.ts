@@ -39,8 +39,8 @@ export const texts = {
 
   // The provider buttons (spec 0011). The names are the providers' own; the words around them say what the button does.
   providers: {
-    names: { google: 'Google', microsoft: 'Microsoft' } as Record<string, string>,
-    either: 'Google or Microsoft',
+    names: { google: 'Google', microsoft: 'Microsoft', github: 'GitHub' } as Record<string, string>,
+    either: 'Google, Microsoft or GitHub',
     continueWith: (name: string): string => `Continue with ${name}`,
     signUpWith: (name: string): string => `Sign up with ${name}`,
     acceptWith: (name: string): string => `Accept with ${name}`,
@@ -57,6 +57,8 @@ export const texts = {
     noMembership: 'Your account does not belong to a company.',
     createAccount: 'Create an account',
     accountDeleted: 'Your account was deleted.',
+    // Spec 0012: 401 session_required at a settings endpoint.
+    sessionEnded: 'Your session ended. Sign in again.',
     tooManyAttempts: (seconds: number): string =>
       `Too many attempts. Try again in ${counted(minutesFrom(seconds), 'minute', 'minutes')}.`,
   },
@@ -140,17 +142,17 @@ export const texts = {
       cancelled: 'Sign-in was cancelled.',
       invalid_state: 'The sign-in took too long or was started in another browser. Try again.',
       provider_unavailable: 'This way to sign in is not available.',
-      provider_error: 'Google or Microsoft could not sign you in. Try again.',
+      provider_error: 'Google, Microsoft or GitHub could not sign you in. Try again.',
     } as Record<string, string>,
     invalidTicket: 'This sign-in took too long. Start again.',
     noAccount: 'You have no account. Ask your company for an invitation.',
-    noEmail: 'Your Microsoft or Google account has no email address we can use. Sign in with your password.',
+    noEmail: 'Your Google, Microsoft or GitHub account has no email address we can use. Sign in with your password.',
     alreadyRegistered: 'An account with this address exists. Sign in with your password.',
-    addressMismatch: 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.',
+    addressMismatch: 'Use the Google, Microsoft or GitHub account of the invited address, or open the invitation link again and choose a password.',
     alreadyMember: 'This account already belongs to a company.',
     // Spec 0017: an invitation for an address that has an account is accepted with the button on /invite, then the person signs in.
     alreadyRegisteredInvite: 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.',
-    providerAlreadyLinked: 'This Google or Microsoft account already signs in to another account.',
+    providerAlreadyLinked: 'This Google, Microsoft or GitHub account already signs in to another account.',
     invalidToken: 'This invitation has expired or was already used. Ask for a new one.',
   },
 
@@ -176,6 +178,7 @@ export const texts = {
     signOut: 'Sign out',
     privateAccount: 'Private account',
     team: 'Team',
+    settings: 'Settings',
     deleteAccount: 'Delete account',
     deleteWarning: 'This deletes your account and all your notes. It cannot be undone.',
     deleteConfirm: 'Delete my account',
@@ -217,6 +220,47 @@ export const texts = {
     // Spec 0016: an account that is still in a company cannot be deleted; the names are those of GET /auth/orgs.
     companyMember: (names: string): string =>
       `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`,
+  },
+
+  // Spec 0012: the settings screen. {Provider} is the provider's name, {email} the account's address.
+  settings: {
+    title: 'Settings',
+    loading: 'Loading...',
+    back: 'Back to the notes',
+    methods: 'Sign-in methods',
+    password: 'Password',
+    set: 'Set',
+    notSet: 'Not set',
+    connected: 'Connected',
+    connect: 'Connect',
+    disconnect: 'Disconnect',
+    disconnectBlocked: 'Set a password or connect another provider before you disconnect this one.',
+    changePassword: 'Change password',
+    currentPassword: 'Current password',
+    currentRequired: 'Enter your current password.',
+    wrongCurrent: 'The current password is wrong.',
+    passwordChanged: 'Password changed.',
+    setPassword: 'Set a password',
+    sendLink: 'Send me a link',
+    linkSent: 'Check your inbox: the link sets your password. Setting it signs you out everywhere.',
+    connectedNow: (provider: string): string => `${provider} connected.`,
+    disconnectedNow: (provider: string): string => `${provider} disconnected.`,
+    lastLogin: 'Set a password or connect another provider first.',
+    providerInUse: (provider: string): string => `You already have a ${provider} account connected. Disconnect it first.`,
+    providerAlreadyLinked: (provider: string): string => `This ${provider} account belongs to another account.`,
+    addressMismatch: (provider: string, email: string): string => `This ${provider} account has another address. Connect the one with ${email}.`,
+    emailNotVerified: (provider: string): string => `${provider} has not verified this address.`,
+    noEmail: (provider: string): string => `This ${provider} account has no email address we can use.`,
+    invalidTicket: 'This took too long. Start again.',
+    reauthFailed: 'The confirmation did not work or took too long. Confirm again.',
+    wrongPassword: 'The password is wrong.',
+    notFound: 'This sign-in method is no longer connected.',
+    connectAgain: (provider: string): string => `Confirmed. Connect ${provider} again.`,
+    // The confirmation dialog.
+    confirmTitle: "Confirm it's you",
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+    noMethod: 'None of your sign-in methods can confirm here. Set a password first.',
   },
 
   team: {

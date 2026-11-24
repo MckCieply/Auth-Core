@@ -22,7 +22,7 @@ describe('AccountApi: the providers of GET /auth/options (spec 0011)', () => {
   });
 
   it.each([
-    [['google', 'github', 'microsoft'], ['google', 'microsoft']],
+    [['google', 'gitlab', 'github', 'microsoft'], ['google', 'github', 'microsoft']],
     [['google', 'google'], ['google']],
     [['Google', 'MICROSOFT'], []],
     [[1, null, 'microsoft'], ['microsoft']],
@@ -40,11 +40,18 @@ describe('AccountApi: the providers of GET /auth/options (spec 0011)', () => {
     expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [], orgCreation: false });
   });
 
-  it('knows Google and Microsoft', () => {
-    expect(PROVIDER_NAMES).toEqual(['google', 'microsoft']);
+  it('knows Google, Microsoft and GitHub', () => {   // spec 0012
+    expect(PROVIDER_NAMES).toEqual(['google', 'microsoft', 'github']);
     expect(isProviderName('google')).toBe(true);
-    expect(isProviderName('github')).toBe(false);
+    expect(isProviderName('github')).toBe(true);
+    expect(isProviderName('gitlab')).toBe(false);
+    expect(isProviderName('GitHub')).toBe(false);
     expect(isProviderName(undefined)).toBe(false);
+  });
+
+  it('builds the start of a connect (spec 0012)', () => {
+    expect(providerStartUrl('github', { connect: true })).toBe('/auth/providers/github/start?purpose=connect');
+    expect(providerStartUrl('google', { reauth: true })).toBe('/auth/providers/google/start?purpose=reauth');
   });
 
   it('builds the start addresses of the buttons: plain, with an invitation, for a confirmation', () => {

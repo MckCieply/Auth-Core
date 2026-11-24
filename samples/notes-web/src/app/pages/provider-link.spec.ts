@@ -82,15 +82,15 @@ describe('ProviderLinkPage (spec 0011)', () => {
     expect(has(harness.fixture, '#password')).toBe(true);
   });
 
-  it('without a remembered provider it says "Google or Microsoft"', async () => {
+  it('without a remembered provider it says "Google, Microsoft or GitHub"', async () => {
     const { harness } = await open({ ...verified, provider: null });
-    expect(pageText(harness.fixture)).toContain('to connect Google or Microsoft');
-    expect(pageText(harness.fixture)).toContain('After that Google or Microsoft alone signs you in.');
+    expect(pageText(harness.fixture)).toContain('to connect Google, Microsoft or GitHub');
+    expect(pageText(harness.fixture)).toContain('After that Google, Microsoft or GitHub alone signs you in.');
   });
 
-  it.each(['github', 'constructor', '__proto__', 42, undefined])('a provider in the state that is not one (%j) reads as "Google or Microsoft"', async (provider) => {
+  it.each(['gitlab', 'constructor', '__proto__', 42, undefined])('a provider in the state that is not one (%j) reads as "Google, Microsoft or GitHub"', async (provider) => {
     const { harness } = await open({ ...verified, provider });
-    expect(pageText(harness.fixture)).toContain('to connect Google or Microsoft');
+    expect(pageText(harness.fixture)).toContain('to connect Google, Microsoft or GitHub');
   });
 
   it('after the screen has read the ticket the history entry holds no ticket (state replaced, address kept, no new entry)', async () => {
@@ -179,7 +179,7 @@ describe('ProviderLinkPage (spec 0011)', () => {
     [400, { error: 'invalid_ticket' }, 'This sign-in took too long. Start again.'],
     [403, { error: 'email_not_verified' }, 'Your email address is not confirmed yet.'],
     [403, { error: 'no_membership' }, 'Your account does not belong to a company.'],
-    [403, { error: 'no_email' }, 'Your Microsoft or Google account has no email address we can use. Sign in with your password.'],
+    [403, { error: 'no_email' }, 'Your Google, Microsoft or GitHub account has no email address we can use. Sign in with your password.'],
     [400, { error: 'invalid_request' }, 'Something went wrong. Try again.'],
     [500, 'oops', 'Something went wrong. Try again.'],
   ])('%s %j says "%s"', async (code, body, text) => {

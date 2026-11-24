@@ -5,7 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { vi } from 'vitest';
 import { authInterceptor } from '../auth/auth.interceptor';
 import { AuthService, Me } from '../auth/auth.service';
-import { adminMe, clickOn, has, holdToken, pageText, settle, signedInAs, submitForm, typeInto, viewerMe } from '../../testing/helpers';
+import { adminMe, clickOn, has, holdToken, pageText, privateMe, settle, signedInAs, submitForm, typeInto, viewerMe } from '../../testing/helpers';
 import { NotesPage } from './notes';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -48,6 +48,18 @@ async function openWithInterceptor() {
   fixture.detectChanges();
   return { fixture, ctrl, auth, navigate, navigateByUrl };
 }
+
+describe('NotesPage: the way to the settings (spec 0012)', () => {
+  it('the header has "Settings" for a private account and for a company member', async () => {
+    for (const me of [privateMe, adminMe]) {
+      TestBed.resetTestingModule();
+      const { fixture } = await open(me);
+      const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="settings-link"]');
+      expect(link?.getAttribute('href')).toBe('/settings');
+      expect(link?.textContent?.trim()).toBe('Settings');
+    }
+  });
+});
 
 describe('NotesPage', () => {
   it('shows the email, company and role from /auth/me, and "Sign out"', async () => {

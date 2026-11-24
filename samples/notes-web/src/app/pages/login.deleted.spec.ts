@@ -34,6 +34,12 @@ describe('LoginPage: after a deleted account (spec 0010)', () => {
     expect(has(fixture, '[data-testid="login-notice"]')).toBe(true);
   });
 
+  it('says "Your session ended. Sign in again." when a settings call found the session over (spec 0012)', async () => {
+    const fixture = await arrive({ notice: 'session' });
+    expect(pageText(fixture)).toContain('Your session ended. Sign in again.');
+    expect(has(fixture, '[data-testid="login-notice"]')).toBe(true);
+  });
+
   it('says nothing of the kind otherwise', async () => {
     const fixture = await arrive();
     expect(has(fixture, '[data-testid="login-notice"]')).toBe(false);

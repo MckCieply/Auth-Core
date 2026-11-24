@@ -11,7 +11,7 @@ import { ProviderReturnPage } from './provider-return';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const TICKET = 'TICKET-abcdefghijklmnopqrstuvwxyz-0123456789A';
-const GENERIC = 'Google or Microsoft could not sign you in. Try again.';
+const GENERIC = 'Google, Microsoft or GitHub could not sign you in. Try again.';
 
 /** The screens the return screen sends the person to; each keeps the navigation state it was opened with. */
 @Component({ template: '<p>landed</p>' })
@@ -393,12 +393,12 @@ describe('ProviderReturnPage (spec 0011)', () => {
   it.each([
     [400, 'invalid_ticket', 'This sign-in took too long. Start again.'],
     [403, 'no_account', 'You have no account. Ask your company for an invitation.'],
-    [403, 'no_email', 'Your Microsoft or Google account has no email address we can use. Sign in with your password.'],
+    [403, 'no_email', 'Your Google, Microsoft or GitHub account has no email address we can use. Sign in with your password.'],
     [409, 'already_registered', 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.'],
-    [403, 'address_mismatch', 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.'],
+    [403, 'address_mismatch', 'Use the Google, Microsoft or GitHub account of the invited address, or open the invitation link again and choose a password.'],
     [409, 'already_member', 'You are already a member of this company. Sign in to open it.'],
     [409, 'private_account_exists', 'Something went wrong. Try again.'],
-    [409, 'provider_already_linked', 'This Google or Microsoft account already signs in to another account.'],
+    [409, 'provider_already_linked', 'This Google, Microsoft or GitHub account already signs in to another account.'],
     [400, 'invalid_token', 'This invitation has expired or was already used. Ask for a new one.'],
     [403, 'no_membership', 'Your account does not belong to a company.'],
     [400, 'invalid_request', 'Something went wrong. Try again.'],

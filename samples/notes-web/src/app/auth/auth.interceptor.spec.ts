@@ -17,7 +17,18 @@ const status = (code: number) => ({ status: code, statusText: String(code) });
 describe('wantsToken', () => {
   const origin = 'https://app.example';
 
-  it.each(['/api/notes', '/api/', '/auth/me', '/auth/org', '/auth/org/members', 'https://app.example/api/notes'])(
+  it.each([
+    '/api/notes',
+    '/api/',
+    '/auth/me',
+    '/auth/org',
+    '/auth/org/members',
+    '/auth/account/confirm',
+    '/auth/providers/connect',
+    '/auth/account/logins/unlink',
+    '/auth/account/password',
+    'https://app.example/api/notes',
+  ])(
     'is true for %s',
     (url) => expect(wantsToken(url, origin)).toBe(true),
   );
@@ -28,6 +39,9 @@ describe('wantsToken', () => {
     '/auth/logout',
     '/auth/password/forgot',
     '/auth/me/other',
+    '/auth/account/confirm/x',
+    '/auth/providers/exchange',
+    '/auth/testing/end-confirmation',
     '/api',
     '/apiary',
     '/notes',
@@ -82,7 +96,16 @@ describe('authInterceptor', () => {
   });
 
   describe('which requests get the token', () => {
-    it.each(['/api/notes', '/auth/me', '/auth/org', '/auth/org/members'])('sends it to %s', async (url) => {
+    it.each([
+      '/api/notes',
+      '/auth/me',
+      '/auth/org',
+      '/auth/org/members',
+      '/auth/account/confirm',   // spec 0012: the settings screen
+      '/auth/providers/connect',
+      '/auth/account/logins/unlink',
+      '/auth/account/password',
+    ])('sends it to %s', async (url) => {
       const done = lastValueFrom(http.get(url));
       const request = ctrl.expectOne(url);
       expect(request.request.headers.get('Authorization')).toBe('Bearer old');
