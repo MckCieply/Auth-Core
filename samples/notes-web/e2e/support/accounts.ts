@@ -1,3 +1,4 @@
+import { Page, expect } from '@playwright/test';
 import { apiUrl, setting } from './env';
 import { waitForLink } from './mail';
 
@@ -174,4 +175,20 @@ export async function deleteCompanyByApi(email: string, password: string, compan
     throw new Error(`deleting the company answered ${deleted.status}, not 204`);
   }
   return true;
+}
+
+export const NEW_COMPANY = 'New company...';
+
+/** The company picker of the notes screen. */
+export const picker = (page: Page) => page.getByTestId('org-picker');
+
+/** Chooses "New company...", types the name, submits, and waits until the account bar names the new company. */
+export async function createCompany(page: Page, name: string): Promise<void> {
+  await picker(page).selectOption({ label: NEW_COMPANY });
+  await expect(page.getByTestId('new-company-form')).toBeVisible();
+  await page.getByTestId('new-company-name').fill(name);
+  await page.getByTestId('new-company-submit').click();
+  await expect(page.getByTestId('me-company')).toHaveText(name);
+  await expect(page.getByTestId('new-company-form')).toHaveCount(0);
+  await expect(picker(page)).toBeEnabled();
 }
