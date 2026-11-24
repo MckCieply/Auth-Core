@@ -75,6 +75,47 @@ public sealed class OrgDeletionProviderTests : ProviderTestBase
     }
 
     [Fact]
+    public async Task A_member_who_keeps_another_space_keeps_the_account_when_the_company_is_deleted_with_a_ticket()   // spec 0015 rule, criterion 21
+    {
+        var (company, adminId, token) = await AdminWithoutPasswordAsync();
+        var other = await CreateCompanyAsync("Globex");
+        var keeper = await AddMemberAsync(company, "keeper@acme.test", "user");
+        await AddMembershipAsync(keeper, other, "user");
+        var ticket = await ReauthTicketAsync();
+
+        using var response = await OrgApi.DeleteWithTicket(Client, token, "Acme", ticket);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, await CompaniesAsync(company));
+        Assert.Equal(1, await InDbAsync(db => db.Users.CountAsync(u => u.Id == keeper, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == adminId, TestContext.Current.CancellationToken)));   // the admin's last space
+        Assert.Equal([other], await InDbAsync(db => db.Memberships.Where(m => m.UserId == keeper).Select(m => m.CompanyId)
+            .ToListAsync(TestContext.Current.CancellationToken)));
+        Assert.Single(await AuditAsync(AuditKinds.ProviderReauthenticated));
+        Assert.Equal("2", AuditApi.Text(await SingleAsync(AuditKinds.OrgDeleted), "members"));
+        var accountDeleted = await SingleAsync(AuditKinds.AccountDeleted);   // the admin only, not the keeper
+        Assert.Equal(adminId, accountDeleted.SubjectUserId);
+        Assert.Equal("org_deleted", AuditApi.Text(accountDeleted, "reason"));
+        Assert.DoesNotContain(await AuditAsync(AuditKinds.AccountDeleted), r => r.SubjectUserId == keeper);
+    }
+
+    [Fact]
+    public async Task Only_accounts_with_no_other_space_are_deleted_with_the_company_and_a_ticket()   // spec 0015 rule, criterion 21
+    {
+        var (company, adminId, token) = await AdminWithoutPasswordAsync();
+        var worker = await AddMemberAsync(company, "worker@acme.test", "user");
+        var ticket = await ReauthTicketAsync();
+
+        using var response = await OrgApi.DeleteWithTicket(Client, token, "Acme", ticket);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, await InDbAsync(db => db.Users.CountAsync(u => u.Id == adminId || u.Id == worker, TestContext.Current.CancellationToken)));
+        var deleted = await SingleAsync(AuditKinds.OrgDeleted);
+        Assert.Equal(["invitations", "members", "roles"], AuditApi.DetailNames(deleted));   // no `keepers` member
+        Assert.Equal("2", AuditApi.Text(deleted, "members"));
+    }
+
+    [Fact]
     public async Task A_password_is_still_403_reauth_required_and_nothing_is_counted()   // criterion 21
     {
         var (company, _, token) = await AdminWithoutPasswordAsync();

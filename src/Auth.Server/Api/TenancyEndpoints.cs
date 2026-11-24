@@ -153,7 +153,8 @@ public static class TenancyEndpoints
                 + "`auth_pt` (`403 reauth_required` for a password); neither is counted or written. A ticket that is unknown, used, expired (5 "
                 + "minutes), of another purpose, without its `auth_pt` or of an identity that is not a login of the caller is `403 reauth_failed`, "
                 + "recorded, and nothing is deleted; it is used up inside the deletion, so a deletion refused afterwards keeps it, and the answer "
-                + "clears `auth_pt`.")
+                + "clears `auth_pt`. With a provider ticket in place of the password, the ticket is checked inside the deletion, after the company lock "
+                + "and before the name.")
             .ReadsJson<DeleteOrgRequest>()
             .ReadsCookie(ProviderBindingCookie.Name, "With `provider_ticket`: the binding of the ticket, set by the callback that made it.")
             .Produces(StatusCodes.Status204NoContent)

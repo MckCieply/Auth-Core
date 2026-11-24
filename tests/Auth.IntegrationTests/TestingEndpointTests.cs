@@ -177,6 +177,15 @@ public sealed class TestingEndpointTests : TenancyTestBase
         Assert.DoesNotContain(session.AccessToken, Logs.Text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task With_the_setting_on_the_endpoint_is_still_not_in_the_openapi_document()   // criterion 26
+    {
+        using var response = await Client.GetAsync("/auth/openapi/v1.json", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("/auth/testing", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("false")]
     [InlineData("  ")]

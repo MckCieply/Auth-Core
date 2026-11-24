@@ -50,6 +50,20 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     }
 
     [Fact]
+    public async Task The_delete_org_description_names_the_accounts_that_stay()   // spec 0012 Amendment B7: only accounts with no other space go with the company
+    {
+        var (_, operations) = await DescriptionAsync();
+
+        var description = operations["DELETE /auth/org"]["description"]!.GetValue<string>();
+
+        Assert.Contains("who has no other space", description, StringComparison.Ordinal);
+        Assert.Contains("Members with another space keep their account", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("the account of every member, the caller's included", description, StringComparison.Ordinal);   // the sentence of before spec 0015
+        Assert.DoesNotContain("no account is left without a space", description, StringComparison.Ordinal);   // its second sentence
+        Assert.Contains("the ticket is checked inside the deletion, after the company lock and before the name", description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_permission_org_delete_is_named_in_the_description_and_in_the_operation()
     {
         var (document, operations) = await DescriptionAsync();

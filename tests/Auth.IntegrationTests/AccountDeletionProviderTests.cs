@@ -105,6 +105,37 @@ public sealed class AccountDeletionProviderTests : ProviderTestBase
     }
 
     [Fact]
+    public async Task A_company_only_account_is_403_forbidden_for_a_ticket_and_the_ticket_is_kept()   // spec 0012 Amendment B6: the space is judged before the ticket
+    {
+        var company = await CreateCompanyAsync("Acme");
+        var userId = await AddMemberAsync(company, Ola, "admin");
+        var session = await SessionApi.LoginAsync(Client, Ola, UserPassword);
+        await InDbAsync(db => db.Users.Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, (string?)null), TestContext.Current.CancellationToken));
+        await LinkAsync(userId, "google", FakePeople.GoogleSubject);
+        var reauth = await TicketAsync("google", GooglePerson(), "?purpose=reauth");
+
+        using (var refused = await ProviderApi.DeleteAccount(Client, session.AccessToken, new { provider_ticket = reauth.Value }, reauth.Binding))
+        {
+            await TenancyApi.AssertErrorAsync(refused, HttpStatusCode.Forbidden, "forbidden");
+        }
+
+        Assert.Equal(1, await UsersAsync(userId));
+        Assert.Equal(1, await TicketCountAsync());   // not used up
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderReauthenticated));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountDeleteRefused));
+
+        using (var confirmed = await SettingsApi.ConfirmWithTicket(Client, session, reauth))   // the same ticket still works elsewhere
+        {
+            Assert.Equal(HttpStatusCode.NoContent, confirmed.StatusCode);
+        }
+
+        Assert.Equal("google", AuditApi.Text(await SingleAsync(AuditKinds.AccountConfirmed), "method"));
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderReauthenticated));   // written only by DELETE /auth/account and DELETE /auth/org
+        Assert.Equal(0, await TicketCountAsync());
+    }
+
+    [Fact]
     public async Task A_deletion_by_the_microsoft_identity_names_microsoft_in_the_row_it_writes()   // criterion 23: details.provider is the ticket's
     {
         var (userId, session) = await PrivateThroughProviderAsync("microsoft", PersonalMicrosoft());

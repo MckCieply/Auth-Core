@@ -46,6 +46,10 @@ public sealed class JsonCharsetTests(PostgresFixture postgres, KeyMaterialFixtur
     [InlineData("POST", "/auth/providers/exchange")]   // spec 0011, criterion 29
     [InlineData("POST", "/auth/providers/link")]
     [InlineData("POST", "/auth/providers/finish")]
+    [InlineData("POST", "/auth/account/confirm")]   // spec 0012, criterion 26: the guard covers every POST under /auth/
+    [InlineData("POST", "/auth/providers/connect")]
+    [InlineData("POST", "/auth/account/logins/unlink")]
+    [InlineData("POST", "/auth/account/password")]
     [InlineData("POST", "/auth/switch")]   // spec 0015: the switch reads a body, so it is under the guard
     public async Task A_body_declared_utf_16_is_a_415_on_every_endpoint_that_reads_one_and_before_authentication(string method, string path)   // criterion 6
     {
