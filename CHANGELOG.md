@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.3.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.4.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
-## Unreleased
+## 0.4.0 - 2026-11-24
 
 GitHub, and managing one's own logins ([spec 0012](docs/superpowers/specs/0012-github-and-managing-logins.md)): "Continue with GitHub", and a
 settings screen to connect and disconnect providers and change the password. An instance that does not list GitHub sees no change in sign-in;
