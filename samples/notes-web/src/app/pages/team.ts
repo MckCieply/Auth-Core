@@ -1,9 +1,11 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, ElementRef, Injector, OnInit, afterNextRender, computed, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthService, errorCode, isRecord } from '../auth/auth.service';
 import { texts } from '../texts';
+import { DeleteCompanySection } from './delete-company';
+import { keepTicketOutOfHistory, reauthTicketOf } from './ticket-history';
 
 interface Member {
   user_id: string;
@@ -27,7 +29,7 @@ function isMember(value: unknown): value is Member {
  */
 @Component({
   selector: 'app-team',
-  imports: [RouterLink],
+  imports: [RouterLink, DeleteCompanySection],
   template: `
     <main class="wide">
       <h1 tabindex="-1" data-testid="team-title">{{ t.title }}</h1>
@@ -38,7 +40,9 @@ function isMember(value: unknown): value is Member {
         <p class="error" role="alert" data-testid="team-error">{{ somethingWrong }}</p>
         <button type="button" data-testid="try-again" (click)="start()">{{ common.tryAgain }}</button>
       } @else if (!canManage()) {
-        <p class="error" role="alert" data-testid="team-forbidden">{{ t.notAllowed }}</p>
+        @if (!canDeleteCompany()) {
+          <p class="error" role="alert" data-testid="team-forbidden">{{ t.notAllowed }}</p>
+        }
       } @else {
         @if (loadFailed()) {
           <p class="error" role="alert">{{ somethingWrong }}</p>
@@ -80,6 +84,9 @@ function isMember(value: unknown): value is Member {
           <p class="error" role="alert" data-testid="team-error">{{ text }}</p>
         }
       }
+      @if (ready() && canDeleteCompany()) {
+        <app-delete-company [ticket]="reauthTicket" />
+      }
       <p><a routerLink="/notes">{{ t.back }}</a></p>
     </main>
   `,
@@ -92,9 +99,15 @@ export class TeamPage implements OnInit {
   private readonly auth = inject(AuthService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
+  private readonly router = inject(Router);
+  /** The ticket of "Confirm with {Provider}" for "Delete company", read now, while the navigation that brought it is current, and handed to the section. */
+  protected readonly reauthTicket = reauthTicketOf(this.router);
 
   protected readonly me = this.auth.me;
   protected readonly canManage = computed(() => this.me()?.permissions.includes('members:manage') ?? false);
+  protected readonly canDeleteCompany = computed(
+    () => (this.me()?.permissions.includes('org:delete') ?? false) && this.me()?.org_kind === 'organization',
+  );
   protected readonly members = signal<Member[]>([]);
   // False while the person and the list are being read: until then the page cannot tell "no access" from "not known yet".
   protected readonly ready = signal(false);
@@ -104,6 +117,9 @@ export class TeamPage implements OnInit {
   protected readonly error = signal<string | null>(null);
 
   ngOnInit(): Promise<void> {
+    if (this.reauthTicket !== null) {
+      void keepTicketOutOfHistory(this.router); // the ticket lives in memory only: the history entry is replaced without it
+    }
     return this.start();
   }
 

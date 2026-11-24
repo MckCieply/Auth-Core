@@ -36,6 +36,7 @@ async function open(fragment: string | null, removal: 'works' | 'false' | 'rejec
       provideRouter([
         { path: 'provider-return', component: ProviderReturnPage },
         { path: 'notes', component: Landing },
+        { path: 'settings', component: Landing },
         { path: 'login', component: Landing },
         { path: 'provider-link', component: Landing },
         { path: 'provider-finish', component: Landing },
@@ -197,11 +198,11 @@ describe('ProviderReturnPage (spec 0011)', () => {
     expect(history.length).toBe(opened.entries);
   });
 
-  it('reauth after "Confirm with ...": the notes screen with the ticket in the navigation state, and no call', async () => {
+  it('reauth after "Confirm with ..." for a deletion: the settings screen with the ticket in the navigation state, and no call', async () => {
     armReauth('delete_account');
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     opened.ctrl.expectNone('/auth/providers/exchange');
-    expect(opened.router.url).toBe('/notes');
+    expect(opened.router.url).toBe('/settings');
     expect(Landing.state).toEqual({ reauthTicket: TICKET });
     expect(window.location.href).not.toContain(TICKET);
     expect(stored()).not.toContain(TICKET);
@@ -223,7 +224,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   it('the flag is one-shot: the return that used it clears it, and a second reauth link in the same tab goes to /login', async () => {
     armReauth('delete_account');
     const first = await open(`ticket=${TICKET}&purpose=reauth`);
-    expect(first.router.url).toBe('/notes');
+    expect(first.router.url).toBe('/settings');
     expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
     TestBed.resetTestingModule();
     const second = await open(`ticket=${TICKET}&purpose=reauth`);
@@ -280,7 +281,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
       armReauth('delete_account');
       vi.setSystemTime(new Date('2026-05-02T12:09:59Z'));
       const opened = await open(`ticket=${TICKET}&purpose=reauth`);
-      expect(opened.router.url).toBe('/notes');
+      expect(opened.router.url).toBe('/settings');
       expect(Landing.state).toEqual({ reauthTicket: TICKET });
     } finally {
       vi.useRealTimers();

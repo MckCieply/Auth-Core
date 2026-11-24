@@ -80,8 +80,8 @@ export class ProviderReturnPage implements OnInit {
     } else if (purpose === 'reauth') {
       // Only for a confirmation this tab started, and to the screen it was started for (spec 0012: the flag's target).
       if (armed === 'delete_account') {
-        // The notes screen opens "Delete account" ready to confirm: the ticket is spent there, not here.
-        await this.go(DEFAULT_RETURN_URL, { reauthTicket: this.ticket });
+        // The settings screen opens "Delete account" ready to confirm: the ticket is spent there, not here.
+        await this.go('/settings', { reauthTicket: this.ticket });
       } else if (armed === 'delete_company') {
         await this.go('/team', { reauthTicket: this.ticket });
       } else if (armed === 'confirm') {

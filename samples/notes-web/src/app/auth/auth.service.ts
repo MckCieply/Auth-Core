@@ -52,6 +52,7 @@ export type Failure =
   | { kind: 'last_login' }
   | { kind: 'password_not_set' }
   | { kind: 'not_found' }
+  | { kind: 'permission_not_held' }
   | { kind: 'org_creation_disabled' }
   | { kind: 'company_limit_reached' }
   | { kind: 'company_member' }
@@ -213,6 +214,17 @@ export function formFailureOf(error: unknown): Failure {
   return error instanceof HttpErrorResponse && error.status === 400 && errorCode(error) === 'invalid_request'
     ? { kind: 'invalid_request' }
     : failureOf(error);
+}
+
+/**
+ * The answers of DELETE /auth/org (spec 0008, spec 0012): those of the forms (a name that is not the company's is `400 invalid_request`;
+ * `permissions_changed` is read as everywhere), and the refusal of the company API that the "Delete company" section names.
+ */
+function companyFailureOf(error: unknown): Failure {
+  if (error instanceof HttpErrorResponse && error.status === 403 && errorCode(error) === 'permission_not_held') {
+    return { kind: 'permission_not_held' };
+  }
+  return formFailureOf(error);
 }
 
 interface LoginBody {
@@ -452,6 +464,21 @@ export class AuthService {
       await firstValueFrom(this.http.delete('/auth/account', { body: { provider_ticket: ticket } }));
     } catch (error) {
       return { ok: false, failure: failureOf(error) };
+    }
+    this.dropSession();
+    return { ok: true };
+  }
+
+  /**
+   * Spec 0012: DELETE /auth/org with the company's name and the caller's confirmation (the password, or the ticket of a `reauth` round trip).
+   * On `204` the session is over here too: the company's devices are signed out; the account stays when it has another space (spec 0015).
+   * The product deletes the company's data before it calls this.
+   */
+  async deleteCompany(name: string, confirmation: { password: string } | { provider_ticket: string }): Promise<LoginResult> {
+    try {
+      await firstValueFrom(this.http.delete('/auth/org', { body: { name, ...confirmation } }));
+    } catch (error) {
+      return { ok: false, failure: companyFailureOf(error) };
     }
     this.dropSession();
     return { ok: true };

@@ -385,11 +385,11 @@ describe('ProviderReturnPage: the targets of the settings screen (spec 0012)', (
     expect(stored()).not.toContain(TICKET);
   });
 
-  it('reauth with the delete_account flag still goes to the notes screen with the ticket, and no call', async () => {
+  it('reauth with the delete_account flag goes to the settings screen with the ticket, and no call', async () => {
     armReauth('delete_account');
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     opened.ctrl.expectNone('/auth/account/confirm');
-    expect(opened.router.url).toBe('/notes');
+    expect(opened.router.url).toBe('/settings');
     expect(Landing.state).toEqual({ reauthTicket: TICKET });
   });
 });

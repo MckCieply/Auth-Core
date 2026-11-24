@@ -5,6 +5,7 @@ import { AccountApi, ProviderName, isProviderName, providerStartUrl } from '../a
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
 import { ConfirmDialog } from './confirm-dialog';
+import { DeleteAccountSection } from './delete-account';
 import { acceptablePassword } from './password-input';
 import {
   ASSIGN_LOCATION,
@@ -16,7 +17,7 @@ import {
   takePendingConnect,
 } from './provider-buttons';
 import { PasswordRules } from './password-rules';
-import { keepTicketOutOfHistory } from './ticket-history';
+import { keepTicketOutOfHistory, reauthTicketOf } from './ticket-history';
 
 /** What waits for the confirmation: a connect to start, a disconnect, or a connect ticket the return screen handed back. */
 type Pending =
@@ -52,7 +53,7 @@ interface ProviderRow {
  */
 @Component({
   selector: 'app-settings',
-  imports: [ReactiveFormsModule, RouterLink, PasswordRules, ConfirmDialog],
+  imports: [ReactiveFormsModule, RouterLink, PasswordRules, ConfirmDialog, DeleteAccountSection],
   template: `
     <main class="wide">
       <h1 tabindex="-1" data-testid="settings-title">{{ t.title }}</h1>
@@ -124,6 +125,7 @@ interface ProviderRow {
             <p class="error" role="alert" data-testid="password-error">{{ text }}</p>
           }
         </section>
+        <app-delete-account [ticket]="reauthTicket" />
       } @else {
         <p class="status" role="status">{{ t.loading }}</p>
       }
@@ -139,6 +141,8 @@ export class SettingsPage implements OnInit {
   private readonly router = inject(Router);
   private readonly assign = inject(ASSIGN_LOCATION);
   private readonly fromReturn = handedOn(this.router);
+  /** The ticket of "Confirm with {Provider}" for "Delete account", read now and handed to the section (it is created later). */
+  protected readonly reauthTicket = reauthTicketOf(this.router);
 
   /** A sentence of the last action, or the one the return screen handed on. */
   protected readonly notice = signal<string | null>(this.fromReturn.notice);
@@ -182,9 +186,11 @@ export class SettingsPage implements OnInit {
     void this.account.options().then((options) => this.offered.set(options.providers));
     // Always read afresh: the window and the logins are what the screen acts on.
     void this.auth.loadMe();
-    if (this.fromReturn.pending !== null) {
-      // The ticket lives in this component's memory only: the history entry is replaced without it.
+    if (this.fromReturn.pending !== null || this.reauthTicket !== null) {
+      // A ticket lives in memory only: the history entry is replaced without it.
       void keepTicketOutOfHistory(this.router);
+    }
+    if (this.fromReturn.pending !== null) {
       if (this.fromReturn.pending.kind === 'resend' && this.fromReturn.pending.provider !== null) {
         // A confirmation with a provider from this dialog leaves the page, and the ticket with it (one auth_pt): the screen it comes back to
         // names the provider to connect again (spec 0012, "Confirmed. Connect {Provider} again.").

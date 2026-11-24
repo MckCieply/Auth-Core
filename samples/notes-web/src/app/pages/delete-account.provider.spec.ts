@@ -7,7 +7,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { vi } from 'vitest';
 import { AuthService, Me } from '../auth/auth.service';
 import { answerOrgs, clickOn, has, pageText, privateMe, providerMe, realLocation, settle, signedInAs, submitForm, typeInto } from '../../testing/helpers';
-import { NotesPage } from './notes';
+import { SettingsPage } from './settings';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
 const TICKET = 'r-ticket-1';
@@ -23,7 +23,7 @@ function configure(): void {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([
-        { path: 'notes', component: NotesPage },
+        { path: 'settings', component: SettingsPage },
         { path: 'login', component: Elsewhere },
       ]),
       provideHttpClient(),
@@ -33,7 +33,14 @@ function configure(): void {
   });
 }
 
-/** The notes screen, opened as /provider-return opens it: with `reauthTicket` in the navigation state, or without. */
+/** What the settings screen asks when it opens: the options, the person and the list of spaces (no company). */
+function answerSettings(ctrl: HttpTestingController, me: Me): void {
+  ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
+  ctrl.expectOne('/auth/me').flush(me);
+  ctrl.expectOne('/auth/orgs').flush({ orgs: [] });
+}
+
+/** The settings screen, opened as /provider-return opens it: with `reauthTicket` in the navigation state, or without. */
 async function open(me: Me, reauthTicket: string | null = null) {
   history.replaceState(null, '', '/start');
   configure();
@@ -42,10 +49,9 @@ async function open(me: Me, reauthTicket: string | null = null) {
   await signedInAs(auth, ctrl, me);
   const harness = await RouterTestingHarness.create();
   const router = TestBed.inject(Router);
-  await router.navigateByUrl('/notes', reauthTicket === null ? {} : { state: { reauthTicket } });
+  await router.navigateByUrl('/settings', reauthTicket === null ? {} : { state: { reauthTicket } });
   harness.detectChanges();
-  ctrl.expectOne('/api/notes').flush([]);
-  ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
+  answerSettings(ctrl, me);
   await settle(harness.fixture);
   await settle(harness.fixture); // the navigation that takes the ticket out of the history entry lands here
   const navigateByUrl = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
@@ -86,7 +92,7 @@ function expectNoTicketAnywhere(opened: Opened): void {
   expect(pageText(opened.fixture)).not.toContain(TICKET);
 }
 
-describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
+describe('DeleteAccountSection without a password (spec 0011; spec 0012: on /settings)', () => {
   afterEach(() => {
     TestBed.inject(HttpTestingController).verify();
     history.replaceState(null, '', '/');
@@ -143,7 +149,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     expect(pageText(opened.fixture)).toContain('Delete my account');
     expect(links(opened)).toEqual([]);
     expect(has(opened.fixture, '#delete-password')).toBe(false);
-    expect(opened.router.url).toBe('/notes');
+    expect(opened.router.url).toBe('/settings');
     expectNoTicketAnywhere(opened);
     await settle(opened.fixture);
     expect((document.activeElement as HTMLElement | null)?.getAttribute('data-testid')).toBe('delete-confirm');
@@ -162,7 +168,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     const opened = await open(providerMe, TICKET);
     expect(history.state).not.toHaveProperty('reauthTicket');
     expect(JSON.stringify(history.state)).not.toContain(TICKET);
-    expect(window.location.pathname).toBe('/notes');
+    expect(window.location.pathname).toBe('/settings');
     // The ticket still works from memory.
     expect(has(opened.fixture, '[data-testid="delete-confirm"]')).toBe(true);
     await confirmDeletion(opened);
@@ -184,8 +190,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
     const harness = await RouterTestingHarness.create();
     TestBed.inject(Router).initialNavigation();
     await settle(harness.fixture);
-    ctrl.expectOne('/api/notes').flush([]);
-    ctrl.expectOne('/auth/options').flush({ signup: 'invite-only', private_signup: 'off', providers: [], org_creation: 'off' });
+    answerSettings(ctrl, providerMe);
     await settle(harness.fixture);
     expect(has(harness.fixture, '[data-testid="delete-account"]')).toBe(true);
     expect(has(harness.fixture, '[data-testid="delete-section"]')).toBe(false);
@@ -453,7 +458,7 @@ describe('NotesPage: "Delete account" without a password (spec 0011)', () => {
   });
 });
 
-describe('NotesPage: "Delete account" with a ticket and the companies of the account (spec 0016)', () => {
+describe('DeleteAccountSection with a ticket and the companies of the account (spec 0016; spec 0012)', () => {
   afterEach(() => {
     TestBed.inject(HttpTestingController).verify();
     history.replaceState(null, '', '/');

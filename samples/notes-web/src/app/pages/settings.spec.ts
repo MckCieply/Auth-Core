@@ -21,6 +21,7 @@ async function open(me: Me, providers: string[] = ALL) {
   const fixture = TestBed.createComponent(SettingsPage);
   fixture.detectChanges();
   ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'self-service', providers });
+  ctrl.expectOne('/auth/orgs').flush({ orgs: [] });
   ctrl.expectOne('/auth/me').flush(me);
   await settle(fixture);
   return { fixture, ctrl, auth };
@@ -87,6 +88,7 @@ describe('SettingsPage: sign-in methods (spec 0012)', () => {
     const fixture = TestBed.createComponent(SettingsPage);
     fixture.detectChanges();
     ctrl.expectOne('/auth/options').flush('oops', status(500));
+    ctrl.expectOne('/auth/orgs').flush({ orgs: [] });
     ctrl.expectOne('/auth/me').flush({ ...privateMe, linked_providers: ['google'] });
     await settle(fixture);
     expect(row(fixture, 'google')).toBe('Google Connected Disconnect');

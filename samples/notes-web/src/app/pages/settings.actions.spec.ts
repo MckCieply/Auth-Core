@@ -36,6 +36,7 @@ async function open(me: Me, state: Record<string, unknown> | null = null) {
   const fixture = TestBed.createComponent(SettingsPage);
   fixture.detectChanges();
   ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'self-service', providers: ALL });
+  ctrl.expectOne('/auth/orgs').flush({ orgs: [] });
   ctrl.expectOne('/auth/me').flush(me);
   await settle(fixture);
   return { fixture, ctrl, auth, assign };
@@ -399,6 +400,7 @@ async function openOffering(me: Me, providers: string[]) {
   const fixture = TestBed.createComponent(SettingsPage);
   fixture.detectChanges();
   ctrl.expectOne('/auth/options').flush({ signup: 'self-service', private_signup: 'self-service', providers });
+  ctrl.expectOne('/auth/orgs').flush({ orgs: [] });
   ctrl.expectOne('/auth/me').flush(me);
   await settle(fixture);
   return { fixture, ctrl, auth, assign };

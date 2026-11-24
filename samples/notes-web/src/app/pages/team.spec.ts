@@ -201,4 +201,13 @@ describe('TeamPage (spec 0010)', () => {
     await settle(fixture);
     expect(pageText(fixture)).toContain('worker@example.test');
   });
+
+  it('a holder of org:delete without members:manage sees no "not allowed" and sees "Delete company" (spec 0012)', async () => {
+    const deleter: Me = { ...adminMe, permissions: [...adminMe.permissions, 'org:delete'] };
+    const { fixture, ctrl } = await open(deleter);
+    await settle(fixture);
+    ctrl.expectNone('/auth/org/members');
+    expect(has(fixture, '[data-testid="team-forbidden"]')).toBe(false);
+    expect(has(fixture, '[data-testid="delete-company"]')).toBe(true);
+  });
 });

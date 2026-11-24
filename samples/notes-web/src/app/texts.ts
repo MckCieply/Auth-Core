@@ -61,6 +61,7 @@ export const texts = {
     accountDeleted: 'Your account was deleted.',
     // Spec 0012: 401 session_required at a settings endpoint.
     sessionEnded: 'Your session ended. Sign in again.',
+    companyDeleted: 'The company was deleted.',
     tooManyAttempts: (seconds: number): string =>
       `Too many attempts. Try again in ${counted(minutesFrom(seconds), 'minute', 'minutes')}.`,
   },
@@ -277,5 +278,16 @@ export const texts = {
     lastManager: 'The company needs at least one person who manages its members.',
     cannotChangeSelf: 'You cannot remove yourself.',
     notAllowed: "You don't have access to this.",
+    // Spec 0012: "Delete company", for a holder of org:delete.
+    deleteCompany: 'Delete company',
+    deleteCompanyWarning:
+      'This deletes the company and all its notes. A member who has no other space loses the account too. It cannot be undone.',
+    companyName: "Type the company's name",
+    nameMismatch: "Type the company's name exactly.",
+    permissionNotHeldDelete: 'A member has permissions you do not have, so you cannot delete the company.',
+    wrongPassword: 'The password is wrong.',
+    reauthFailed:
+      'The confirmation did not work or took too long, so the company was not deleted. Its notes are already gone. Confirm again.',
+    notesGone: "The company's notes are already gone.",
   },
 };

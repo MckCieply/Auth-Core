@@ -20,6 +20,9 @@ function startNotice(router: Router): string | null {
   if (notice === 'deleted') {
     return texts.login.accountDeleted;
   }
+  if (notice === 'company_deleted') {
+    return texts.login.companyDeleted;
+  }
   return notice === 'session' ? texts.login.sessionEnded : null;
 }
 
