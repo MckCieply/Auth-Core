@@ -582,6 +582,32 @@ public sealed class AccountPasswordTests : ProviderTestBase
     }
 
     [Fact]
+    public async Task A_password_change_and_an_unlink_renew_the_session_in_the_company_it_was_switched_to()   // D48: the renewal keeps the caller's company
+    {
+        var (userId, session) = await AccountAsync();
+        var other = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(userId, other, "user");
+        var switched = await SessionApi.SwitchOk(Client, session.RefreshToken, other);
+        Assert.Equal(other.ToString(), AccessTokens.Text(switched.AccessToken, "org_id"));
+        using (var confirmed = await SettingsApi.Confirm(Client, switched, new { password = UserPassword }))   // the unlink needs an open window
+        {
+            Assert.Equal(HttpStatusCode.NoContent, confirmed.StatusCode);
+        }
+
+        var before = await LiveSessionStateAsync();
+
+        using var changed = await SettingsApi.ChangePassword(Client, switched, UserPassword, NewPassword);
+        var afterChange = await SessionApi.ReadSessionAsync(changed);
+        using var unlinked = await SettingsApi.Unlink(Client, afterChange, "google");
+        var afterUnlink = await SessionApi.ReadSessionAsync(unlinked);
+
+        Assert.Equal(other.ToString(), AccessTokens.Text(afterChange.AccessToken, "org_id"));
+        Assert.Equal(other.ToString(), AccessTokens.Text(afterUnlink.AccessToken, "org_id"));
+        var live = await LiveSessionStateAsync();
+        Assert.Equal((before.SessionStart, before.ConfirmedUntil), (live.SessionStart, live.ConfirmedUntil));   // the same start and window
+    }
+
+    [Fact]
     public async Task An_account_removed_by_a_member_removal_that_commits_before_the_change_reads_its_row_is_401_session_required_and_nothing_is_written()
     {
         var (company, _, adminToken) = await CompanyWithAdminAsync();
