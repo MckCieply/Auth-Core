@@ -40,7 +40,7 @@ in `OpenIddict.Client.WebIntegration`, which the existing `OpenIddict.AspNetCore
 (standalone components, signals, reactive forms), Vitest on jsdom and Playwright (Chromium and WebKit); Python 3.12 with FastAPI and pytest for
 notes-api; bash and Python 3 (standard library only) for the e2e script. **No new third-party NuGet, npm or pip package.**
 
-## Global Constraints
+## Global Constraints (changed by Amendment B at the end of this plan)
 
 Values copied from the spec, one line each; every task includes them.
 
@@ -11155,7 +11155,7 @@ confirmation had used).
 
 ## Day 4 — Monday 11.05: the limits and the audit flows, the e2e script, the settings screen
 
-### Task 14: The limits, the audit flows, GitHub through every flow, the last API checks
+### Task 14: The limits, the audit flows, GitHub through every flow, the last API checks (changed by Amendment B at the end of this plan: read it first)
 
 **Files:**
 - Modify: `src/Auth.Server/RateLimiting/RatePolicy.cs`
@@ -11632,7 +11632,7 @@ passes. Mutate and see a test fail, then restore: add the unlink to `LoginPolicy
 
 ---
 
-### Task 15: `scripts/e2e-settings.sh` and the earlier e2e script
+### Task 15: `scripts/e2e-settings.sh` and the earlier e2e script (changed by Amendment B at the end of this plan: read it first)
 
 **Files:**
 - Create: `scripts/e2e-settings.sh` (LF; the orchestrator marks it executable in the index)
@@ -12174,7 +12174,7 @@ Scan the touched files. Proposed subject: `test: e2e of the settings endpoints, 
 
 ---
 
-### Task 16: The sample: GitHub buttons, the settings calls, `/settings` and its password section
+### Task 16: The sample: GitHub buttons, the settings calls, `/settings` and its password section (changed by Amendment B at the end of this plan: read it first)
 
 **Files** (all under `samples/notes-web/src/`):
 - Create: `app/pages/settings.ts`, `app/pages/password-input.ts`, `app/pages/settings.spec.ts`, `app/auth/auth.service.settings.spec.ts`
@@ -13562,7 +13562,7 @@ Scan the touched files (`password-input.ts` holds the moved escapes, which the s
 
 ---
 
-### Task 17: The sample: the confirmation dialog, connect, disconnect, the return screen's targets
+### Task 17: The sample: the confirmation dialog, connect, disconnect, the return screen's targets (changed by Amendment B at the end of this plan: read it first)
 
 **Files** (all under `samples/notes-web/src/app/`):
 - Create: `pages/confirm-dialog.ts`, `pages/settings.actions.spec.ts`, `pages/provider-return.settings.spec.ts`
@@ -14739,7 +14739,7 @@ with ...": …` fails); let `takePendingConnect` ignore the time (`keeps the pro
 
 ## Day 5 — Wednesday 13.05: the deletions in the sample, the browser test, the documents
 
-### Task 18: The sample: "Delete account" on `/settings`, "Delete company" on `/team`; notes-api `DELETE /api/org`
+### Task 18: The sample: "Delete account" on `/settings`, "Delete company" on `/team`; notes-api `DELETE /api/org` (changed by Amendment B at the end of this plan: read it first)
 
 **Files:**
 - Create: `samples/notes-web/src/app/pages/delete-account.ts`, `samples/notes-web/src/app/pages/delete-company.ts`,
@@ -15859,7 +15859,7 @@ Proposed subject: `feat(sample): delete the account on the settings screen and t
 
 ---
 
-### Task 19: The Playwright spec `12-settings.spec.ts` and the moved steps of 0010 and 0011
+### Task 19: The Playwright spec `12-settings.spec.ts` and the moved steps of 0010 and 0011 (changed by Amendment B at the end of this plan: read it first)
 
 **Files** (all under `samples/notes-web/e2e/`):
 - Create: `12-settings.spec.ts`, `support/settings.ts`
@@ -16122,7 +16122,7 @@ confirmation (`grep -n "delete-account\|Confirm with" e2e/*.spec.ts`) and move i
 
 ---
 
-### Task 20: The documents and the acceptance map check
+### Task 20: The documents and the acceptance map check (changed by Amendment B at the end of this plan: read it first)
 
 **Files:**
 - Modify: `docs/deployment/provider-keys.md`, `docs/security/threat-model.md`, `docs/integration/angular.md`, `docs/deployment/vps.md`,
@@ -16575,3 +16575,520 @@ Each has its reason in the task named; the list is for the reviewer.
 1. **The real-keys test** (owner item, as for spec 0011): a real GitHub OAuth App on the deployed origin: the round trip, `iss` on the answer,
    the primary-address rule, the revocation with Basic credentials (`204`), the token gone from the app's authorized list, and the state cookie
    across GitHub's redirect in Safari on a phone.
+
+---
+
+## Amendment B (24.11.2026, after specs 0015-0017)
+
+Plan file: `docs/superpowers/plans/0012-github-and-managing-logins.md`. Line numbers are those of the plan as it stands now (16,577 lines).
+"Replaces lines a-b" means: delete those plan lines and put the new text there. Everything quoted as "main" was read in `C:/Users/mwppl/code/Auth-Core`
+(v0.3.0). Where main's code and the probe report (`reconcile-probe.md`) disagree, the code wins and the line says so.
+
+Tasks 1 to 13 are done code. They change in the merge worker's commits (fix commit A before Task 14, see the "Merge worker" list at the end). This
+amendment changes Tasks 14 to 20 and the Global Constraints.
+
+Counts: tasks changed 7 (14 to 20; Task 17 only by two run-time rules, no changed step); Global Constraints changed (5 places).
+
+---
+
+### Global Constraints, added (replaces nothing; insert as a new block after line 69, before "OpenAPI")
+
+Edit the plan's Global Constraints (line 43 on) as follows.
+
+1. **Lock order.** Replaces the Password/Renewal text at lines 63-64 by the same text plus this sentence:
+   "Lock order for every path that takes more than one lock (owner decision F1, 24.11.2026): the company lock, the address lock, `IdentityLock`
+   (only where a path uses it), the membership row(s), the account row, the login rows. A settings endpoint takes the caller's membership row
+   (`SpaceLocks`, `SpaceUse.Hold`) before the account row. `ProviderLogins.HoldAsync` keeps its order (account `FOR KEY SHARE`, then the login row
+   `FOR SHARE`); the sign-in that calls it already holds the membership first."
+2. **The token's company.** Insert: "A settings endpoint acts in the company of the access token's `org_id` (`MembershipReader.ReadInCompanyAsync(userId,
+   companyId)`); a token without `org_id` is `403 no_membership`. `ReadSignInSpaceAsync` is for sign-in only, never for a settings endpoint."
+3. **The renewed session keeps the company** (owner decision F2). Insert: "`SessionRenewal.Issue` copies the claims `session_org_id` and
+   `session_org_joined` of the caller's token, the start and the window of the old session, so after an unlink or a password change the new
+   tokens are in the company the caller is in now. It does not read `caller.Tenant` for this."
+4. **Counts, measured.** Line 69 "Audit: 32 kinds" becomes "Audit: 33 kinds" and line 70 "OpenAPI: 40 operations, 28 under the charset guard" becomes
+   "OpenAPI: 43 operations, 30 under the charset guard". Baselines at lines 119-120 (I7, I13): replace the two baseline counts with the same pair
+   (main is 29 kinds, 39 operations, 26 covered; spec 0012 adds 4 kinds and 4 operations, and 0 covered operations of its own beyond the 4 POSTs).
+   Rule: a task that writes a count first runs the count test and writes the number it printed; the numbers above are the expected result, not a
+   substitute for the run.
+5a. **The schedule block is old-world.** The schedule table (plan lines 183-206), "Contract counts that change" (lines 209-217: 28 -> 32, 36 -> 40, 24 -> 28) and the backdated day slots (lines 196-204 and the "off days") are replaced by one
+   sentence: "After the merge: 33 audit kinds, 43 OpenAPI operations, 30 under the charset guard, each measured when written; tasks 14 to 20 run in order with real dates."
+5. **Dates.** Insert: "From Task 14 on, commits carry real dates. The headings 'Day 4' (line 11156) and 'Day 5' (line 14740) are deleted; tasks run in
+   order. The earlier text of the plan that says 'Mon 11.05' or 'Wed 13.05' is history."
+6. **Names that changed on main** (insert as a table the implementer reads first):
+
+| Plan says | Main has |
+| --- | --- |
+| `12-settings.spec.ts` | `14-settings.spec.ts` (main has `12-orgs`, `13-create-org`) |
+| `settings.companyMember` text | `texts.orgs.companyMember(names)` |
+| risks 62, 63, 64 of the threat model | risks 71, 72, 73 (main ends at 70) |
+| `CompanyDeletionService.DeleteAsync(actor, id, name, ct, confirmInside)` deletes every member's account | main deletes only accounts with no other space ("doomed"); the others ("keepers") stay |
+| `RatePolicy` class | `RatePolicies` (static) with `Classify`; `RatePolicy` is the enum |
+| plan line 115 "residual risk 63" (the Checked section) | "residual risk 72" |
+| `CHANGELOG.md` `## Unreleased` | main has no `## Unreleased` heading: the top heading is `## 0.3.0 - 2026-11-23`; Task 20 adds the heading |
+
+---
+
+### Task 14 (plan lines 11158-11633): changed, 3 steps (1, 3, 4)
+
+**Replaces lines 11171-11172** ("Contract counts"): "`RatePolicyTests` and `RateLimitMiddlewareTests` gain the five settings paths;
+`JsonCharsetTests` gains the four settings `POST`s (covered: 26 + 4 = 30 after the merge, measured); `AuditSettingsFlowsTests` pins 33 kinds."
+
+**Files, added:** Modify (tests) `tests/Auth.IntegrationTests/AuditProviderFlowsTests.cs` (line 40 `Assert.Equal(29, AuditKinds.All.Count);`),
+`tests/Auth.IntegrationTests/OrgCreateTests.cs` (line 134 `Assert.Equal(29, AuditKinds.All.Count);   // no new kind`), `tests/Auth.IntegrationTests/OpenApiHardeningTests.cs`
+(lines 119 `Assert.Equal(39, operations.Count);` and 153 `Assert.Equal(26, covered);`), `tests/Auth.IntegrationTests/OrgDeletionProviderTests.cs`,
+`tests/Auth.IntegrationTests/AccountDeletionProviderTests.cs` (main's class for `DELETE /auth/account` with a ticket; its `The_provider_ticket_branch_answers_company_member_too` already pins private-plus-company with the ticket kept).
+
+**Step 1 (tests), changes:**
+
+(a) In `AuditSettingsFlowsTests.The_four_new_kinds_are_in_the_contract` (plan line 11476) replace `Assert.Equal(32, AuditKinds.All.Count);` with
+`Assert.Equal(33, AuditKinds.All.Count);`. Before writing 33, run `AuditKinds.All.Count` once (the count test run of Step 2); write the printed value.
+
+(b) New step block "The pins that count": run `grep -rn "AuditKinds.All.Count" tests/`. Every hit that says 29 becomes the measured number (expected 33):
+`tests/Auth.IntegrationTests/AuditProviderFlowsTests.cs` line 40 (`Assert.Equal(29, AuditKinds.All.Count);`) and `tests/Auth.IntegrationTests/OrgCreateTests.cs` line 134 (its comment `// no new kind` is correct there and stays: the test says 0016 made no kind;
+change the number only if the test still passes for that meaning, otherwise rename the test `The_audit_kinds_are_the_ones_of_the_contract` and drop
+the comment; stop and report if you are unsure). `tests/Auth.IntegrationTests/OpenApiHardeningTests.cs` line 119 becomes 43 and line 153 becomes 30 (measure first).
+
+(c) **F12, company deletion with a ticket against the 0015 rule.** In `OrgDeletionProviderTests` add two tests (they use `CompanyWithAdminAsync`,
+`OrgApi.DeleteWithTicket` and the helpers of Task 13; a second membership is made the way main's
+`AccountDeletionOnRemovalTests.A_member_with_another_membership_keeps_the_account_and_the_other_session` does it: `CreateCompanyAsync` plus `AddMembershipAsync`):
+- `A_member_who_keeps_another_space_keeps_the_account_when_the_company_is_deleted_with_a_ticket`: company "Beta" has an admin without a password (GitHub
+  identity) and a second member M who also has a personal space; the admin deletes Beta with a ticket; expected 204, M's `AspNetUsers` row still exists,
+  M's membership in Beta is gone, M's other membership remains, and `provider.reauthenticated` has 1 row (the delete endpoint writes it).
+- `Only_accounts_with_no_other_space_are_deleted_with_the_company_and_a_ticket`: Beta has the admin (no other space) and M2 (no other space): both rows
+  gone (`org.deleted` 1 row; main's details are `members`, `invitations`, `roles`, there is no `keepers`: assert `members` = 2).
+- Not added: a test of "bad ticket and bad name" and a test of "a wrong name does not use the ticket up". Task 13 already has `A_bad_ticket_is_refused_before_the_name_is_checked` and
+  `A_deletion_refused_after_the_ticket_was_used_up_gives_the_ticket_back("name"/"rule1")`; the hand-back says "exists: <name>".
+
+(d) **F12, the description.** No test under `tests/` pins the description of `DELETE /auth/org` (`grep -rn "every member" tests/` is empty), so the premise "the class that pins it" is false. Add
+`The_delete_org_description_names_the_accounts_that_stay` to `tests/Auth.IntegrationTests/OpenApiHardeningTests.cs` (it already reads `operations["DELETE /auth/org"]["description"]`
+at about line 56): the description contains `who has no other space` and does not contain `the account of every member`. The text, verbatim, so that test and description agree: main's sentence
+at `src/Auth.Server/Api/TenancyEndpoints.cs` line 140 (`... every member who has no other space (the caller's included when this was their last). Members with another space keep their ...`, read
+the rest of the sentence there) stays, and the merge worker appends exactly: ` With a provider ticket in place of the password, the ticket is checked inside the deletion, after the company lock and before the name.`
+The p12 sentence ("the account of every member, the caller's included", p12 `TenancyEndpoints.cs` line 89) is dropped in the merge. `OpenApiHardeningTests` is in the Step 4 run list.
+
+(e) **F17, the order on `DELETE /auth/account`.** Main's `AccountDeletionEndpoint.JudgeAsync` answers `403 company_member` (private space plus a company)
+and `403 forbidden` (companies only) before it reads the body and before any ticket is looked at. The probe asked for "ticket first"; the code is the
+other way and the owner's F11 text relies on `company_member` being the last guard. Keep the code. Main already pins the private-plus-company case with a ticket
+(`AccountDeletionProviderTests.The_provider_ticket_branch_answers_company_member_too`: refused, ticket not used up, no `provider.reauthenticated` row, the same ticket deletes later) and the
+company-only case without a ticket (`AccountDeletionCompanyMemberTests.An_account_with_companies_only_is_403_forbidden`). Add one test to `AccountDeletionProviderTests`:
+- `A_company_only_account_is_403_forbidden_for_a_ticket_and_the_ticket_is_kept`: an account with a company membership only, with a fresh `reauth` ticket, sends `{"provider_ticket": ...}`
+  to `DELETE /auth/account`: `403 forbidden`; `TicketCountAsync()` is still 1; `provider.reauthenticated` has 0 rows; then `POST /auth/account/confirm` with the same ticket answers 204 and writes
+  `account.confirmed` (1 row, method provider) and still no `provider.reauthenticated` row (that kind is written only by `DELETE /auth/account` and `DELETE /auth/org`).
+
+(f) **F16.** No plan step adds an `AccountDeletion` overload (checked with grep over the whole plan: the account deletion with a ticket uses
+`AccountDeletionEndpoint` as main has it, with the ticket read after `JudgeAsync`). Nothing to change; the hand-back says "F16: no overload".
+
+**Step 3 (limits), replaces lines 11589-11623.** The anchor in `src/Auth.Server/RateLimiting/RatePolicy.cs` is main's lines 68-72:
+
+```csharp
+        if (trimmed.Equals("/auth/login", StringComparison.OrdinalIgnoreCase)
+            || ProviderPaths.TokenPaths.Any(tokenPath => trimmed.Equals(tokenPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return RatePolicy.Login;
+        }
+```
+
+It is unchanged from the baseline, so the plan's Edit works as written. Differences to apply: the class is `public static class RatePolicies` (line 17), so the
+field `LoginPolicyPaths` goes at the top of the class body (`NameOf` is already there at line 19, so it is not the first member); `RatePolicy` is the enum (do not rename). The `Refresh` branch on main also holds
+`SessionPaths.Switch`: leave it. Main adds `OrgListEndpoint.Path` to the `Invite` branch (line 92): leave it. After the edit run
+`RatePolicyTests` and read the number of `[InlineData]` rows; the policy-count test (F15) is the class `RatePolicyTests`: if a test counts the policies or
+paths, write its measured value. The unlink (`/auth/account/logins/unlink`) stays `General`.
+
+**Step 4 (run), replaces lines 11624-11629:** the class list gains `-class Auth.IntegrationTests.OrgDeletionProviderTests -class
+Auth.IntegrationTests.AccountDeletionProviderTests -class Auth.IntegrationTests.AccountDeletionCompanyMemberTests -class Auth.IntegrationTests.OpenApiHardeningTests -class Auth.IntegrationTests.OrgCreateTests -class
+Auth.IntegrationTests.AuditProviderFlowsTests`. Mutate and see a test fail, then restore (added): make `confirmInside` run before the company lock (Task 13's `A_ticket_gone_when_the_lock_is_taken_is_refused_before_the_name_is_checked` and `A_caller_who_lost_org_delete_while_the_deletion_waited_for_the_company_lock_..._the_ticket_stays` fail: they are the order guards, the two tests this amendment does not add would not fail); delete every member's account in
+`CompanyDeletionService` instead of the doomed ones (`A_member_who_keeps_another_space_keeps_the_account...` fails).
+
+New guard tests, Task 14: `A_member_who_keeps_another_space_keeps_the_account_when_the_company_is_deleted_with_a_ticket`,
+`Only_accounts_with_no_other_space_are_deleted_with_the_company_and_a_ticket`, `The_delete_org_description_names_the_accounts_that_stay`,
+`A_company_only_account_is_403_forbidden_for_a_ticket_and_the_ticket_is_kept`. That is 4 (main and Task 13 already own the other order guards).
+
+---
+
+### Task 15 (plan lines 11635-12173): changed, 4 steps (1, 2, 3, 4)
+
+**Step 1, `scripts/e2e-providers.sh` (replaces lines 11659-11768 piece by piece; edit with the Edit tool, LF).** Main's file differs from the baseline the plan
+quotes, so each anchor is re-derived:
+
+(a) Header, main lines 10-11 read
+`#   1. health is Healthy; the fake answers; GET /auth/options -> {"signup":"self-service","private_signup":"self-service",` and
+`#      "providers":["google","microsoft"],"org_creation":"self-service"}; the OpenAPI description names the five provider paths - criteria 2, 29.`
+Replace the second line's `"providers":["google","microsoft"]` with `"providers":["google","microsoft","github"]` and `names the five provider paths`
+with `names the six provider paths` only if the check in (c) says six (see (c)).
+
+(b) The options check, main line 380: replace
+
+`expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"self-service"}'`
+
+with
+
+`expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"],"org_creation":"self-service"}'`
+
+(the key `org_creation` stays last; main's server writes `providers` before it, as the old string shows). The next line `expect_no_store "step 1: the options"` stays.
+
+(c) The provider-paths check and its pass line, main lines 384-387: read the lines first (`sed -n 380,390p scripts/e2e-providers.sh`), apply the plan's
+piece (c) to what is there; the count word in the pass line follows the number of paths the check lists.
+
+(d) Step 2 (main lines 389-413) begins `call GET /auth/providers/github/start` then `expect_error "step 2: an unknown name" 404 not_found`: change `github` to
+`gitlab` in the path and, if the message names it, in the label (plan piece (d)). The pass line at 413 is as the plan quotes.
+
+(e) The new GitHub start block and its pass line go after the check of step 2's pass line as the plan says, with the label text unchanged.
+
+(f) **Step 11 and 12 of main's script are not touched by this task, and their counts are derived, not guessed.** Main's step 11 (lines ~670-715): the
+unlinked identity is `already_registered`, then a "pwjoin" join with PW's own Microsoft identity (memberships 2, `invite.accepted`). Main's step 12
+(lines 720-721) counts `login.succeeded` rows with `details ? 'provider'` as 8. The 0012 edits to this script add no provider sign-in (the new GitHub
+block is a start request only, with no callback), so the count stays 8. Derivation to put in the commit message: "8 (main) + 0 (the GitHub start is not
+a sign-in)". If the implementer's run (the e2e verifier's) says another number, that is a finding.
+
+**Step 2, `scripts/e2e-settings.sh` (replaces lines 11769-12166 where listed; the rest stands).**
+
+(a) Header comment: the sentence "(NEW...ORG...)" is rewritten for what the script does now: "ORG's company is deleted with a GitHub ticket; ORG's account goes with
+it (its only space), and the account row is gone (step 9)".
+
+(b) Step 1 options string, replaces `{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"]}` with
+`{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"],"org_creation":"self-service"}`. No manifest edit: `scripts/e2e-orgs-create.sh`
+only comments (line 12) that `deploy/auth.yaml` turns `org_creation` on, and the stack manifests `deploy/auth.yaml` line 26 and `samples/notes-api/auth.yaml` line 17 already say `org_creation: self-service`;
+`e2e-settings.sh` writes no manifest. Do not copy that script's `"providers":[]`.
+
+(c) **F2 step (new).** After the plan's step 8 (PW's sign-up, which creates PW only there) and before step 9, add "step 8b: the renewed session stays in the company". (In the plan script
+step 6 is NEW's disconnect with the renewed session and step 7 is NEW's first password through the reset mail; step 8 is PW's sign-up. The header list "eleven steps" at plan line 11770
+becomes "twelve steps", and the header comment of the script lists 8b.) The person is a new account "SW", made inside 8b by copying step 8's inline sign-up code (no helper exists): a
+`json_body` with `E2E_SW_EMAIL` (declared with the other addresses in the set-up, a fresh address of the same domain), `POST /auth/signup`, `wait_mail "$SW_EMAIL" "Complete your sign-up" 90`,
+`token_body "$SIGNUP_LINK" "$tmp/sw.complete" E2E_PASSWORD`, `POST /auth/signup/complete`, `keep_session sw`. Then:
+1. `POST /auth/orgs` with `{"name":"Switch Co"}` through `settings`-style call with SW's bearer (201, entry id C).
+2. `POST /auth/switch` with `{"org_id": C}` and SW's refresh cookie. The answer's shape is checked first: `keep_session` requires the body keys to be exactly `['access_token','status']`;
+   if the switch answer has other keys (read `Sessions/SwitchEndpoint.cs`), keep the token with a plain `printf 'Authorization: Bearer %s
+'` into `$tmp/sw.auth` and the cookie with `pair_of "$(set_cookie_line auth_rt)" > "$tmp/sw.rt"`.
+   Either way the rotated cookie is kept again after the switch.
+3. `GET /auth/me` with SW's new token: `org_id` is C; record `confirmed_until` as W1. The sign-up completion opened the window, so W1 is not `None`; if it is `None`, `fail` (do NOT confirm with the password: a
+   third `account.confirmed` row would break step 11's `github,password` assertion).
+4. `POST /auth/account/password` with SW's token and cookie: `{"current_password": E2E_PASSWORD, "new_password": a new value}`: 200; keep the new token and re-keep the rotated cookie (again with the shape check).
+5. `GET /auth/orgs` with the new token: the entry with `"current":true` has id C (and not the personal space). `GET /auth/me`: `org_id` is C and `confirmed_until` equals W1.
+6. Pass line: "step 8b: after a password change in a switched company the renewed session is still in that company, with the same window".
+Counts that change because of this step: `login.succeeded` with `details.via = 'session_renewal'`: 2 -> 3 (SW's password change renews once); `password.changed`: +1 (derive from the query step 11 uses);
+`org.created`: +1 if step 11 counts it. SW's notice mails: 1 (password changed) on SW's own limit row, so step 10 gains the assertion "SW = 1"; NEW = 2, PW = 1 and ORG = 0 do not change. Update step 11's expected
+`login.succeeded via session_renewal` from 2 to 3 and say so in the comment above the query.
+
+(d) Step 9 (ORG deletes the company with a GitHub ticket): add one assertion after the 204. Under spec 0015 the account is deleted only if the company was its
+only space, which is true for ORG, so the account's row is gone: `GET /auth/me` with ORG's old token is `403 permissions_changed` (the old token of a deleted account, as main's `scripts/e2e-tenancy.sh` step 7 expects) and the script's `psql` helper counts `"AspNetUsers"`
+rows with `"NormalizedEmail" = upper('$ORG_EMAIL')` = 0 (use the same helper step 11 uses for audit queries). Add a second company holder in the same step? No: it would change step 10's notice
+counts. The keeper case is covered by `A_member_who_keeps_another_space_keeps_the_account_when_the_company_is_deleted_with_a_ticket` (Task 14).
+
+(e) Step 10 notice counts: NEW = 2, PW = 1, ORG = 0 stay (the switch and the new company send no mail; 0017's join mail is not in this script, and the kind of
+the notice limit is 100, not the 0017 mail kinds: F14 is closed by Task 14's check below).
+
+(f) The helper block copied from `scripts/e2e-providers.sh` is the MERGED main version. The wait for the mail limit is not in that block: it is inline in step 11 of that script (about lines 644-645, "the mail limit of PW's second
+invitation"). Where `e2e-settings.sh` needs a wait of that kind, copy the inline lines; there is no helper to grep for.
+
+(g) The header text of the plan (lines 11677-11680, the sentence about GitHub's 302 with `user:email`, S256, a state and no nonce) is applied as the plan has it; it is item 2 of the header list. The pass line says "six provider
+paths" always (the connect path is the sixth), not "if (c) says six". `12-settings` also appears in the plan at lines 176, 201, 11764-11766 (the `e2e-web.sh` header comment) and 16435 (the README text of Task 20): each becomes `14-settings`.
+
+**Step 3 (check), replaces lines 12167-12170:** `bash -n scripts/e2e-settings.sh`, `bash -n scripts/e2e-providers.sh`, `bash -n scripts/e2e-web.sh`, and
+also `bash -n scripts/e2e-orgs.sh scripts/e2e-orgs-create.sh` (unchanged; to be sure nothing was edited by mistake); `file scripts/e2e-settings.sh` says no CRLF.
+F14: the enum is `src/Auth.Infrastructure/Persistence/MailKind.cs`; main has the values 1 to 4 and no 0017 kind, and p12 adds `NoticeLimit = 100`. `grep -n "= 100\|NoticeLimit" src/Auth.Infrastructure/Persistence/MailKind.cs` must show 100 once; if a
+0017 kind equals 100 after the merge, stop and report.
+
+**Step 4 (hand back):** the file list gains nothing; the e2e web header comment of `scripts/e2e-web.sh` names `e2e/14-settings.spec.ts`.
+
+New guard assertions, Task 15: step 8b (`after a password change in a switched company the renewed session is still in that company, with the same window`),
+step 9's row-gone assertion. That is 2.
+
+---
+
+### Task 16 (plan lines 12177-13564): changed, 5 steps (2, 5, 7, 8, 10)
+
+All anchors below were checked against main's `samples/notes-web`. Every Edit anchor of Steps 4, 6 and 8's file creation matches except the two named in Step 5.
+
+**Step 2 (failing specs), added:** in `auth.service.settings.spec.ts` add
+
+`it('a settings call asked while a switch is on its way waits for it and is sent with the switched token', ...)`: the test starts `auth.switchTo(otherId)`
+(held open at `POST /auth/switch`), then calls `auth.changePassword(...)` and `auth.unlink('github')`; expect no request to `/auth/account/password` or
+`/auth/account/logins/unlink` until the switch answer is flushed; after it, each request carries the new token. Reason: main's `switchTo` spends the same refresh
+cookie as a refresh, and an unlink or a password change renews the session with it (the F2 rule, in the browser).
+
+`it('a switch asked during a renewal is sent after the renewal answered', ...)`: an unlink is held at `POST /auth/account/logins/unlink`, `auth.switchTo(otherId)` is called, expect no `/auth/switch` request until the unlink answer is flushed.
+`it('a renewal asked while a refresh is on its way waits for it', ...)` exists in the plan's Task 16 text as `a refresh asked while a renewal is on its way...`
+(the interceptor gate holds `/auth/` calls while a renewal runs); the new test is its mirror. Name it exactly as above.
+
+The settings spec's `open()` helper must expect no call it does not make: where `verify()` names `/auth/orgs`, call `answerOrgs(ctrl)` (main's
+`src/testing/helpers.ts`, added by 0015) right after the `/auth/me` flush. The page of Task 16 does not read the list itself (the delete section does, in Task 18), but
+only a sign-in and the resume of a session call `loadOrgs` (`auth.service.ts` lines 300 and 388); `signedInAs` (= `holdToken` + `loadMe`) makes no orgs call. So the trigger is exactly: where a `verify()` names `/auth/orgs`.
+
+**Step 5, the person, the failures and the calls (replaces lines 12850-13100 where listed).**
+
+(c) The `Failure` union. Main's lines 25-50 already hold `company_member`, `company_limit_reached`, `org_creation_disabled`, `permissions_changed`,
+`private_account_exists`. The plan's anchor (`| { kind: 'reauth_required' }` followed by `| { kind: 'too_many_attempts' ...`) MISSES: main has
+`| { kind: 'reauth_required' }` (line 43) followed by `| { kind: 'org_creation_disabled' }`. Replace
+
+```ts
+  | { kind: 'reauth_required' }
+  | { kind: 'org_creation_disabled' }
+```
+
+with
+
+```ts
+  | { kind: 'reauth_required' }
+  | { kind: 'session_required' }
+  | { kind: 'confirmation_required' }
+  | { kind: 'provider_in_use' }
+  | { kind: 'last_login' }
+  | { kind: 'password_not_set' }
+  | { kind: 'not_found' }
+  | { kind: 'org_creation_disabled' }
+```
+
+(read the two lines in the file first; keep their exact spelling and the `\r\n`). Do not add `permissions_changed` or `company_member`: they exist.
+
+(h) `refresh()` and `exchange()`. The plan's anchors (`this.refreshing ??= this.exchange().finally`) MISS. Main has `refresh()` at about lines 437-441:
+`this.refreshing ??= this.renew().finally(...)`, where `renew()` waits for `this.switching` in a loop and then calls `this.exchange()`. Re-derive in this order:
+1. Read `refresh`, `renew`, `exchange`, `switchTo`, `callSwitch` and the `switching` and `refreshing` fields (about lines 160-260 and 430-520).
+2. `exchange(forRenewal = false)` takes the flag as the plan says and sets the `RENEWAL` HttpContextToken on the `POST /auth/refresh` call when it is true.
+3. Write exactly this (main's `refresh()` calls `renew()`, which loops on `this.switching` and then calls `this.exchange()`; the loop stays in `renew`, unchanged):
+```ts
+refresh(forRenewal = false): Promise<RefreshResult> {
+  if (forRenewal) {
+    this.renewalRefreshing ??= this.renew(true).finally(() => { this.renewalRefreshing = null; });
+    return this.renewalRefreshing;
+  }
+  this.refreshing ??= this.renew(false).finally(() => { this.refreshing = null; });
+  return this.refreshing;
+}
+private async renew(forRenewal: boolean) { /* the switching-wait loop of main, unchanged */ return this.exchange(forRenewal); }
+```
+   `renewalRefreshing` is a new field (`Promise<RefreshResult> | null`); a plain refresh in flight is not mistaken for a renewal, and the renewal's flag reaches `exchange`.
+   The converse race (a switch asked while a renewal is in flight): `switchTo` waits only on `refreshing` and `switching`, and the interceptor gate (Task 16 Step 6) holds every `/auth/` request, `/auth/switch` included,
+   while `auth.renewal` is set; that gate is the guard, named by the test `a switch asked during a renewal is sent after the renewal answered` (added to Step 2, in `auth.service.settings.spec.ts`).
+4. The settings calls (`unlink`, `changePassword`) call `await this.waitForSwitch()` first, a small private method that is `while (this.switching) await this.switching;`
+   (the same loop `renew` uses; extract it from `renew` and make `renew` call it, so one place holds the rule). Then they send.
+5. `logout` and `deleteAccount` are not changed.
+
+**Step 7 (texts), replaces lines 13202-13283 where listed.**
+- The grep rule "replace `Google or Microsoft` in every sample spec and text" names these places on main: `texts.ts` line 42-43 (`providers.names`, `either`),
+  line 143 (`provider_error` becomes `Google, Microsoft or GitHub could not sign you in. Try again.`, and the `GENERIC` constant of `provider-return.spec.ts` line 14 gets the same sentence), line 149 (`addressMismatch`), line 153 (`providerAlreadyLinked`), the comments in `provider-buttons.ts` lines 18 and 64 and in `auth.service.ts` line 17 (all three: say `a provider`), and the specs `provider-return.spec.ts` lines 14, 398 and 401, `provider-link.spec.ts` lines 85-93,
+  `providers-on-screens.spec.ts` line 49 (anchor `['github', 'google', 'google', 'Microsoft']` matches), `providers-on-screens.spec.ts` for the invite text. After the edit,
+  `grep -rn "Google or Microsoft" samples/notes-web/src` returns nothing, and `grep -rn "Google, Microsoft or GitHub"` returns exactly the places edited. Each pinned
+  sentence changes to the same sentence with `Google, Microsoft or GitHub`.
+- `providers.names` (main line 42) becomes `{ google: 'Google', microsoft: 'Microsoft', github: 'GitHub' } as Record<string, string>` and `either` becomes
+  `'Google, Microsoft or GitHub'` (check `either`'s uses first: a sentence with two providers named uses `either`).
+- Text (c) `settings.companyMember: "A company account is deleted by the company's admins."` is DROPPED. Do not add the key. The delete section (Task 18) uses
+  `texts.orgs.companyMember(names)` of main (`texts.ts` lines 218-219). No other key of `settings` duplicates a key of `orgs` or `team`; `texts.spec.ts` checks the
+  printable-ASCII rule: keep it.
+
+**Step 8 (`pages/settings.ts`), replaces lines 13284-13552 where listed.** The page shows three sections in Task 16 and 17; "Delete account" is added in Task 18
+as a component. The `settings-link` goes in `notes.ts` before the sign-out button: the anchor is main's line 107
+`<button type="button" data-testid="sign-out" [disabled]="signingOut()" (click)="signOut()">{{ t.signOut }}</button>` (still matches the plan's anchor at 13518).
+`app.routes.ts` anchors (line 38 `{ path: 'team', ...` and `import { SignupPage } from './pages/signup';`) match; `login.ts` `startNotice` matches.
+
+**Step 10 (hand back):** the list of specs whose "Google or Microsoft" sentence changed is the one above (names, not "each spec").
+
+New guard tests, Task 16: `a settings call asked while a switch is on its way waits for it and is sent with the switched token`,
+`a renewal asked while a refresh is on its way waits for it`. That is 2.
+
+---
+
+### Task 17 (plan lines 13565-14739): unchanged, with two run-time rules
+
+Its Edit anchors were checked on main for the files main has (`provider-buttons.ts`, `provider-return.ts`, `texts.ts`; `confirm-dialog.ts` is new). Anchors in files that tasks 8 to 13 and 16 created
+(`sessionEnded`, `startNotice`, the settings page blocks) are not on main: grep misses on main at plan lines 13603 (a false positive: main has `expect(takeReauth(), value).toBe(false)` at `provider-buttons.spec.ts` line 139),
+14224, 14468, 14499, 14522, 14549 and 14701 are checked after commit A and the Task 16 hand-back, not now; Task 18 lines 14945, 14970, 15230, 15239 and 15270 likewise.
+- Rule 1: in its specs, where a `verify()` names `/auth/orgs`, call `answerOrgs(ctrl)` (see Task 16).
+- Rule 2: the settings screen of Task 17 opens `confirm-dialog` for a window ended by a switch or a refresh: nothing to add, because F5 (refresh and switch keep the
+  window) is true on main (`NextPrincipal` copies the authorization id).
+- The `reauth` target `delete_account` is routed to `/settings` in Task 18 (Step 3 below), not here.
+
+---
+
+### Task 18 (plan lines 14742-15861): changed, 6 steps (2, 3, 4, 5, 6, 7)
+
+The task moves "Delete account" from the notes screen to `/settings`. Main's notes screen has more in it than the baseline: the 0016 pre-check and the
+`company_member` handling. The owner decided (F11): the section on `/settings` shows main's text `companyMember(names)` and no button for an account that is a member of any company; a private-only account deletes as main does today.
+
+**Step 2 (calls and texts), replaces lines 14901-14978 where listed:**
+- `auth.service.ts`: add `deleteCompany` after `deleteAccountWithTicket` as the plan says. Its doc comment sentence "the caller's account went with the company" is wrong after
+  0015: it reads "the company's devices are signed out; the account stays when it has another space (spec 0015)". `permission_not_held` is added to `Failure` after
+  `{ kind: 'not_found' }` (added in Task 16); `permissions_changed` already exists on main: do not add it again.
+- Texts (a) and (b) as the plan has them, with this change: `deleteCompanyWarning` reads
+  `"This deletes the company and all its notes. A member who has no other space loses the account too. It cannot be undone."` (owner-approved text, spec B15). Text (c) `settings.companyMember` is dropped (see Task 16).
+- Text (b)'s anchor `    notAllowed: "You don't have access to this.",` still matches in main's `team` block (about line 222).
+
+**Step 3 (`pages/delete-account.ts`), replaces lines 14979-15287. Rewrite the component from main's `notes.ts`, not from the plan's copy.** Read in this order:
+`notes.ts` lines 24-45 and `reauthTicketOf` (the helpers; Task 16 moved the password helpers to `pages/password-input.ts`), the template block 160-182
+(`delete-section`, `delete-warning`, `delete-form`, `delete-confirm`, `delete-cancel`, `delete-error`), the `moved()` block at about 131-133 (`account-moved`), the members at
+about 213-224 and the methods `askToDelete`, `cancelDelete`, `deleteWithTicket`, `deleteAccount`, `stillInACompany`, `deleteNotes`, `leave`, `refused`,
+`focusDeleteSection`. The component keeps all of them with these differences:
+1. The test ids stay: `delete-account`, `delete-section`, `delete-warning`, `delete-form`, `#delete-password`, `delete-confirm`, `delete-cancel`, `delete-error`,
+   `account-moved`, and `delete-company-member` for the text of an account that is in a company.
+2. On creation the component calls `account.listOrgs()` once (`AccountApi`, main's `GET /auth/orgs`) and keeps `companyNames()` (main's helper: names of entries with
+   `kind === 'organization'`). `@if (companyNames().length > 0)`: show `<p data-testid="delete-company-member">{{ texts.orgs.companyMember(names) }}</p>` and NO
+   button (also for an account with companies only: owner decision, it does not use spec 0012's old sentence). `@else`: the button and the flows below. A list that cannot be
+   read shows the button (the pre-check below catches it at the click).
+3. `stillInACompany` stays as main has it as the pre-check of `deleteAccount` and `deleteWithTicket` (`GET /auth/orgs` before anything is deleted, a list that cannot
+   be read deletes nothing and says something went wrong), and `refusedAsCompanyMember` stays in `refused` for the server's `403 company_member` after the notes went.
+   The plan's version of both lacks them: do not copy it.
+4. `leave` navigates to `/login` with `{ notice: 'deleted' }`.
+5. The `ticket` input and `keepTicketOutOfHistory` are as the plan says (`reauthTicketOf(router)` moves to `pages/ticket-history.ts`; remove it from `notes.ts`).
+6. `provider-return.ts`: the target `delete_account` goes to `/settings` (plan edit as written; the constant `DEFAULT_RETURN_URL` is not touched).
+
+**Step 4 (`delete-company.ts`, TeamPage edits, `notes.ts` edits), replaces lines 15288-15566 where listed.** The `notes.ts` removals are re-derived from main's file:
+remove the header button at line 92 (`<button type="button" data-testid="delete-account" (click)="askToDelete()">{{ t.deleteAccount }}</button>`, inside
+`@if (person.org_kind === 'personal')`), the template block 160-182, the `moved()` block (lines ~131-133), the members `deleteForm`, `deleting`, `deleteBusy`,
+`deleteError`, `notesGone`, `moved`, `reauthTicket` (lines ~213-224), the methods listed in Step 3 above, the helpers at the top that only the section used
+(`BLANK`, `LONE_SURROGATE`, `MAX_BODY_BYTES`, `acceptablePassword` and `reauthTicketOf`: check each with grep before removing; the ones moved by Task 16 are already gone), and the imports
+they leave unused. The org picker, `creating`/`companyForm`, `orgs`, the `orgChanged` effect and `orgCreation` stay. `texts.notes` keys `deleteAccount`, `deleteWarning`,
+`deleteConfirm`, `cancel`, `wrongPassword`, `notesGone`, `movedToCompany`, `passwordRequired`, `reauthFailed` are used by the component now: leave them in `texts.notes`
+(do not move them; the component reads `texts.notes`), and `texts.spec.ts` stays green. `canOpenTeam` edits are as the plan has them (anchors checked).
+
+**Step 5 (specs), replaces lines 15567-15850.**
+(a) `pages/delete-account.spec.ts`: move the two describes of main's `notes.account.spec.ts`: `NotesPage: "Delete account" (spec 0010)` (line 80) and
+`NotesPage: "Delete account" and the companies of the account (spec 0016)` (line 300). The first is moved as the plan says (the four renamed tests keep the plan's new names).
+The second is moved whole, with the helper `submitPassword`, `text`, `personal`, `company`; its four tests keep their names:
+`delete_account_with_a_company_listed_shows_the_company_member_text_and_deletes_no_notes` (now: the section shows `delete-company-member` with the names when the page
+loads and has no `delete-account` button; the test then needs no click, and it is renamed `a_company_member_sees_the_company_member_text_and_no_button`; keep the old
+name as a second test that clicks through a list that arrives late: `delete_account_with_a_company_listed_shows_the_company_member_text_and_deletes_no_notes` (the list
+is empty at load, the company appears at the click: the pre-check text appears, no `/api/me`, no `/auth/account`)), `delete_account_with_only_the_personal_space_still_deletes_the_notes_first`,
+`a list that cannot be read deletes nothing and says something went wrong`, `delete_account_on_403_company_member_shows_the_text_with_the_names`. The plan's
+test `a company member sees the sentence and no button (spec 0012)` is replaced by these:
+- `a_company_member_sees_the_company_member_text_and_no_button`: open with a list of one company (Acme): `pageText` contains
+  "You are still a member of Acme. Delete those companies or ask their admins to remove you, then delete your account." and `[data-testid="delete-account"]` is absent.
+- `an_account_with_companies_only_sees_the_same_text_and_no_button`: the list holds a company and no personal space: the same text, no button.
+- `a_private_only_account_sees_the_button`: the list holds the personal space only: `delete-account` is present, `delete-company-member` absent.
+- `the_old_sentence_is_gone`: `pageText` never contains "A company account is deleted by the company's admins." (guards F11).
+The `open(me)` helper opens `SettingsPage` as the plan has it, and flushes `/auth/orgs` after `/auth/me`
+(`ctrl.expectOne('/auth/orgs').flush({ orgs })`, the list a parameter, default `{ orgs: [] }`).
+(b) `pages/delete-account.provider.spec.ts`: the whole of main's `notes.provider.spec.ts` (66 lines changed on main since the baseline; read it, do not use the plan's
+description), its `open(me, reauthTicket)` navigating to `/settings`, flushing `/auth/options`, `/auth/me` and `/auth/orgs`. Its two 0016 tests (lines 464 and 480 on main) move
+with it and keep their names. Then delete `notes.provider.spec.ts`.
+(c) `notes.account.spec.ts`: delete the two moved describes; the test at line 57 is replaced as the plan says; add the `org:delete` test as the plan says. `notes.orgs.spec.ts`
+line 96 asserts `delete-account` is absent: it stays true.
+(d) `provider-return.spec.ts` edits as the plan has them (anchors checked); the sentence edits of Task 16 already touch lines 14, 398 and 401.
+(e) `pages/delete-company.spec.ts` as the plan has it. Add one test, `the_warning_names_the_members_who_lose_the_account`: the dialog text contains `A member who has no other space loses the account too` (guard of spec B15). Tests named there that assert `permissions_changed` use main's existing `Failure` kind.
+(e2) `team.spec.ts` as the plan says.
+(f) Add `notes.account.spec.ts` (or `notes.spec.ts`) one test: `the_notes_screen_has_no_delete_account_button_for_a_private_account`.
+
+**Step 6 (run), replaces lines 15851-15856:** as the plan, plus: `grep -rn "delete-section\|delete-account" samples/notes-web/src/app/pages/notes*.ts` returns nothing; the e2e
+specs (Task 19) are not run here. Mutate and see a spec fail, then restore (added): remove `stillInACompany` from `deleteAccount` (`a list that cannot be read deletes nothing...` fails); make the
+component show the button when the list has a company (`a_company_member_sees_the_company_member_text_and_no_button` fails).
+
+**Step 7 (hand back):** files gain `texts.ts` (not duplicated keys) and `provider-return.ts`; deleted: `notes.provider.spec.ts`.
+
+New guard tests, Task 18: `a_company_member_sees_the_company_member_text_and_no_button`, `an_account_with_companies_only_sees_the_same_text_and_no_button`,
+`a_private_only_account_sees_the_button`, `the_old_sentence_is_gone`, `the_notes_screen_has_no_delete_account_button_for_a_private_account`. That is 5 (the moved
+tests keep their names).
+
+---
+
+### Task 19 (plan lines 15862-16124): changed, 4 steps (1-title, 2, 3, 5)
+
+The file is `14-settings.spec.ts` (main has `12-orgs.spec.ts` and `13-create-org.spec.ts`). Every `12-settings` in the task, in Task 15's header, in Task 20's
+README text and in the plan's file lists is replaced; run `grep -n "12-settings" plan` and change each.
+
+**Heading and Files (lines 15862-15866):** `### Task 19: The Playwright spec 14-settings.spec.ts and the moved steps of 0010, 0011 and 0016`; Files: Create `14-settings.spec.ts`,
+`support/settings.ts`; Modify `support/fake-provider.ts`, `support/accounts.ts` (exports `createCompany` and `picker`), `10-private.spec.ts`, `11-providers.spec.ts`, `13-create-org.spec.ts`.
+
+**Step 2, added tests in `14-settings.spec.ts` (after the three of the plan):**
+- `after a password change in a switched company the person is still in that company, with the window open` (F2, owner): sign up a private person with a password
+  (`signUpPrivatelyByApi` and `signIn` of `support/accounts.ts` and `support/session.ts`, as `13-create-org.spec.ts` does), create a company with the picker's "New company..."
+  (`createCompany(page, name)`: today a local function of `13-create-org.spec.ts` (line 19), as is `picker`; export both to `e2e/support/accounts.ts` and import them in `13-create-org.spec.ts` and `14-settings.spec.ts`), see `me-company` with the
+  company's name, open `/settings`, change the password (`#current-password`, `#settings-new-password`, `#settings-repeat-password`, `password-submit`), see
+  "Password changed.", then `page.goto('/notes')` and expect `me-company` to hold the company's name (not "Private account") and `picker(page)` to have the company selected;
+  the window part of F2 is checked in `e2e-settings.sh` step 8b, not here. Both new tests leave a company behind: clean up in a `finally` with `deleteCompanyByApi(email, <the password in force: the NEW one after a change>, name)` of `support/accounts.ts`.
+- `a person who is in a company sees the company_member text on /settings and no button`: from the same set-up, `openSettings(page)` then
+  `expect(page.getByTestId('delete-company-member')).toContainText("You are still a member of ${name}.")` and `expect(page.getByTestId('delete-account')).toHaveCount(0)`.
+
+The first test of the plan (`a person signs up with GitHub...`): after `signUpPrivately`, the notes screen may show the picker (a person with GitHub as the only login has one space):
+no change. The third test (`an admin without a password deletes the company with "Confirm with Google"`) ends with "The account went with the company: the same Google identity is
+a new person now": under 0015 this holds because the admin's only space was the company (doomed). Keep the assertion and add the comment `// the company was the account's only space`.
+Add a fourth: `an admin who is also in another company keeps the account when the first company is deleted with "Confirm with Google"` is NOT added: it needs a Google identity with
+two companies and `POST /auth/orgs` by API; it is covered by the API test of Task 14. Say so in the hand-back.
+
+**Step 3 (moved steps), replaces lines 16064-16116, adds:** `13-create-org.spec.ts` line 74-110: the test `a private person who created a company, back in Private, sees the company_member
+text and keeps the notes` clicks `delete-account` on the notes screen (line 100) and expects `delete-error` there. After the move there is no button on `/settings` for an account in a
+company. The test is rewritten: after `picker(page).selectOption({ label: 'Private' })` and the note, `await openSettings(page)`; expect
+`delete-company-member` to contain `You are still a member of ${name}.` and `delete-account` to have count 0; `await page.goBack()` (or `page.goto('/notes')`) and expect the note
+visible. Then `deleteCompanyByApi(...)` as now, `await page.reload()`, `await openSettings(page)`, `delete-account` visible, click it, fill `#delete-password`, `delete-confirm`, expect
+`/login`. The test name stays; the comment about "the sample has no screen for DELETE /auth/org" is changed to say the company is removed by the API for set-up. Add `import { openSettings } from './support/settings';`.
+`10-private.spec.ts` (line 67-68) and `11-providers.spec.ts` (131-143) edits are as the plan says (anchors match main). After them, run `grep -n "delete-account\|Confirm with" e2e/*.spec.ts` (main's hits:
+`10-private` 67-68, `11-providers` 131-143, `13-create-org` 74-100) and name each.
+
+**Step 5 (hand back):** Proposed subject unchanged.
+
+New guard tests, Task 19: `after a password change in a switched company the person is still in that company, with the window open`,
+`a person who is in a company sees the company_member text on /settings and no button`, and the rewritten `a private person who created a company, back in Private, sees the
+company_member text and keeps the notes`. That is 2 new and 1 rewritten.
+
+---
+
+### Task 20 (plan lines 16125-16465): changed, 4 steps (2, 3, 4, 6)
+
+**Step 1 (keys guide):** unchanged, anchors checked on main (`docs/deployment/provider-keys.md` lines 1, 3, 4, 48, 112 match).
+
+**Step 2 (threat model), replaces lines 16215-16306 where listed:**
+- The risk numbers: the new residual risks are 71, 72 and 73 (main ends at 70). In the whole plan `risk 62` becomes `risk 71`, `risk 63` becomes `risk 72` and `risk 64` becomes `risk 73`
+  (run `grep -n "risk 6[2-4]\|Risk 6[2-4]" plan`: the places are the table of "Managing logins" (rows 'Risk 62', 'risk 63', 'Risk 64'), item 57's `(risk 62)`, the self-review line 16488 `residual risk 63`).
+  Add them "after `70.`" (not after `61.`).
+- The audit row on main's threat model (line 88) says `The audit log: 29 kinds`: replace `29 kinds` with `33 kinds` (measured); `docs/operations/backup.md` line 252 lists the audit kinds and ends `That makes 29 kinds.`: add the four kinds (`account.confirmed`, `account.confirm_refused`, `provider.unlinked`, `password.changed`) and write the measured number; and the row of the contract counts in `docs/design.md` if it names 29.
+- (a)-(c): the diagram anchor (line 35 on main) and `## Sign-in with Google and Microsoft` (line 160) and `## Account deletion and personal data` (line 191) match. The anchor
+  `with providers on, Auth-Core to Google and Microsoft (outbound HTTPS, the client secret)` is at line 40.
+- Items 2, 51, 52, 53, 55, 56, 57, 58 (lines 242, 293-300) are widened as the plan says; item 59 (line 301) is rewritten as the plan says.
+- The `Managing logins` table row `E | A session outlives...` gains one row: `| E | A renewed session lands in a company the person did not choose | The renewed session keeps the
+  company claims of the token that asked (`session_org_id`, `session_org_joined`) and the old start and window (`AccountPasswordTests`, `ProviderUnlinkTests`, ...)`: name the two tests the merge worker's fix commit
+  writes (they are in the "Merge worker" list below). A second row: `| D | Two settings calls and a switch race for one refresh cookie | Every settings call that renews waits for a switch in flight in
+  the sample; on the server the membership row is locked before the account row (the lock order) | |`.
+- "Managing logins" first paragraph gains: "Settings endpoints act in the company of the access token; a token without a company is `403 no_membership`."
+
+**Step 3 (Angular guide), replaces lines 16307-16362 where listed.** Main's `docs/integration/angular.md` has "Several companies (spec 0015)" (line 214) and "Creating another company (spec 0016)" (line 246);
+the new section goes before `## The limits and an outage (spec 0008)` as the plan says (after `## Google and Microsoft (spec 0011)` at line 308, which the plan renames), and its text says:
+- (b) The bullet `**"Delete account" without a password.**` is at line 342 and `**Deleting a company needs a password too.**` at line 349 (the anchors match). The `notes-web.reauth` flag text
+  (line 324) quoted in the plan matches. Add to the account bullet: "A private-only account deletes as before; an account that is in any company shows 'You are still a member of ...' and no button (the
+  `403 company_member` of spec 0016 stays the last guard)". The "Deleting an account that is still in a company" bullet of spec 0016 (line 268) is edited: the sample's section is on `/settings`, not on the notes screen.
+- (c) The new section "The settings screen (spec 0012)" gains a bullet: "**The company.** A settings endpoint acts in the company of the access token's `org_id`; after an unlink or a password change the new
+  token is in the same company, with the same window. A client must not call a settings endpoint while a switch is on its way (they share the refresh cookie): the sample's `AuthService` waits."
+
+**Step 4 (deployment guide, design, changelog, README), replaces lines 16363-16435 where listed:**
+- `docs/deployment/vps.md` anchors match main (lines 89, 91, 255, 257, 260, 327). `docs/design.md` anchor `*As built (spec 0011):*` is at line 376.
+- **CHANGELOG.** Main has no `## Unreleased` heading: add it above `## 0.3.0 - 2026-11-23`, i.e. replace the line `## 0.3.0 - 2026-11-23` with
+  `## Unreleased` + a blank line + the paragraph, `### Added`, `### Changed`, `### Upgrading` blocks (the plan's text, with `32 in all` changed to `33 in all`, and the first paragraph
+  starting without the anchor `Sign-in with Google and Microsoft ([spec 0011]...` (that sentence is in the 0.2.0 block on main, line 85, and is not repeated)) + a blank line + `## 0.3.0 - 2026-11-23`.
+  The sample line "**The sample**: GitHub buttons, `/settings`, ..." adds "Delete account moves to `/settings`; the notes screen has no account section".
+  Add to `### Changed`: "**`DELETE /auth/org` with a provider ticket** deletes only the accounts that have no other space (spec 0015 rule), as the password path does."
+- `samples/notes-web/README.md`: line 76 names `e2e/12-orgs.spec.ts`; the new sentence reads `e2e/14-settings.spec.ts` and goes after the sentence that names `/provider-return`;
+  read the file first. The sample README also lists `notes.account.spec.ts` ... : after Task 18 the list gains `delete-account.spec.ts` and `delete-account.provider.spec.ts`.
+
+**Step 5 (check):** unchanged.
+
+**Step 6 (acceptance map):** the map `docs/superpowers/plans/0012-acceptance-map.md` names tests: add every guard test of this amendment that a criterion needs (criteria 21 and 28-31); the script
+of the step stays. The names that Tasks 14, 16, 18, 19 add are listed above; the criterion rows are the orchestrator's to write if criteria are added to the spec (Amendment B items of the spec).
+
+New guard tests, Task 20: none (documents), plus the acceptance map rows.
+
+---
+
+### Merge worker (not a plan task; the plan needs these tests, the worker writes the code)
+
+The merge worker's commit A (before Task 14) changes done code: F1 lock order (`ProviderLogins.HoldAsync`, `AccountPasswordEndpoint`, the unlink, `SettingsCallers` with
+`MembershipReader.ReadInCompanyAsync`), F2 (`SessionRenewal.Issue` keeps `session_org_id` and `session_org_joined`), F4 (`IdentityLock` between the address lock and the account row in
+`AcceptThroughProviderAsync`), F12 (`confirmInside` after `guard.EnterAsync`, before the name check, in main's `CompanyDeletionService.DeleteAsync`, with main's keepers kept; description sentence).
+The tests of tasks 15 and 19 that see F2 are named above. The tests the worker adds in commit A (names for the threat model row in Task 20):
+`AccountPasswordTests.The_renewed_session_stays_in_the_company_the_caller_is_in` and `ProviderUnlinkTests.The_renewed_session_stays_in_the_company_the_caller_is_in`
+(both: the account has a personal space and a company, the caller's token is for the company, the new tokens carry the company's `org_id` and the same start and window).
+F3 is decided (owner): commit A also adds the lock to `ProviderConnectEndpoint.ConnectAsync` (the membership row, then the account row, in the lock order) and its race test
+`ProviderConnectTests.A_connect_asked_while_the_account_is_being_deleted_answers_a_clean_4xx` (two connections, the account deletion held before commit; the connect answers a 4xx, never a 500). Task 14 does not touch it.
+Commit A also changes the done test of Task 3 that pins the options JSON without `org_creation` (plan line 2327): its expected string gains `"org_creation":"self-service"` where the stack's manifest turns it on (read the test first; stop if the
+test's factory does not set the manifest key).
+
+---
+
+### Open questions (one line each, owner)
+
+None open.
+
+Answered and removed: the company-only account (owner F11: same text, no button; the server answers `403 forbidden`); the `/team` warning text (owner: "This deletes the company and all its notes. A member who has no other space loses the account too. It cannot be undone."; spec B15); SW in step 8b (accepted); F3 (decided: lock in commit A).
+
+### Problems found (code against the probe)
+
+- F17: main refuses `company_member` before it reads the body and the ticket; the probe said "ticket first". The code stays; one guard test added in Task 14 (main already pins the private-plus-company case).
+- Task 16 Step 5 anchors (c) and (h) miss on main; re-derived above.
+- Task 18's `DeleteAccountSection` in the plan lacks main's 0016 pre-check and `company_member` handling; re-derived above.
+- Task 14 `AuditProviderFlowsTests` and `OrgCreateTests` pin 29 kinds on main (the probe named only the OpenAPI counts); added to Task 14.
+- `13-create-org.spec.ts` (main) clicks "Delete account" on the notes screen; added to Task 19.

@@ -1,6 +1,6 @@
 # Spec 0012 — GitHub, and managing one's own logins
 
-- **Status:** Approved (owner, 2026-05-04), with the Amendment of 2026-05-04
+- **Status:** Approved (owner, 2026-05-04), with the Amendment of 2026-05-04 and Amendment B of 2026-11-24 (after specs 0015 to 0017)
 - **Date:** 2026-05-04
 - **Author:** Alex
 - **Milestone:** Phase 2, slice 0012 — *"a person manages their linked logins"*
@@ -1017,6 +1017,63 @@ items it touches now read so.
   their count through the notification-limit row of the store of the mail limits (`MailRequestLimits`, the key of
   Amendment A10). The queue rows themselves (kind, address, provider name, no token) are asserted by the integration
   tests with the dispatcher run by hand (criterion 22). Criterion 31 reads so.
+
+### Amendment B (2026-11-24, after specs 0015, 0016 and 0017)
+
+Specs 0015 (several companies per account, `POST /auth/switch`, `GET /auth/orgs`), 0016 (`POST /auth/orgs`, `403 company_member` on `DELETE /auth/account`) and 0017
+(an invitation joins an existing account) shipped in v0.3.0 after this spec was written. A probe of this spec against them
+(`reconcile-probe.md`) found two items that change what a consumer or a person sees (B3 and B5, owner decisions) and several that say how the contract is built.
+Each item names the sentences of the spec it changes. Items A1 to A13 above stand; none contradicts 0015 to 0017.
+
+- **B1 - the lock order.** Every path of this spec that takes more than one lock takes them in this order: the company lock, the address lock, the identity lock
+  (`IdentityLock`, only where a path uses it), the membership row(s), the account row, the login rows. A settings endpoint takes the caller's membership row before
+  the account row, as sign-in and `AccountDeletion` do on 0015. The sign-in's hold of its login (account `FOR KEY SHARE`, then the login row `FOR SHARE`) keeps its order.
+  The identity lock in a provider invitation sits after the address lock and before the account row's `FOR UPDATE`, before the `already_registered` and
+  `provider_already_linked` decisions. This changes Decisions 43 to 45 and Settled 25 and 26 only in order, not in what they judge.
+- **B2 - the token's company.** A settings endpoint (`confirm`, `connect`, `unlink`, `password`) acts in the company of the access token's `org_id`. A token without
+  `org_id` is `403 no_membership`. The `confirmed_until` of `GET /auth/me` is the window of the session, whatever company the token is for. Changes the "caller" rule of the
+  four endpoints and criterion 8.
+- **B3 - the renewed session keeps the company (owner).** After an unlink or a password change the renewed session is in the company the caller's token is in now: the new tokens
+  carry `session_org_id` and `session_org_joined` of the old token, and the old start and the old window. Nothing jumps. Visible: a person who switched to company B and changes the
+  password is still in B. Changes the paragraphs of the renewed session in the unlink and the password change (and criteria 16 and 17).
+  Guard: `scripts/e2e-settings.sh` step 8b and the `14-settings.spec.ts` test "after a password change in a switched company the person is still in that company, with the window open".
+- **B4 - the window across a switch and a refresh.** A refresh and a switch keep the session's start and its window (`NextPrincipal` copies the authorization id): a switch inside
+  the window does not close it, and does not extend it. A settings call and a switch spend the same refresh cookie, so the sample sends a settings call that renews only after a
+  switch in flight has answered. Adds to the "Answers" list of the sample frontend.
+- **B5 - "Delete account" on `/settings` (owner).** Replaces the spec's lines about 503 to 506 (the bullet **"Delete account"**) with:
+
+  > - **"Delete account"**, moved here from the notes screen. An account that is a member of any company (`GET /auth/orgs` lists a space of kind `organization`) sees the text
+  >   "You are still a member of {names}. Delete those companies or ask their admins to remove you, then delete your account." (the text of spec 0016, the names from the list) and
+  >   no button. An account with a personal space only deletes as before (specs 0010 and 0011): the pre-check of `GET /auth/orgs`, the notes, then `DELETE /auth/account`,
+  >   and the server's `403 company_member` stays the last guard. The `reauth` return of "Confirm with {Provider}" lands on `/settings`. The notes screen keeps no account section.
+
+  The sentence "A company account is deleted by the company's admins." is withdrawn. Changes the sample sections of the spec, criterion 28 and criterion 29, and the tests that moved.
+- **B6 - `DELETE /auth/account` and a ticket.** `DELETE /auth/account` still judges the space first: a personal space plus a company is `403 company_member`, companies only is
+  `403 forbidden`, before the body and the ticket are read. A provider ticket sent in either case is not used up (a later confirmation with it works). Changes the order the probe
+  recommended ("ticket first"): the code of 0016 is kept.
+- **B7 - `DELETE /auth/org` with a ticket after 0015.** The ticket step runs inside the deletion's transaction, after the company lock and before the name check, as before.
+  The deletion keeps spec 0015's rule: only the accounts that have no other space are deleted with the company; a member with another space keeps the account and loses the membership.
+  The caller's account is deleted when the company was its last space. The sentence of the OpenAPI description "the account of every member, the caller's included" is withdrawn; main's
+  sentence ("every member who has no other space (the caller's included when this was their last). Members with another space keep their ...") stands and gains the ticket sentence.
+  A wrong name does not use the ticket up (the transaction is rolled back before any change). Changes the `DELETE /auth/org` contract and criterion 21.
+- **B8 - the names of 0015 to 0017 this spec uses.** `MembershipReader.ReadInCompanyAsync(userId, companyId)` for a settings endpoint, `ReadSignInSpaceAsync` for sign-in only;
+  the text `texts.orgs.companyMember(names)` of the sample; `RatePolicies.Classify` (the static class; `RatePolicy` is the enum); `company_member`, `company_limit_reached`,
+  `org_creation_disabled`, `permissions_changed` already exist in the sample's failures.
+- **B9 - the counts after the merge.** Audit kinds 33 (29 on main plus 4), OpenAPI operations 43 (39 plus 4), operations under the charset guard 30 (26 plus 4). Every place that pins a count
+  is measured when it is changed, and the number printed by the count test is the one written. Changes the counts of "Audit events", "OpenAPI" and criteria 26 and 27.
+- **B10 - the browser spec.** The Playwright spec is `e2e/14-settings.spec.ts` (main has `12-orgs.spec.ts` and `13-create-org.spec.ts`); wherever this spec says `12-settings.spec.ts` it reads
+  `14-settings.spec.ts`. `13-create-org.spec.ts` gains the move of its "Delete account" step to `/settings`, and the notes of the earlier specs `10-private` and `11-providers` move as listed.
+  `scripts/e2e-settings.sh` expects `"org_creation":"self-service"` in the options and gains a step for B3.
+- **B11 - the notice mails.** The notice mails keep the limit key `MailKind.NoticeLimit` (100); no mail kind of 0017 equals it, and the 0017 join mail does not count against it.
+  Criterion 31 (the count of mails from the notice row) stands (A13).
+- **B12 - the threat model numbers.** The residual risks of this spec are numbered 71, 72 and 73 (0015 to 0017 end at 70), and wherever this spec or the plan says "risk 62", "risk 63" or "risk 64" it
+  means 71, 72 and 73. The widened items (2, 51, 52, 53, 55 to 59) keep their numbers.
+- **B13 - the changelog.** The entry goes under a new `## Unreleased` heading above `## 0.3.0`; v0.3.0 has none.
+- **B14 - risks accepted from the probe.** (a) Connect takes the membership row, then the account row lock (F3, owner decision); a concurrent account deletion gets a clean 4xx, never a 500.
+  Guard: `ProviderConnectTests.A_connect_asked_while_the_account_is_being_deleted_answers_a_clean_4xx`. (b) A settings call asked while a switch is in flight is sent late, not refused.
+  (c) The company deletion warning on `/team` is decided: see B15.
+- **B15 - the company deletion warning (owner).** The warning on `/team` reads: "This deletes the company and all its notes. A member who has no other space loses the account too. It cannot be undone."
+  Visible: an owner sees which members lose the account. Changes the sample text only (no server contract). Guard: `pages/delete-company.spec.ts` test `the_warning_names_the_members_who_lose_the_account`.
 
 ## Verification notes (for the local verifiers)
 
