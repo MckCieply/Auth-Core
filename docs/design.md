@@ -380,6 +380,12 @@ links with its password once; a new person finishes an account without a passwor
 accepted with a provider; a private person without a password confirms a deletion with the provider. The tests run the real web-provider
 registrations against a fake provider (`tests/Auth.FakeOidc`); what remains is in the threat model (risks 52 to 61).
 
+*Spec 0012:* GitHub is the third provider (an OAuth App: the code flow with PKCE, `GET /user` and `/user/emails` read and the token revoked
+at once, the decimal `id` as the identity, the primary verified address only). A settings screen manages one's own logins: a five-minute
+confirmation window bound to the session of the device (the refresh cookie names it), connect and disconnect (never the last way in; a
+disconnect signs the other devices out and renews this one), the password changed against the current one, and three notice mails without a
+link. `DELETE /auth/org` takes a provider confirmation. With it the phase's milestone is complete for the three providers.
+
 *As built (spec 0015, the first of three slices, 0015 to 0017, for "multiple orgs per user with org switching"; 0015 to 0017 are built):* one account belongs to several companies (and at most one personal space) and moves between them without signing in again.
 `GET /auth/orgs` lists the person's spaces and `POST /auth/switch` moves the device to another one with the refresh cookie alone; every
 session works in one company, the access token still names exactly one, and a sign-in lands in the company used last. A removal or a company

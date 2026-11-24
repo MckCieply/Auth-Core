@@ -586,7 +586,7 @@ No change: a GitHub sign-in and a renewed session issue the same claims as a pas
   `POST /auth/account/confirm` and password change while it lasts, as it blocks their login.
 - **57** (changed): re-authentication is as strong as the provider makes it; for GitHub it is usually one click, or
   none, because GitHub cannot be asked for a fresh sign-in. Script in the product's page that opens such a round trip in a
-  window of the same origin can read the ticket there (risk 62).
+  window of the same origin can read the ticket there (risk 71).
 - **59** (rewritten): a provider login is now mailed when it is added and can be disconnected from the settings screen,
   and a disconnect signs the other devices out (their access tokens still work for up to 10 minutes). What remains: a
   person who ignores the mail keeps the intruder's login until they act; and a stale "verified" flag at a provider can
@@ -775,7 +775,7 @@ Samples and end to end
 29. `samples/notes-api` tests cover `DELETE /api/org` (`204` and the notes of the company gone, other companies'
     untouched; `403` for a private token and for a token without `org:delete`). Guard: pytest
     (`test_delete_org_data.py`).
-30. A Playwright spec (`samples/notes-web/e2e/12-settings.spec.ts`) passes in Chromium and WebKit against the fake
+30. A Playwright spec (`samples/notes-web/e2e/14-settings.spec.ts`) passes in Chromium and WebKit against the fake
     provider, on the development stack with `Auth:Testing:WindowEndpoint` on, every person made with a fresh address of
     the fake's free-address mode so that the spec runs in both browsers and again on the same stack: a new person signs
     up with "GitHub" and is
@@ -931,7 +931,7 @@ Choices the decisions left open; the contract above reads this way.
 19. **`prompt=select_account` for every GitHub purpose**, so that a person with several GitHub accounts picks the linked
     one at a reauth and the right one at a connect.
 20. **The revocation runs on every path and never fails the round trip**: the token must not outlive the request
-    however it ends, and a failed revocation leaves a named residual (risk 63) rather than a person who cannot sign in.
+    however it ends, and a failed revocation leaves a named residual (risk 72) rather than a person who cannot sign in.
 21. **The flag of D30 carries its target**, so that a `reauth` return can serve the dialog, "Delete account" and
     "Delete company" without a crafted link reaching any of them. Nothing secret crosses a round trip: the
     person clicks the action again after a provider confirmation.
@@ -944,7 +944,7 @@ Choices the decisions left open; the contract above reads this way.
     and be signed out; that tab signs in again.
 25. *(Withdrawn by Amendment A1: the reset does not retry; the password change voids the links first, and the first of
     the two wins.)*
-26. **File names.** `scripts/e2e-settings.sh`, `samples/notes-web/e2e/12-settings.spec.ts`,
+26. **File names.** `scripts/e2e-settings.sh`, `samples/notes-web/e2e/14-settings.spec.ts`,
     `samples/notes-api/tests/test_delete_org_data.py`.
 
 ### Amendment (2026-05-04, after the probe)

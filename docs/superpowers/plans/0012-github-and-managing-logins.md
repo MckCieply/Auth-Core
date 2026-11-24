@@ -112,7 +112,7 @@ none of its code is copied here, and the plan does not re-run them. What the pla
   dictionary: the `github` entry in `Load` (Task 3). **U6** the retry pipeline (Task 5: the named client; Task 6: one `/user` and one revocation
   counted). **U7** the manager hashes the reference id: never compare `ReferenceId` in SQL (Task 2). **U8** the `Properties` approach needs the
   optimistic token: the table is used instead (Task 1). **U9** an unsupported 2xx token body is logged verbatim by OpenIddict at `fail:` (Task 4:
-  the fake answers JSON when asked for JSON; Task 20: the residual risk 63 names it). **U10** the plain `401` has no body; `session_required` comes
+  the fake answers JSON when asked for JSON; Task 20: the residual risk 72 names it). **U10** the plain `401` has no body; `session_required` comes
   after it (Task 2). **U11** only the unlink and the password change are token-endpoint paths (Tasks 7, 9, 10, 12). **U12** the revocation never
   uses the request's token (Task 5). **U13** GitHub's documented shapes (Tasks 4 and 5). **U14** the deadlock of the spec's first order (Task
   12: Amendment A2's order and its three race tests). **U15** `AtomicSignInResult` takes the session values (Task 1).
@@ -173,7 +173,7 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | End to end | `scripts/e2e-providers.sh`, `scripts/e2e-settings.sh`, `scripts/e2e-web.sh` (comment only) | Task 15 |
 | Sample frontend | `samples/notes-web/src/app/account-api.ts`, `auth/auth.service.ts`, `auth/auth.interceptor.ts`, `texts.ts`, `app.routes.ts`, `pages/settings.ts`, `pages/confirm-dialog.ts`, `pages/delete-account.ts`, `pages/delete-company.ts`, `pages/provider-buttons.ts`, `pages/provider-return.ts`, `pages/provider-link.ts`, `pages/notes.ts`, `pages/team.ts`, `pages/ticket-history.ts`, `pages/login.ts`, `pages/password-input.ts`, `src/testing/helpers.ts` and their specs | Tasks 16, 17, 18 |
 | Sample backend | `samples/notes-api/src/notes_api/app.py`, `samples/notes-api/tests/test_delete_org_data.py` | Task 18 |
-| Browser check | `samples/notes-web/e2e/12-settings.spec.ts`, `e2e/support/*.ts`, `e2e/10-private.spec.ts`, `e2e/11-providers.spec.ts` | Task 19 |
+| Browser check | `samples/notes-web/e2e/14-settings.spec.ts`, `e2e/support/*.ts`, `e2e/10-private.spec.ts`, `e2e/11-providers.spec.ts` | Task 19 |
 | Documents | `docs/deployment/provider-keys.md`, `docs/security/threat-model.md`, `docs/integration/angular.md`, `docs/deployment/vps.md`, `docs/design.md`, `CHANGELOG.md`, `samples/notes-web/README.md` | Task 20 |
 
 ## The tasks
@@ -198,7 +198,7 @@ New and changed files by responsibility. Everything under `src/Auth.Server/` unl
 | Mon 11.05 | 16 | The sample: GitHub buttons, the settings calls, `/settings` and its password section |
 | Mon 11.05 | 17 | The sample: the confirmation dialog, connect, disconnect, the return screen's targets |
 | Wed 13.05 | 18 | The sample: "Delete account" on `/settings`, "Delete company" on `/team`; notes-api `DELETE /api/org` |
-| Wed 13.05 | 19 | The Playwright spec `12-settings.spec.ts` and the moved steps of 0010 and 0011 |
+| Wed 13.05 | 19 | The Playwright spec `14-settings.spec.ts` and the moved steps of 0010 and 0011 |
 | Wed 13.05 | 20 | The documents and the acceptance map check |
 | Fri 15.05 | — | Final review and fixes (outside this plan) |
 | Sat 16.05 | — | The three verifiers, the "As built", the merge (outside this plan, owner-gated) |
@@ -11762,7 +11762,7 @@ with
 
 ```bash
 # The stack includes the fake provider of specs 0011 and 0012 (tests/Auth.FakeOidc/compose.yml, http://localhost:8099): the sample's manifest
-# lists Google, Microsoft and GitHub, e2e/11-providers.spec.ts and e2e/12-settings.spec.ts sign in through it (the second also uses the testing
+# lists Google, Microsoft and GitHub, e2e/11-providers.spec.ts and e2e/14-settings.spec.ts sign in through it (the second also uses the testing
 # endpoint, which the overlay turns on with Auth__Testing__WindowEndpoint), and Auth-Core trusts it as its test issuer.
 ```
 
@@ -15859,10 +15859,10 @@ Proposed subject: `feat(sample): delete the account on the settings screen and t
 
 ---
 
-### Task 19: The Playwright spec `12-settings.spec.ts` and the moved steps of 0010 and 0011 (changed by Amendment B at the end of this plan: read it first)
+### Task 19: The Playwright spec `14-settings.spec.ts` and the moved steps of 0010 and 0011 (changed by Amendment B at the end of this plan: read it first)
 
 **Files** (all under `samples/notes-web/e2e/`):
-- Create: `12-settings.spec.ts`, `support/settings.ts`
+- Create: `14-settings.spec.ts`, `support/settings.ts`
 - Modify: `support/fake-provider.ts`, `10-private.spec.ts`, `11-providers.spec.ts`
 
 **Interfaces:**
@@ -15914,7 +15914,7 @@ export async function endConfirmationWindow(page: Page): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: The spec.** `12-settings.spec.ts`:
+- [ ] **Step 2: The spec.** `14-settings.spec.ts`:
 
 ```ts
 import { Page, expect, test } from '@playwright/test';
@@ -16206,7 +16206,7 @@ with `3. On your product's sign-in screen, "Continue with Google" (and "with Mic
 | GitHub shows "The redirect_uri is not associated with this application" | The "Authorization callback URL" of the OAuth App differs from the one Auth-Core sends: compare it with the table above |
 | A GitHub sign-in comes back with `#error=provider_error`, and `$C logs auth` names `incorrect_client_credentials` or `bad_verification_code` | The GitHub client secret is wrong (or was regenerated), or the code was used already: check `AUTH_GITHUB_CLIENT_SECRET` |
 | A GitHub sign-in always reaches the link screen with the sentence about an unverified address | The account's primary address is not verified at GitHub (GitHub, Settings, Emails), or the account keeps its address private and has a verified secondary one: only the primary address counts |
-| `$C logs auth` warns that the GitHub token could not be revoked | GitHub did not answer the revocation with `204`: the token stays valid at GitHub, unused and not stored, until the person revokes the app (risk 63); check the client secret |
+| `$C logs auth` warns that the GitHub token could not be revoked | GitHub did not answer the revocation with `204`: the token stays valid at GitHub, unused and not stored, until the person revokes the app (risk 72); check the client secret |
 ```
 
 (and in the first row's settings list, `(`Auth:Providers:Google:ClientId`, `Auth:Providers:Google:ClientSecret`, ..., `Auth:App:FrontendUrls:ProviderReturn`)`
@@ -16241,7 +16241,7 @@ and add rows to its table, after the row that starts `| S | Someone signs in as 
 
 ```markdown
 | S | Someone signs in with a GitHub account whose secondary address is the victim's | Only the primary entry of `/user/emails` is the address, and only when verified; `email` of `/user` is never read (`GitHubIdentityTests`) | |
-| I | The GitHub token in a log, a ticket or the audit log | The reader keeps it in memory only, revokes it in a `finally`, removes it from OpenIddict's context, and logs a failed revocation without it (`GitHubCallbackTests`, `GitHubCallbackErrorTests`) | A token GitHub would not revoke stays valid at GitHub (risk 63) |
+| I | The GitHub token in a log, a ticket or the audit log | The reader keeps it in memory only, revokes it in a `finally`, removes it from OpenIddict's context, and logs a failed revocation without it (`GitHubCallbackTests`, `GitHubCallbackErrorTests`) | A token GitHub would not revoke stays valid at GitHub (risk 72) |
 | D | GitHub answers slowly or with a huge body | 10 seconds and 64 KiB per call, one attempt, then `provider_error` (`GitHubCallbackErrorTests`) | |
 ```
 
@@ -16264,12 +16264,12 @@ transaction.
 | --- | --- | --- | --- |
 | S | Script in the page (XSS) connects the attacker's provider to the account | The connect needs a ticket of this browser whose **verified** address is the account's; another address is `403 address_mismatch` (`ProviderConnectTests`) | |
 | S | A stolen access token alone acts on the settings | Every settings endpoint also needs the refresh cookie of a live session of the same account (`401 session_required`, `ConfirmationWindowTests`, `ProviderUnlinkTests`) | |
-| T | Script in the page disconnects a provider during the window | The window lasts 5 minutes, is bound to one session, and the last way in cannot go (`409 last_login`); every disconnect is mailed (`ProviderUnlinkTests`, `SettingsMailTests`) | Risk 62 |
+| T | Script in the page disconnects a provider during the window | The window lasts 5 minutes, is bound to one session, and the last way in cannot go (`409 last_login`); every disconnect is mailed (`ProviderUnlinkTests`, `SettingsMailTests`) | Risk 71 |
 | T | A reset and a password change race | Both meet at the account's mail link row; the first wins and neither answers `500`: the change answers `403 wrong_password` when the reset commits while it waits at the link, and `401 session_required` when the reset committed before it took the address lock (`AccountPasswordTests`, Amendment A1) | |
 | R | A person denies a confirmation, a connect, a disconnect or a password change | `account.confirmed`, `account.confirm_refused`, `provider.linked` (`via`), `provider.unlinked`, `password.changed` and `login.succeeded` (`via session_renewal`) (`AuditSettingsFlowsTests`) | |
 | I | A password, a ticket, a cookie or a token in a log, a mail or the audit log | None is logged or written; the mails hold no link and no token (`AssertNoSecretsAsync` in every class of this spec, `MailComposerTests`) | |
 | D | The password at the confirmation and the change guessed | Both count in the account's login streak and its lockout, and against the per-IP `login` limit (`AccountConfirmTests`, `AccountPasswordTests`, `RateLimitMiddlewareTests`) | The lockout a distributed guesser triggers blocks them too (risk 2) |
-| D | The mails used as noise | 10 an hour per address for the three kinds together; beyond it the change happens unmailed (`SettingsMailTests`) | Risk 64 |
+| D | The mails used as noise | 10 an hour per address for the three kinds together; beyond it the change happens unmailed (`SettingsMailTests`) | Risk 73 |
 | E | A session outlives the unlink of the identity it signed in with | A sign-in holds its login row under a share lock; an unlink that comes second ends the session it issued (`ProviderUnlinkRaceTests`) | |
 | E | A renewal extends a session past its 30-day cap | The renewed session keeps the old start; past the cap the endpoint is `401 session_required` (`ProviderUnlinkTests`) | |
 ```
@@ -16290,7 +16290,7 @@ transaction.
   whoever holds a live access token and the refresh cookie in that browser can then confirm a deletion or open the confirmation window. Auth-Core
   asks for a fresh sign-in (`prompt=login` at Microsoft, `prompt=select_account` and `max_age=0` at Google) but does not check that one
   happened; GitHub cannot be asked for one at all (`prompt=select_account` only). Script in the product's page that opens such a round trip in a
-  window of the same origin can read the ticket there (risk 62) (spec 0011; spec 0012).`;
+  window of the same origin can read the ticket there (risk 71) (spec 0011; spec 0012).`;
 - `59.` → `59. **A provider login can be unwanted.** A provider login is now mailed when it is added and can be disconnected on the settings
   screen, and a disconnect signs the other devices out (their access tokens still work for up to 10 minutes). What remains: a person who ignores
   the mail keeps the intruder's login until they act; and a stale "verified" flag at a provider can still create the account of an address
@@ -16432,7 +16432,7 @@ and under `### Upgrading` add:
 
 In `samples/notes-web/README.md`, where it lists the screens (or after the sentence that names `/provider-return`), add one sentence:
 `Spec 0012 adds `/settings` (sign-in methods, the password, "Delete account") and "Delete company" on `/team`; `scripts/e2e-settings.sh` and
-`e2e/12-settings.spec.ts` drive them against the fake provider.` (Read the file first and put it where the screens are named.)
+`e2e/14-settings.spec.ts` drive them against the fake provider.` (Read the file first and put it where the screens are named.)
 
 - [ ] **Step 5: Check the documents.** `C:/p6v/Scripts/python.exe scripts/check-docs.py` passes (links, paths and identifiers of the listed
 documents); `C:/p6v/Scripts/python.exe scripts/check-docs.py --self-test` passes. From `samples/notes-web`, `npm run check:docs` passes.
@@ -16485,7 +16485,7 @@ rename tests to fit.
 | 32 | Task 4, used by every test above | 33, 34 | the suites (final review, verifiers); Task 20 |
 
 **The probe's traps**, each where it is handled: U1 Tasks 4 and 6; U2, U3, U6, U12 Task 5 (tests in Task 6); U4 Task 6; U5 Task 3; U7 Task 2; U8
-Task 1; U9 Task 4 (residual risk 63 in Task 20); U10 Task 2; U11 Tasks 7, 9, 10, 12; U13 Tasks 4 and 5; U14 Task 12; U15 Task 1.
+Task 1; U9 Task 4 (residual risk 72 in Task 20); U10 Task 2; U11 Tasks 7, 9, 10, 12; U13 Tasks 4 and 5; U14 Task 12; U15 Task 1.
 
 **Earlier tests that pin what this spec changes**, each changed by name in the task that changes the behaviour: `/auth/me`'s members
 (`OrgEndpointTests.Me_returns_the_callers_current_data_from_the_database`, `OpenApiTests`' `MeResponse`, Task 2); the cookie test of
@@ -17032,8 +17032,8 @@ company_member text and keeps the notes`. That is 2 new and 1 rewritten.
   `with providers on, Auth-Core to Google and Microsoft (outbound HTTPS, the client secret)` is at line 40.
 - Items 2, 51, 52, 53, 55, 56, 57, 58 (lines 242, 293-300) are widened as the plan says; item 59 (line 301) is rewritten as the plan says.
 - The `Managing logins` table row `E | A session outlives...` gains one row: `| E | A renewed session lands in a company the person did not choose | The renewed session keeps the
-  company claims of the token that asked (`session_org_id`, `session_org_joined`) and the old start and window (`AccountPasswordTests`, `ProviderUnlinkTests`, ...)`: name the two tests the merge worker's fix commit
-  writes (they are in the "Merge worker" list below). A second row: `| D | Two settings calls and a switch race for one refresh cookie | Every settings call that renews waits for a switch in flight in
+  company claims of the token that asked (`session_org_id`, `session_org_joined`) and the old start and window (`AccountPasswordTests`, `ProviderUnlinkTests`, ...)`: name the test the merge worker's fix commit
+  wrote (it is in the "Merge worker" list below; one test covers the password change and the unlink). A second row: `| D | Two settings calls and a switch race for one refresh cookie | Every settings call that renews waits for a switch in flight in
   the sample; on the server the membership row is locked before the account row (the lock order) | |`.
 - "Managing logins" first paragraph gains: "Settings endpoints act in the company of the access token; a token without a company is `403 no_membership`."
 
@@ -17070,10 +17070,10 @@ The merge worker's commit A (before Task 14) changes done code: F1 lock order (`
 `MembershipReader.ReadInCompanyAsync`), F2 (`SessionRenewal.Issue` keeps `session_org_id` and `session_org_joined`), F4 (`IdentityLock` between the address lock and the account row in
 `AcceptThroughProviderAsync`), F12 (`confirmInside` after `guard.EnterAsync`, before the name check, in main's `CompanyDeletionService.DeleteAsync`, with main's keepers kept; description sentence).
 The tests of tasks 15 and 19 that see F2 are named above. The tests the worker adds in commit A (names for the threat model row in Task 20):
-`AccountPasswordTests.The_renewed_session_stays_in_the_company_the_caller_is_in` and `ProviderUnlinkTests.The_renewed_session_stays_in_the_company_the_caller_is_in`
-(both: the account has a personal space and a company, the caller's token is for the company, the new tokens carry the company's `org_id` and the same start and window).
+`AccountPasswordTests.A_password_change_and_an_unlink_renew_the_session_in_the_company_it_was_switched_to`
+(one test for both endpoints: the account has a personal space and a company, the caller's token is for the company, the new tokens carry the company's `org_id` and the same start and window).
 F3 is decided (owner): commit A also adds the lock to `ProviderConnectEndpoint.ConnectAsync` (the membership row, then the account row, in the lock order) and its race test
-`ProviderConnectTests.A_connect_asked_while_the_account_is_being_deleted_answers_a_clean_4xx` (two connections, the account deletion held before commit; the connect answers a 4xx, never a 500). Task 14 does not touch it.
+`ProviderConnectTests.A_connect_for_an_account_whose_deletion_holds_its_rows_is_refused_cleanly_and_never_a_500` (two connections, the account deletion held before commit; the connect answers a 4xx, never a 500). Task 14 does not touch it.
 Commit A also changes the done test of Task 3 that pins the options JSON without `org_creation` (plan line 2327): its expected string gains `"org_creation":"self-service"` where the stack's manifest turns it on (read the test first; stop if the
 test's factory does not set the manifest key).
 

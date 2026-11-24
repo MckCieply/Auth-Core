@@ -249,7 +249,7 @@ The kinds are: `login.succeeded`, `login.failed` (reason: `wrong_password`, `unk
 `account.delete_refused` (reason: `wrong_password`, `locked`, `reauth_failed`: a provider confirmation that did not hold), `rate_limit.hit` (at most one per address and policy per minute), `signup.requested`
 (an accepted request: the address as typed), `signup.completed` (the account, the company or, for a private person, the personal space, and the address),
 `provider.linked` (an existing account connected a Google or Microsoft identity with its password; `details.provider`) and `provider.reauthenticated` (a private
-account without a password confirmed its deletion with the provider; `details.provider`, written with `account.deleted`), and `org.switched` (a switch moved a session to another space; `details.from_org_id`). That makes 29 kinds.
+account without a password confirmed its deletion with the provider; `details.provider`, written with `account.deleted`), and `org.switched` (a switch moved a session to another space; `details.from_org_id`), `account.confirmed` (a confirmation opened the window of a session; `details.method`: `password` or the provider's name), `account.confirm_refused` (a confirmation or a password change refused; `details.reason`: `wrong_password`, `locked`, `reauth_failed`; `details.action`: `confirm`, `password`), `provider.unlinked` (a login was disconnected; `details.provider`) and `password.changed` (the password was changed on the settings screen). That makes 33 kinds.
 
 The address typed into a failed or locked login is kept as typed, and a person may have pasted a password into that field: treat the
 audit log, and a dump that holds it, as private.

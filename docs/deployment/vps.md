@@ -86,9 +86,9 @@ The two SMTP credentials must both be **present** in `.env`: compose refuses to 
 authentication.
 
 **Optional.** `AUTH_FRONTEND_SIGNUP_URL` is the https address of the screen of your frontend that finishes a self-service sign-up. Leave it blank and sign-up
-stays off (the default; nothing changes for you). See "Self-service sign-up" in step 7. The six provider variables (`AUTH_FRONTEND_PROVIDER_URL`,
-`AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES`)
-stay blank unless you turn on sign-in with Google and Microsoft: see "Sign-in with Google and Microsoft" in step 7.
+stays off (the default; nothing changes for you). See "Self-service sign-up" in step 7. The eight provider variables (`AUTH_FRONTEND_PROVIDER_URL`,
+`AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES`, `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET`)
+stay blank unless you turn on sign-in with a provider: see "Sign-in with Google, Microsoft and GitHub" in step 7. (spec 0012 adds the two GitHub variables.)
 
 `AUTH_MEM_LIMIT` is the memory ceiling of the `auth` container (`512m` when blank; Docker's units, `1g`). The .NET garbage collector reads the ceiling and keeps its heap under 75% of it, so no other setting is needed; the ceiling covers swap too (the file sets `memswap_limit` to the same value), and a container that goes over is killed (exit code 137) and restarted by Docker (`docker events --filter event=oom`, or the kernel log, shows the kill). Keep some room above what the service needs: the health check starts a second, short .NET process inside the same ceiling. Raise it if the kills happen. To change the 75% share, add `DOTNET_GCHeapHardLimitPercent` to the `environment:` of the `auth` service; it is an optional knob and the file does not set it. Its value is read as **hexadecimal**: `32` means 50%, `4B` means 75%.
 
@@ -252,12 +252,12 @@ typed in the body: it is limited to one mail a minute and five an hour per addre
 risk that remains is in [`threat-model.md`](../security/threat-model.md). Keep the access logs of `/reset`, `/verify`, `/invite` and `/complete-signup` off, or scrub `token=` from them: their
 query holds a token.
 
-### Sign-in with Google and Microsoft (optional)
+### Sign-in with Google, Microsoft and GitHub (optional)
 
-Off unless you turn it on (spec 0011). It needs your manifest to list the providers (`providers: [google, microsoft]`), the https address of
+Off unless you turn it on (spec 0011). It needs your manifest to list the providers (`providers: [google, microsoft, github]`), the https address of
 your frontend's return screen in `AUTH_FRONTEND_PROVIDER_URL` (`https://app.example.com/provider-return`; the sample's is `/provider-return`),
 and each provider's two keys in `.env`. [`provider-keys.md`](provider-keys.md) gets the keys step by step. At each provider you register the
-**callback address**: the origin of `AUTH_FRONTEND_PROVIDER_URL` followed by `/auth/providers/google/callback` (or `/microsoft/callback`),
+**callback address**: the origin of `AUTH_FRONTEND_PROVIDER_URL` followed by `/auth/providers/google/callback` (or `/microsoft/callback`, `/github/callback`: GitHub's "Authorization callback URL"),
 for example `https://app.example.com/auth/providers/google/callback`; Auth-Core builds it from that setting only. Set
 `AUTH_MICROSOFT_CLIENT_SECRET_EXPIRES` to the Microsoft secret's lapse date, and keep [`microsoft-secret.md`](../operations/microsoft-secret.md)
 at hand for the rotation. After changing `.env` run `$C up -d`; after changing the manifest `$C restart auth`. A listed provider without its
@@ -324,7 +324,7 @@ something is wrong". Then sign in through your frontend and call one product end
 | `/auth/health` says `Degraded` (still status 200), or a new company has the built-in roles instead of your product's | The manifest file was not used: `$C logs auth \| grep "was not used"` names the path and the reason (missing, not readable by uid `1654`, too large, not valid). Fix the file (`sudo chmod 0644 /etc/auth-core/auth.yaml` for the permission), then `$C restart auth` |
 | `/auth/health` says `Degraded` after you turned sign-up on | The manifest says `signup: self-service` but `AUTH_FRONTEND_SIGNUP_URL` is empty: `$C logs auth \| grep "sign-up is off"`. Set the address in `.env` and `$C up -d` |
 | `/auth/health` says `Degraded` after you listed providers | A listed provider is missing a key or `AUTH_FRONTEND_PROVIDER_URL`: `$C logs auth \| grep -i provider` names the settings; or the Microsoft secret lapses within 30 days ([`microsoft-secret.md`](../operations/microsoft-secret.md)) |
-| A Microsoft or Google sign-in comes back with `#error=provider_error` | A wrong client secret, or the Microsoft secret lapsed: `$C logs auth \| grep callback` shows `provider_error` with the OAuth error `invalid_client`; see the table of [`provider-keys.md`](provider-keys.md) |
+| A Microsoft, Google or GitHub sign-in comes back with `#error=provider_error` | A wrong client secret, or the Microsoft secret lapsed: `$C logs auth \| grep callback` shows `provider_error` with the OAuth error `invalid_client`; see the table of [`provider-keys.md`](provider-keys.md) |
 | The `auth` container is killed now and then (exit code 137) | It probably went over its memory ceiling (`docker events --filter event=oom` shows it): raise `AUTH_MEM_LIMIT` in `.env` and `$C up -d` |
 | `docker compose ps` shows the `auth` container `unhealthy` | The process does not answer on its port: `$C logs auth`, and run the probe by hand with `$C exec auth dotnet Auth.Server.dll --health-probe; echo $?` (0 is healthy; the reason is on stderr) |
 | `docker compose` says "required variable ... is missing" | A variable of `.env` has no default on purpose |

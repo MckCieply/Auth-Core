@@ -1,7 +1,7 @@
-# Getting the keys for Google and Microsoft
+# Getting the keys for Google, Microsoft and GitHub
 
-Auth-Core signs people in with Google and Microsoft when three things are in place: your manifest lists the providers
-(`providers: [google, microsoft]`, see [`deploy/auth.yaml`](../../deploy/auth.yaml)), the return address of your frontend is set
+Auth-Core signs people in with Google, Microsoft and GitHub when three things are in place: your manifest lists the providers
+(`providers: [google, microsoft, github]`, see [`deploy/auth.yaml`](../../deploy/auth.yaml)), the return address of your frontend is set
 (`AUTH_FRONTEND_PROVIDER_URL`), and each provider's two keys are in `.env`. This guide gets the keys. The values go into the `.env` of
 [`vps.md`](vps.md) (the lines are in [`deploy/.env.prod.example`](../../deploy/.env.prod.example)); a secret never goes into the manifest, a
 compose file or the repository.
@@ -15,13 +15,14 @@ C="docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml --env-file
 
 ## The addresses you register
 
-Both providers send the browser back to Auth-Core, never to your frontend. The address is the **origin** of your return address followed by
+Every provider sends the browser back to Auth-Core, never to your frontend. The address is the **origin** of your return address followed by
 `/auth/providers/{name}/callback`. With `AUTH_FRONTEND_PROVIDER_URL=https://app.example.com/provider-return`:
 
 | Provider | Redirect URI to register |
 | --- | --- |
 | Google | `https://app.example.com/auth/providers/google/callback` |
 | Microsoft | `https://app.example.com/auth/providers/microsoft/callback` |
+| GitHub | `https://app.example.com/auth/providers/github/callback` (GitHub calls it the "Authorization callback URL") |
 
 Auth-Core builds the address from that setting only, never from the request, so it must match what you register character for character
 (scheme, host, port, path; no trailing slash). Your reverse proxy must send `/auth` to Auth-Core on that origin, as for every other path of
@@ -45,7 +46,7 @@ In the [Google Cloud Console](https://console.cloud.google.com/):
 
 ### Check it with the sample
 
-The repository's notes sample (`samples/notes-web` in front of `samples/notes-api`, at `https://localhost:8443`) lists Google and Microsoft in
+The repository's notes sample (`samples/notes-web` in front of `samples/notes-api`, at `https://localhost:8443`) lists Google, Microsoft and GitHub in
 its manifest (`samples/notes-api/auth.yaml`). To try your Google client with it before you deploy:
 
 1. In the client of step 3, add the sample's redirect URI `https://localhost:8443/auth/providers/google/callback` beside your own (Google
@@ -62,6 +63,8 @@ its manifest (`samples/notes-api/auth.yaml`). To try your Google client with it 
          Auth__Providers__Google__ClientSecret: ${AUTH_GOOGLE_CLIENT_SECRET:-}
          Auth__Providers__Microsoft__ClientId: ${AUTH_MICROSOFT_CLIENT_ID:-}
          Auth__Providers__Microsoft__ClientSecret: ${AUTH_MICROSOFT_CLIENT_SECRET:-}
+         Auth__Providers__GitHub__ClientId: ${AUTH_GITHUB_CLIENT_ID:-}
+         Auth__Providers__GitHub__ClientSecret: ${AUTH_GITHUB_CLIENT_SECRET:-}
    ```
 
 3. Start the sample's stack with that overlay and **without** the fake provider's overlay (`tests/Auth.FakeOidc/compose.yml`, which would
@@ -72,7 +75,7 @@ its manifest (`samples/notes-api/auth.yaml`). To try your Google client with it 
      -f ~/auth-core-keys.yml --env-file .env up -d --build
    ```
 
-   With Google's keys only, Microsoft is not offered and `/auth/health` says `Degraded`: that is expected.
+   With Google's keys only, Microsoft and GitHub are not offered and `/auth/health` says `Degraded`: that is expected.
 4. Open `https://localhost:8443/login` (accept the certificate warning), press "Continue with Google" and sign in at Google: a new address
    reaches the screen that finishes the account (`/provider-finish`), an address of an existing password account the link screen
    (`/provider-link`). Anything else is in "When a value is wrong" below.
@@ -107,13 +110,40 @@ In the [Microsoft Entra admin center](https://entra.microsoft.com/), "App regist
    step 4; without it `/provider-link` says that the address is not verified and links to the sign-up screen, which is the safe answer for
    an unverified address.
 
+## GitHub
+
+On GitHub, signed in as the account or organization that will own the app: **Settings**, **Developer settings**, **OAuth Apps**, **New OAuth
+App** (an organization's apps are under the organization's settings, "Developer settings", "OAuth Apps"):
+
+1. **The app.** The "Application name" the person will see; the "Homepage URL", your product's address (`https://app.example.com`); the
+   "Authorization callback URL", the GitHub address of the table above. Leave "Enable Device Flow" off. Register.
+2. **The client id.** The "Client ID" of the app's page goes into `AUTH_GITHUB_CLIENT_ID`.
+3. **The secret.** "Generate a new client secret", and copy it into `AUTH_GITHUB_CLIENT_SECRET` at once: GitHub shows it only now. A GitHub
+   OAuth App secret does not lapse.
+4. **Nothing else.** GitHub has no consent screen to set up and no scopes to register: Auth-Core asks for `user:email` at each sign-in, which
+   lets it read the person's addresses, and GitHub shows that on its authorization page. Auth-Core uses the person's **primary** address only,
+   and only when GitHub has verified it; after reading it Auth-Core revokes the token at once, so the app holds no access to the account.
+
+A GitHub sign-in cannot be asked for a fresh password: a confirmation with GitHub ("Confirm with GitHub") is usually one click, or none (the
+threat model's risk 57).
+
+### Check it with the sample
+
+1. Register a second OAuth App for the check (GitHub allows one callback address per OAuth App) with the "Homepage URL"
+   `https://localhost:8443` and the "Authorization callback URL" `https://localhost:8443/auth/providers/github/callback`. Delete it once the
+   check is done.
+2. Put its `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET` into the repository's `.env`; the overlay of Google's check passes them.
+3. Start the stack as in Google's check, open `https://localhost:8443/login`, press "Continue with GitHub" and authorize the app at GitHub: a
+   GitHub account whose primary address is verified and new to the sample reaches `/provider-finish`; one whose primary address is not
+   verified reaches `/provider-link` with the sentence about an unverified address.
+
 ## Turn it on and check it
 
-1. Set the values in `.env` and `providers: [google, microsoft]` in your manifest (list only the ones you configured), then
+1. Set the values in `.env` and `providers: [google, microsoft, github]` in your manifest (list only the ones you configured), then
    `$C up -d` (a restart does not read `.env` again).
 2. `curl -s https://app.example.com/auth/options` lists the providers, in the order of the manifest; `curl -s https://app.example.com/auth/health`
    says `Healthy`.
-3. On your product's sign-in screen, "Continue with Google" (and "with Microsoft") goes to the provider and back, and a new person reaches the
+3. On your product's sign-in screen, "Continue with Google" (and "with Microsoft", "with GitHub") goes to the provider and back, and a new person reaches the
    screen that finishes the account (the sample's `/provider-finish`).
 
 ## When a value is wrong
@@ -127,3 +157,7 @@ In the [Microsoft Entra admin center](https://entra.microsoft.com/), "App regist
 | The person comes back to your screen with `#error=provider_error`, and `$C logs auth` names `invalid_client` (the line `The google callback ended in provider_error (the client recorded the OAuth error invalid_client).`, or `microsoft`) | The client secret is wrong, or the Microsoft secret has lapsed ([`microsoft-secret.md`](../operations/microsoft-secret.md)) |
 | The person comes back with `#error=invalid_state` | The round trip took longer than 10 minutes, was started in another browser, or the browser did not send the request-forgery cookie back (a browser that blocks cookies for the product's origin); the person starts again |
 | Microsoft sign-ins of work accounts always lead to the link screen with the sentence about an unverified address | The optional claim `xms_edov` is missing (step 4 of Microsoft) |
+| GitHub shows "The redirect_uri is not associated with this application" | The "Authorization callback URL" of the OAuth App differs from the one Auth-Core sends: compare it with the table above |
+| A GitHub sign-in comes back with `#error=provider_error`, and `$C logs auth` names `incorrect_client_credentials` or `bad_verification_code` | The GitHub client secret is wrong (or was regenerated), or the code was used already: check `AUTH_GITHUB_CLIENT_SECRET` |
+| A GitHub sign-in always reaches the link screen with the sentence about an unverified address | The account's primary address is not verified at GitHub (GitHub, Settings, Emails), or the account keeps its address private and has a verified secondary one: only the primary address counts |
+| `$C logs auth` warns that the GitHub token could not be revoked | GitHub did not answer the revocation with `204`: the token stays valid at GitHub, unused and not stored, until the person revokes the app (risk 72); check the client secret |

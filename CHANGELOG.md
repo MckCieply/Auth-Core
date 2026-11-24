@@ -3,6 +3,41 @@
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
 (`v0.3.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
+## Unreleased
+
+GitHub, and managing one's own logins ([spec 0012](docs/superpowers/specs/0012-github-and-managing-logins.md)): "Continue with GitHub", and a
+settings screen to connect and disconnect providers and change the password. An instance that does not list GitHub sees no change in sign-in;
+`GET /auth/me` gains `confirmed_until`, the link refuses a second login of one provider, and the link queues a mail.
+
+### Added
+
+- **GitHub sign-in** (spec 0012): the provider name `github`, `AUTH_GITHUB_CLIENT_ID`/`AUTH_GITHUB_CLIENT_SECRET`, the round trip through
+  OpenIddict's GitHub provider, `GET /user` and `/user/emails` read and the token revoked at once.
+- **The confirmation window** (spec 0012): five minutes after a sign-in or `POST /auth/account/confirm`, bound to the session of the device;
+  `GET /auth/me` `confirmed_until`.
+- **`POST /auth/account/confirm`, `POST /auth/providers/connect`, `POST /auth/account/logins/unlink`, `POST /auth/account/password`**, and the
+  `connect` purpose of `GET /auth/providers/{name}/start`.
+- **Three notice mails** (provider connected, provider disconnected, password changed), Polish and English, no link, 10 an hour per address.
+- **Four audit kinds** (33 in all): `account.confirmed`, `account.confirm_refused`, `provider.unlinked`, `password.changed`; `provider.linked`
+  and `login.succeeded` gain `details.via`.
+- **`DELETE /auth/org` with a provider ticket** for an admin without a password.
+- **The sample**: GitHub buttons, `/settings`, "Delete company" on `/team`, notes-api `DELETE /api/org`; `scripts/e2e-settings.sh`. "Delete
+  account" moves to `/settings`; the notes screen has no account section.
+- A Development-only endpoint, `POST /auth/testing/end-confirmation` (`Auth:Testing:WindowEndpoint`), for browser tests.
+
+### Changed
+
+- **The link** (`POST /auth/providers/link`) answers `409 provider_in_use` for an account that already has a login of the ticket's provider,
+  and queues the mail "provider connected" (spec 0012).
+- **A provider sign-in holds its login** against an unlink in the same moment (spec 0012).
+- **`DELETE /auth/org` with a provider ticket** deletes only the accounts that have no other space (spec 0015 rule), as the password path does.
+
+### Upgrading
+
+- Spec 0012: one migration adds the table `SessionStates` and the column `MailRequests.Provider`. Sessions from before the upgrade keep working;
+  their confirmation window is closed until the person confirms. An account that the link of spec 0011 gave two logins of one provider keeps
+  both; `GET /auth/me` lists the provider once, and a disconnect removes both.
+
 ## 0.3.0 - 2026-11-23
 
 Several companies per account ([spec 0015](docs/superpowers/specs/0015-multiple-companies.md), the first of three slices with 0016 and 0017): one

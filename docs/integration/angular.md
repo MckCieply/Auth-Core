@@ -268,8 +268,9 @@ opt in sees no change.
 - **Deleting an account that is still in a company.** `DELETE /auth/account` answers `403 company_member` to an account that holds its
   personal space and a company, whichever space the token names: no company is deleted with an account and none loses its admin. Tell the
   person to delete their companies (`DELETE /auth/org`, which an admin does with the company's token) or to ask their admins to remove them, then to
-  delete the account. The sample reads `GET /auth/orgs` before it deletes the notes and, when a company is listed, shows "You are still a member
-  of {names}. Delete those companies or ask their admins to remove you, then delete your account." without deleting anything; the server's
+  delete the account. The sample's section is on `/settings` (spec 0012), not on the notes screen; it reads `GET /auth/orgs` and, when a company is
+  listed, shows "You are still a member of {names}. Delete those companies or ask their admins to remove you, then delete your account." and no
+  button, so nothing is deleted; the server's
   `403 company_member` stays the guard for a company created in another tab in between (then the notes are already gone, as after a wrong
   password).
 
@@ -305,9 +306,9 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
   address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
   rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.
 
-## Google and Microsoft (spec 0011)
+## Google, Microsoft and GitHub (specs 0011 and 0012)
 
-When `GET /auth/options` lists `providers` (`["google","microsoft"]`, in the manifest's order), draw one button per name, first on the
+When `GET /auth/options` lists `providers` (`["google","microsoft","github"]`, in the manifest's order), draw one button per name, first on the
 sign-in, sign-up and invitation screens, then "or" and the form. **A button is a link, not a call**: `<a href="/auth/providers/google/start">`
 (on `/invite` with `?invite=<the token>`). The browser leaves for the provider and comes back
 to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src/app/pages/provider-buttons.ts)).
@@ -321,8 +322,9 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
   `sessionStorage`. The router keeps that state in the browser's history entry of the next screen, so a screen that has spent the ticket, or
   no longer needs it, replaces its entry without the state (the sample's notes screen does for a `reauth` ticket). The sample keeps one
   thing in `sessionStorage`: the name of the provider the person chose (the fragment does not carry it), for the sentence of the link
-  screen; and, only after "Confirm with {provider}" in the delete section, a one-shot flag (`notes-web.reauth`, the time it was set) that the
-  return screen reads and clears: it hands a `reauth` ticket to the notes screen only when the flag is there and not older than 10 minutes (the life of
+  screen; and, only after a button that starts a round trip whose ticket comes back to the app ("Confirm with {provider}", "Connect"), a one-shot
+  flag (`notes-web.reauth`, `<target>:<the time it was set>`, the target being `delete_account`, `delete_company`, `confirm` or `connect`) that the
+  return screen reads and clears: it hands a ticket on only when a flag of the fitting target is there and not older than 10 minutes (the life of
   the state of the round trip), and otherwise goes to the sign-in screen and sends nothing, so that a forged link `#ticket=...&purpose=reauth`
   cannot open the delete section, also after a confirmation that was abandoned. Never the ticket, the address or the kinds.
 - **The exchange.** `POST /auth/providers/exchange` `{"ticket"}` answers as a login does (the token and the refresh cookie), or
@@ -344,12 +346,46 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
   above); back with the ticket (purpose `reauth`) and that memory, delete your data
   and then call `DELETE /auth/account` with `{"provider_ticket"}` (the ticket is good for 5 minutes and once). `reauth_failed` means
   confirm again; `password_required` and `reauth_required` mean the account changed: ask `GET /auth/me` again and redraw
-  ([`pages/notes.ts`](../../samples/notes-web/src/app/pages/notes.ts)).
+  ([`pages/delete-account.ts`](../../samples/notes-web/src/app/pages/delete-account.ts); since spec 0012 the section is on `/settings`). A
+  private-only account deletes as before; an account that is in any company shows "You are still a member of ..." and no button (the
+  `403 company_member` of spec 0016 stays the last guard).
 - A person who signed up with a provider has no password; "Forgot your password?" sets one.
-- **Deleting a company needs a password too.** `DELETE /auth/org` keeps the password confirmation. An admin whose account has no password (an
-  organization made through a provider, or an invitation accepted through one) gets `403 reauth_required` for any password; nothing is counted
-  and nothing is deleted. Tell such an admin to set a password with "Forgot your password?" first, and then delete the company (spec 0011,
-  Amendment A9). A provider confirmation for deleting a company is left to a later spec.
+- **Deleting a company** (spec 0012). `DELETE /auth/org` takes `{"name","password"}` or, for an admin without a password,
+  `{"name","provider_ticket"}` with a `reauth` ticket (the round trip armed for the team screen). The sample compares the typed name with
+  `org_name` of `GET /auth/me` first, confirms the password with `POST /auth/account/confirm` before any data goes, then deletes its own data
+  (`DELETE /api/org` of notes-api) and only after its `204` calls `DELETE /auth/org`, then signs out
+  ([`pages/delete-company.ts`](../../samples/notes-web/src/app/pages/delete-company.ts)). **Warning (risk 51):** a product's own deletion of a
+  company's data must be limited to holders of `org:delete` and should confirm the person first; an admin without a password, or a ticket
+  that expires between your deletion and Auth-Core's, still leaves a company with no data.
+
+## The settings screen (spec 0012)
+
+The sample's `/settings` ([`pages/settings.ts`](../../samples/notes-web/src/app/pages/settings.ts)) shows the person's sign-in methods (the
+password, and one row per provider: "Connected" with "Disconnect", or "Connect"), the password ("Change password", or "Set a password" with
+"Send me a link", which calls `POST /auth/password/forgot` with the account's address) and "Delete account".
+
+- **The four endpoints** need the access token **and** the refresh cookie: `POST /auth/account/confirm` (`{"password"}` or
+  `{"provider_ticket"}`), `POST /auth/providers/connect` (`{"ticket"}` of a round trip with `purpose=connect`), `POST
+  /auth/account/logins/unlink` (`{"provider"}`) and `POST /auth/account/password` (`{"current_password","new_password"}`). Add the four
+  paths to the interceptor's exact token paths (step 3). The refresh cookie goes along by itself (`Path=/auth`).
+- **The window.** `GET /auth/me` says `confirmed_until`: the end of the 5-minute confirmation window of this device's session, or `null`.
+  Before a connect or a disconnect, read it; when it is `null` or past, open "Confirm it's you" ([`pages/confirm-dialog.ts`](../../samples/notes-web/src/app/pages/confirm-dialog.ts)):
+  the password, or one "Confirm with {Provider}" per linked offered provider (the round trip comes back to `/settings` with the window open,
+  and the person clicks again), or, with neither, "Set a password first" and "Send me a link". A `403 confirmation_required` (the window
+  closed meanwhile) opens the dialog too; a connect ticket refused that way is sent again after a password confirmation.
+- **The renewed session.** The unlink and the password change answer as a login answers: store the new access token (the refresh cookie is
+  already the new one). While one of them is in flight, send no other request with the refresh cookie (no refresh, no other settings call):
+  the sample's interceptor holds every request to `/auth/` until it settles ([`auth/auth.interceptor.ts`](../../samples/notes-web/src/app/auth/auth.interceptor.ts)).
+- **The company.** A settings endpoint acts in the company of the access token's `org_id`; after an unlink or a password change the new
+  token is in the same company, with the same window. A client must not call a settings endpoint while a switch is on its way (they share the
+  refresh cookie): the sample's `AuthService` waits.
+- **`401 session_required`** means the session of this device is over: sign the person out to the sign-in screen ("Your session ended. Sign
+  in again.") and do not refresh.
+- **The answers**, one sentence each: `409 last_login`, `409 provider_in_use`, `409 provider_already_linked`, `403 address_mismatch`,
+  `403 email_not_verified`, `403 no_email`, `400 invalid_ticket`, `403 reauth_failed`, `403 wrong_password`, `429` with the wait, `400
+  weak_password` with the rules; `403 password_not_set` redraws from a fresh `GET /auth/me`. The link screen gains `409 provider_in_use`.
+- **The return screen** handles `purpose=connect` (it sends the connect and opens `/settings` with the sentence) and a `reauth` return for the
+  settings screen (it sends the confirmation and opens `/settings`), each only with the flag of its target.
 
 ## The limits and an outage (spec 0008)
 
