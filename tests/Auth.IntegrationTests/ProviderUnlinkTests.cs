@@ -503,7 +503,7 @@ public sealed class ProviderUnlinkTests : ProviderTestBase
         await DispatchAsync();
         var token = TokenIn(Mail.Sent.Last(m => m.To == Ola));
         Task<HttpResponseMessage>? reset = null;
-        _race.Skip = 1;   // the first share lock on the account's row is the unlink's early one, right after the address lock; this is its second read, at the commit
+        _race.Skip = 2;   // the first row lock is the unlink's membership row, the second the account's row right after it; this is its third, the read of the account's row at the commit
         _race.Before = async () =>
         {
             // The unlink holds the account's row for share since the address lock and has deleted the login and revoked the sessions: the reset
