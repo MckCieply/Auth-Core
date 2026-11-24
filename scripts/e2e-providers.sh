@@ -8,10 +8,12 @@
 # the development company invites; SEED = the development admin). Each step names the criteria it touches; the guarding tests are in
 # docs/superpowers/plans/0011-acceptance-map.md.
 #   1. health is Healthy; the fake answers; GET /auth/options -> {"signup":"self-service","private_signup":"self-service",
-#      "providers":["google","microsoft"],"org_creation":"self-service"}; the OpenAPI description names the five provider paths - criteria 2, 29.
+#      "providers":["google","microsoft","github"],"org_creation":"self-service"} (spec 0012); the OpenAPI description names the six
+#      provider paths (spec 0012 adds the connect) - criteria 2, 29.
 #   2. the start: an unknown name -> 404 not_found; another purpose -> 400 invalid_request; Google and Microsoft -> 302 to the fake with the
-#      client id, the callback address on this origin, the code flow, the scopes, S256, a state, a nonce and prompt=select_account; the
-#      request-forgery cookie is HttpOnly, Secure, SameSite=Lax, Path=/auth/providers - criteria 5, 6.
+#      client id, the callback address on this origin, the code flow, the scopes, S256, a state, a nonce and prompt=select_account; GitHub ->
+#      302 with user:email, S256, a state and no nonce (spec 0012); the request-forgery cookie is HttpOnly, Secure, SameSite=Lax,
+#      Path=/auth/providers - criteria 5, 6.
 #   3. NEW's round trip with Google: the return address with a ticket and purpose sign_in; auth_pt HttpOnly, Secure, SameSite=Strict,
 #      Path=/auth, Max-Age=600; the exchange without auth_pt or with another browser's -> 400 invalid_ticket; with its own -> next
 #      finish_signup with both kinds - criteria 7, 12, 14.
@@ -377,17 +379,17 @@ START_TS="$(psql_value "SELECT now()")"
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"self-service"}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"],"org_creation":"self-service"}'
 expect_no_store "step 1: the options"
 call GET /auth/openapi/v1.json
 expect_status "step 1: the OpenAPI description" 200
-expect_eq "step 1: the five provider paths are described" \
+expect_eq "step 1: the six provider paths are described" \
   "$(val "sorted(p for p in d['paths'] if p.startswith('/auth/providers/'))")" \
-  "['/auth/providers/exchange', '/auth/providers/finish', '/auth/providers/link', '/auth/providers/{name}/callback', '/auth/providers/{name}/start']"
-pass "step 1: health is Healthy; the fake answers; GET /auth/options offers google and microsoft; the description names the five provider paths"
+  "['/auth/providers/connect', '/auth/providers/exchange', '/auth/providers/finish', '/auth/providers/link', '/auth/providers/{name}/callback', '/auth/providers/{name}/start']"
+pass "step 1: health is Healthy; the fake answers; GET /auth/options offers google, microsoft and github; the description names the six provider paths"
 
 # --- Step 2: the start (criteria 5, 6) --------------------------------------------------------------------------------------
-call GET /auth/providers/github/start
+call GET /auth/providers/gitlab/start
 expect_error "step 2: an unknown name" 404 not_found
 call GET "/auth/providers/google/start?purpose=other"
 expect_error "step 2: another purpose" 400 invalid_request
@@ -410,7 +412,19 @@ for provider in google microsoft; do
   expect_attrs "step 2: $provider: the request-forgery cookie" "$LINE" HttpOnly Secure SameSite=Lax Path=/auth/providers
   keep_secret "$(pair_of "$LINE" | cut -d= -f2-)"
 done
-pass "step 2: an unknown name -> 404, another purpose -> 400; each start -> 302 to the fake with the code flow, PKCE, a state, a nonce and the callback on this origin; the cookie is Lax"
+# Spec 0012: GitHub's start, through the fake's minimal discovery document under /github.
+call GET /auth/providers/github/start
+expect_status "step 2: the start of github" 302
+header location > "$tmp/start.url"
+[[ "$(cat "$tmp/start.url")" == "$FAKE_URL/github/authorize?"* ]] || fail "step 2: the start of github does not go to the fake"
+expect_eq "step 2: github: redirect_uri" "$(url_param "$tmp/start.url" query redirect_uri)" "$BASE_URL/auth/providers/github/callback"
+expect_eq "step 2: github: scope" "$(url_param "$tmp/start.url" query scope)" "user:email"
+expect_eq "step 2: github: code_challenge_method" "$(url_param "$tmp/start.url" query code_challenge_method)" "S256"
+expect_eq "step 2: github: prompt" "$(url_param "$tmp/start.url" query prompt)" "select_account"
+expect_eq "step 2: github: no nonce" "$(url_param "$tmp/start.url" query nonce)" ""
+for member in state code_challenge; do keep_secret "$(url_param "$tmp/start.url" query "$member")"; done
+keep_secret "$(pair_of "$(set_cookie_line 'OpenIddict\.Client\.State[^=]*')" | cut -d= -f2-)"
+pass "step 2: an unknown name -> 404, another purpose -> 400; each start -> 302 to the fake with the code flow, PKCE, a state and the callback on this origin (a nonce for OpenID Connect, user:email for GitHub); the cookie is Lax"
 
 # --- Step 3: NEW's round trip and the browser binding (criteria 7, 12, 14) ---------------------------------------------
 round_trip new google "" "person=custom&email=$(enc "$NEW_EMAIL")&verified=true"

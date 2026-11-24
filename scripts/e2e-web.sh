@@ -17,8 +17,9 @@
 # the completion finds an account) and prepares EXPIRED: it asks for a sign-up through the API, waits for the mail, and moves the end of the
 # link into the past with one UPDATE of "PendingSignups"."TokenExpiresAt" (the database, because the test cannot move the server's clock).
 # The tests of spec 0010 (e2e/10-private.spec.ts) make what they need themselves, through the API; nothing is seeded for them.
-# The stack includes the fake OpenID provider of spec 0011 (tests/Auth.FakeOidc/compose.yml, http://localhost:8099): the sample's manifest
-# lists Google and Microsoft, e2e/11-providers.spec.ts signs in through it, and Auth-Core trusts it as its test issuer.
+# The stack includes the fake provider of specs 0011 and 0012 (tests/Auth.FakeOidc/compose.yml, http://localhost:8099): the sample's manifest
+# lists Google, Microsoft and GitHub, e2e/11-providers.spec.ts and e2e/14-settings.spec.ts sign in through it (the second also uses the testing
+# endpoint, which the overlay turns on with Auth__Testing__WindowEndpoint), and Auth-Core trusts it as its test issuer.
 #
 # Full sequence, from the repo root:
 #   cp .env.example .env                  # then set real local values (git-ignored); NOTES_DB_PASSWORD and the unverified user too
