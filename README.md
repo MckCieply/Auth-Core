@@ -2,7 +2,9 @@
 
 A self-hosted authentication service in .NET: sign-in, companies, roles and token refresh, ready to put in front of any product.
 
-> **Version 0.4.0.** Image `ghcr.io/mckcieply/auth-core:0.4.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
+[![Latest release](https://img.shields.io/github/v/release/MckCieply/Auth-Core?sort=semver&filter=v*&label=release)](https://github.com/MckCieply/Auth-Core/releases/latest)
+
+> **Version 0.4.0.** Image `ghcr.io/mckcieply/auth-core:0.4.0` (public, `linux/amd64`). See the [releases](https://github.com/MckCieply/Auth-Core/releases) and the [changelog](CHANGELOG.md).
 
 ## What it is
 
