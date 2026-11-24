@@ -60,7 +60,7 @@ function isMember(value: unknown): value is Member {
                   >
                     {{ t.remove }}
                   </button>
-                  <button type="button" data-testid="remove-cancel" [disabled]="busy()" (click)="cancel(member)">{{ t.cancel }}</button>
+                  <button type="button" data-testid="remove-cancel" [disabled]="busy()" (click)="cancel(member)">{{ common.cancel }}</button>
                 } @else {
                   <button
                     type="button"

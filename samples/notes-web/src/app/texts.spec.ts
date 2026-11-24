@@ -37,9 +37,11 @@ describe('texts', () => {
     expect(s.wrongPassword).toBe('The password is wrong.');
     expect(s.notFound).toBe('This sign-in method is no longer connected.');
     expect(s.connectAgain('Google')).toBe('Confirmed. Connect Google again.');
+    expect(s.disconnectAgain('Google')).toBe('Confirmed. Disconnect Google again.');
     expect(s.confirmTitle).toBe("Confirm it's you");
     expect(s.confirm).toBe('Confirm');
-    expect(s.cancel).toBe('Cancel');
+    expect(texts.common.cancel).toBe('Cancel');
+    expect(texts.common.passwordRequired).toBe('Enter your password.');
     expect(s.noMethod).toBe('None of your sign-in methods can confirm here. Set a password first.');
   });
 

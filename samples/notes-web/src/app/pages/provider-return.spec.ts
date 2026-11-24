@@ -198,7 +198,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   });
 
   it('reauth after "Confirm with ...": the notes screen with the ticket in the navigation state, and no call', async () => {
-    armReauth();
+    armReauth('delete_account');
     const opened = await open(`ticket=${TICKET}&purpose=reauth`);
     opened.ctrl.expectNone('/auth/providers/exchange');
     expect(opened.router.url).toBe('/notes');
@@ -221,7 +221,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   });
 
   it('the flag is one-shot: the return that used it clears it, and a second reauth link in the same tab goes to /login', async () => {
-    armReauth();
+    armReauth('delete_account');
     const first = await open(`ticket=${TICKET}&purpose=reauth`);
     expect(first.router.url).toBe('/notes');
     expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
@@ -235,7 +235,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   it.each([`error=cancelled&purpose=reauth`, `ticket=${TICKET}&purpose=sign_in`])(
     'any return clears the flag, so that an abandoned confirmation cannot arm a later forged link (%s)',
     async (fragment) => {
-      armReauth();
+      armReauth('delete_account');
       const opened = await open(fragment);
       opened.ctrl.match('/auth/providers/exchange'); // the sign-in asks; its answer does not matter here
       expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
@@ -243,7 +243,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
   );
 
   it('storage that throws on read counts as no flag: /login, nothing handed on', async () => {
-    armReauth();
+    armReauth('delete_account');
     const failing = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied');
     });
@@ -261,7 +261,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(new Date('2026-05-02T12:10:00.001Z'));
       const opened = await open(`ticket=${TICKET}&purpose=reauth`);
       opened.ctrl.expectNone('/auth/providers/exchange');
@@ -277,7 +277,7 @@ describe('ProviderReturnPage (spec 0011)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-05-02T12:00:00Z'));
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(new Date('2026-05-02T12:09:59Z'));
       const opened = await open(`ticket=${TICKET}&purpose=reauth`);
       expect(opened.router.url).toBe('/notes');

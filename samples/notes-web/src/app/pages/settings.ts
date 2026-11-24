@@ -1,12 +1,40 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import { AccountApi, ProviderName } from '../account-api';
+import { Router, RouterLink } from '@angular/router';
+import { AccountApi, ProviderName, isProviderName, providerStartUrl } from '../account-api';
 import { AuthService, Failure } from '../auth/auth.service';
 import { texts } from '../texts';
+import { ConfirmDialog } from './confirm-dialog';
 import { acceptablePassword } from './password-input';
-import { providerTitle } from './provider-buttons';
+import {
+  ASSIGN_LOCATION,
+  armReauth,
+  providerTitle,
+  rememberPendingConnect,
+  rememberPendingDisconnect,
+  rememberProvider,
+  takePendingConnect,
+} from './provider-buttons';
 import { PasswordRules } from './password-rules';
+import { keepTicketOutOfHistory } from './ticket-history';
+
+/** What waits for the confirmation: a connect to start, a disconnect, or a connect ticket the return screen handed back. */
+type Pending =
+  | { kind: 'connect'; provider: ProviderName }
+  | { kind: 'disconnect'; provider: ProviderName }
+  | { kind: 'resend'; provider: ProviderName | null; ticket: string };
+
+/** What /provider-return handed on in the navigation state (spec 0012): a sentence, or a connect ticket refused for a closed window. */
+function handedOn(router: Router): { notice: string | null; pending: Pending | null } {
+  const state = router.currentNavigation()?.extras.state ?? {};
+  const notice: unknown = state['notice'];
+  const ticket: unknown = state['connectTicket'];
+  const provider: unknown = state['provider'];
+  return {
+    notice: typeof notice === 'string' ? notice : null,
+    pending: typeof ticket === 'string' && ticket !== '' ? { kind: 'resend', provider: isProviderName(provider) ? provider : null, ticket } : null,
+  };
+}
 
 /** One row of "Sign-in methods": a provider the app offers, or one the account still has a login of. */
 interface ProviderRow {
@@ -24,11 +52,20 @@ interface ProviderRow {
  */
 @Component({
   selector: 'app-settings',
-  imports: [ReactiveFormsModule, RouterLink, PasswordRules],
+  imports: [ReactiveFormsModule, RouterLink, PasswordRules, ConfirmDialog],
   template: `
     <main class="wide">
       <h1 tabindex="-1" data-testid="settings-title">{{ t.title }}</h1>
       @if (me(); as person) {
+        @if (notice(); as text) {
+          <p class="status" role="status" data-testid="settings-notice">{{ text }}</p>
+        }
+        @if (actionError(); as text) {
+          <p class="error" role="alert" data-testid="settings-error">{{ text }}</p>
+        }
+        @if (pending() !== null) {
+          <app-confirm-dialog [providers]="offered()" (confirmed)="confirmed()" (cancelled)="cancelPending()" (sendLink)="sendLink()" />
+        }
         <section data-testid="methods">
           <h2>{{ t.methods }}</h2>
           <ul class="plain">
@@ -40,14 +77,21 @@ interface ProviderRow {
                 {{ row.title }}
                 @if (row.connected) {
                   <span>{{ t.connected }}</span>
-                  <button type="button" [attr.data-testid]="'disconnect-' + row.name" [disabled]="!row.canDisconnect || busy()">
+                  <button
+                    type="button"
+                    [attr.data-testid]="'disconnect-' + row.name"
+                    [disabled]="!row.canDisconnect || locked()"
+                    (click)="disconnect(row.name)"
+                  >
                     {{ t.disconnect }}
                   </button>
                   @if (!row.canDisconnect) {
                     <p class="status" data-testid="disconnect-blocked">{{ t.disconnectBlocked }}</p>
                   }
                 } @else if (row.offered) {
-                  <button type="button" [attr.data-testid]="'connect-' + row.name" [disabled]="busy()">{{ t.connect }}</button>
+                  <button type="button" [attr.data-testid]="'connect-' + row.name" [disabled]="locked()" (click)="connect(row.name)">
+                    {{ t.connect }}
+                  </button>
                 }
               </li>
             }
@@ -92,6 +136,15 @@ export class SettingsPage implements OnInit {
   protected readonly common = texts.common;
   protected readonly auth = inject(AuthService);
   private readonly account = inject(AccountApi);
+  private readonly router = inject(Router);
+  private readonly assign = inject(ASSIGN_LOCATION);
+  private readonly fromReturn = handedOn(this.router);
+
+  /** A sentence of the last action, or the one the return screen handed on. */
+  protected readonly notice = signal<string | null>(this.fromReturn.notice);
+  protected readonly actionError = signal<string | null>(null);
+  /** Opens the dialog while it is set. */
+  protected readonly pending = signal<Pending | null>(this.fromReturn.pending);
 
   protected readonly me = this.auth.me;
   /** The providers GET /auth/options offers, in its order; empty until it answers, and when it fails. */
@@ -99,6 +152,8 @@ export class SettingsPage implements OnInit {
   /** A connect or a disconnect in flight (spec 0012: each button is disabled while its request is). */
   protected readonly busy = signal(false);
   protected readonly passwordBusy = signal(false);
+  /** The rows act on one thing at a time: not during a request, a password change or the open dialog. */
+  protected readonly locked = computed(() => this.busy() || this.passwordBusy() || this.pending() !== null);
   protected readonly linkBusy = signal(false);
   protected readonly linkSent = signal(false);
   protected readonly rules = signal<readonly string[]>([]);
@@ -127,6 +182,139 @@ export class SettingsPage implements OnInit {
     void this.account.options().then((options) => this.offered.set(options.providers));
     // Always read afresh: the window and the logins are what the screen acts on.
     void this.auth.loadMe();
+    if (this.fromReturn.pending !== null) {
+      // The ticket lives in this component's memory only: the history entry is replaced without it.
+      void keepTicketOutOfHistory(this.router);
+      if (this.fromReturn.pending.kind === 'resend' && this.fromReturn.pending.provider !== null) {
+        // A confirmation with a provider from this dialog leaves the page, and the ticket with it (one auth_pt): the screen it comes back to
+        // names the provider to connect again (spec 0012, "Confirmed. Connect {Provider} again.").
+        rememberPendingConnect(this.fromReturn.pending.provider);
+      }
+    }
+  }
+
+  /** The window of this device's session, as the last GET /auth/me said, is still open. */
+  private windowOpen(): boolean {
+    const until = this.me()?.confirmed_until;
+    return typeof until === 'string' && Date.parse(until) > Date.now();
+  }
+
+  protected async connect(name: ProviderName): Promise<void> {
+    if (this.locked()) {
+      return;
+    }
+    if (!(await this.readWindow())) {
+      rememberPendingConnect(name);
+      this.pending.set({ kind: 'connect', provider: name });
+      return;
+    }
+    this.startConnect(name);
+  }
+
+  /** A connect starts its round trip only with the window open (spec 0012). */
+  private startConnect(name: ProviderName): void {
+    rememberProvider(name);
+    armReauth('connect');
+    this.assign(providerStartUrl(name, { connect: true }));
+  }
+
+  protected async disconnect(name: ProviderName): Promise<void> {
+    if (this.locked()) {
+      return;
+    }
+    if (!(await this.readWindow())) {
+      rememberPendingDisconnect(name); // replaces a connect that was left open: the confirmation names this disconnect
+      this.pending.set({ kind: 'disconnect', provider: name });
+      return;
+    }
+    await this.unlink(name);
+  }
+
+  /** Reads the person again, with the buttons disabled meanwhile; true when the window is open. */
+  private async readWindow(): Promise<boolean> {
+    this.busy.set(true);
+    this.notice.set(null);
+    this.actionError.set(null);
+    await this.auth.loadMe();
+    this.busy.set(false);
+    return this.windowOpen();
+  }
+
+  private async unlink(name: ProviderName): Promise<void> {
+    this.busy.set(true);
+    const result = await this.auth.unlink(name);
+    this.busy.set(false);
+    if (result.ok) {
+      this.notice.set(this.t.disconnectedNow(providerTitle(name)));
+    } else if (result.failure.kind === 'confirmation_required') {
+      rememberPendingDisconnect(name);
+      this.pending.set({ kind: 'disconnect', provider: name });
+    } else {
+      await this.refusedAction(result.failure, name);
+    }
+  }
+
+  private async resend(ticket: string, provider: ProviderName | null): Promise<void> {
+    this.busy.set(true);
+    const result = await this.auth.connect(ticket);
+    this.busy.set(false);
+    if (result.ok) {
+      this.notice.set(this.t.connectedNow(providerTitle(provider)));
+    } else {
+      await this.refusedAction(result.failure, provider);
+    }
+  }
+
+  /** The dialog's password confirmation worked: what waited goes on at once. */
+  protected async confirmed(): Promise<void> {
+    const waiting = this.pending();
+    this.pending.set(null);
+    this.forgetPendingConnect(); // a password confirmation goes on here: no round trip comes back to name the connect
+    if (waiting === null) {
+      return;
+    }
+    if (waiting.kind === 'connect') {
+      this.startConnect(waiting.provider);
+    } else if (waiting.kind === 'disconnect') {
+      await this.unlink(waiting.provider);
+    } else {
+      await this.resend(waiting.ticket, waiting.provider);
+    }
+  }
+
+  protected cancelPending(): void {
+    this.pending.set(null);
+    this.forgetPendingConnect();
+  }
+
+  /** Whatever connect was waiting is over: it goes on here after a password, the person cancelled, or another action opened the dialog. */
+  private forgetPendingConnect(): void {
+    takePendingConnect();
+  }
+
+  /** The answers of a connect or a disconnect, one sentence each; the rows are read again, since they may have changed. */
+  private async refusedAction(failure: Failure, provider: ProviderName | null): Promise<void> {
+    const title = providerTitle(provider);
+    const sentences: Partial<Record<Failure['kind'], string>> = {
+      last_login: this.t.lastLogin,
+      not_found: this.t.notFound,
+      provider_in_use: this.t.providerInUse(title),
+      provider_already_linked: this.t.providerAlreadyLinked(title),
+      email_not_verified: this.t.emailNotVerified(title),
+      no_email: this.t.noEmail(title),
+      invalid_ticket: this.t.invalidTicket,
+      no_membership: texts.login.noMembership,
+      confirmation_required: this.t.reauthFailed,
+    };
+    if (failure.kind === 'session_required' || failure.kind === 'too_many_requests') {
+      return; // signed out by the interceptor, or the bar says when to try again
+    }
+    if (failure.kind === 'address_mismatch') {
+      this.actionError.set(this.t.addressMismatch(title, this.me()?.email ?? ''));
+    } else {
+      this.actionError.set(sentences[failure.kind] ?? this.common.somethingWrong);
+    }
+    await this.auth.loadMe();
   }
 
   protected async changePassword(): Promise<void> {

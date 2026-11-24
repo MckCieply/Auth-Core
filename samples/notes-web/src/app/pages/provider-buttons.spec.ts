@@ -3,7 +3,18 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { ProviderName } from '../account-api';
 import { has, spacedText } from '../../testing/helpers';
-import { ProviderButtons, armReauth, rememberProvider, rememberedProvider, takeReauth } from './provider-buttons';
+import {
+  ProviderButtons,
+  ReauthTarget,
+  armReauth,
+  rememberPendingConnect,
+  rememberPendingDisconnect,
+  rememberProvider,
+  rememberedProvider,
+  takePending,
+  takePendingConnect,
+  takeReauth,
+} from './provider-buttons';
 
 @Component({
   imports: [ProviderButtons],
@@ -12,6 +23,7 @@ import { ProviderButtons, armReauth, rememberProvider, rememberedProvider, takeR
     [action]="action()"
     [invite]="invite()"
     [reauth]="reauth()"
+    [target]="target()"
     [separator]="separator()"
   />`,
 })
@@ -20,6 +32,7 @@ class Host {
   readonly action = signal<'continue' | 'signup' | 'accept' | 'confirm'>('continue');
   readonly invite = signal<string | null>(null);
   readonly reauth = signal(false);
+  readonly target = signal<ReauthTarget>('delete_account');
   readonly separator = signal(true);
 }
 
@@ -91,7 +104,7 @@ describe('ProviderButtons (spec 0011)', () => {
     const plainLink = (plain.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-google"]')!;
     plainLink.addEventListener('click', (event) => event.preventDefault());
     plainLink.click();
-    expect(takeReauth()).toBe(false);
+    expect(takeReauth()).toBeNull();
     sessionStorage.clear();
 
     const confirm = draw((host) => {
@@ -104,11 +117,11 @@ describe('ProviderButtons (spec 0011)', () => {
     link.click();
     expect(Object.fromEntries(Object.entries(sessionStorage))).toEqual({
       'notes-web.provider': 'google',
-      'notes-web.reauth': String(Date.parse('2026-05-02T12:00:00Z')),
+      'notes-web.reauth': 'delete_account:' + String(Date.parse('2026-05-02T12:00:00Z')),
     });
     expect(localStorage.length).toBe(0);
-    expect(takeReauth()).toBe(true);
-    expect(takeReauth()).toBe(false);
+    expect(takeReauth()).toBe('delete_account');
+    expect(takeReauth()).toBeNull();
   });
 
   describe('the reauth flag lives 10 minutes', () => {
@@ -120,26 +133,88 @@ describe('ProviderButtons (spec 0011)', () => {
     });
 
     it('a fresh flag works, once', () => {
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(Date.now() + 9 * MINUTE + 59_000);
-      expect(takeReauth()).toBe(true);
-      expect(takeReauth()).toBe(false);
+      expect(takeReauth()).toBe('delete_account');
+      expect(takeReauth()).toBeNull();
     });
 
     it('a flag older than 10 minutes is no flag, and reading it clears it', () => {
-      armReauth();
+      armReauth('delete_account');
       vi.setSystemTime(Date.now() + 10 * MINUTE + 1);
-      expect(takeReauth()).toBe(false);
+      expect(takeReauth()).toBeNull();
       expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
     });
 
     it('a time ahead of this clock, a text and an old-style 1 are no flag', () => {
-      for (const value of [String(Date.now() + MINUTE), 'yes', '1', '', '12:00', '-5']) {
+      for (const value of [
+        `delete_account:${Date.now() + MINUTE}`,
+        String(Date.now()), // the shape of spec 0011: no target
+        `other:${Date.now()}`,
+        'confirm:',
+        'yes',
+        '1',
+        '',
+        '12:00',
+        '-5',
+      ]) {
         sessionStorage.setItem('notes-web.reauth', value);
-        expect(takeReauth(), value).toBe(false);
+        expect(takeReauth(), value).toBeNull();
         expect(sessionStorage.getItem('notes-web.reauth')).toBeNull();
       }
     });
+  });
+
+  it('a confirmation for the settings screen arms its target; each target is read back once (spec 0012)', () => {
+    for (const target of ['delete_account', 'delete_company', 'confirm', 'connect'] as const) {
+      armReauth(target);
+      expect(sessionStorage.getItem('notes-web.reauth')).toMatch(new RegExp(`^${target}:\\d+$`));
+      expect(takeReauth()).toBe(target);
+      expect(takeReauth()).toBeNull();
+    }
+  });
+
+  it('the target input of the buttons arms that target', () => {
+    const fixture = draw((host) => {
+      host.providers.set(['github']);
+      host.action.set('confirm');
+      host.reauth.set(true);
+      host.target.set('confirm');
+    });
+    const link = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('[data-testid="provider-github"]')!;
+    link.addEventListener('click', (event) => event.preventDefault());
+    link.click();
+    expect(takeReauth()).toBe('confirm');
+    expect(rememberedProvider()).toBe('github');
+  });
+
+  it('keeps the provider of a pending connect, the name and the time only, once, and for ten minutes', () => {
+    rememberPendingConnect('github');
+    expect(sessionStorage.getItem('notes-web.pending-connect')).toMatch(/^connect:github:\d+$/);
+    expect(takePendingConnect()).toBe('github');
+    expect(takePendingConnect()).toBeNull();
+    for (const value of [
+      `connect:gitlab:${Date.now()}`,
+      `connect:github`, // no time
+      'github:' + Date.now(), // the old shape: no kind
+      `fetch:github:${Date.now()}`,
+      `connect:github:${Date.now() + 60_000}`,
+      `connect:github:${Date.now() - 10 * 60_000 - 1000}`,
+      `disconnect:github:${Date.now() + 60_000}`,
+    ]) {
+      sessionStorage.setItem('notes-web.pending-connect', value);
+      expect(takePending(), value).toBeNull();
+    }
+  });
+
+  it('keeps the provider of a pending disconnect with its kind: read once, and not a connect', () => {
+    rememberPendingDisconnect('google');
+    expect(sessionStorage.getItem('notes-web.pending-connect')).toMatch(/^disconnect:google:\d+$/);
+    expect(takePending()).toEqual({ kind: 'disconnect', provider: 'google' });
+    expect(takePending()).toBeNull();
+    rememberPendingDisconnect('google');
+    expect(takePendingConnect()).toBeNull(); // a disconnect is not named as a connect, and the value is gone
+    expect(takePending()).toBeNull();
   });
 
   it('a confirmation survives storage that throws on write: the link is still followed, and nothing is armed', () => {
@@ -159,7 +234,7 @@ describe('ProviderButtons (spec 0011)', () => {
     expect(() => link.click()).not.toThrow();
     writing.mockRestore();
     expect(prevented).toBe(false);
-    expect(takeReauth()).toBe(false);
+    expect(takeReauth()).toBeNull();
   });
 
   it('keeps the name and nothing else: not the invitation token, not a ticket, and nothing in localStorage', () => {

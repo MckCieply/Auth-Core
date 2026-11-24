@@ -124,6 +124,9 @@ export class ProviderLinkPage implements OnInit {
         case 'no_email':
           this.error.set(this.returnTexts.noEmail);
           break;
+        case 'provider_in_use':
+          this.error.set(this.t.providerInUse(this.provider));
+          break;
         default:
           this.error.set(this.common.somethingWrong);
       }

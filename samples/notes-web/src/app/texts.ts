@@ -25,6 +25,8 @@ export const texts = {
     waitSeconds: (seconds: number): string => `Wait ${counted(seconds, 'second', 'seconds')} before asking again.`,
     signInLink: 'Sign in.',
     backToSignIn: 'Back to sign in',
+    cancel: 'Cancel',
+    passwordRequired: 'Enter your password.',
   },
 
   // The bar above every screen. The keys are the notices of AuthService.
@@ -165,6 +167,9 @@ export const texts = {
     createAccount: 'Create an account',
     submit: 'Connect and sign in',
     wrongPassword: "Wrong password. No password yet? Use 'Forgot your password?' to set one.",
+    // Spec 0012: one login per provider per account.
+    providerInUse: (provider: string): string =>
+      `This account already has a ${provider} account connected. Sign in with it or with your password.`,
   },
 
   providerFinish: {
@@ -182,14 +187,12 @@ export const texts = {
     deleteAccount: 'Delete account',
     deleteWarning: 'This deletes your account and all your notes. It cannot be undone.',
     deleteConfirm: 'Delete my account',
-    cancel: 'Cancel',
     // The notes are deleted first (spec 0010): a wrong password then leaves the account without them, and the screen says so.
     wrongPassword: 'The password is wrong, so your account was not deleted. Your notes are already gone.',
     // Said next to every refusal that comes after the notes were deleted.
     notesGone: 'Your notes are already gone.',
     // The account moved into a company while the person was deleting it (an invitation was accepted in another tab).
     movedToCompany: 'Your account now belongs to a company, so it cannot be deleted here.',
-    passwordRequired: 'Enter your password.',
     // Spec 0011: the provider confirmation of an account without a password did not hold (wrong account, too late, used).
     reauthFailed:
       'The confirmation did not work or took too long, so your account was not deleted. Your notes are already gone. Confirm again.',
@@ -256,10 +259,10 @@ export const texts = {
     wrongPassword: 'The password is wrong.',
     notFound: 'This sign-in method is no longer connected.',
     connectAgain: (provider: string): string => `Confirmed. Connect ${provider} again.`,
+    disconnectAgain: (provider: string): string => `Confirmed. Disconnect ${provider} again.`,
     // The confirmation dialog.
     confirmTitle: "Confirm it's you",
     confirm: 'Confirm',
-    cancel: 'Cancel',
     noMethod: 'None of your sign-in methods can confirm here. Set a password first.',
   },
 
@@ -268,7 +271,6 @@ export const texts = {
     loading: 'Loading...',
     back: 'Back to the notes',
     remove: 'Remove',
-    cancel: 'Cancel',
     // Spec 0015: removing a member deletes the account only when this company was its last space. A product's own team screen says the same.
     removeConfirm: 'This person loses access to this company. Their account is deleted if this company is their last.',
     permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',

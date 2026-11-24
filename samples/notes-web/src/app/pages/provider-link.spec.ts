@@ -213,6 +213,17 @@ describe('ProviderLinkPage (spec 0011)', () => {
     expect(pageText(opened.harness.fixture)).toContain('Too many attempts. Try again in 1 minute.');
   });
 
+  it('409 provider_in_use: the account already has a login of this provider (spec 0012)', async () => {
+    const opened = await open({ ...verified, provider: 'github' });
+    await link(opened, 'Another-Passw0rd');
+    opened.ctrl.expectOne('/auth/providers/link').flush({ error: 'provider_in_use' }, status(409));
+    await settle(opened.harness.fixture);
+    expect(pageText(opened.harness.fixture)).toContain(
+      'This account already has a GitHub account connected. Sign in with it or with your password.',
+    );
+    expect(has(opened.harness.fixture, '#password')).toBe(true);
+  });
+
   it('an expired ticket replaces the form with the sentence and the way back', async () => {
     const opened = await open(verified);
     await link(opened, 'Pw-1 x');

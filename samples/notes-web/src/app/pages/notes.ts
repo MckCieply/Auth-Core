@@ -96,7 +96,7 @@ function isNote(value: unknown): value is Note {
           <label for="new-company-name">{{ o.newCompanyName }}</label>
           <input id="new-company-name" data-testid="new-company-name" type="text" formControlName="name" autocomplete="off" maxlength="100" />
           <button type="submit" data-testid="new-company-submit" [disabled]="creatingBusy()">{{ o.createCompany }}</button>
-          <button type="button" data-testid="new-company-cancel" [disabled]="creatingBusy()" (click)="cancelCreate()">{{ t.cancel }}</button>
+          <button type="button" data-testid="new-company-cancel" [disabled]="creatingBusy()" (click)="cancelCreate()">{{ cancel }}</button>
           @if (createError(); as text) {
             <p class="error" role="alert" data-testid="new-company-error">{{ text }}</p>
           }
@@ -150,15 +150,15 @@ function isNote(value: unknown): value is Note {
               <label for="delete-password">{{ password }}</label>
               <input id="delete-password" type="password" formControlName="password" autocomplete="current-password" />
               <button type="submit" data-testid="delete-confirm" [disabled]="deleteBusy()">{{ t.deleteConfirm }}</button>
-              <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
+              <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ cancel }}</button>
             </form>
           } @else if (reauthTicket() === null) {
             <!-- Spec 0011: no password to ask for; the provider confirms. Nothing is deleted before the person comes back. -->
             <app-provider-buttons [providers]="me()?.linked_providers ?? []" action="confirm" [reauth]="true" [separator]="false" />
-            <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
+            <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ cancel }}</button>
           } @else {
             <button type="button" data-testid="delete-confirm" [disabled]="deleteBusy()" (click)="deleteWithTicket()">{{ t.deleteConfirm }}</button>
-            <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ t.cancel }}</button>
+            <button type="button" data-testid="delete-cancel" [disabled]="deleteBusy()" (click)="cancelDelete()">{{ cancel }}</button>
           }
           @if (deleteError(); as text) {
             <p class="error" role="alert" data-testid="delete-error">{{ text }}</p>
@@ -173,6 +173,7 @@ export class NotesPage implements OnInit {
   protected readonly o = texts.orgs;
   protected readonly somethingWrong = texts.common.somethingWrong;
   protected readonly password = texts.common.password;
+  protected readonly cancel = texts.common.cancel;
   protected readonly maxCharacters = MAX_NOTE_CHARACTERS;
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
@@ -457,7 +458,7 @@ export class NotesPage implements OnInit {
       return;
     }
     if (!acceptablePassword(password)) {
-      this.deleteError.set(this.t.passwordRequired);
+      this.deleteError.set(texts.common.passwordRequired);
       return;
     }
     if (await this.stillInACompany()) {

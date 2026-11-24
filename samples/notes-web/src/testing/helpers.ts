@@ -52,6 +52,11 @@ export const viewerMe: Me = {
   permissions: ['notes:read'],
 };
 
+/** The person with a confirmation window that ends at `until` (spec 0012: GET /auth/me says it; null means closed). */
+export function withWindow(me: Me, until: Date | null): Me {
+  return { ...me, confirmed_until: until === null ? null : until.toISOString().replace(/\.\d{3}Z$/, 'Z') };
+}
+
 /** Gives the service a token the way the app does: by a refresh that the test answers. */
 export async function holdToken(auth: AuthService, ctrl: HttpTestingController, token: string): Promise<void> {
   const done = auth.refresh();
