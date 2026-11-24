@@ -76,7 +76,8 @@ internal static class SettingsCallers
         var session = await DeviceSessions.ReadAsync(db, caller.Session.TokenId, caller.UserId, now, CancellationToken.None);
         return session is null
             ? Refused(TenancyErrors.SessionRequired)
-            : await CallerOfAsync(db, memberships, caller.UserId, caller.Tenant.CompanyId, session, CancellationToken.None);
+            // A token's claims never change, so the company the first read found is the one this session names.
+            : await CallerOfAsync(db, memberships, caller.UserId, caller.Tenant.CompanyId, session with { Company = caller.Session.Company }, CancellationToken.None);
     }
 
     /// <summary>
@@ -130,9 +131,27 @@ internal static class SettingsCallers
             return Refused(TenancyErrors.SessionRequired);
         }
 
-        return await memberships.ReadInCompanyAsync(userId, companyId, cancellationToken) is { } tenant
-            ? new SettingsRead(new SettingsCaller(userId, email, normalized, account.PasswordHash, tenant, session), null)
-            : Refused(TenancyErrors.NoMembership);
+        if (await memberships.ReadInCompanyAsync(userId, companyId, cancellationToken) is not { } tenant)
+        {
+            return Refused(TenancyErrors.NoMembership);
+        }
+
+        // A settings call acts in the company of its access token (spec 0012 B2), and the renewal keeps the session where it is (B3): the two
+        // must be the session's own company, and the membership the one the session names (a membership removed and made again has a later
+        // JoinedAt). Otherwise the call is not of this session. The same rule as the refresh's, and it runs before anything is written.
+        // A token with only one of the claims, or one that does not read, is refused as the refresh does; a token with neither is one of before
+        // spec 0015, and the caller's company stands for it.
+        // After this check the caller's company is the session's, so the renewal's claims come from it.
+        var named = session.Company;
+        if (named.Present
+            && (named.Space is not { } space
+                || space.CompanyId != tenant.CompanyId
+                || space.JoinedMicros != SessionCompany.MicrosOf(tenant.JoinedAt)))
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        return new SettingsRead(new SettingsCaller(userId, email, normalized, account.PasswordHash, tenant, session), null);
     }
 
     private static SettingsRead Refused(string code) => new(null, ApiResults.Error(code));

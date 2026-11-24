@@ -51,6 +51,8 @@ internal static class SessionRenewal
     {
         ArgumentNullException.ThrowIfNull(caller);
 
+        // The session's company claims come from caller.Tenant, which is the session's own company: SettingsCallers refuses (401 session_required)
+        // a caller whose company or membership differs from the one the session's refresh token names, and a token from before spec 0015 names none.
         return new AtomicSignInResult(
             SessionPrincipal.Create(http, account, caller.Tenant, audience, clock, caller.Session.Start),
             SettingsCallers.Entry(AuditKinds.LoginSucceeded, caller, new Dictionary<string, object?> { ["via"] = Via }),

@@ -11,13 +11,21 @@ using OpenIddict.EntityFrameworkCore.Models;
 namespace Auth.IntegrationTests;
 
 /// <summary>Spec 0012 → <c>POST /auth/account/confirm</c> (criteria 10 and 11), in the order of its checks.</summary>
-public sealed class AccountConfirmTests(PostgresFixture postgres, KeyMaterialFixture keys) : ProviderTestBase(postgres, keys)
+public sealed class AccountConfirmTests : ProviderTestBase
 {
     private const string Ola = FakePeople.GoogleEmail;
     private const string OlaNormalized = "OLA@GMAIL.TEST";
 
     // Spelled out, so that the escape in a test body is not read as an escape of this file.
     private const char Backslash = (char)0x5C;
+
+    private readonly OldRefreshTokens _oldTokens;
+
+    public AccountConfirmTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        _oldTokens = OldRefreshTokens.Install(Factory);
+    }
 
     private Task<int> AttemptsAsync() =>
         InDbAsync(db => db.LoginStreaks.Where(s => s.IdentifierHash == LoginIdentifier.HashOf(OlaNormalized)).Select(s => s.AttemptCount)
@@ -365,6 +373,39 @@ public sealed class AccountConfirmTests(PostgresFixture postgres, KeyMaterialFix
         Assert.Equal(0, await AttemptsAsync());
         Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmed));
         Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmRefused));
+    }
+
+    [Fact]
+    public async Task A_token_without_org_id_is_403_no_membership_and_nothing_is_written()   // spec 0012 B2
+    {
+        await CreateUserAsync(Ola, confirmed: true);
+        var session = await _oldTokens.LoginWithoutAsync(Client, Ola, UserPassword, "org_id");
+        Assert.False(AccessTokens.Payload(session.AccessToken).ContainsKey("org_id"), "The minted access token must carry no org_id.");
+        Clock.Advance(TimeSpan.FromMinutes(6));   // the window of the sign-in is closed
+
+        using var response = await SettingsApi.Confirm(Client, session, new { password = UserPassword });
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(0, await AttemptsAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmed));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmRefused));
+        Assert.False(await WindowIsOpenAsync());
+    }
+
+    [Fact]
+    public async Task A_token_for_a_company_the_account_left_is_403_no_membership_even_with_a_personal_space()   // spec 0012 B2: never the sign-in space
+    {
+        var (userId, session) = await PasswordAccountAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, await DevCompanyIdAsync());
+
+        using var response = await SettingsApi.Confirm(Client, session, new { password = UserPassword });
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(0, await AttemptsAsync());
+        Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmed));
+        Assert.Empty(await AuditAsync(AuditKinds.AccountConfirmRefused));
+        Assert.False(await WindowIsOpenAsync());
     }
 
     [Fact]

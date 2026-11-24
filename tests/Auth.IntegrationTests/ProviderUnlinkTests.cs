@@ -19,10 +19,12 @@ public sealed class ProviderUnlinkTests : ProviderTestBase
 
     private readonly ShareLockInterceptor _race = new();
     private readonly SessionRowFault _fault = new();
+    private readonly OldRefreshTokens _oldTokens;
 
     public ProviderUnlinkTests(PostgresFixture postgres, KeyMaterialFixture keys)
         : base(postgres, keys)
     {
+        _oldTokens = OldRefreshTokens.Install(Factory);
         Factory.WithServices(services => services.ConfigureDbContext<AuthDbContext>(options => options.AddInterceptors(_race, _fault)));
     }
 
@@ -445,6 +447,85 @@ public sealed class ProviderUnlinkTests : ProviderTestBase
         await TenancyApi.AssertUnauthorizedAsync(noToken);
         Assert.Equal(["google"], await ProvidersOfAsync(userId));
         Assert.Equal(HttpStatusCode.OK, (await SessionApi.Refresh(Client, session.RefreshToken)).StatusCode);   // the session was not ended
+    }
+
+    /// <summary>The unlink must have written nothing: the login stays, with no audit row, no mail and no change to a session.</summary>
+    private async Task AssertNothingUnlinkedAsync(Guid userId, int rows, (string[] Authorizations, string[] Tokens, string[] Limits) sessions)
+    {
+        Assert.Equal(["google"], await ProvidersOfAsync(userId));
+        Assert.Empty(await AuditAsync(AuditKinds.ProviderUnlinked));
+        Assert.Equal(rows, (await AuditAsync()).Count);   // no login.succeeded of a renewal either
+        Assert.Equal(0, await UnlinkMailsAsync());
+        var now = await SessionRowsAsync();
+        Assert.Equal(sessions.Authorizations, now.Authorizations);
+        Assert.Equal(sessions.Tokens, now.Tokens);
+        Assert.Equal(sessions.Limits, now.Limits);
+    }
+
+    [Fact]
+    public async Task A_change_with_the_old_session_after_the_membership_was_removed_and_made_again_is_401_session_required_and_nothing_is_written()   // spec 0012 B3, spec 0015: the JoinedAt of the session
+    {
+        var (userId, session) = await PasswordAccountAsync();
+        var company = await DevCompanyIdAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, company);
+        await AddMembershipAsync(userId, company, "user");   // the same company, another membership: a later JoinedAt
+        var rows = (await AuditAsync()).Count;
+        var sessions = await SessionRowsAsync();
+
+        using var response = await SettingsApi.Unlink(Client, session, "google");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingUnlinkedAsync(userId, rows, sessions);
+    }
+
+    [Fact]
+    public async Task A_change_with_an_access_token_from_before_a_switch_is_401_session_required_and_the_session_stays_in_the_switched_company()   // spec 0012 B3
+    {
+        var (userId, session) = await PasswordAccountAsync();
+        var other = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(userId, other, "user");
+        var switched = await SessionApi.SwitchOk(Client, session.RefreshToken, other);
+        var rows = (await AuditAsync()).Count;
+        var sessions = await SessionRowsAsync();
+
+        using var response = await SettingsApi.Unlink(Client, session with { RefreshToken = switched.RefreshToken }, "google");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingUnlinkedAsync(userId, rows, sessions);
+        var refreshed = await SessionApi.RefreshOk(Client, switched.RefreshToken);
+        Assert.Equal(other.ToString(), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+    }
+
+    [Fact]
+    public async Task A_token_without_org_id_is_403_no_membership_and_nothing_is_written()   // spec 0012 B2
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        await LinkAsync(user.Id, "google", FakePeople.GoogleSubject);
+        var session = await _oldTokens.LoginWithoutAsync(Client, Ola, UserPassword, "org_id");
+        Assert.False(AccessTokens.Payload(session.AccessToken).ContainsKey("org_id"), "The minted access token must carry no org_id.");
+        var rows = (await AuditAsync()).Count;
+        var sessions = await SessionRowsAsync();
+
+        using var response = await SettingsApi.Unlink(Client, session, "google");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        await AssertNothingUnlinkedAsync(user.Id, rows, sessions);
+    }
+
+    [Fact]
+    public async Task A_token_for_a_company_the_account_left_is_403_no_membership_even_with_a_personal_space()   // spec 0012 B2: never the sign-in space
+    {
+        var (userId, session) = await PasswordAccountAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, await DevCompanyIdAsync());
+        var rows = (await AuditAsync()).Count;
+        var sessions = await SessionRowsAsync();
+
+        using var response = await SettingsApi.Unlink(Client, session, "google");
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        await AssertNothingUnlinkedAsync(userId, rows, sessions);
     }
 
     [Fact]

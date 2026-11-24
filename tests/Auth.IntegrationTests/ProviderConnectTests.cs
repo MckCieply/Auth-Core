@@ -8,12 +8,20 @@ using Microsoft.EntityFrameworkCore;
 namespace Auth.IntegrationTests;
 
 /// <summary>Spec 0012 → <c>POST /auth/providers/connect</c> (criteria 12 and 13), in the order of its checks.</summary>
-public sealed class ProviderConnectTests(PostgresFixture postgres, KeyMaterialFixture keys) : ProviderTestBase(postgres, keys)
+public sealed class ProviderConnectTests : ProviderTestBase
 {
     private const string Ola = FakePeople.GoogleEmail;
     private const string OlaNormalized = "OLA@GMAIL.TEST";
     private const string OtherGoogleSubject = "100000000000000000077";
     private const string Kim = "kim@firma.test";
+
+    private readonly OldRefreshTokens _oldTokens;
+
+    public ProviderConnectTests(PostgresFixture postgres, KeyMaterialFixture keys)
+        : base(postgres, keys)
+    {
+        _oldTokens = OldRefreshTokens.Install(Factory);
+    }
 
     /// <summary>Everything a connect could write, as the database holds it now: a refusal under the lock must leave all of it as it was.</summary>
     private sealed record Snapshot(int Logins, int LinkedRows, int Mails, int Tickets, string Sessions);
@@ -632,6 +640,40 @@ public sealed class ProviderConnectTests(PostgresFixture postgres, KeyMaterialFi
 
         using var again = await SettingsApi.Connect(Client, session, ticket);   // the ticket was given back by the rollback
         Assert.Equal(HttpStatusCode.NoContent, again.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_token_without_org_id_is_403_no_membership_and_nothing_is_written()   // spec 0012 B2
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var session = await _oldTokens.LoginWithoutAsync(Client, Ola, UserPassword, "org_id");
+        Assert.False(AccessTokens.Payload(session.AccessToken).ContainsKey("org_id"), "The minted access token must carry no org_id.");
+        var ticket = await ConnectTicketAsync();
+        var before = await SnapshotAsync();
+
+        using var response = await SettingsApi.Connect(Client, session, ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Empty(await LoginsOfAsync(user.Id));
+        Assert.Equal(before, await SnapshotAsync());
+    }
+
+    [Fact]
+    public async Task A_token_for_a_company_the_account_left_is_403_no_membership_even_with_a_personal_space()   // spec 0012 B2: never the sign-in space
+    {
+        var (userId, session) = await AccountAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, await DevCompanyIdAsync());
+        var ticket = await ConnectTicketAsync();
+        var before = await SnapshotAsync();
+
+        using var response = await SettingsApi.Connect(Client, session, ticket);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        Assert.Equal(1, await TicketCountAsync());
+        Assert.Empty(await LoginsOfAsync(userId));
+        Assert.Equal(before, await SnapshotAsync());
     }
 
     [Fact]

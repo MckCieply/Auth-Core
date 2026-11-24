@@ -27,10 +27,12 @@ public sealed class AccountPasswordTests : ProviderTestBase
 
     private readonly ShareLockInterceptor _race = new();
     private readonly SessionRowFault _fault = new();
+    private readonly OldRefreshTokens _oldTokens;
 
     public AccountPasswordTests(PostgresFixture postgres, KeyMaterialFixture keys)
         : base(postgres, keys)
     {
+        _oldTokens = OldRefreshTokens.Install(Factory);
         Factory.WithServices(services => services.ConfigureDbContext<AuthDbContext>(options => options.AddInterceptors(_race, _fault)));
     }
 
@@ -605,6 +607,167 @@ public sealed class AccountPasswordTests : ProviderTestBase
         Assert.Equal(other.ToString(), AccessTokens.Text(afterUnlink.AccessToken, "org_id"));
         var live = await LiveSessionStateAsync();
         Assert.Equal((before.SessionStart, before.ConfirmedUntil), (live.SessionStart, live.ConfirmedUntil));   // the same start and window
+    }
+
+    private Task<string?> HashOfAsync(Guid userId) =>
+        InDbAsync(db => db.Users.Where(u => u.Id == userId).Select(u => u.PasswordHash).SingleAsync(TestContext.Current.CancellationToken));
+
+    /// <summary>The change must have written nothing: the hash, the audit rows, the mails and the streak are as they were.</summary>
+    private async Task AssertNothingWrittenAsync(Guid userId, string? hash, int logins)
+    {
+        Assert.Equal(hash, await HashOfAsync(userId));
+        Assert.Empty(await AuditAsync(AuditKinds.PasswordChanged));
+        Assert.Equal(logins, (await AuditAsync(AuditKinds.LoginSucceeded)).Count);   // no login.succeeded of a renewal
+        Assert.Equal(0, await InDbAsync(db => db.MailRequests.CountAsync(r => r.Kind == MailKind.PasswordChanged, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await AttemptsAsync());
+    }
+
+    [Fact]
+    public async Task A_change_with_the_old_session_after_the_membership_was_removed_and_made_again_is_401_session_required_and_nothing_is_written()   // spec 0012 B3, spec 0015: the JoinedAt of the session
+    {
+        var (userId, session) = await AccountAsync();
+        var company = await DevCompanyIdAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, company);
+        await AddMembershipAsync(userId, company, "user");   // the same company, another membership: a later JoinedAt
+        var hash = await HashOfAsync(userId);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingWrittenAsync(userId, hash, logins);
+    }
+
+    [Fact]
+    public async Task A_change_with_an_access_token_from_before_a_switch_is_401_session_required_and_the_session_stays_in_the_switched_company()   // spec 0012 B3
+    {
+        var (userId, session) = await AccountAsync();
+        var other = await CreateCompanyAsync("Second");
+        await AddMembershipAsync(userId, other, "user");
+        var switched = await SessionApi.SwitchOk(Client, session.RefreshToken, other);
+        var hash = await HashOfAsync(userId);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session with { RefreshToken = switched.RefreshToken }, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingWrittenAsync(userId, hash, logins);
+        var refreshed = await SessionApi.RefreshOk(Client, switched.RefreshToken);
+        Assert.Equal(other.ToString(), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+    }
+
+    /// <summary>Replaces the stored payload of the refresh tokens of the account, which is what the session's company is read from.</summary>
+    private Task<int> SetStoredPayloadAsync(Guid userId, string? payload) =>
+        InDbAsync(db => db.Set<OpenIddictEntityFrameworkCoreToken>()
+            .Where(t => t.Subject == userId.ToString() && t.Type == OpenIddictConstants.TokenTypeIdentifiers.RefreshToken)
+            .ExecuteUpdateAsync(u => u.SetProperty(t => t.Payload, payload), TestContext.Current.CancellationToken));
+
+    /// <summary>A payload as the server would write a refresh token naming <paramref name="company"/>, but of the JWT type <paramref name="type"/>.</summary>
+    private string PayloadOfType(string type, Guid company, long joinedMicros)
+    {
+        var server = Factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OpenIddict.Server.OpenIddictServerOptions>>().CurrentValue;
+        var descriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
+        {
+            Issuer = server.Issuer?.AbsoluteUri,
+            TokenType = type,
+            Claims = new Dictionary<string, object>
+            {
+                ["session_org_id"] = company.ToString(),
+                ["session_org_joined"] = joinedMicros.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            },
+            SigningCredentials = server.SigningCredentials.First(),
+            EncryptingCredentials = server.EncryptionCredentials.First(),
+        };
+        return server.JsonWebTokenHandler.CreateToken(descriptor);
+    }
+
+    [Theory]
+    [InlineData("garbage")]
+    [InlineData(null)]
+    public async Task A_change_whose_session_token_payload_does_not_read_is_401_session_required_and_nothing_is_written(string? payload)   // fail closed
+    {
+        var (userId, session) = await AccountAsync();
+        await SetStoredPayloadAsync(userId, payload);
+        var hash = await HashOfAsync(userId);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingWrittenAsync(userId, hash, logins);
+    }
+
+    [Fact]
+    public async Task A_change_whose_session_token_payload_is_of_another_token_type_is_401_session_required_and_nothing_is_written()   // the payload is validated as OpenIddict validates it
+    {
+        var (userId, session) = await AccountAsync();
+        var tenant = await TenantOfAsync(userId);
+        await SetStoredPayloadAsync(userId, PayloadOfType("at+jwt", tenant.CompanyId, Auth.Server.Sessions.SessionCompany.MicrosOf(tenant.JoinedAt)));
+        var hash = await HashOfAsync(userId);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingWrittenAsync(userId, hash, logins);
+    }
+
+    [Fact]
+    public async Task A_change_whose_session_token_has_only_one_company_claim_is_401_session_required_and_nothing_is_written()
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var session = await _oldTokens.LoginWithoutAsync(Client, Ola, UserPassword, Auth.Server.Sessions.SessionPolicy.JoinedClaim);
+        var hash = await HashOfAsync(user.Id);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Unauthorized, "session_required");
+        await AssertNothingWrittenAsync(user.Id, hash, logins);
+    }
+
+    [Fact]
+    public async Task A_change_with_a_session_from_before_spec_0015_is_served_in_the_token_company()
+    {
+        await CreateUserAsync(Ola, confirmed: true);
+        var session = await _oldTokens.LoginAsync(Client, Ola, UserPassword);
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        var renewed = await SessionApi.ReadSessionAsync(response);
+        Assert.Equal(AccessTokens.Text(session.AccessToken, "org_id"), AccessTokens.Text(renewed.AccessToken, "org_id"));
+        Assert.Single(await AuditAsync(AuditKinds.PasswordChanged));
+    }
+
+    [Fact]
+    public async Task A_token_without_org_id_is_403_no_membership_and_nothing_is_written()   // spec 0012 B2
+    {
+        var user = await CreateUserAsync(Ola, confirmed: true);
+        var session = await _oldTokens.LoginWithoutAsync(Client, Ola, UserPassword, "org_id");
+        Assert.False(AccessTokens.Payload(session.AccessToken).ContainsKey("org_id"), "The minted access token must carry no org_id.");
+        var hash = await HashOfAsync(user.Id);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        await AssertNothingWrittenAsync(user.Id, hash, logins);
+    }
+
+    [Fact]
+    public async Task A_token_for_a_company_the_account_left_is_403_no_membership_even_with_a_personal_space()   // spec 0012 B2: never the sign-in space
+    {
+        var (userId, session) = await AccountAsync();
+        await AddPersonalSpaceAsync(userId);
+        await RemoveMembershipAsync(userId, await DevCompanyIdAsync());
+        var hash = await HashOfAsync(userId);
+        var logins = (await AuditAsync(AuditKinds.LoginSucceeded)).Count;
+
+        using var response = await SettingsApi.ChangePassword(Client, session, UserPassword, NewPassword);
+
+        await TenancyApi.AssertErrorAsync(response, HttpStatusCode.Forbidden, "no_membership");
+        await AssertNothingWrittenAsync(userId, hash, logins);
     }
 
     [Fact]
