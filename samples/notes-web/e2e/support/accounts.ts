@@ -57,7 +57,121 @@ export async function signUpPrivatelyByApi(email: string, password: string, wait
   }
 }
 
+/**
+ * Spec 0017: the development admin makes a company of its own with a unique name (POST /auth/orgs, spec 0016), goes into it by the API
+ * (POST /auth/switch with the refresh cookie of a sign-in made here, so no browser session of the admin moves) and invites the address
+ * with the role named (POST /auth/org/invites, 202; the mail goes out at once). `remove()` deletes the company with its name and the
+ * admin's password; it may be called twice. When the invitation fails, the company is deleted before the error is thrown.
+ */
+export async function inviteFromNewCompanyByApi(
+  email: string,
+  roleName: string,
+): Promise<{ companyName: string; remove: () => Promise<void> }> {
+  const seedEmail = setting('E2E_SEED_EMAIL');
+  const seedPassword = setting('E2E_SEED_PASSWORD');
+  const companyName = `Invitor ${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const remove = async (): Promise<void> => {
+    await deleteCompanyByApi(seedEmail, seedPassword, companyName);
+  };
+
+  const login = await postJson('/auth/login', { email: seedEmail, password: seedPassword });
+  if (login.status !== 200) {
+    throw new Error(`the development admin could not sign in by the API: ${login.status}`);
+  }
+  const loginBody = (await login.json()) as { access_token?: unknown };
+  const cookie = login.headers
+    .getSetCookie()
+    .map((line) => line.split(';')[0])
+    .join('; ');
+  if (typeof loginBody.access_token !== 'string' || cookie === '') {
+    throw new Error('the sign-in gave no token or no refresh cookie');
+  }
+  const created = await postJson('/auth/orgs', { name: companyName }, loginBody.access_token);
+  if (created.status !== 201) {
+    throw new Error(`creating the company answered ${created.status}, not 201`);
+  }
+  const entry = (await created.json()) as { id?: unknown };
+  if (typeof entry.id !== 'string') {
+    throw new Error('the new company has no id');
+  }
+  try {
+    const switched = await fetch(`${apiUrl()}/auth/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ org_id: entry.id }),
+    });
+    const switchedBody = (await switched.json()) as { access_token?: unknown };
+    if (switched.status !== 200 || typeof switchedBody.access_token !== 'string') {
+      throw new Error(`the switch into the new company answered ${switched.status}, not 200`);
+    }
+    const token = switchedBody.access_token;
+    const roles = await fetch(`${apiUrl()}/auth/org/roles`, { headers: { Authorization: `Bearer ${token}` } });
+    if (roles.status !== 200) {
+      throw new Error(`the list of roles answered ${roles.status}, not 200`);
+    }
+    const role = ((await roles.json()) as { roles: { id: string; name: string }[] }).roles.find((candidate) => candidate.name === roleName);
+    if (role === undefined) {
+      throw new Error(`the new company has no role ${roleName}`);
+    }
+    const invited = await postJson('/auth/org/invites', { email, role_id: role.id }, token);
+    if (invited.status !== 202) {
+      throw new Error(`the invitation answered ${invited.status}, not 202`);
+    }
+  } catch (error) {
+    await remove();
+    throw error;
+  }
+  return { companyName, remove };
+}
+
 /** Whether the address and the password still sign in, by the API: the status of POST /auth/login. */
 export async function loginStatus(email: string, password: string): Promise<number> {
   return (await postJson('/auth/login', { email, password })).status;
+}
+
+/**
+ * Deletes a company of the account by the API (the sample has no screen for DELETE /auth/org): signs in, lists the account's spaces, switches
+ * into the company named (POST /auth/switch needs the refresh cookie of the sign-in) and deletes it with its name and the password.
+ * Returns false when the account has no company of that name (already gone), so a clean-up can run twice.
+ */
+export async function deleteCompanyByApi(email: string, password: string, companyName: string): Promise<boolean> {
+  const login = await postJson('/auth/login', { email, password });
+  if (login.status !== 200) {
+    throw new Error(`the account could not sign in by the API: ${login.status}`);
+  }
+  const loginBody = (await login.json()) as { access_token?: unknown };
+  const cookie = login.headers
+    .getSetCookie()
+    .map((line) => line.split(';')[0])
+    .join('; ');
+  if (typeof loginBody.access_token !== 'string' || cookie === '') {
+    throw new Error('the sign-in gave no token or no refresh cookie');
+  }
+  const listed = await fetch(`${apiUrl()}/auth/orgs`, { headers: { Authorization: `Bearer ${loginBody.access_token}` } });
+  if (listed.status !== 200) {
+    throw new Error(`the list of companies answered ${listed.status}, not 200`);
+  }
+  const spaces = ((await listed.json()) as { orgs: { id: string; name: string; kind: string }[] }).orgs;
+  const target = spaces.find((entry) => entry.kind === 'organization' && entry.name === companyName);
+  if (target === undefined) {
+    return false;
+  }
+  const switched = await fetch(`${apiUrl()}/auth/switch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
+    body: JSON.stringify({ org_id: target.id }),
+  });
+  const switchedBody = (await switched.json()) as { access_token?: unknown };
+  if (switched.status !== 200 || typeof switchedBody.access_token !== 'string') {
+    throw new Error(`the switch into the company answered ${switched.status}, not 200`);
+  }
+  const deleted = await fetch(`${apiUrl()}/auth/org`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${switchedBody.access_token}` },
+    body: JSON.stringify({ name: companyName, password }),
+  });
+  if (deleted.status !== 204) {
+    throw new Error(`deleting the company answered ${deleted.status}, not 204`);
+  }
+  return true;
 }

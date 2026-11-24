@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// The members of the caller's company (spec 0005 → Company API): list, change a role, remove. All need
+/// The members of the token's company (spec 0005 → Company API): list, change a role, remove. All need
 /// <c>members:manage</c>, checked against the database.
 /// </summary>
 public static class OrgMemberEndpoints
@@ -63,7 +63,8 @@ public static class OrgMemberEndpoints
             return ApiResults.InvalidRequest();
         }
 
+        // 204 whether the account was deleted with its last space or kept: the answer does not show it.
         var outcome = await members.RemoveAsync(Actor.Of(caller), caller.CompanyId, user, force: false, http.RequestAborted);
-        return outcome.Succeeded ? ApiResults.NoContent() : ApiResults.Refused(outcome);
+        return outcome.Succeeded ? ApiResults.NoContent() : ApiResults.Refused(outcome.Without);
     }
 }

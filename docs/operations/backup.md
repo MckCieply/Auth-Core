@@ -165,16 +165,16 @@ auth_psql() { docker compose -p auth-core-prod -f deploy/docker-compose.prod.yml
 and run a query by giving it on the standard input, `auth_psql <<'SQL'` followed by the query and a line `SQL`, or with `auth_psql -c "..."`.
 
 The columns: `occurred_at`, `kind`, `actor_user_id` (the account that acted; empty for the operator CLI, an anonymous request or a failed
-login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account; always as typed on `password.reset_requested` and `signup.requested`), `org_id`, `org_name` (its name at that
+login), `subject_user_id`, `subject_email` (as stored, or as typed for an address that has no account; always as typed on `password.reset_requested` and `signup.requested`), `org_id` (on `account.deleted` of a removal or a company deletion, the space the account lost; on `org.switched`, the space switched to), `org_name` (its name at that
 moment), `target_id` (the role or invitation), `client_ip` (the whole address; empty for the operator CLI, `unknown` for a request that had none), `details` (a small JSON
 object). A row outlives the account, company, role or invitation it names. It never holds a password, a token, a link, a cookie or a mail
 body. Rows older than `AUTH_AUDIT_RETENTION_DAYS` (90 by default) are deleted every hour; a row exactly that old is still there.
 
 What `details` holds, where it is set: `"via": "cli"` for the operator CLI, and `"via": "seed"` on the `org.created` row of the
-development seeder (Development only), and `"via": "signup"` on the `org.created` row of a company a visitor started, and `kind` (`organization` or `private`) on `signup.requested` and `signup.completed` (spec 0010); `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
+development seeder (Development only), and `"via": "signup"` on the `org.created` row of a company a visitor started, and `"via": "api"` on the `org.created` row of a company a signed-in account created through `POST /auth/orgs` (spec 0016), and `kind` (`organization` or `private`) on `signup.requested` and `signup.completed` (spec 0010); `role` (the role the member had) on every `member.removed` row, and `"forced": true` on it when the operator passed `--force`; `from` and `to` (the old and the new role) on `member.role_changed`, and (the old and the new name) on
 `org.renamed`; `role` on `invite.sent`, `invite.resent`, `invite.accepted` and `invite.cancelled`, and `left_private_account` and `personal_org_id` on the `invite.accepted` row of a private account that moved; `name` and `permissions` on
 `role.created`, `role.updated` (with `previous_name` and `previous_permissions`) and `role.deleted`; `reason` on `login.failed`, `org.delete_refused`, `account.delete_refused` (`wrong_password`, `locked`, `reauth_failed`) and
-`account.deleted` (`self`, `member_removed`, `org_deleted`, `upgrade`); `retry_after_seconds` on `login.locked`; `provider` (`google` or `microsoft`, spec 0011) on `login.succeeded` of a provider sign-in, on `login.failed` and `login.locked` of a failed link, on `signup.completed`, `invite.accepted`, `provider.linked` and `provider.reauthenticated`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
+`account.deleted` (`self`, `member_removed`, `org_deleted`, `upgrade`); `from_org_id` (the space the session worked in before) on `org.switched`, whose `org_id` and `org_name` name the space switched to; `retry_after_seconds` on `login.locked`; `provider` (`google` or `microsoft`, spec 0011) on `login.succeeded` of a provider sign-in, on `login.failed` and `login.locked` of a failed link, on `signup.completed`, `invite.accepted`, `provider.linked` and `provider.reauthenticated`; `policy` and `limit` on `rate_limit.hit`; the counts `members`, `invitations`
 and `roles` on `org.deleted`.
 
 Two things to know when a row seems to be missing:
@@ -249,7 +249,7 @@ The kinds are: `login.succeeded`, `login.failed` (reason: `wrong_password`, `unk
 `account.delete_refused` (reason: `wrong_password`, `locked`, `reauth_failed`: a provider confirmation that did not hold), `rate_limit.hit` (at most one per address and policy per minute), `signup.requested`
 (an accepted request: the address as typed), `signup.completed` (the account, the company or, for a private person, the personal space, and the address),
 `provider.linked` (an existing account connected a Google or Microsoft identity with its password; `details.provider`) and `provider.reauthenticated` (a private
-account without a password confirmed its deletion with the provider; `details.provider`, written with `account.deleted`). That makes 28 kinds.
+account without a password confirmed its deletion with the provider; `details.provider`, written with `account.deleted`), and `org.switched` (a switch moved a session to another space; `details.from_org_id`). That makes 29 kinds.
 
 The address typed into a failed or locked login is kept as typed, and a person may have pasted a password into that field: treat the
 audit log, and a dump that holds it, as private.

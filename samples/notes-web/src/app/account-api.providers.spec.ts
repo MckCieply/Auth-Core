@@ -37,7 +37,7 @@ describe('AccountApi: the providers of GET /auth/options (spec 0011)', () => {
   it('a failed call means no provider', async () => {
     const done = api.options();
     ctrl.expectOne('/auth/options').flush('oops', { status: 500, statusText: '500' });
-    expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [] });
+    expect(await done).toEqual({ signup: 'invite-only', private_signup: 'off', providers: [], orgCreation: false });
   });
 
   it('knows Google and Microsoft', () => {

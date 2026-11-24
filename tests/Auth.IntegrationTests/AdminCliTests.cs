@@ -125,8 +125,11 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
         await DispatchAsync();
         var mail = Assert.Single(Mail.Sent);
         Assert.Equal(Boss, mail.To);
-        Assert.Contains("Acme", mail.TextBody);
-        Assert.Contains("as admin", mail.TextBody);
+        Assert.Contains(
+            "You have been invited to join Acme on Auth-Core Test. Use the link below to choose a password and accept the invitation.",
+            mail.TextBody,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(" as admin", mail.TextBody, StringComparison.Ordinal);
         Assert.Contains(AuthAppFactory.DefaultInviteUrl + "?token=", mail.TextBody);
     }
 
@@ -204,6 +207,27 @@ public sealed class AdminCliTests(PostgresFixture postgres, KeyMaterialFixture k
         Assert.Null(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));   // spec 0010
         using var login = await LoginApi.Login(Client, "worker@acme.test", UserPassword);
         Assert.Equal("""{"error":"invalid_credentials"}""", await login.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Remove_member_says_whether_the_account_was_kept_or_deleted()
+    {
+        var acme = await CreateOrgAsync("Acme");
+        var globex = await CreateOrgAsync("Globex");
+        await AddMemberAsync(acme, Boss, "admin");
+        var both = await AddMemberAsync(acme, "both@acme.test", "user");
+        await AddMembershipAsync(both, globex, "user");
+        var only = await AddMemberAsync(acme, "only@acme.test", "user");
+
+        var kept = await RunAsync("remove-member", "--org", acme.ToString(), "--email", "both@acme.test");
+        var deleted = await RunAsync("remove-member", "--org", acme.ToString(), "--email", "only@acme.test");
+
+        Assert.Equal(0, kept.Exit);
+        Assert.Equal("Member removed; the account is kept.", kept.Out.Trim());
+        Assert.Equal(0, deleted.Exit);
+        Assert.Equal("Member removed; the account is deleted.", deleted.Out.Trim());
+        Assert.NotNull(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == both, TestContext.Current.CancellationToken)));
+        Assert.Null(await InDbAsync(db => db.Users.SingleOrDefaultAsync(u => u.Id == only, TestContext.Current.CancellationToken)));
     }
 
     [Fact]

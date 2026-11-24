@@ -62,7 +62,7 @@ public sealed class UpgradeFromSpec0011Tests(PostgresFixture postgres, KeyMateri
         using (var options = await client.GetAsync("/auth/options", TestContext.Current.CancellationToken))
         {
             Assert.Equal(
-                """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"]}""",
+                """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft"],"org_creation":"off"}""",
                 await options.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         }
 

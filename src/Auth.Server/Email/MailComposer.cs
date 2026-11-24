@@ -35,19 +35,22 @@ public sealed class MailComposer(MailSettings settings)
     /// The company of an invitation or of an organization sign-up; required for <see cref="MailKind.Invitation"/> and for
     /// <see cref="MailKind.Signup"/> unless <paramref name="privateAccount"/> is set, ignored otherwise (a private sign-up names no company).
     /// </param>
-    /// <param name="roleName">The role of an invitation; required for <see cref="MailKind.Invitation"/>, ignored otherwise.</param>
     /// <param name="privateAccount">
-    /// Spec 0010. For <see cref="MailKind.Signup"/>: the private variant, which names no company. For <see cref="MailKind.Invitation"/>: the
-    /// invited address has a private account, and the mail says what accepting does to it. Ignored otherwise.
+    /// Spec 0010. For <see cref="MailKind.Signup"/> only: the private variant, which names no company. Ignored otherwise (since spec 0017 an
+    /// invitation no longer has a private variant: see <paramref name="accountExists"/>).
+    /// </param>
+    /// <param name="accountExists">
+    /// Spec 0017. For <see cref="MailKind.Invitation"/> only: the invited address has an account (of any kind), and the mail says that
+    /// accepting adds the company to it and keeps what it has. Ignored otherwise.
     /// </param>
     public ComposedMail Compose(
-        MailKind kind, string recipient, string token, string? companyName = null, string? roleName = null, bool privateAccount = false)
+        MailKind kind, string recipient, string token, string? companyName = null, bool privateAccount = false, bool accountExists = false)
     {
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(token);
-        if (kind == MailKind.Invitation && (companyName is null || roleName is null))
+        if (kind == MailKind.Invitation && companyName is null)
         {
-            throw new ArgumentException("An invitation names its company and its role.", nameof(kind));
+            throw new ArgumentException("An invitation names its company.", nameof(companyName));
         }
 
         if (kind == MailKind.Signup && companyName is null && !privateAccount)
@@ -55,10 +58,10 @@ public sealed class MailComposer(MailSettings settings)
             throw new ArgumentException("An organization sign-up names its company.", nameof(companyName));
         }
 
-        var text = (kind, privateAccount) switch
+        var text = (kind, privateAccount, accountExists) switch
         {
-            (MailKind.Signup, true) => MailTexts.PrivateSignup(settings.Locale),
-            (MailKind.Invitation, true) => MailTexts.InvitationToPrivateAccount(settings.Locale),
+            (MailKind.Signup, true, _) => MailTexts.PrivateSignup(settings.Locale),
+            (MailKind.Invitation, _, true) => MailTexts.InvitationToExistingAccount(settings.Locale),
             _ => MailTexts.For(settings.Locale, kind),
         };
         var target = kind switch
@@ -71,14 +74,14 @@ public sealed class MailComposer(MailSettings settings)
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown kind of mail."),
         };
         var link = QueryHelpers.AddQueryString(target.AbsoluteUri, "token", token);
-        // The subject takes the application name only: the company and the role are typed by people, and a header is not the place
-        // for that. They appear in the body, encoded in its HTML part.
+        // The subject takes the application name only: the company is typed by people, and a header is not the place
+        // for that. It appears in the body, encoded in its HTML part.
         var subject = string.Format(CultureInfo.InvariantCulture, text.Subject, settings.AppName);
-        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName, roleName);
-        // Formatted first and encoded whole, like the intro: the company and the role in it are encoded in the HTML part.
+        var intro = string.Format(CultureInfo.InvariantCulture, text.Intro, settings.AppName, companyName);
+        // Formatted first and encoded whole, like the intro: the company in it is encoded in the HTML part.
         var paragraph = text.Paragraph is null
             ? null
-            : string.Format(CultureInfo.InvariantCulture, text.Paragraph, settings.AppName, companyName, roleName);
+            : string.Format(CultureInfo.InvariantCulture, text.Paragraph, settings.AppName, companyName);
         var paragraphHtml = paragraph is null ? "" : "\n<p>" + Html.Encode(paragraph) + "</p>";
         var lines = new List<string> { text.Greeting, "", intro, "" };
         if (paragraph is not null)

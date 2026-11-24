@@ -100,6 +100,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         _settings[MailSettingsLoader.SmtpPasswordKey] = "";
         _settings[DevUserSeeder.UnverifiedEmailKey] = "";
         _settings[DevUserSeeder.UnverifiedPasswordKey] = "";
+        // A second development company is a setting of its own (appsettings.Development.json names one): no test host sees it
+        // unless the test sets it with WithSetting.
+        _settings[DevUserSeeder.SecondOrgNameKey] = "";
         // The per-IP limiter is off in a test host, so that no test meets it by accident (the test server sends everything from one
         // address, "unknown"); a test about it turns it on with WithSetting. Blank proxy lists count as unset, so that a variable of
         // the machine cannot make a test host trust a proxy.
@@ -137,6 +140,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
 
     /// <summary>The default manifest with <c>signup: self-service</c>.</summary>
     public const string SelfServiceManifest = DefaultManifest + "\nsignup: self-service\n";
+
+    /// <summary>The default manifest with <c>org_creation: self-service</c> (spec 0016).</summary>
+    public const string OrgCreationManifest = DefaultManifest + "\norg_creation: self-service\n";
 
     /// <summary>The block that turns private sign-up on (spec 0010), with two permissions of the default catalog for the private role.</summary>
     public const string PrivateBlock = "\nprivate:\n  signup: self-service\n  permissions: [reports:read, reports:approve]\n";
@@ -203,6 +209,9 @@ public class AuthAppFactory : WebApplicationFactory<Program>
         WithManifest(SelfServiceManifest);
         return WithSetting(MailSettingsLoader.CompleteSignupUrlKey, DefaultCompleteSignupUrl);
     }
+
+    /// <summary>Turns creating another company on (spec 0016): the manifest says <c>org_creation: self-service</c>. Call it before the host is built.</summary>
+    public AuthAppFactory WithOrgCreation() => WithManifest(OrgCreationManifest);
 
     /// <summary>
     /// Turns private sign-up on (spec 0010) and, unless told otherwise, organization sign-up too: the manifest and the completion address.

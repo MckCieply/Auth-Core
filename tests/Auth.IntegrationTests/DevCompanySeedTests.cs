@@ -50,6 +50,22 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
         return row is null ? null : (row.Name, row.RoleName);
     }
 
+    private static async Task<List<(string Company, string Role)>> MembershipsOfAsync(AuthAppFactory factory, string email)
+    {
+        using var scope = factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = await users.FindByEmailAsync(email) ?? throw new InvalidOperationException($"No user {email}.");
+        var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        var rows = await (
+            from m in db.Memberships
+            join c in db.Companies on m.CompanyId equals c.Id
+            join r in db.CompanyRoles on m.RoleId equals r.Id
+            where m.UserId == user.Id
+            select new { c.Name, RoleName = r.Name })
+            .ToListAsync(TestContext.Current.CancellationToken);
+        return [.. rows.Select(r => (r.Name, r.RoleName)).OrderBy(r => r.Name, StringComparer.Ordinal)];
+    }
+
     [Fact]
     public async Task First_seed_user_is_the_admin_of_the_development_company()
     {
@@ -170,7 +186,7 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
     }
 
     [Fact]
-    public async Task A_member_is_not_moved_to_another_company_by_a_new_setting()
+    public async Task A_new_company_name_adds_a_membership_and_keeps_the_old_one()   // spec 0015: a member of one company may be a member of several
     {
         var database = UniqueDatabase();
         await using var first = Factory(database);
@@ -179,8 +195,138 @@ public sealed class DevCompanySeedTests(PostgresFixture postgres, KeyMaterialFix
         await using var second = Factory(database).WithSetting(DevUserSeeder.OrgNameKey, "Elsewhere");
         _ = second.Services;
 
-        Assert.Equal(("Development", "admin"), await MembershipOfAsync(second, second.SeedEmail));
+        Assert.Equal([("Development", "admin"), ("Elsewhere", "admin")], await MembershipsOfAsync(second, second.SeedEmail));
         Assert.Equal(2, await InDbAsync(second, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task With_a_second_name_the_first_seed_user_is_admin_of_the_first_and_a_plain_member_of_the_second()   // criterion 30
+    {
+        await using var factory = Factory().WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = factory.Services;
+
+        Assert.Equal([("Beta", "user"), ("Development", "admin")], await MembershipsOfAsync(factory, factory.SeedEmail));
+        var beta = await InDbAsync(factory, db => db.CompanyRoles.AsNoTracking()
+            .Where(r => db.Companies.Any(c => c.Id == r.CompanyId && c.Name == "Beta")).OrderBy(r => r.Name).ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(["admin", "user"], beta.Select(r => r.Name));   // every default role, as the first company has them
+        Assert.Equal(2, await InDbAsync(factory, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task Without_the_setting_it_seeds_as_today()   // criterion 30
+    {
+        await using var factory = Factory();
+        _ = factory.Services;
+
+        Assert.Equal([("Development", "admin")], await MembershipsOfAsync(factory, factory.SeedEmail));
+        Assert.Equal(1, await InDbAsync(factory, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await InDbAsync(factory, db => db.Memberships.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_manifest_without_a_plain_default_role_gives_a_new_empty_member_role()
+    {
+        var database = UniqueDatabase();
+        await using var first = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta").WithManifest("default_roles:\n  owner: [\"*\"]\n");
+        _ = first.Services;
+
+        Assert.Equal([("Beta", "member"), ("Development", "owner")], await MembershipsOfAsync(first, first.SeedEmail));
+        var members = await InDbAsync(first, db => db.CompanyRoles.AsNoTracking().Where(r => r.Name == "member").ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(Assert.Single(members).Permissions);
+
+        // A restart finds that role again and makes no second one.
+        await using var second = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta").WithManifest("default_roles:\n  owner: [\"*\"]\n");
+        _ = second.Services;
+        Assert.Equal(1, await InDbAsync(second, db => db.CompanyRoles.CountAsync(r => r.Name == "member", TestContext.Current.CancellationToken)));
+        Assert.Equal(2, await InDbAsync(second, db => db.Memberships.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task The_plain_role_is_the_first_default_role_in_the_order_of_the_manifest()
+    {
+        await using var factory = Factory().WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta")
+            .WithManifest("permissions: [a:b]\ndefault_roles:\n  owner: [\"*\"]\n  zeta: [a:b]\n  alpha: [a:b]\n");
+        _ = factory.Services;
+
+        // The order of the file, not the order of the names (unlike the unverified user's role): zeta.
+        Assert.Equal([("Beta", "zeta"), ("Development", "owner")], await MembershipsOfAsync(factory, factory.SeedEmail));
+    }
+
+    [Fact]
+    public async Task The_same_name_twice_makes_one_company()
+    {
+        await using var factory = Factory().WithSetting(DevUserSeeder.SecondOrgNameKey, "Development");
+        _ = factory.Services;
+
+        Assert.Equal(1, await InDbAsync(factory, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal([("Development", "admin")], await MembershipsOfAsync(factory, factory.SeedEmail));
+    }
+
+    [Fact]
+    public async Task The_same_name_twice_adds_no_plain_role_to_the_one_company()   // teeth for the guard: without it the owner-only manifest gets a member role
+    {
+        await using var factory = Factory().WithSetting(DevUserSeeder.SecondOrgNameKey, "Development").WithManifest("default_roles:\n  owner: [\"*\"]\n");
+        _ = factory.Services;
+
+        var roles = await InDbAsync(factory, db => db.CompanyRoles.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("owner", Assert.Single(roles).Name);
+        Assert.Equal([("Development", "owner")], await MembershipsOfAsync(factory, factory.SeedEmail));
+    }
+
+    [Fact]
+    public async Task A_restart_with_a_second_company_changes_nothing()
+    {
+        var database = UniqueDatabase();
+        await using var first = WithSecondUser(Factory(database)).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = first.Services;
+        await using var second = WithSecondUser(Factory(database)).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = second.Services;
+
+        Assert.Equal(2, await InDbAsync(second, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(4, await InDbAsync(second, db => db.CompanyRoles.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(3, await InDbAsync(second, db => db.Memberships.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_restart_puts_a_removed_seed_user_back_in_the_second_company()
+    {
+        var database = UniqueDatabase();
+        await using var first = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = first.Services;
+        await InDbAsync(first, db => db.Database.ExecuteSqlAsync(
+            $"""DELETE FROM "Memberships" WHERE "CompanyId" IN (SELECT "Id" FROM "Companies" WHERE "Name" = 'Beta')""", TestContext.Current.CancellationToken));
+        Assert.Equal([("Development", "admin")], await MembershipsOfAsync(first, first.SeedEmail));
+
+        await using var second = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = second.Services;
+
+        Assert.Equal([("Beta", "user"), ("Development", "admin")], await MembershipsOfAsync(second, second.SeedEmail));
+        Assert.Equal(2, await InDbAsync(second, db => db.Companies.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task A_restart_puts_a_removed_seed_user_back_in_the_first_company_too()
+    {
+        var database = UniqueDatabase();
+        await using var first = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = first.Services;
+        await InDbAsync(first, db => db.Database.ExecuteSqlAsync(
+            $"""DELETE FROM "Memberships" WHERE "CompanyId" IN (SELECT "Id" FROM "Companies" WHERE "Name" = 'Development')""", TestContext.Current.CancellationToken));
+
+        await using var second = Factory(database).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = second.Services;
+
+        Assert.Equal([("Beta", "user"), ("Development", "admin")], await MembershipsOfAsync(second, second.SeedEmail));
+    }
+
+    [Fact]
+    public async Task The_unverified_seed_user_is_not_put_in_the_second_company()
+    {
+        await using var factory = WithSecondUser(Factory()).WithSetting(DevUserSeeder.SecondOrgNameKey, "Beta");
+        _ = factory.Services;
+
+        Assert.Equal(("Development", "user"), await MembershipOfAsync(factory, UnverifiedEmail));
+        Assert.Equal([("Beta", "user"), ("Development", "admin")], await MembershipsOfAsync(factory, factory.SeedEmail));
     }
 
     [Fact]

@@ -66,10 +66,10 @@ describe('TeamPage (spec 0010)', () => {
     expect(has(fixture, '[data-testid="team-loading"]')).toBe(false);
   });
 
-  it('"Remove" asks first, with the sentence that the account will be deleted, and puts the focus on "Cancel"', async () => {
+  it('"Remove" asks first, with the sentence that the account is deleted only with its last company, and puts the focus on "Cancel"', async () => {
     const opened = await openWithMembers();
     await askToRemove(opened);
-    expect(pageText(opened.fixture)).toContain("This person's account will be deleted.");
+    expect(pageText(opened.fixture)).toContain('This person loses access to this company. Their account is deleted if this company is their last.');
     expect(has(opened.fixture, '[data-testid="remove-confirmation"][role="alert"]')).toBe(true);
     expect(focused()).toBe('remove-cancel');
     opened.ctrl.expectNone(workerUrl);
@@ -94,7 +94,7 @@ describe('TeamPage (spec 0010)', () => {
     clickOn(opened.fixture, '[data-testid="remove-cancel"]');
     opened.fixture.detectChanges();
     await settle(opened.fixture);
-    expect(pageText(opened.fixture)).not.toContain("This person's account will be deleted.");
+    expect(pageText(opened.fixture)).not.toContain('This person loses access to this company.');
     expect(focused()).toBe('remove');
     opened.ctrl.expectNone(workerUrl);
   });

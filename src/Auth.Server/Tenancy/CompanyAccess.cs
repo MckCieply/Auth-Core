@@ -8,13 +8,14 @@ namespace Auth.Server.Tenancy;
 public readonly record struct Access(TenantContext? Caller, IResult? Failure);
 
 /// <summary>
-/// The permission check of the company API (spec 0005 → General rules). The token proves who the caller is; what they
-/// may do is read from the database on every call: their membership, company and role at this moment.
+/// The permission check of the company API (spec 0005 → General rules; spec 0015 → Company API). The token proves who the caller is and in
+/// which company it was issued (its <c>org_id</c>); what they may do there is read from the database on every call: their membership, company
+/// and role in the token's company at this moment. The space a sign-in would land in now plays no part.
 /// <list type="bullet">
-/// <item>The caller's space is personal (spec 0010): <c>403 forbidden</c>, before the rules below.</item>
+/// <item>The token's space is personal (spec 0010): <c>403 forbidden</c>, before the rules below.</item>
 /// <item>The database grants the permission: the call proceeds, whatever the token says.</item>
-/// <item>It does not, but the token claims it: the caller was demoted or removed since the token was issued, and
-/// the answer is <c>403 permissions_changed</c>, so that the frontend refreshes and redraws.</item>
+/// <item>It does not (or the caller is no member of the token's company any more), but the token claims it: the caller was demoted or
+/// removed since the token was issued, and the answer is <c>403 permissions_changed</c>, so that the frontend refreshes and redraws.</item>
 /// <item>Neither grants it: <c>403 forbidden</c>.</item>
 /// </list>
 /// </summary>
@@ -42,7 +43,10 @@ public static class CompanyAccess
             return new Access(null, ApiResults.Error(TenancyErrors.Forbidden));
         }
 
-        var tenant = await memberships.ReadAsync(userId, http.RequestAborted);
+        // The company of the token; a token without a usable org_id names none, so the caller has no membership to read.
+        var tenant = Guid.TryParse(http.User.FindFirst(TenantClaims.OrgId)?.Value, out var orgId)
+            ? await memberships.ReadInCompanyAsync(userId, orgId, http.RequestAborted)
+            : null;
 
         // A personal space is no company (spec 0010). Read from the database, whatever the token says, and also where no permission is needed:
         // a check on permissions alone would let a private account through GET /auth/org.

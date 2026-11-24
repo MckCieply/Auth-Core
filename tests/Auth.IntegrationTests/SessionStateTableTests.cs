@@ -196,7 +196,7 @@ public sealed class SessionStateTableTests : TenancyTestBase
     private static ClaimsPrincipal PrincipalOf(HttpContext http, FakeTimeProvider clock, DateTimeOffset? start)
     {
         var user = new ApplicationUser { Id = Guid.NewGuid(), SecurityStamp = "stamp" };
-        var tenant = new TenantContext(user.Id, Guid.NewGuid(), "Acme", Guid.NewGuid(), "admin", ["org:manage"], false, CompanyKind.Organization);
+        var tenant = new TenantContext(user.Id, Guid.NewGuid(), "Acme", Guid.NewGuid(), "admin", ["org:manage"], false, CompanyKind.Organization, DateTimeOffset.UnixEpoch);
         return SessionPrincipal.Create(http, user, tenant, "https://api.test", clock, start);
     }
 

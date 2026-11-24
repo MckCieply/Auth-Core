@@ -2,7 +2,7 @@
 
 A self-hosted authentication service in .NET: sign-in, companies, roles and token refresh, ready to put in front of any product.
 
-> **Version 0.1.0.** Image `ghcr.io/mckcieply/auth-core:0.1.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
+> **Version 0.3.0.** Image `ghcr.io/mckcieply/auth-core:0.3.0` (public, `linux/amd64`). See the [changelog](CHANGELOG.md).
 
 ## What it is
 
@@ -56,6 +56,7 @@ needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_S
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
 The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
 `providers: [google, microsoft]` is optional too (no key, no provider): it offers "Continue with Google" and "Continue with Microsoft", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token (spec 0011).
+`org_creation: self-service` is optional as well (the default is `off`): a signed-in person may create another company (`POST /auth/orgs`, off until the key is there), and `GET /auth/options` tells your screens whether to offer it. It needs no address; the number of companies an account may belong to before it can create another (joined ones count too) is `AUTH_MAX_COMPANIES_PER_ACCOUNT` (20 by default; spec 0016).
 
 ### 2. Run it on your server
 
@@ -98,13 +99,13 @@ def add(user: Principal = Depends(auth.require_permission("documents:write"))):
     return {"company": user.org_id}   # every query is filtered by user.org_id
 ```
 
-The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product `samples/notes-api`. A backend
+The guide is [`docs/integration/python-fastapi.md`](docs/integration/python-fastapi.md), with the sample product [`samples/notes-api`](samples/notes-api/README.md) (its section "Multi-tenancy, step by step" shows how it serves several companies per account). A backend
 in another language checks the JWT with any library that reads a JWKS.
 
 ### 5. Connect your frontend
 
 An Angular app copies three files (a service, an interceptor and a guard) and adds the screens the mail links open. The guide is
-[`docs/integration/angular.md`](docs/integration/angular.md), with the working app `samples/notes-web`.
+[`docs/integration/angular.md`](docs/integration/angular.md), with the working app [`samples/notes-web`](samples/notes-web/README.md) (its section "Several companies" shows the company picker).
 
 The API is described in OpenAPI at `/auth/openapi/v1.json`.
 
@@ -124,7 +125,9 @@ scripts/e2e-lockout.sh          # lockout → cooldown → timing medians (~2.5 
 scripts/e2e-email.sh            # verification → reset → sessions end → mail outage (~1 min)
 scripts/e2e-tenancy.sh          # CLI → invitations → roles and safety rules → removal (~2 min)
 scripts/e2e-signup.sh           # sign-up → link → company → first admin; an account that exists; an invitation first; a removed member's address signs up again as a new address (~6 min)
-scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, the invitation move, self-deletion, removal (~3 min)
+scripts/e2e-private.sh          # private sign-up, /auth/me, the company API refused, an invitation that keeps the space and the opt-in move, self-deletion, removal (~3 min)
+scripts/e2e-orgs.sh             # several companies: list, switch, refresh, sign-in lands in the company used last, an invitation of another company joins, removal keeps the account
+scripts/e2e-orgs-create.sh      # creating another company: POST /auth/orgs, switch into it, delete it; a private person cannot delete the account while in one
 docker compose -f deploy/docker-compose.yml --env-file .env up -d   # recreates auth with the rate limits on
 scripts/e2e-hardening.sh        # limits, headers, the outage, company deletion, the audit log (~6 min)
 docker compose -f deploy/docker-compose.yml --env-file .env down -v
@@ -144,8 +147,8 @@ auth() { docker compose -p "${COMPOSE_PROJECT_NAME:?set it to the project of you
 auth create-org --name "Acme"                                     # prints the company id
 auth invite --org <id> --email boss@acme.test --role admin
 auth list-orgs                                                    # id, name, number of members
-auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted
-auth delete-org --org <id> --confirm "Acme"                       # deletes the company and its members' accounts
+auth remove-member --org <id> --email worker@acme.test [--force]  # --force overrides last_manager; the account is deleted only when that was its last space, else kept
+auth delete-org --org <id> --confirm "Acme"                       # deletes the company; members with no other space lose their accounts too
 ```
 
 The commands work on the database with the service's configuration and never migrate it. A product's permissions and default roles come from its manifest

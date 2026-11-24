@@ -5,7 +5,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { TimeoutError, lastValueFrom } from 'rxjs';
 import { vi } from 'vitest';
-import { adminMe, holdToken, settle } from '../../testing/helpers';
+import { adminMe, answerOrgs, holdToken, settle } from '../../testing/helpers';
 import { REQUEST_TIMEOUT_MS, authInterceptor, wantsToken } from './auth.interceptor';
 import { AuthService } from './auth.service';
 
@@ -76,7 +76,10 @@ describe('authInterceptor', () => {
     await holdToken(auth, ctrl, 'old');
   });
 
-  afterEach(() => ctrl.verify());
+  afterEach(() => {
+    answerOrgs(ctrl);
+    ctrl.verify();
+  });
 
   describe('which requests get the token', () => {
     it.each(['/api/notes', '/auth/me', '/auth/org', '/auth/org/members'])('sends it to %s', async (url) => {

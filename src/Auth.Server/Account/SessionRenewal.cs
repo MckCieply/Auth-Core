@@ -57,6 +57,6 @@ internal static class SessionRenewal
             transaction,
             whenGone: () => Task.FromResult(ApiResults.Error(TenancyErrors.SessionRequired)),
             whenCommitted,
-            new SessionValues(caller.Session.Start, caller.Session.ConfirmedUntil));
+            session: new SessionValues(caller.Session.Start, caller.Session.ConfirmedUntil));
     }
 }

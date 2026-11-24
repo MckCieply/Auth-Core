@@ -1,7 +1,8 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, Injector, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { firstValueFrom, timeout } from 'rxjs';
-import { ProviderName, providerNamesOf } from '../account-api';
+import { AccountApi, OrgEntry, ProviderName, providerNamesOf } from '../account-api';
 
 /** What GET /auth/me answers. The app never decodes the access token: it asks. */
 export interface Me {
@@ -30,7 +31,7 @@ export type Failure =
   | { kind: 'already_registered' }
   | { kind: 'signup_disabled' }
   | { kind: 'wrong_password' }
-  | { kind: 'private_account_exists' }
+  | { kind: 'private_account_exists' } // spec 0017: the server no longer sends it; kept for an older server
   | { kind: 'invalid_request' }
   | { kind: 'invalid_ticket' }
   | { kind: 'no_email' }
@@ -40,6 +41,10 @@ export type Failure =
   | { kind: 'reauth_failed' }
   | { kind: 'password_required' }
   | { kind: 'reauth_required' }
+  | { kind: 'org_creation_disabled' }
+  | { kind: 'company_limit_reached' }
+  | { kind: 'company_member' }
+  | { kind: 'permissions_changed' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'too_many_requests'; retryAfterSeconds: number }
   | { kind: 'other' };
@@ -51,9 +56,19 @@ export type Failure =
 export type RefreshResult = 'ok' | 'rejected' | 'unavailable' | 'limited';
 
 /** The messages of the bar above the screens. */
-export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden' | 'wait';
+export type AuthNotice = 'unreachable' | 'tryLater' | 'forbidden' | 'wait' | 'switched';
 
 export type LoginResult = { ok: true } | { ok: false; failure: Failure };
+
+/** What `switchTo` came to: the session is in the other space; the account is not a member there any more; the session is over; nothing changed. */
+export type SwitchResult = 'switched' | 'gone' | 'signed-out' | 'failed';
+
+/**
+ * What `createCompany` came to (spec 0016); 'created' means the session is now in the new company. 'changed': the POST answered
+ * `permissions_changed` (the caller asks for the list again). 'gone': the switch found the new company gone (the list is already asked again).
+ * 'switch-failed': the company was created but the switch did not go through (the caller asks for the list again). 'failed': anything else.
+ */
+export type CreateCompanyResult = 'created' | 'limit' | 'disabled' | 'invalid' | 'changed' | 'gone' | 'switch-failed' | 'failed';
 
 /** The next screen of a provider round trip, from POST /auth/providers/exchange (spec 0011). */
 export type ProviderNext =
@@ -63,7 +78,7 @@ export type ProviderNext =
 /** `next: null`: the exchange signed the person in. */
 export type ExchangeResult = { ok: true; next: ProviderNext | null } | { ok: false; failure: Failure };
 
-const REFRESH_TIMEOUT_MS = 10_000;
+export const REFRESH_TIMEOUT_MS = 10_000;
 const DEFAULT_WAIT_SECONDS = 60;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -124,6 +139,12 @@ export function failureOf(error: unknown): Failure {
   }
   if (error.status === 409 && code === 'private_account_exists') {
     return { kind: 'private_account_exists' };
+  }
+  if (error.status === 403 && (code === 'org_creation_disabled' || code === 'company_member' || code === 'permissions_changed')) {
+    return { kind: code };
+  }
+  if (error.status === 409 && code === 'company_limit_reached') {
+    return { kind: 'company_limit_reached' };
   }
   return providerFailureOf(error.status, code);
 }
@@ -229,15 +250,25 @@ function asMe(body: unknown): Me | null {
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
+  private readonly api = inject(AccountApi);
+  private readonly injector = inject(Injector);
   private readonly accessToken = signal<string | null>(null);
   private readonly meState = signal<Me | null>(null);
   private readonly noticeState = signal<AuthNotice | null>(null);
   private readonly noticeSecondsState = signal(0);
+  private readonly noticeNameState = signal<string | null>(null);
+  private readonly orgsState = signal<OrgEntry[]>([]);
+  private readonly orgChangesState = signal(0);
   private refreshing: Promise<RefreshResult> | null = null;
+  // The call of /auth/switch that is on its way. It spends the same refresh cookie as a refresh, so the two never run together: a refresh
+  // asked meanwhile waits for it (and takes its token), a switch asked while a refresh runs waits for that.
+  private switching: Promise<SwitchResult> | null = null;
   // The /auth/me that is on its way, and the session and token it was asked for.
   private asking: { generation: number; token: string | null; answer: Promise<boolean> } | null = null;
   // Counts the sessions that ended in this tab: an answer that was on its way when the person signed out is never used.
   private generation = 0;
+  // Counts the switches this tab made: a refresh that finds another company while one of them runs is not news from another tab.
+  private switches = 0;
 
   /** The access token, or null when nobody is signed in. Held here, in memory, and nowhere else. */
   readonly token = this.accessToken.asReadonly();
@@ -247,6 +278,12 @@ export class AuthService {
   readonly notice = this.noticeState.asReadonly();
   /** The number of the 'wait' notice: the seconds the server asked the person to wait. */
   readonly noticeSeconds = this.noticeSecondsState.asReadonly();
+  /** The spaces of the account, as the last GET /auth/orgs listed them (empty before the first answer). */
+  readonly orgs = this.orgsState.asReadonly();
+  /** Goes up by one whenever the company of the session changed, here or in another tab: the notes page reloads on it. */
+  readonly orgChanges = this.orgChangesState.asReadonly();
+  /** The space the 'switched' notice names; null for the personal space. */
+  readonly noticeName = this.noticeNameState.asReadonly();
 
   /** Run once before the first route is resolved (app.config.ts): is there a session to resume? */
   async start(): Promise<void> {
@@ -258,6 +295,9 @@ export class AuthService {
       // The same ten seconds as the refresh: the app must not sit blank behind the initializer. Not when the interceptor has
       // already set a bar of its own for this /auth/me (503 auth_unavailable: "Try again shortly."): that one is the better one.
       this.noticeState.set('unreachable');
+    }
+    if (result === 'ok' && this.meState() !== null) {
+      void this.loadOrgs();
     }
   }
 
@@ -344,6 +384,8 @@ export class AuthService {
     // Signed in once there is a token, even when this answer cannot be read: the notes screen asks for the person again.
     // Ten seconds, like the start: a sign-in must not hang behind an /auth/me that never answers.
     await this.loadMe(REFRESH_TIMEOUT_MS);
+    // The picker of the account bar: not waited for, a sign-in does not hang behind it.
+    void this.loadOrgs();
     return { ok: true };
   }
 
@@ -389,12 +431,29 @@ export class AuthService {
    * Exchanges the refresh cookie for a new access token. Callers that ask while a refresh runs get that refresh:
    * there is never more than one request at a time. A refresh that started before the person signed out hands its callers
    * 'rejected' when it ends, whatever the cookie said: the session it was for is gone (the interceptor then leaves the page alone).
+   * A switch that is on its way (spec 0015) spends the same refresh cookie: the refresh waits for it and takes its token ('ok'), or its end
+   * of the session ('rejected'); when the switch renewed nothing (404, 503) the refresh goes on to its own request.
    */
   refresh(): Promise<RefreshResult> {
-    this.refreshing ??= this.exchange().finally(() => {
+    this.refreshing ??= this.renew().finally(() => {
       this.refreshing = null;
     });
     return this.refreshing;
+  }
+
+  private async renew(): Promise<RefreshResult> {
+    const asked = this.generation;
+    while (this.switching !== null) {
+      const switched = await this.switching;
+      if (switched === 'switched') {
+        return 'ok';
+      }
+      // The session this refresh was asked in is over. A switch of an older session that ends 'signed-out' leaves a newer one alone.
+      if (switched === 'signed-out' && this.generation !== asked) {
+        return 'rejected';
+      }
+    }
+    return this.exchange();
   }
 
   /**
@@ -432,6 +491,106 @@ export class AuthService {
     }
   }
 
+  /** Asks GET /auth/orgs and keeps the list; an answer that cannot be read, or that comes after the session ended, leaves the last list. */
+  async loadOrgs(): Promise<void> {
+    const started = this.generation;
+    const outcome = await this.api.listOrgs();
+    if (outcome.ok && this.generation === started) {
+      this.orgsState.set(outcome.value);
+    }
+  }
+
+  /**
+   * Moves the session to another space of the account (POST /auth/switch, spec 0015): the answer is a renewed token for the chosen space, so
+   * it is kept as the same session (the generation does not change) and the person, the list and the page follow it. `404`: the account is
+   * not a member there any more, the list is asked again. `401`: the session cannot go on; /login opens, and there is no refresh and no
+   * second try, because this call spends the refresh token itself.
+   */
+  async switchTo(orgId: string): Promise<SwitchResult> {
+    const started = this.generation;
+    // A refresh or another switch that is on its way spends the same refresh cookie, and its token would replace the switched one when it
+    // lands: wait for it. Only one of them holds the cookie at a time.
+    while (this.refreshing !== null || this.switching !== null) {
+      await (this.switching ?? this.refreshing);
+    }
+    if (this.generation !== started) {
+      return 'signed-out'; // the refresh found the session over
+    }
+    // The slot is held for the call and the keeping of its token only: /auth/me and the list below may need a refresh of their own.
+    const call = this.callSwitch(orgId, started);
+    // The slot's promise is only ever awaited by a waiter; `call` is awaited below, so a rejection reaches the caller of `switchTo` once.
+    // The catch keeps the copy kept in the slot from being a second, unobserved rejection when no waiter joins.
+    this.switching = call
+      .finally(() => {
+        this.switching = null;
+      })
+      .catch(() => 'failed');
+    const result = await call;
+    if (result === 'gone') {
+      await this.loadOrgs();
+    } else if (result === 'switched') {
+      await this.loadMe();
+      await this.loadOrgs();
+      this.orgChangesState.update((count) => count + 1);
+    }
+    return result;
+  }
+
+  /**
+   * Creates another company for the account (POST /auth/orgs, spec 0016) and moves the session into it with `switchTo`, as the picker does.
+   * 'limit', 'disabled', 'invalid' and 'changed' (`permissions_changed`: the caller refreshes) mean nothing was created and nothing was
+   * switched. After the `201` a `switchTo` that does not end in the company is 'gone' (a `404`), 'switch-failed' (any other failed answer) or
+   * 'failed' (the session ended: `switchTo` has opened /login itself); the company exists then and the next list shows it.
+   */
+  async createCompany(name: string): Promise<CreateCompanyResult> {
+    const outcome = await this.api.createOrg(name);
+    if (!outcome.ok) {
+      switch (outcome.failure.kind) {
+        case 'company_limit_reached':
+          return 'limit';
+        case 'org_creation_disabled':
+          return 'disabled';
+        case 'invalid_request':
+          return 'invalid';
+        case 'permissions_changed':
+          return 'changed';
+        default:
+          return 'failed';
+      }
+    }
+    const result = await this.switchTo(outcome.value.id);
+    if (result === 'switched') {
+      return 'created';
+    }
+    if (result === 'gone') {
+      return 'gone';
+    }
+    return result === 'failed' ? 'switch-failed' : 'failed';
+  }
+
+  /** The request of `switchTo` and what the session does with its answer; 'switched' means the new token is kept. */
+  private async callSwitch(orgId: string, started: number): Promise<SwitchResult> {
+    const outcome = await this.api.switchOrg(orgId);
+    if (this.generation !== started) {
+      return 'signed-out'; // the session this was for ended while the call was away: its token is never kept
+    }
+    if (outcome.result === 'rejected') {
+      this.dropSession();
+      void this.injector.get(Router).navigateByUrl('/login');
+      return 'signed-out';
+    }
+    if (outcome.result === 'gone') {
+      return 'gone';
+    }
+    if (outcome.result === 'failed') {
+      return 'failed';
+    }
+    this.switches += 1;
+    this.accessToken.set(outcome.token);
+    this.noticeState.set(null);
+    return 'switched';
+  }
+
   /** Counts the sessions that ended in this tab. A request that was sent in an older one is never sent again with a newer token. */
   get session(): number {
     return this.generation;
@@ -441,11 +600,18 @@ export class AuthService {
     this.generation += 1;
     this.accessToken.set(null);
     this.meState.set(null);
+    this.orgsState.set([]);
   }
 
   showNotice(notice: AuthNotice, seconds = 0): void {
     this.noticeSecondsState.set(seconds);
     this.noticeState.set(notice);
+  }
+
+  /** The bar says that another tab moved the session to a space (`null`: the personal space). */
+  showSwitchedNotice(name: string | null): void {
+    this.noticeNameState.set(name);
+    this.noticeState.set('switched');
   }
 
   clearNotice(): void {
@@ -468,6 +634,11 @@ export class AuthService {
         return 'unavailable';
       }
       this.accessToken.set(token);
+      const before = this.meState()?.org_id ?? null;
+      if (before !== null) {
+        // Not waited for: the refresh is done, and a caller that is waiting for a token must not wait for a second request.
+        void this.noticeAnotherTab(before, started);
+      }
       return 'ok';
     } catch (error) {
       if (error instanceof HttpErrorResponse && error.status === 401) {
@@ -482,5 +653,27 @@ export class AuthService {
       }
       return 'unavailable';
     }
+  }
+
+  /**
+   * The refresh cookie is shared by every tab of the browser, so another tab that switched company moves this session too, at its next
+   * refresh. After a refresh, `/auth/me` says which company the token is for: when it is not the one the page showed, the notes are read again,
+   * the list is asked again and the bar says so. A switch made in this tab is not news.
+   */
+  private async noticeAnotherTab(before: string, started: number): Promise<void> {
+    const switches = this.switches;
+    if (!(await this.loadMe()) || this.generation !== started || this.switches !== switches) {
+      return;
+    }
+    const person = this.meState();
+    if (person === null || person.org_id === before) {
+      return;
+    }
+    await this.loadOrgs();
+    if (this.generation !== started) {
+      return;
+    }
+    this.orgChangesState.update((count) => count + 1);
+    this.showSwitchedNotice(person.org_kind === 'personal' ? null : person.org_name);
   }
 }

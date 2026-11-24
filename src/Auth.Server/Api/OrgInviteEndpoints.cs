@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Identity;
 namespace Auth.Server.Api;
 
 /// <summary>
-/// The invitations of the caller's company (spec 0005 → Company API): list, send, resend, cancel. All need
+/// The invitations of the token's company (spec 0005 → Company API): list, send, resend, cancel. All need
 /// <c>members:manage</c>, checked against the database.
 /// </summary>
 public static class OrgInviteEndpoints

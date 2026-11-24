@@ -7,11 +7,13 @@ namespace Auth.Server.Tenancy;
 /// <summary>
 /// Deletes a company (spec 0008 → Company deletion): the operator's <c>delete-org</c> and the company API's
 /// <c>DELETE /auth/org</c> both call it. Everything happens under the company lock, in one transaction. The queued mails of the company's
-/// invitations and the invitations go first, in the order the mail sender locks them (the mail row, then the invitation). Every member loses
-/// the only space they have, the caller included, so their accounts are deleted next (spec 0010, <see cref="AccountDeletion"/>: the
-/// memberships, sessions and links go with them), then the roles and the company (the keys from memberships and invitations to roles are
-/// <c>Restrict</c>, so a single delete of the company would stop at them). A member who later presents a token: <c>403 permissions_changed</c>
-/// at the company API, <c>401 invalid_grant</c> at refresh, the <c>401</c> of an unknown address at login.
+/// invitations and the invitations go first, in the order the mail sender locks them (the mail row, then the invitation). Then every membership
+/// of the company is deleted. A member who has no other space left, the caller included, loses the only space they had, so their account is
+/// deleted next (spec 0010, <see cref="AccountDeletion"/>: the sessions and links go with it); a member who belongs to another space keeps the
+/// account (spec 0015). Then the roles and the company (the keys from memberships and invitations to roles are <c>Restrict</c>, so the
+/// memberships must go before the roles, and a single delete of the company would stop at them). A member who later presents a token of
+/// this company: <c>403 permissions_changed</c> at the company API, <c>401 invalid_grant</c> at refresh; the <c>401</c> of an unknown address
+/// at login when the account is gone.
 /// </summary>
 public sealed class CompanyDeletionService(AuthDbContext db, CompanyGuard guard, ManifestHolder manifest, AccountDeletion deletion, AuditLog audit)
 {
@@ -75,10 +77,21 @@ public sealed class CompanyDeletionService(AuthDbContext db, CompanyGuard guard,
             .ExecuteDeleteAsync(cancellationToken);
         var invitations = await db.Invites.Where(i => i.CompanyId == companyId).ExecuteDeleteAsync(cancellationToken);
 
-        // Every member loses the only space they have, the caller included: their accounts are deleted (spec 0010), one row each, in one set
-        // of statements. Under the company lock only, never an address lock per member (spec 0010 → Locks): a large company could not be
-        // deleted otherwise. Their memberships go with them.
-        await deletion.DeleteAsync(members, AccountDeletionReason.OrgDeleted, current, cancellationToken);
+        // Every membership of the company goes first (before the roles: a membership's key to its role restricts). A member left with no
+        // other space, the caller included, then has their account deleted (spec 0010), one row each, in one set of statements, naming this
+        // company; a member who has another space keeps the account and the sessions there (spec 0015). Under the company lock only, never
+        // an address lock per member (spec 0010 → Locks): a large company could not be deleted otherwise.
+        await db.Memberships.Where(m => m.CompanyId == companyId).ExecuteDeleteAsync(cancellationToken);
+        var keepers = await db.Memberships.AsNoTracking()
+            .Where(m => members.Contains(m.UserId))
+            .Select(m => m.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        List<Guid> doomed = [.. members.Except(keepers)];
+        if (doomed.Count > 0)
+        {
+            await deletion.DeleteAsync(doomed, AccountDeletionReason.OrgDeleted, current, companyId, cancellationToken);
+        }
 
         var roles = await db.CompanyRoles.Where(r => r.CompanyId == companyId).ExecuteDeleteAsync(cancellationToken);
         await db.Companies.Where(c => c.Id == companyId).ExecuteDeleteAsync(cancellationToken);

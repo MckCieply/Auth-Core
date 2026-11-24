@@ -15,6 +15,18 @@ public sealed record MeResponse(
 /// <summary>Response of <c>GET /auth/org</c>.</summary>
 public sealed record OrgResponse(Guid Id, string Name);
 
+/// <summary>Response of <c>GET /auth/orgs</c>: every space the caller belongs to.</summary>
+public sealed record OrgListResponse(IReadOnlyList<OrgListItem> Orgs);
+
+/// <summary>
+/// One space of <c>GET /auth/orgs</c>: <c>kind</c> is <c>organization</c> or <c>personal</c> as <c>org_kind</c> of <c>GET /auth/me</c> has it (a
+/// private account's space is named <c>private</c>, as is its role); <c>current</c>: this is the space the token is for.
+/// </summary>
+public sealed record OrgListItem(Guid Id, string Name, string Kind, RoleRef Role, bool Current);
+
+/// <summary>Request of <c>POST /auth/orgs</c> (spec 0016): the new company's name. Documents the body for OpenAPI; the endpoint reads it itself.</summary>
+public sealed record CreateOrgRequest(string Name);
+
 /// <summary>Request of <c>PATCH /auth/org</c>.</summary>
 public sealed record RenameOrgRequest(string Name);
 
@@ -45,12 +57,16 @@ public sealed record SendInviteRequest(string Email, Guid RoleId);
 /// <summary>Request of <c>POST /auth/invites/preview</c>.</summary>
 public sealed record PreviewInviteRequest(string Token);
 
-/// <summary>Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a private account.</summary>
-public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount);
+/// <summary>
+/// Response of <c>POST /auth/invites/preview</c>; <c>has_private_account</c> (spec 0010): the address has a personal space; <c>has_account</c>
+/// (spec 0017): it has an account of any kind; <c>org_id</c>: the invited company.
+/// </summary>
+public sealed record InvitePreviewResponse(string OrgName, string Email, string Role, bool HasPrivateAccount, bool HasAccount, Guid OrgId);
 
 /// <summary>
 /// Request of <c>POST /auth/invites/accept</c>: the password of a new account (not used for an account that exists), and
-/// <c>leave_private_account</c>, a JSON boolean, which a private account needs to move (spec 0010).
+/// <c>leave_private_account</c>, a JSON boolean, with which a private account moves into the company on purpose (spec 0010; since spec 0017
+/// a private account joins without it and keeps its personal space).
 /// </summary>
 public sealed record AcceptInviteRequest(string Token, string? Password = null, bool? LeavePrivateAccount = null);
 

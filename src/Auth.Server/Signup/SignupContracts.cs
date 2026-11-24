@@ -7,9 +7,10 @@ namespace Auth.Server.Signup;
 
 /// <summary>
 /// Response of <c>GET /auth/options</c>: <c>signup</c> (spec 0009) and <c>private_signup</c> (spec 0010), each following its switch, and
-/// <c>providers</c> (spec 0011), the offered providers in the manifest's order, <c>[]</c> when none. A client ignores members it does not know.
+/// <c>providers</c> (spec 0011), the offered providers in the manifest's order, <c>[]</c> when none, and <c>org_creation</c> (spec 0016),
+/// <c>self-service</c> while a signed-in account may create another company and <c>off</c> otherwise. A client ignores members it does not know.
 /// </summary>
-public sealed record OptionsResponse(string Signup, string PrivateSignup, IReadOnlyList<string> Providers);
+public sealed record OptionsResponse(string Signup, string PrivateSignup, IReadOnlyList<string> Providers, string OrgCreation);
 
 /// <summary>
 /// Request of <c>POST /auth/signup</c>: <c>kind</c> is <c>organization</c> (the default) or <c>private</c> (spec 0010); <c>company_name</c> is

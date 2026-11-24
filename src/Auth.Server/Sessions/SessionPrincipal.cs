@@ -51,6 +51,9 @@ public static class SessionPrincipal
         // The company, the role and what it grants, read from the database now.
         TenantClaims.Apply(identity, tenant);
 
+        // The space this session signed in to and when the account joined it: the refresh token only (no destination), spec 0015.
+        SessionCompany.Apply(identity, tenant);
+
         var principal = new ClaimsPrincipal(identity);
         principal.SetResources(audience);
         // `sub` and the tenancy claims make the access token; the session start stays in the refresh token only.

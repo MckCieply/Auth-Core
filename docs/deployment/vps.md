@@ -32,14 +32,14 @@ You need three files and nothing else from the repository: the compose file, the
 sudo mkdir -p /srv/auth-core && cd /srv/auth-core
 sudo chown "$USER" /srv/auth-core
 mkdir -p deploy/postgres-init
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/docker-compose.prod.yml -o deploy/docker-compose.prod.yml
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.3.0/deploy/docker-compose.prod.yml -o deploy/docker-compose.prod.yml
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.3.0/deploy/postgres-init/10-auth-app-role.sh -o deploy/postgres-init/10-auth-app-role.sh
 chmod 644 deploy/postgres-init/10-auth-app-role.sh
-curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.1.0/deploy/.env.prod.example -o .env
+curl -fsSL https://raw.githubusercontent.com/MckCieply/Auth-Core/v0.3.0/deploy/.env.prod.example -o .env
 chmod 600 .env
 ```
 
-(Or clone the repository at the tag and use its `deploy/` directory.) The image `ghcr.io/mckcieply/auth-core:0.1.0` is public; `docker compose` pulls it.
+(Or clone the repository at the tag and use its `deploy/` directory.) The image `ghcr.io/mckcieply/auth-core:0.3.0` is public; `docker compose` pulls it.
 
 ## 2. The keys
 
@@ -69,7 +69,7 @@ Edit `.env`. Every variable is explained in the file; these you must set:
 | --- | --- |
 | `POSTGRES_PASSWORD` | a long random value, letters and digits only (`openssl rand -hex 32`): the password of the superuser, which only you use (backups, restores). Empty in the example: compose refuses to start until you fill it |
 | `AUTH_DB_APP_PASSWORD` | a second long random value, letters and digits only, at least 16 (`openssl rand -hex 32` again): the password of the database role Auth-Core connects as (`AUTH_DB_APP_USER`, `auth_app`; leave it). Empty in the example too |
-| `AUTH_CORE_VERSION` | `0.1.0` |
+| `AUTH_CORE_VERSION` | `0.3.0` |
 | `AUTH_ISSUER` | `https://app.example.com/auth`: the origin your users see plus `/auth`. Your backend's package must be given the same value |
 | `AUTH_AUDIENCE` | the audience your backend checks, for example `my-product-api` |
 | `AUTH_KEYS_DIR`, `AUTH_MANIFEST` | the two paths above |
@@ -245,7 +245,7 @@ the screen of your frontend that finishes a sign-up (`https://app.example.com/co
 (a restart does not read it again); after changing the manifest run `$C restart auth`. A visitor then gives an email address and a company name; the mail holds a link to your screen, where the person chooses a password and
 confirms the company's name; the company is made and the person is its first admin, with the first default role of your manifest that holds `"*"` (else the
 first that holds `members:manage`), and is signed in at once: `POST /auth/signup/complete` answers as a login does (the access token and the refresh cookie), so your screen
-opens the product and not the sign-in screen. Any account under the address, of either kind, gets a mail that says so, with no link; every address gets the same answer. The block `private` of the manifest (`signup: self-service` and `permissions`) turns private sign-up on (spec 0010): a person signs up alone, with an email address only, into a space nobody else joins; it needs the same `AUTH_FRONTEND_SIGNUP_URL`. Removing a member, or deleting a company, deletes the accounts of the people concerned (spec 0010).
+opens the product and not the sign-in screen. Any account under the address, of either kind, gets a mail that says so, with no link; every address gets the same answer. The block `private` of the manifest (`signup: self-service` and `permissions`) turns private sign-up on (spec 0010): a person signs up alone, with an email address only, into a space nobody else joins; it needs the same `AUTH_FRONTEND_SIGNUP_URL`. Removing a member, or deleting a company, deletes the account of each person concerned who loses their last space (spec 0010); a person who belongs to another space keeps the account (spec 0015).
 `GET /auth/options` tells your screens whether to offer it. A manifest that asks for `self-service` without the address leaves sign-up off, logs a warning
 at start and makes `/auth/health` say `Degraded`. Sign-up mails any well-formed address that passes the invitation rule, with the company name the visitor
 typed in the body: it is limited to one mail a minute and five an hour per address and, counted with the other mail requests of a client address, ten a minute by default, there is no CAPTCHA, and the
@@ -290,6 +290,7 @@ something is wrong". Then sign in through your frontend and call one product end
 - **Limits.** 30 logins, 60 refreshes, 10 mail requests, 20 invitation and sign-up link requests and 300 other requests a minute per client address, answered `429 too_many_requests`
   with `Retry-After`. An office behind one NAT shares them: raise `AUTH_RATE_LIMIT_LOGIN` for it. A person who fails ten times is locked for a minute or more
   (`429 too_many_attempts`).
+- **Companies per account.** `AUTH_MAX_COMPANIES_PER_ACCOUNT` (setting `Auth:Tenancy:MaxCompaniesPerAccount`) is how many companies an account may belong to before it can create another (joined ones count too); a whole number from 1 to 1000, blank means 20. Any other value stops the start and the log names the setting.
 - **Backups.** A nightly dump and a restore that you have tried: [`docs/operations/backup.md`](../operations/backup.md).
 - **The audit log** is the table `audit_events`, kept 90 days by default (`AUTH_AUDIT_RETENTION_DAYS`) and read with SQL: the queries are in the backup runbook.
 - **The health check.** The `auth` container has one: `docker compose ps` shows `healthy` after 30 to 60 seconds. The image has no shell and no curl, so the check runs the binary with `--health-probe` (`dotnet Auth.Server.dll --health-probe`): one request to `/auth/health` on the container's own loopback address and port, exit code 0 for a `2xx` (`200`). It is liveness only: `Degraded` (see step 5) still passes, and a database that is down does not show in it (a login does; step 5). `unhealthy` therefore means the process does not answer; Docker only marks it, and `$C logs auth` says why.

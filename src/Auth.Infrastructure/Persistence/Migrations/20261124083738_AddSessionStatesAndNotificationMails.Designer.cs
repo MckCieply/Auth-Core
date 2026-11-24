@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Auth.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    [Migration("20260506171200_AddSessionStatesAndNotificationMails")]
+    [Migration("20261124083738_AddSessionStatesAndNotificationMails")]
     partial class AddSessionStatesAndNotificationMails
     {
         /// <inheritdoc />
@@ -400,6 +400,9 @@ namespace Auth.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("RoleId")

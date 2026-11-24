@@ -35,7 +35,7 @@ internal static class ProviderSignIn
             return ApiResults.Error(TenancyErrors.InvalidTicket);
         }
 
-        if (await memberships.ReadAsync(account.Id, http.RequestAborted) is not { } tenant)
+        if (await memberships.ReadSignInSpaceAsync(account.Id, http.RequestAborted) is not { } tenant)
         {
             return ApiResults.Error(TenancyErrors.NoMembership);
         }

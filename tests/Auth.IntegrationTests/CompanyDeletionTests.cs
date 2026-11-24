@@ -1,7 +1,9 @@
 using System.Net;
 using Auth.Infrastructure.Persistence;
 using Auth.IntegrationTests.Infrastructure;
+using Auth.Server.Api;
 using Auth.Server.Audit;
+using Auth.Server.Email;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Abstractions;
@@ -88,6 +90,128 @@ public sealed class CompanyDeletionTests(PostgresFixture postgres, KeyMaterialFi
         {
             Assert.NotEqual(OpenIddictConstants.Statuses.Revoked, await authorizations.GetStatusAsync(item, TestContext.Current.CancellationToken));
         }
+    }
+
+    private Task<Guid[]> MembershipsOfAsync(Guid user) =>
+        InDbAsync(async db => (await db.Memberships.Where(m => m.UserId == user).Select(m => m.CompanyId)
+            .ToListAsync(TestContext.Current.CancellationToken)).ToArray());
+
+    /// <summary>A sign-in that lands in the company: its membership is marked as the one used last, and the login follows.</summary>
+    private async Task<SessionApi.Session> LoginInAsync(string email, Guid user, Guid company)
+    {
+        await InDbAsync(db => db.Memberships.Where(m => m.UserId == user && m.CompanyId == company)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.LastUsedAt, (DateTimeOffset?)StorableTime.Now(Clock).AddHours(1)), TestContext.Current.CancellationToken));
+        var session = await SessionApi.LoginAsync(Client, email, UserPassword);
+        Assert.Equal(company.ToString(), AccessTokens.Text(session.AccessToken, "org_id"));
+        return session;
+    }
+
+    [Fact]
+    public async Task A_member_who_gains_a_membership_while_the_company_is_deleted_keeps_the_account()   // spec 0017 recount
+    {
+        var (a, _, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        var worker = await AddMemberAsync(a, "worker@acme.test", "user");
+        var roleInB = await RoleIdAsync(b, "user");
+
+        Task<HttpResponseMessage> deletion;
+        await using (var held = await HeldLock.AccountRowAsync(Factory, worker))
+        {
+            deletion = SendFromCallerAsync(HttpMethod.Delete, OrgEndpoints.OrgPath, token, new { name = "Acme", password = UserPassword });
+            await HeldLock.WaitForWaitersAsync(Factory, 1, deletion);   // the deletion waits for the account row of the worker
+
+            await held.InsertMembershipAsync(worker, b, roleInB);
+            await held.ReleaseAsync();
+        }
+
+        using (var response = await deletion)
+        {
+            await TenancyApi.AssertEmptyAsync(response, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal(0, await CountAsync(db => db.Companies.CountAsync(c => c.Id == a, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == worker, TestContext.Current.CancellationToken)));
+        Assert.Equal([b], await MembershipsOfAsync(worker));
+        Assert.DoesNotContain(await AuditAsync(AuditKinds.AccountDeleted), r => r.SubjectUserId == worker);
+    }
+
+    [Fact]
+    public async Task Members_with_another_membership_keep_their_accounts_and_the_others_are_deleted()   // criterion 28
+    {
+        var (a, boss, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        var shared = await AddMemberAsync(a, "shared@acme.test", "user");
+        var only = await AddMemberAsync(a, "only@acme.test", "user");
+        await AddMembershipAsync(boss, b, "user");
+        await AddMembershipAsync(shared, b, "user");
+        var bossInB = await LoginInAsync("boss@acme.test", boss, b);
+        var sharedInB = await LoginInAsync("shared@acme.test", shared, b);
+
+        using (var deleted = await SendFromCallerAsync(HttpMethod.Delete, OrgEndpoints.OrgPath, token, new { name = "Acme", password = UserPassword }))
+        {
+            await TenancyApi.AssertEmptyAsync(deleted, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal([b], await MembershipsOfAsync(boss));
+        Assert.Equal([b], await MembershipsOfAsync(shared));
+        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == boss, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == shared, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CountAsync(db => db.Users.CountAsync(u => u.Id == only, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CountAsync(db => db.Companies.CountAsync(c => c.Id == a, TestContext.Current.CancellationToken)));
+
+        var row = await SingleAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(only, row.SubjectUserId);
+        Assert.Equal(a, row.OrgId);
+        Assert.Equal("Acme", row.OrgName);
+        Assert.Equal("org_deleted", AuditApi.Text(row, "reason"));
+        Assert.Equal("3", AuditApi.Text(await SingleAsync(AuditKinds.OrgDeleted), "members"));   // every former member is counted
+
+        foreach (var session in new[] { bossInB, sharedInB })
+        {
+            var refreshed = await SessionApi.RefreshOk(Client, session.RefreshToken);
+            Assert.Equal(b.ToString(), AccessTokens.Text(refreshed.AccessToken, "org_id"));
+        }
+    }
+
+    [Fact]
+    public async Task An_admin_with_no_other_membership_is_deleted_with_the_company()
+    {
+        var (a, boss, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        var shared = await AddMemberAsync(a, "shared@acme.test", "user");
+        await AddMembershipAsync(shared, b, "user");
+
+        using (var deleted = await SendFromCallerAsync(HttpMethod.Delete, OrgEndpoints.OrgPath, token, new { name = "Acme", password = UserPassword }))
+        {
+            await TenancyApi.AssertEmptyAsync(deleted, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal(0, await CountAsync(db => db.Users.CountAsync(u => u.Id == boss, TestContext.Current.CancellationToken)));
+        Assert.Equal(1, await CountAsync(db => db.Users.CountAsync(u => u.Id == shared, TestContext.Current.CancellationToken)));
+        var row = await SingleAsync(AuditKinds.AccountDeleted);
+        Assert.Equal(boss, row.SubjectUserId);
+        Assert.Equal(boss, row.ActorUserId);
+        Assert.Equal(a, row.OrgId);
+        Assert.Equal("org_deleted", AuditApi.Text(row, "reason"));
+    }
+
+    [Fact]
+    public async Task A_kept_members_role_does_not_stop_the_company_deletion()   // the memberships go before the roles: the foreign key to a role restricts
+    {
+        var (a, _, token) = await CompanyWithAdminAsync("Acme", "boss@acme.test");
+        var b = await CreateCompanyAsync("Globex");
+        await AddRoleAsync(a, "manager", "members:manage");
+        var kept = await AddMemberAsync(a, "kept@acme.test", "manager");
+        await AddMembershipAsync(kept, b, "user");
+
+        using (var deleted = await SendFromCallerAsync(HttpMethod.Delete, OrgEndpoints.OrgPath, token, new { name = "Acme", password = UserPassword }))
+        {
+            await TenancyApi.AssertEmptyAsync(deleted, HttpStatusCode.NoContent);
+        }
+
+        Assert.Equal(0, await CountAsync(db => db.CompanyRoles.CountAsync(r => r.CompanyId == a, TestContext.Current.CancellationToken)));
+        Assert.Equal(0, await CountAsync(db => db.Companies.CountAsync(c => c.Id == a, TestContext.Current.CancellationToken)));
+        Assert.Equal([b], await MembershipsOfAsync(kept));
     }
 
     [Fact]

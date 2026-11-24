@@ -3,12 +3,13 @@
 # the sequence of the spec's Goal - a private person signs up through the mail, is signed in to a space of their own and deletes the
 # account - and the cases around it.
 #
-# What it checks, in order (PRIV = the private person, INV = a second private person whom the development company invites, SEED = the
-# development seed user, the admin of the development company). Each step names the criteria it touches; the guarding tests are in
+# What it checks, in order (PRIV = the private person, KEEP = a private person whom the development company invites and who keeps its
+# space, INV = a private person whom the company invites and who moves, SEED = the development seed user, the admin of the development
+# company). Each step names the criteria it touches; the guarding tests are in
 # docs/superpowers/plans/0010-acceptance-map.md.
 #   1. health is Healthy; the mail catcher answers; GET /auth/options -> 200 {"signup":"self-service","private_signup":"self-service",
-#      "providers":[]}
-#      (deploy/auth.yaml turns both on); the OpenAPI description names DELETE /auth/account - part of criteria 2 and 30.
+#      "providers":[],"org_creation":"self-service"}
+#      (deploy/auth.yaml turns all three on); the OpenAPI description names DELETE /auth/account - part of criteria 2 and 30.
 #   2. PRIV asks for a private sign-up -> 202 with an empty body; the mail "Complete your sign-up" has the private intro and the same link in
 #      its text and HTML parts; the preview -> 200 {"kind":"private","email":PRIV}; a weak password -> 400 weak_password; the password ->
 #      200 with a login's body and the auth_rt cookie; the token says org_kind personal, roles ["private"] and the private permissions of
@@ -16,18 +17,23 @@
 #   3. GET /auth/me -> org_kind personal, org_name private; GET /auth/org and GET /auth/org/members -> 403 forbidden - criteria 12, 14.
 #   4. a minute later an organization request for PRIV -> 202; the mail "You already have an account" holds the sentence about a new
 #      account on purpose, and no link - criterion 5.
-#   5. INV signs up privately through the mail; SEED invites INV through the company API; the invitation mail holds the paragraph about the
-#      private account; the preview says has_private_account true; the acceptance without leave_private_account -> 409
-#      private_account_exists; with it -> 204; INV's cookie of its sign-up -> 401 invalid_grant; INV signs in with its own password, into
-#      the development company, as user, org_kind organization; invite.accepted holds left_private_account true and the old space's id -
-#      criteria 16 to 19.
+#   5. KEEP and INV sign up privately through the mail (spec 0017 changes this step). 5a: SEED invites KEEP through the company API; the
+#      invitation mail holds the paragraph about an existing account; the preview says has_private_account true, has_account true and the
+#      company's org_id; the acceptance without leave_private_account -> 204 (a password sent with it is not used); KEEP's cookie of its
+#      sign-up still refreshes in the personal space; KEEP signs in with its own password, into the development company, as user,
+#      org_kind organization; its personal space and both memberships are still there; invite.accepted does not say left_private_account.
+#      5b: SEED invites INV; the same mail paragraph and preview; the acceptance with leave_private_account true -> 204; INV's cookie of its
+#      sign-up (a session of the deleted space) -> 401 invalid_grant; INV signs in with its own password, into the development company,
+#      as user, org_kind organization; the space is gone; invite.accepted holds left_private_account true and the old space's id -
+#      criteria 16 to 19 of spec 0010, changed by spec 0017.
 #   6. PRIV deletes the account: a wrong password -> 403 wrong_password and an account.delete_refused row; the right one -> 204 and the
 #      auth_rt cookie cleared (Max-Age=0); PRIV's refresh cookie -> 401 invalid_grant; PRIV's login -> the 401 of an unknown address;
 #      account.deleted with the reason self; PRIV signs up privately again through the mail and finishes -> 200: the address is free -
 #      criteria 21, 22.
 #   7. SEED's DELETE /auth/account -> 403 forbidden - criterion 22.
 #   8. SEED removes INV through the company API -> 204; INV's login -> the 401 of an unknown address; account.deleted with the reason
-#      member_removed - criterion 23.
+#      member_removed - criterion 23. SEED removes KEEP the same way -> 204; KEEP's session in the company -> 401 invalid_grant; the account
+#      is kept (no account.deleted), and its next login lands in its personal space - spec 0017.
 #   9. no audit row of the run holds a password, a link or a session token of the run - criterion 29.
 #
 # Full sequence, from the repo root (the stack and .env of the other e2e scripts, with the per-IP limiter OFF as for them; run this one after
@@ -39,6 +45,8 @@
 #   AUTH_RATE_LIMIT_ENABLED=false docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 #   scripts/e2e-login.sh; scripts/e2e-refresh.sh; scripts/e2e-lockout.sh; scripts/e2e-email.sh; scripts/e2e-tenancy.sh; scripts/e2e-signup.sh
 #   scripts/e2e-private.sh                # this script (does NOT bring the stack up or down)
+#   scripts/e2e-orgs.sh                   # spec 0015 (several companies), after this one
+#   scripts/e2e-orgs-create.sh            # spec 0016 (creating another company), after e2e-orgs.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The database is read with
@@ -82,13 +90,14 @@ SEED_PASSWORD="$(env_get AUTH_DEV_SEED_PASSWORD)"
 run="$RANDOM$RANDOM"
 PRIV_EMAIL="ola-$run@poczta.test"
 INV_EMAIL="jan-$run@poczta.test"
+KEEP_EMAIL="kasia-$run@poczta.test"
 export E2E_SEED_EMAIL="$SEED_EMAIL" E2E_SEED_PASSWORD="$SEED_PASSWORD"
-export E2E_PRIV_EMAIL="$PRIV_EMAIL" E2E_INV_EMAIL="$INV_EMAIL" E2E_COMPANY="Firma $run"
-export E2E_PASSWORD="E2e-Passw0rd-$run" E2E_INV_PASSWORD="E2e-Inv-Passw0rd-$run" E2E_AGAIN_PASSWORD="E2e-Again-Passw0rd-$run"
+export E2E_PRIV_EMAIL="$PRIV_EMAIL" E2E_INV_EMAIL="$INV_EMAIL" E2E_KEEP_EMAIL="$KEEP_EMAIL" E2E_COMPANY="Firma $run"
+export E2E_PASSWORD="E2e-Passw0rd-$run" E2E_INV_PASSWORD="E2e-Inv-Passw0rd-$run" E2E_AGAIN_PASSWORD="E2e-Again-Passw0rd-$run" E2E_KEEP_PASSWORD="E2e-Keep-Passw0rd-$run"
 export E2E_IGNORED_PASSWORD="E2e-Ignored-Passw0rd-$run" E2E_WRONG_PASSWORD="E2e-Wrong-Passw0rd-$run" E2E_WEAK_PASSWORD="abc"
 export E2E_PRIVATE_INTRO="Someone asked to create a private account on"
 export E2E_SENTENCE="If you want a new account on purpose, delete the one you have first, or sign up with another email address."
-export E2E_PARAGRAPH="You already have a private account on"
+export E2E_PARAGRAPH="You already have an account on"
 
 wait_ok() { # wait_ok <url> <seconds>: waits until the URL answers 200
   local i
@@ -285,7 +294,7 @@ wait_ok "$MAILPIT_URL/readyz" 60 || fail "step 1: $MAILPIT_URL/readyz did not re
 call GET /auth/health
 expect_status "step 1: health" 200 "Healthy"
 call GET /auth/options
-expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[]}'
+expect_status "step 1: the options" 200 '{"signup":"self-service","private_signup":"self-service","providers":[],"org_creation":"self-service"}'
 expect_no_store "step 1: the options"
 call GET /auth/openapi/v1.json
 expect_status "step 1: the OpenAPI description" 200
@@ -356,6 +365,10 @@ mail_has_no_link || fail "step 4: the mail holds a link or a token"
 pass "step 4: an organization request for an address with a private account -> 202 and the mail that says so, with the new sentence and no link"
 
 # --- Step 5: the invitation of a private person (criteria 16 to 19) -----------------------------------------------------
+private_signup E2E_KEEP_EMAIL E2E_KEEP_PASSWORD keep
+BODY="$(jwt_payload "$tmp/keep.auth")"
+KEEP_SPACE="$(val 'd["org_id"]')"
+KEEP_SUB="$(val 'd["sub"]')"
 private_signup E2E_INV_EMAIL E2E_INV_PASSWORD inv
 BODY="$(jwt_payload "$tmp/inv.auth")"
 INV_SPACE="$(val 'd["org_id"]')"
@@ -368,38 +381,77 @@ call GET /auth/org/roles "" "$tmp/seed.auth"
 expect_status "step 5: GET /auth/org/roles" 200
 export E2E_USER_ROLE
 E2E_USER_ROLE="$(val '[r["id"] for r in d["roles"] if r["name"] == "user"][0]')"
+
+# --- Step 5a: KEEP accepts without leave_private_account: it joins and keeps its space (spec 0017) ----------------------
+MAILS="$(mail_count "$KEEP_EMAIL")"
+json_body "$tmp/invite-keep.json" "{'email': os.environ['E2E_KEEP_EMAIL'], 'role_id': os.environ['E2E_USER_ROLE']}"
+call POST /auth/org/invites "$tmp/invite-keep.json" "$tmp/seed.auth"
+expect_status "step 5a: SEED invites KEEP" 202 ""
+wait_mail "$KEEP_EMAIL" "You are invited" 90 "$MAILS" || fail "step 5a: no invitation mail for KEEP within 90s"
+mail_holds E2E_PARAGRAPH || fail "step 5a: the invitation mail does not hold the paragraph about an existing account"
+token_body "$INVITE_LINK" "$tmp/keep.preview" || fail "step 5a: no usable invitation link"
+token_body "$INVITE_LINK" "$tmp/keep.plain" E2E_IGNORED_PASSWORD || fail "step 5a: the acceptance body could not be made"
+KEEP_LINK="$(token_of "$tmp/keep.preview")"
+call POST /auth/invites/preview "$tmp/keep.preview"
+expect_status "step 5a: preview" 200
+expect_eq "step 5a: has_private_account" "$(val 'd["has_private_account"]')" "True"
+expect_eq "step 5a: has_account" "$(val 'd["has_account"]')" "True"
+expect_eq "step 5a: org_id" "$(val 'd["org_id"]')" "$DEV_ORG"
+call POST /auth/invites/accept "$tmp/keep.plain"
+expect_status "step 5a: the acceptance without leave_private_account" 204 ""
+call POST /auth/refresh "" "$tmp/keep.cookie"
+expect_status "step 5a: KEEP's cookie of its sign-up still refreshes" 200
+printf 'Authorization: Bearer %s\n' "$(val 'd["access_token"]')" > "$tmp/keep.auth"
+printf 'Cookie: auth_rt=%s\n' "$(cookie_value)" > "$tmp/keep.cookie"
+BODY="$(jwt_payload "$tmp/keep.auth")"
+expect_eq "step 5a: the refreshed session is still in the personal space" "$(val 'd["org_id"]')" "$KEEP_SPACE"
+expect_eq "step 5a: org_kind of the refreshed session" "$(val 'd["org_kind"]')" "personal"
+json_body "$tmp/keep.ignored" "{'email': os.environ['E2E_KEEP_EMAIL'], 'password': os.environ['E2E_IGNORED_PASSWORD']}"
+call POST /auth/login "$tmp/keep.ignored"
+expect_error "step 5a: the password sent with the acceptance was not used" 401 invalid_credentials
+login keep E2E_KEEP_EMAIL E2E_KEEP_PASSWORD
+printf 'Cookie: auth_rt=%s\n' "$(cookie_value)" > "$tmp/keep-company.cookie"
+BODY="$(jwt_payload "$tmp/keep.auth")"
+expect_eq "step 5a: KEEP is the same account" "$(val 'd["sub"]')" "$KEEP_SUB"
+expect_eq "step 5a: the next login lands in the development company" "$(val 'd["org_id"]')" "$DEV_ORG"
+expect_eq "step 5a: org_kind" "$(val 'd["org_kind"]')" "organization"
+expect_eq "step 5a: roles" "$(val 'd["roles"]')" "['user']"
+expect_eq "step 5a: the personal space is kept" "$(psql_value "SELECT count(*) FROM \"Companies\" WHERE \"Id\" = '$KEEP_SPACE'")" "1"
+expect_eq "step 5a: KEEP has both memberships" "$(psql_value "SELECT count(*) FROM \"Memberships\" WHERE \"UserId\" = '$KEEP_SUB'")" "2"
+expect_eq "step 5a: invite.accepted does not say the private account was left" \
+  "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'invite.accepted' AND subject_user_id = '$KEEP_SUB' AND org_id = '$DEV_ORG' AND details->>'left_private_account' IS NULL")" "1"
+pass "step 5a: an existing private account accepts with the token alone: the mail's paragraph, has_account, 204, the personal space kept, its sign-up cookie still refreshes there, the next login lands in the company"
+
+# --- Step 5b: INV accepts with leave_private_account true: the move (criteria 16 to 19 of spec 0010) ---------------------
 MAILS="$(mail_count "$INV_EMAIL")"
 json_body "$tmp/invite.json" "{'email': os.environ['E2E_INV_EMAIL'], 'role_id': os.environ['E2E_USER_ROLE']}"
 call POST /auth/org/invites "$tmp/invite.json" "$tmp/seed.auth"
-expect_status "step 5: SEED invites INV" 202 ""
-wait_mail "$INV_EMAIL" "You are invited" 90 "$MAILS" || fail "step 5: no invitation mail for INV within 90s"
-mail_holds E2E_PARAGRAPH || fail "step 5: the invitation mail does not hold the paragraph about the private account"
-token_body "$INVITE_LINK" "$tmp/inv.preview" || fail "step 5: no usable invitation link"
-token_body "$INVITE_LINK" "$tmp/inv.plain" E2E_IGNORED_PASSWORD || fail "step 5: the acceptance body could not be made"
-token_body "$INVITE_LINK" "$tmp/inv.leave" E2E_IGNORED_PASSWORD leave || fail "step 5: the moving acceptance body could not be made"
+expect_status "step 5b: SEED invites INV" 202 ""
+wait_mail "$INV_EMAIL" "You are invited" 90 "$MAILS" || fail "step 5b: no invitation mail for INV within 90s"
+mail_holds E2E_PARAGRAPH || fail "step 5b: the invitation mail does not hold the paragraph about an existing account"
+token_body "$INVITE_LINK" "$tmp/inv.preview" || fail "step 5b: no usable invitation link"
+token_body "$INVITE_LINK" "$tmp/inv.leave" E2E_IGNORED_PASSWORD leave || fail "step 5b: the moving acceptance body could not be made"
 INV_LINK="$(token_of "$tmp/inv.preview")"
 call POST /auth/invites/preview "$tmp/inv.preview"
-expect_status "step 5: preview" 200
-expect_eq "step 5: has_private_account" "$(val 'd["has_private_account"]')" "True"
-call POST /auth/invites/accept "$tmp/inv.plain"
-expect_error "step 5: the acceptance without leave_private_account" 409 private_account_exists
+expect_status "step 5b: preview" 200
+expect_eq "step 5b: has_private_account" "$(val 'd["has_private_account"]')" "True"
 call POST /auth/invites/accept "$tmp/inv.leave"
-expect_status "step 5: the acceptance with leave_private_account true" 204 ""
+expect_status "step 5b: the acceptance with leave_private_account true" 204 ""
 call POST /auth/refresh "" "$tmp/inv.cookie"
-expect_error "step 5: INV's cookie of its sign-up" 401 invalid_grant
+expect_error "step 5b: INV's cookie of its sign-up (a session of the space that was deleted)" 401 invalid_grant
 json_body "$tmp/inv.ignored" "{'email': os.environ['E2E_INV_EMAIL'], 'password': os.environ['E2E_IGNORED_PASSWORD']}"
 call POST /auth/login "$tmp/inv.ignored"
-expect_error "step 5: the password sent with the acceptance was not used" 401 invalid_credentials
+expect_error "step 5b: the password sent with the acceptance was not used" 401 invalid_credentials
 login inv E2E_INV_EMAIL E2E_INV_PASSWORD
 BODY="$(jwt_payload "$tmp/inv.auth")"
-expect_eq "step 5: INV is the same account" "$(val 'd["sub"]')" "$INV_SUB"
-expect_eq "step 5: INV is in the development company" "$(val 'd["org_id"]')" "$DEV_ORG"
-expect_eq "step 5: org_kind" "$(val 'd["org_kind"]')" "organization"
-expect_eq "step 5: roles" "$(val 'd["roles"]')" "['user']"
-expect_eq "step 5: the personal space is gone" "$(psql_value "SELECT count(*) FROM \"Companies\" WHERE \"Id\" = '$INV_SPACE'")" "0"
-expect_eq "step 5: invite.accepted says the private account was left, and which space" \
+expect_eq "step 5b: INV is the same account" "$(val 'd["sub"]')" "$INV_SUB"
+expect_eq "step 5b: INV is in the development company" "$(val 'd["org_id"]')" "$DEV_ORG"
+expect_eq "step 5b: org_kind" "$(val 'd["org_kind"]')" "organization"
+expect_eq "step 5b: roles" "$(val 'd["roles"]')" "['user']"
+expect_eq "step 5b: the personal space is gone" "$(psql_value "SELECT count(*) FROM \"Companies\" WHERE \"Id\" = '$INV_SPACE'")" "0"
+expect_eq "step 5b: invite.accepted says the private account was left, and which space" \
   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'invite.accepted' AND subject_user_id = '$INV_SUB' AND details->>'left_private_account' = 'true' AND details->>'personal_org_id' = '$INV_SPACE'")" "1"
-pass "step 5: the invitation of a private person: the mail's paragraph, has_private_account, 409 private_account_exists, the move (204), the old session ended, the old password into the company"
+pass "step 5b: the move of a private person: the mail's paragraph, has_private_account, 204 with leave_private_account true, the session of the deleted space ended, the old password into the company"
 
 # --- Step 6: the self-deletion (criteria 21, 22) ------------------------------------------------------------------------
 json_body "$tmp/delete-wrong.json" "{'password': os.environ['E2E_WRONG_PASSWORD']}"
@@ -448,8 +500,26 @@ expect_eq "step 8: account.deleted with the reason member_removed" \
   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'account.deleted' AND subject_user_id = '$INV_SUB' AND org_id = '$DEV_ORG' AND details->>'reason' = 'member_removed'")" "1"
 pass "step 8: a removal through the company API -> 204, and the account is deleted with its row"
 
+# Spec 0017: the account that kept its private space is removed from the company and kept.
+call GET /auth/org/members "" "$tmp/seed.auth"
+expect_status "step 8: GET /auth/org/members (KEEP)" 200
+KEEP_ID="$(val "[m['user_id'] for m in d['members'] if m['email'].lower() == '$KEEP_EMAIL'][0]")"
+call DELETE "/auth/org/members/$KEEP_ID" "" "$tmp/seed.auth"
+expect_status "step 8: SEED removes KEEP" 204 ""
+call POST /auth/refresh "" "$tmp/keep-company.cookie"
+expect_error "step 8: KEEP's session in the company" 401 invalid_grant
+call POST /auth/refresh "" "$tmp/keep.cookie"
+expect_status "step 8: KEEP's session in its personal space goes on" 200
+expect_eq "step 8: KEEP is kept: its account and its personal space are there, its company membership is not"   "$(psql_value "SELECT (SELECT count(*) FROM \"AspNetUsers\" WHERE \"NormalizedEmail\" = upper('$KEEP_EMAIL')) || '/' || (SELECT count(*) FROM \"Companies\" WHERE \"Id\" = '$KEEP_SPACE') || '/' || (SELECT count(*) FROM \"Memberships\" WHERE \"UserId\" = '$KEEP_SUB')")" "1/1/1"
+expect_eq "step 8: no account.deleted row for KEEP"   "$(psql_value "SELECT count(*) FROM audit_events WHERE kind = 'account.deleted' AND subject_user_id = '$KEEP_SUB'")" "0"
+login keep E2E_KEEP_EMAIL E2E_KEEP_PASSWORD
+BODY="$(jwt_payload "$tmp/keep.auth")"
+expect_eq "step 8: KEEP's next login lands in its personal space" "$(val 'd["org_id"]')" "$KEEP_SPACE"
+expect_eq "step 8: org_kind" "$(val 'd["org_kind"]')" "personal"
+pass "step 8: the account that kept its space is removed from the company (204), its session there ends, its personal session goes on, the account is kept and signs in to its personal space"
+
 # --- Step 9: no secret in the audit log (criterion 29) ------------------------------------------------------------------
-for secret in "$E2E_PASSWORD" "$E2E_INV_PASSWORD" "$E2E_AGAIN_PASSWORD" "$E2E_IGNORED_PASSWORD" "$E2E_WRONG_PASSWORD" "$PRIV_LINK" "$INV_LINK" "$PRIV_ACCESS" "$PRIV_COOKIE"; do
+for secret in "$E2E_PASSWORD" "$E2E_INV_PASSWORD" "$E2E_AGAIN_PASSWORD" "$E2E_IGNORED_PASSWORD" "$E2E_WRONG_PASSWORD" "$E2E_KEEP_PASSWORD" "$PRIV_LINK" "$INV_LINK" "$KEEP_LINK" "$PRIV_ACCESS" "$PRIV_COOKIE"; do
   [[ -n "$secret" ]] || fail "step 9: a secret to look for is empty"
   expect_eq "step 9: rows of the audit log that hold a password, a link or a session token of this run" "$(secret_in_audit "$secret")" "0"
 done

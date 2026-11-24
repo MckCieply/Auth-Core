@@ -12,7 +12,7 @@ using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Auth.Server.Account;
 
-/// <summary>The caller of a settings endpoint (spec 0012 → General rules): the account, its space and the session of this device, as read now.</summary>
+/// <summary>The caller of a settings endpoint (spec 0012 → General rules): the account, its membership in the token's company and the session of this device, as read now.</summary>
 internal sealed record SettingsCaller(
     Guid UserId, string Email, string NormalizedEmail, string? PasswordHash, TenantContext Tenant, DeviceSession Session);
 
@@ -46,7 +46,15 @@ internal static class SettingsCallers
         }
 
         var session = await DeviceSessions.FindAsync(http, db, tokens, userId, StorableTime.Now(clock), cancellationToken);
-        return session is null ? Refused(TenancyErrors.SessionRequired) : await CallerOfAsync(db, memberships, userId, session, cancellationToken);
+        if (session is null)
+        {
+            return Refused(TenancyErrors.SessionRequired);
+        }
+
+        // The membership read is the one in the company of the token (spec 0015); a token that names none has no membership to read.
+        return Guid.TryParse(http.User.FindFirst(TenantClaims.OrgId)?.Value, out var companyId)
+            ? await CallerOfAsync(db, memberships, userId, companyId, session, cancellationToken)
+            : Refused(TenancyErrors.NoMembership);
     }
 
     /// <summary>The same checks under the caller's lock: the session by its token, read afresh, the account and the membership.</summary>
@@ -59,7 +67,7 @@ internal static class SettingsCallers
         var session = await DeviceSessions.ReadAsync(db, caller.Session.TokenId, caller.UserId, now, CancellationToken.None);
         return session is null
             ? Refused(TenancyErrors.SessionRequired)
-            : await CallerOfAsync(db, memberships, caller.UserId, session, CancellationToken.None);
+            : await CallerOfAsync(db, memberships, caller.UserId, caller.Tenant.CompanyId, session, CancellationToken.None);
     }
 
     /// <summary>
@@ -102,7 +110,7 @@ internal static class SettingsCallers
     }
 
     private static async Task<SettingsRead> CallerOfAsync(
-        AuthDbContext db, MembershipReader memberships, Guid userId, DeviceSession session, CancellationToken cancellationToken)
+        AuthDbContext db, MembershipReader memberships, Guid userId, Guid companyId, DeviceSession session, CancellationToken cancellationToken)
     {
         var account = await db.Users.AsNoTracking()
             .Where(u => u.Id == userId)
@@ -113,7 +121,7 @@ internal static class SettingsCallers
             return Refused(TenancyErrors.SessionRequired);
         }
 
-        return await memberships.ReadAsync(userId, cancellationToken) is { } tenant
+        return await memberships.ReadInCompanyAsync(userId, companyId, cancellationToken) is { } tenant
             ? new SettingsRead(new SettingsCaller(userId, email, normalized, account.PasswordHash, tenant, session), null)
             : Refused(TenancyErrors.NoMembership);
     }

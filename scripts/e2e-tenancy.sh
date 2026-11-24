@@ -26,13 +26,16 @@
 #      old token gets permissions_changed and the new one forbidden; a role edit that would leave no manager is
 #      last_manager - criterion 17; part of 12, 14, 15, 16 and 18 (no role delete or role_in_use).
 #   8. B: a role or member of another company is 404 on the member and role endpoints; an invitation to an address of
-#      another company is answered with the same status and headers as one to an unknown address, and its preview and
-#      acceptance say already_member - criterion 8; part of 14.
+#      another company is answered with the same status and headers as one to an unknown address (criterion 8); since
+#      spec 0017 its preview says has_account true with the invited company's id, its acceptance with the token alone is
+#      204, the person is a member of both companies, their earlier session still refreshes in B and their next login
+#      lands in A; already_member is for a member of the inviting company only; part of 14.
 #   9. removal: WORKER's refresh cookie -> 401 with no cookie written, login with the right password -> 401 invalid_credentials (spec 0010:
 #      the removal deleted the account) with no cookie, the old access token -> permissions_changed - part of 11 and 13 (no wrong password,
 #      no invitation back in).
 #  10. the CLI refuses to remove the last manager (last_manager) and removes it with --force; afterwards ADMIN's sessions
-#      are over and its account is gone (spec 0010) - criterion 22; part of 16.
+#      are over and its account is gone (spec 0010), and A is left with one member, the person of step 8 who joined it
+#      (spec 0017) - criterion 22; part of 16.
 # Criteria 5, 9, 10, 19 (GET and PATCH /auth/org), 20, 21, 23 and 24 as a whole, the parallel accepts of 6 and the rest
 # of the partial ones above are guarded by the integration tests, not here: see docs/superpowers/plans/0005-acceptance-map.md.
 #
@@ -51,6 +54,8 @@
 #   scripts/e2e-tenancy.sh                # this script (does NOT bring the stack up or down)
 #   scripts/e2e-signup.sh                 # spec 0009 (self-service sign-up), which runs after this one
 #   scripts/e2e-private.sh                # spec 0010 (private accounts), after e2e-signup.sh
+#   scripts/e2e-orgs.sh                   # spec 0015 (several companies), after e2e-private.sh
+#   scripts/e2e-orgs-create.sh            # spec 0016 (creating another company), after e2e-orgs.sh
 #   docker compose -f deploy/docker-compose.yml --env-file .env down -v          # tear down
 #
 # Reads AUTH_DEV_SEED_EMAIL and AUTH_DEV_SEED_PASSWORD from the repo-root .env (parsed, never sourced). The operator
@@ -287,10 +292,10 @@ python3 -c '
 import json, sys
 mail = json.load(sys.stdin.buffer)
 text = mail["Text"]
-for needle in ("E2E Acme", "admin", "7 days"):
+for needle in ("E2E Acme", "7 days"):
     if needle not in text:
         sys.exit("the invitation mail does not say: " + needle)
-' < "$tmp/mail.json" || fail "step 4: the invitation mail misses its company, role or lifetime"
+' < "$tmp/mail.json" || fail "step 4: the invitation mail misses its company or lifetime"
 token_body "$tmp/admin-preview.json" || fail "step 4: no usable invitation link in the mail"
 token_body "$tmp/admin-weak.json" E2E_WEAK_PASSWORD
 token_body "$tmp/admin-accept.json" E2E_PASSWORD
@@ -457,12 +462,35 @@ call POST /auth/org/invites "$tmp/invite-badmin.json" "$tmp/admin.auth"
 expect_status "step 8: invite a member of another company" 202 ""
 [[ "$(header_names)" == "$STRANGER_HEADERS" ]] || fail "step 8: the headers differ between an unknown address and a member of another company"
 wait_mail "$BADMIN_EMAIL" 2 30 || fail "step 8: no second invitation mail for B's admin"
-token_body "$tmp/badmin-second.json" E2E_PASSWORD
+token_body "$tmp/badmin-second.json"
 call POST /auth/invites/preview "$tmp/badmin-second.json"
-expect_error "step 8: the preview tells the invited person" 409 already_member
+expect_status "step 8: the preview of an invitation to a member of another company" 200
+expect_no_store "step 8: the preview"
+expect_eq "step 8: preview has_account" "$(val 'd["has_account"]')" "True"
+expect_eq "step 8: preview org_id" "$(val 'd["org_id"]')" "$A"
+expect_eq "step 8: preview company" "$(val 'd["org_name"]')" "E2E Acme $run"
 call POST /auth/invites/accept "$tmp/badmin-second.json"
-expect_error "step 8: the acceptance too" 409 already_member
-pass "step 8: ids of another company are 404; an invitation to a member of another company is answered like one to an unknown address, and only the acceptance screen says already_member"
+expect_status "step 8: the acceptance with the token alone" 204 ""
+[[ -z "$(header set-cookie)" ]] || fail "step 8: the acceptance set a cookie"
+call GET /auth/org/members "" "$tmp/admin.auth"
+expect_status "step 8: GET /auth/org/members of A" 200
+expect_eq "step 8: the person is a member of A" "$(val '"'"$BADMIN_EMAIL"'" in [m["email"] for m in d["members"]]')" "True"
+# The earlier session of the person (their login in B) goes on in B: the acceptance ends no session.
+refresh badmin
+expect_eq "step 8: the earlier session refreshed" "$HTTP_CODE" "200"
+BODY="$(jwt_payload "$tmp/badmin.auth")"
+expect_eq "step 8: the earlier session stays in B" "$(val 'd["org_id"]')" "$B"
+call GET /auth/org/members "" "$tmp/badmin.auth"
+expect_status "step 8: GET /auth/org/members of B" 200
+expect_eq "step 8: the person is still a member of B" "$(val '"'"$BADMIN_EMAIL"'" in [m["email"] for m in d["members"]]')" "True"
+# The next login lands in the company that was joined last: A.
+login badmin E2E_BADMIN_EMAIL E2E_PASSWORD
+BODY="$(jwt_payload "$tmp/badmin.auth")"
+expect_eq "step 8: the next login lands in the invited company" "$(val 'd["org_id"]')" "$A"
+# The invitation is used up: a second acceptance finds no invitation.
+call POST /auth/invites/accept "$tmp/badmin-second.json"
+expect_error "step 8: the same link again" 400 invalid_token
+pass "step 8: ids of another company are 404; an invitation to a member of another company is answered like one to an unknown address; its preview says has_account, its acceptance (token alone) is 204, the person is a member of both, the earlier session still refreshes in B and the next login lands in A"
 
 # --- Step 9: removing a member ---------------------------------------------------------------------------------------
 call DELETE "/auth/org/members/$WORKER_ID" "" "$tmp/admin.auth"
@@ -492,7 +520,7 @@ expect_error "step 10: ADMIN's refresh cookie" 401 invalid_grant
 call POST /auth/login "$tmp/admin.login"
 expect_error "step 10: ADMIN logs in (spec 0010: the account is gone)" 401 invalid_credentials
 cli list-orgs
-grep -qF "$A"$'\t'"E2E Acme $run"$'\t'"0" <<< "$CLI_OUT" || fail "step 10: company A should be left with no members"
-pass "step 10: remove-member refused the last manager (last_manager) and removed it with --force; ADMIN's sessions and account are gone"
+grep -qF "$A"$'\t'"E2E Acme $run"$'\t'"1" <<< "$CLI_OUT" || fail "step 10: company A should be left with one member (the person of step 8)"
+pass "step 10: remove-member refused the last manager (last_manager) and removed it with --force; ADMIN's sessions and account are gone; A keeps the member who joined it in step 8"
 
 echo "ALL PASS"

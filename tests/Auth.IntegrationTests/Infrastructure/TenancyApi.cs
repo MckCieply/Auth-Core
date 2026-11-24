@@ -32,6 +32,25 @@ public static class TenancyApi
 
     public static Task<HttpResponseMessage> Get(HttpClient client, string path, string? token) => Send(client, HttpMethod.Get, path, token);
 
+    public const string CreateOrgPath = "/auth/orgs";
+
+    /// <summary>
+    /// <c>POST /auth/orgs</c> (spec 0016) with <paramref name="body"/> declared as <paramref name="contentType"/>: a string is sent as it is, anything
+    /// else as JSON, <see langword="null"/> as no body at all.
+    /// </summary>
+    public static Task<HttpResponseMessage> CreateOrg(HttpClient client, string? token, object? body, string contentType = "application/json")
+    {
+        var request = Request(HttpMethod.Post, CreateOrgPath, token);
+        if (body is not null)
+        {
+            var text = body as string ?? JsonSerializer.Serialize(body);
+            request.Content = new StringContent(text, System.Text.Encoding.UTF8);
+            request.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+        }
+
+        return client.SendAsync(request);
+    }
+
     public const string PreviewPath = "/auth/invites/preview";
     public const string AcceptPath = "/auth/invites/accept";
 
@@ -40,6 +59,10 @@ public static class TenancyApi
 
     public static Task<HttpResponseMessage> Accept(HttpClient client, string token, string password) =>
         client.PostAsJsonAsync(AcceptPath, new { token, password });
+
+    /// <summary>Accepts with the token alone (spec 0017): what a screen sends for an address that has an account.</summary>
+    public static Task<HttpResponseMessage> AcceptWithoutPassword(HttpClient client, string token) =>
+        client.PostAsJsonAsync(AcceptPath, new { token });
 
     /// <summary>Accepts for an address that has a private account, on purpose (spec 0010): <c>leave_private_account: true</c>.</summary>
     public static Task<HttpResponseMessage> AcceptLeaving(HttpClient client, string token, string? password = null) =>

@@ -394,10 +394,10 @@ describe('ProviderReturnPage (spec 0011)', () => {
     [400, 'invalid_ticket', 'This sign-in took too long. Start again.'],
     [403, 'no_account', 'You have no account. Ask your company for an invitation.'],
     [403, 'no_email', 'Your Microsoft or Google account has no email address we can use. Sign in with your password.'],
-    [409, 'already_registered', 'An account with this address exists. Sign in with your password.'],
+    [409, 'already_registered', 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.'],
     [403, 'address_mismatch', 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.'],
-    [409, 'already_member', 'This account already belongs to a company.'],
-    [409, 'private_account_exists', 'You have a private account with this address. Open the invitation link again to move it into the company.'],
+    [409, 'already_member', 'You are already a member of this company. Sign in to open it.'],
+    [409, 'private_account_exists', 'Something went wrong. Try again.'],
     [409, 'provider_already_linked', 'This Google or Microsoft account already signs in to another account.'],
     [400, 'invalid_token', 'This invitation has expired or was already used. Ask for a new one.'],
     [403, 'no_membership', 'Your account does not belong to a company.'],
@@ -412,6 +412,23 @@ describe('ProviderReturnPage (spec 0011)', () => {
     expect(opened.router.url).toBe('/provider-return');
     expect(Landing.opened).toBe(0);
     expectNoTicketAnywhere(opened);
+  });
+
+  it('purpose sign_in: already_registered keeps its own sentence', async () => {
+    const opened = await open(`ticket=${TICKET}&purpose=sign_in`);
+    opened.ctrl.expectOne('/auth/providers/exchange').flush({ error: 'already_registered' }, status(409));
+    await settle(opened.harness.fixture);
+    expect(pageText(opened.harness.fixture)).toContain('An account with this address exists. Sign in with your password.');
+  });
+
+  it('after Try again the purpose is still known: an invitation: already_registered shows its own sentence', async () => {
+    const { harness, ctrl } = await open(`ticket=${TICKET}&purpose=invite`);
+    ctrl.expectOne('/auth/providers/exchange').flush({ error: 'too_many_requests', retry_after_seconds: 3 }, status(429));
+    await settle(harness.fixture);
+    (harness.fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="try-again"]')!.click();
+    ctrl.expectOne('/auth/providers/exchange').flush({ error: 'already_registered' }, status(409));
+    await settle(harness.fixture);
+    expect(pageText(harness.fixture)).toContain('You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.');
   });
 
   it.each([

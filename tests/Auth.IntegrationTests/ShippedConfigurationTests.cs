@@ -132,7 +132,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
 
         Assert.Equal(["google", "microsoft", "github"], factory.Services.GetRequiredService<ProviderCatalog>().Offered);
         Assert.Equal(
-            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"]}""",
+            """{"signup":"self-service","private_signup":"self-service","providers":["google","microsoft","github"],"org_creation":"self-service"}""",
             await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
@@ -193,7 +193,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.True(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"self-service","private_signup":"self-service","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"self-service","providers":[],"org_creation":"self-service"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
@@ -206,7 +206,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 
@@ -218,7 +218,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.False(factory.Services.GetRequiredService<SignupGate>().IsOn);
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
         using var request = await SignupApi.Request(client, "anna@firma.test", "Firma");
         await SignupApi.AssertDisabledAsync(request);
@@ -230,7 +230,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         await using var factory = new AuthAppFactory(postgres, keys).WithEnvironment("Production").WithSignup();
         using var client = factory.CreateClient();
 
-        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
@@ -248,7 +248,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
             .WithSetting(ProviderSettings.GitHubClientSecretKey, "");
         using var client = factory.CreateClient();
 
-        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"self-service","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Healthy", await BodyAsync(client, "/auth/health"));
     }
 
@@ -266,7 +266,7 @@ public sealed class ShippedConfigurationTests(PostgresFixture postgres, KeyMater
         using var client = factory.CreateClient();
 
         Assert.Empty(factory.Services.GetRequiredService<ProviderCatalog>().Offered);
-        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[]}""", await BodyAsync(client, "/auth/options"));
+        Assert.Equal("""{"signup":"invite-only","private_signup":"off","providers":[],"org_creation":"off"}""", await BodyAsync(client, "/auth/options"));
         Assert.Equal("Degraded", await BodyAsync(client, "/auth/health"));
     }
 }

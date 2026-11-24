@@ -46,6 +46,7 @@ public sealed class JsonCharsetTests(PostgresFixture postgres, KeyMaterialFixtur
     [InlineData("POST", "/auth/providers/exchange")]   // spec 0011, criterion 29
     [InlineData("POST", "/auth/providers/link")]
     [InlineData("POST", "/auth/providers/finish")]
+    [InlineData("POST", "/auth/switch")]   // spec 0015: the switch reads a body, so it is under the guard
     public async Task A_body_declared_utf_16_is_a_415_on_every_endpoint_that_reads_one_and_before_authentication(string method, string path)   // criterion 6
     {
         using var response = await SendAsync(method, path, Utf16);   // no token: the 415 comes before the 401
@@ -143,6 +144,8 @@ public sealed class JsonCharsetTests(PostgresFixture postgres, KeyMaterialFixtur
     [InlineData("POST", "/api/notes", false)]
     [InlineData("POST", "/auth/login", true)]
     [InlineData("POST", "/AUTH/LOGIN/", true)]
+    [InlineData("POST", "/auth/switch", true)]
+    [InlineData("POST", "/auth/switch/", true)]
     [InlineData("PUT", "/auth/org/roles/x", true)]
     [InlineData("PATCH", "/auth/org", true)]
     [InlineData("DELETE", "/auth/org/members/x", true)]

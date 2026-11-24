@@ -74,31 +74,43 @@ test('a private person signs up through the mail, works alone, deletes the accou
   expect(await loginStatus(email, password), 'the deleted account still signs in').toBe(401);
 });
 
-test('a private person accepts an invitation through the warning and signs in to the company', async ({ page }) => {
+test('a private person accepts an invitation with the button, keeps the private notes and reaches them through the picker', async ({ page }) => {
   test.setTimeout(240_000);
   const email = `${unique('moving')}@e2e.test`;
   const password = setting('E2E_USER_PASSWORD');
+  const note = `Private note ${unique('n')}`;
   await signUpPrivatelyByApi(email, password, MAIL_WAIT_MS);
-  await inviteByApi(email, 'user');
 
+  // The private person signed in, with a private note.
+  await signIn(page, email, password);
+  await expect(page.getByTestId('me-private')).toHaveText('Private account');
+  await page.getByLabel('New note').fill(note);
+  await page.getByRole('button', { name: 'Add note' }).click();
+  await expect(page.getByText(note)).toBeVisible();
+
+  await inviteByApi(email, 'user');
   const link = await waitForLink(email, 'invite', MAIL_WAIT_MS);
   await openMailLink(page, link);
   await expect(page).toHaveURL(/\/invite$/);
   expectCleanAddressBar(page);
-  await expect(page.getByTestId('invite-private-warning')).toContainText('You already have a private account with this email address.');
+  // Spec 0017: one line and one button, no warning, no password field.
+  await expect(page.getByTestId('invite-existing')).toBeVisible();
+  await expect(page.getByTestId('invite-private-warning')).toHaveCount(0);
   await expect(page.getByLabel('New password')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Move me to the company and delete my private account' }).click();
+  await page.getByRole('button', { name: 'Accept the invitation' }).click();
 
-  // The account keeps its password: the sign-in screen, with the address filled in, signs it in to the company.
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByLabel('Email')).toHaveValue(email);
-  await page.getByLabel('Password', { exact: true }).fill(password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  // The signed-in person is the invited one: the page switches into the development company.
   await expect(page).toHaveURL(/\/notes$/);
   await expect(page.getByTestId('me-email')).toHaveText(email);
   await expect(page.getByTestId('me-private')).toHaveCount(0);
   await expect(page.getByTestId('me-company')).toBeVisible();
   await expect(page.getByTestId('me-role')).toHaveText('user');
+
+  // Back in Private by the picker: the private note is still there.
+  await expect(page.getByTestId('org-picker')).toBeEnabled();
+  await page.getByTestId('org-picker').selectOption({ label: 'Private' });
+  await expect(page.getByTestId('me-private')).toHaveText('Private account');
+  await expect(page.getByText(note)).toBeVisible();
 });
 
 test('an admin removes a member on /team after the confirmation that names the deletion', async ({ page }) => {
@@ -113,7 +125,7 @@ test('an admin removes a member on /team after the confirmation that names the d
   await expect(page).toHaveURL(/\/team$/);
   const row = page.getByTestId('member').filter({ hasText: email });
   await row.getByTestId('remove').click();
-  await expect(row.getByTestId('remove-confirmation')).toHaveText("This person's account will be deleted.");
+  await expect(row.getByTestId('remove-confirmation')).toHaveText('This person loses access to this company. Their account is deleted if this company is their last.');
   await row.getByTestId('remove-confirm').click();
   await expect(page.getByTestId('member').filter({ hasText: email })).toHaveCount(0);
   expect(await loginStatus(email, password), 'the removed member still signs in').toBe(401);

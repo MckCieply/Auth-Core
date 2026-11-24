@@ -24,12 +24,20 @@ public enum AccountDeletionReason
 /// The order matters, because the mail sender locks a mail request first and then, by the kind of mail, either the pending sign-up
 /// (a sign-up mail) or the account row (the link of a reset or verification mail, whose foreign key takes a share lock on it); any
 /// other order can deadlock. So the routine first deletes the queued mail requests of the addresses other than invitations, then
-/// the pending sign-ups of the addresses, without any account row locked. Only then does it read the accounts under a row lock
+/// the pending sign-ups of the addresses, without any account row locked. Then it locks the accounts' membership rows (ordered by user
+/// id, then company id), because a sign-in locks its membership row before the account row (spec 0015 → Lock order) and the routine must
+/// not hold an account row while it waits for one. Only then does it read the accounts under a row lock
 /// that is held to the end of the transaction, and delete, for each account: its login streak, its refresh tokens and then their
 /// authorizations (deleted, not only revoked: they name the account; there is no cascade between them), the account (its Identity
 /// rows, its mail links and its membership go by cascade; invitations it sent lose their sender) and, for a personal space, the
 /// space with its role row. The row lock precedes the deletes of the sessions, so that no sign-in or refresh writes a session of
 /// an account it is deleting (they read their account again under a share lock first).
+/// </para>
+/// <para>
+/// For a removal and a company deletion it then counts each account's memberships again, under that row lock, and keeps an account that
+/// has one (a creation of a company, which holds the account row, may have given it one since the caller looked): nothing of it is
+/// deleted and no row is staged (spec 0017, built with spec 0016). The mail requests and pending sign-ups deleted first are not restored
+/// for such an account.
 /// </para>
 /// <para>
 /// It keeps the audit rows, the invitations of companies to the address and the mail-limit counters. It relies on the caller's
@@ -48,17 +56,29 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unknown reason."),
     };
 
-    /// <summary>Deletes one account; see the other overload.</summary>
+    /// <summary>Deletes one account, naming the space a sign-in would take; see the last overload.</summary>
     public Task<int> DeleteAsync(Guid userId, AccountDeletionReason reason, Actor? actor, CancellationToken cancellationToken) =>
-        DeleteAsync([userId], reason, actor, cancellationToken);
+        DeleteAsync([userId], reason, actor, lostSpaceId: null, cancellationToken);
+
+    /// <summary>Deletes one account whose <paramref name="lostSpaceId"/> is named in its row; see the last overload.</summary>
+    public Task<int> DeleteAsync(Guid userId, AccountDeletionReason reason, Actor? actor, Guid? lostSpaceId, CancellationToken cancellationToken) =>
+        DeleteAsync([userId], reason, actor, lostSpaceId, cancellationToken);
+
+    /// <summary>Deletes the accounts, naming for each the space a sign-in would take; see the last overload.</summary>
+    public Task<int> DeleteAsync(
+        IReadOnlyCollection<Guid> userIds, AccountDeletionReason reason, Actor? actor, CancellationToken cancellationToken) =>
+        DeleteAsync(userIds, reason, actor, lostSpaceId: null, cancellationToken);
 
     /// <summary>
-    /// Deletes the accounts; returns how many there were (one already gone is skipped, with no row). <paramref name="actor"/> is the admin who
-    /// removes a member or deletes the company, <see cref="Actor.Operator"/> for the CLI, or <see langword="null"/>; for
-    /// <see cref="AccountDeletionReason.Self"/> the account itself is the actor of its row.
+    /// Deletes the accounts; returns how many were deleted (one already gone is skipped, with no row; for a removal or a company
+    /// deletion so is one that still holds a membership). <paramref name="actor"/> is the admin who removes a member or deletes the
+    /// company, <see cref="Actor.Operator"/> for the CLI, or <see langword="null"/>; for
+    /// <see cref="AccountDeletionReason.Self"/> the account itself is the actor of its row. <paramref name="lostSpaceId"/> is the space the
+    /// caller took from the accounts (a removal, a company deletion, a self-deletion): every <c>account.deleted</c> row names it; without it the
+    /// row names the space a sign-in would have taken.
     /// </summary>
     public async Task<int> DeleteAsync(
-        IReadOnlyCollection<Guid> userIds, AccountDeletionReason reason, Actor? actor, CancellationToken cancellationToken)
+        IReadOnlyCollection<Guid> userIds, AccountDeletionReason reason, Actor? actor, Guid? lostSpaceId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(userIds);
         if (db.Database.CurrentTransaction is null)
@@ -77,29 +97,57 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
             .ExecuteDeleteAsync(cancellationToken);
         await db.PendingSignups.Where(p => addressesOf.Contains(p.NormalizedEmail)).ExecuteDeleteAsync(cancellationToken);
 
-        // The accounts, read under a row lock held to the end of the transaction: from here on no sign-in or refresh can write a session for them.
+        // The memberships of the accounts next, each row locked, ordered by user id and company id (spec 0015 → Lock order: company, address,
+        // membership rows, account row). A sign-in takes its membership row before the account row, so the routine must wait for that row
+        // before it holds the account row, never the other way round; the delete of the users below then removes rows it already holds.
         Guid[] wanted = [.. ids];
+        _ = await db.Database
+            .SqlQuery<Guid>($"""SELECT "UserId" AS "Value" FROM "Memberships" WHERE "UserId" = ANY({wanted}) ORDER BY "UserId", "CompanyId" FOR UPDATE""")
+            .ToListAsync(cancellationToken);
+
+        // The accounts, read under a row lock held to the end of the transaction: from here on no sign-in or refresh can write a session for them.
         var accounts = await db.Users
             .FromSql($"""SELECT * FROM "AspNetUsers" WHERE "Id" = ANY({wanted}) ORDER BY "Id" FOR UPDATE""")
             .AsNoTracking()
             .Select(u => new { u.Id, u.Email, u.NormalizedEmail })
             .ToListAsync(cancellationToken);
+        List<Guid> found = [.. accounts.Select(a => a.Id)];
+        if (reason is AccountDeletionReason.MemberRemoved or AccountDeletionReason.OrgDeleted)
+        {
+            // The recount (spec 0017, built with spec 0016): an account that gained a membership since the caller looked (a creation of a
+            // company holds the account row and commits first) is kept. A plain read: the account rows are locked above, so no creation
+            // can add one now.
+            var holding = await db.Memberships.AsNoTracking()
+                .Where(m => found.Contains(m.UserId))
+                .Select(m => m.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+            _ = found.RemoveAll(holding.Contains);
+            _ = accounts.RemoveAll(a => holding.Contains(a.Id));
+        }
+
         if (accounts.Count == 0)
         {
             return 0;
         }
 
-        List<Guid> found = [.. accounts.Select(a => a.Id)];
-
-        // The space each account loses, read before anything is deleted: the row names it.
+        // The space each account loses, read before anything is deleted: the row names it. The caller's space when it names one (a removal or a
+        // company deletion: the account lost that company, whatever else it had), else the space a sign-in would take, in the sign-in's order.
         var spaces = await (
             from membership in db.Memberships.AsNoTracking()
             join company in db.Companies.AsNoTracking() on membership.CompanyId equals company.Id
             where found.Contains(membership.UserId)
-            orderby company.Kind, membership.JoinedAt   // a company (1) before a personal space (2), as everywhere
+            orderby membership.LastUsedAt == null,   // a space used before the ones never used, the latest first
+                membership.LastUsedAt descending,
+                company.Kind,                        // a company (1) before a personal space (2), as everywhere
+                membership.JoinedAt,
+                company.Id
             select new { membership.UserId, company.Id, company.Name, company.Kind })
             .ToListAsync(cancellationToken);
-        var lost = spaces.GroupBy(s => s.UserId).ToDictionary(g => g.Key, g => g.First());
+        var named = lostSpaceId is { } lostId
+            ? await db.Companies.AsNoTracking().Where(c => c.Id == lostId).Select(c => new { c.Id, c.Name }).FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var lost = spaces.GroupBy(s => s.UserId).ToDictionary(g => g.Key, g => new { g.First().Id, g.First().Name });
 
         List<string> addresses = [.. accounts.Select(a => a.NormalizedEmail).OfType<string>().Distinct(StringComparer.Ordinal)];
         List<byte[]> streaks = [.. addresses.Select(LoginIdentifier.HashOf)];
@@ -128,7 +176,7 @@ public sealed class AccountDeletion(AuthDbContext db, AuditLog audit)
 
         foreach (var account in accounts)
         {
-            lost.TryGetValue(account.Id, out var space);
+            var space = named ?? (lost.TryGetValue(account.Id, out var signIn) ? signIn : null);
             audit.Stage(
                 new AuditEntry
                 {

@@ -58,6 +58,8 @@ services:
       # Optional second seed user with an unconfirmed email (spec 0004); scripts/e2e-email.sh needs it.
       Auth__DevSeed__UnverifiedEmail: ${AUTH_DEV_SEED_UNVERIFIED_EMAIL:-}
       Auth__DevSeed__UnverifiedPassword: ${AUTH_DEV_SEED_UNVERIFIED_PASSWORD:-}
+      # A second company the first seed user is a plain member of (spec 0015); set it blank for none.
+      Auth__DevSeed__SecondOrgName: ${AUTH_DEV_SEED_SECOND_ORG_NAME-Beta}
       Auth__Email__Smtp__Host: mailpit
       # The product's manifest (spec 0005): its permissions and the default roles of a new company. A product mounts its own.
       Auth__Manifest__Path: /etc/auth-core/auth.yaml
@@ -75,6 +77,8 @@ services:
       Auth__RateLimit__Invite__PermitPerMinute: ${AUTH_RATE_LIMIT_INVITE:-}
       Auth__RateLimit__General__PermitPerMinute: ${AUTH_RATE_LIMIT_GENERAL:-}
       Auth__Audit__RetentionDays: ${AUTH_AUDIT_RETENTION_DAYS:-}
+      # How many companies an account may belong to before it can create another (1 to 1000); a blank value is 20.
+      Auth__Tenancy__MaxCompaniesPerAccount: ${AUTH_MAX_COMPANIES_PER_ACCOUNT:-}
     volumes:
       - ../.secrets:/run/secrets/auth:ro
       - ./auth.yaml:/etc/auth-core/auth.yaml:ro

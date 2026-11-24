@@ -31,6 +31,7 @@ public static class AuditKinds
     public const string AccountDeleteRefused = "account.delete_refused";
     public const string ProviderLinked = "provider.linked";
     public const string ProviderReauthenticated = "provider.reauthenticated";
+    public const string OrgSwitched = "org.switched";
 
     // Spec 0012 → Audit events.
     public const string AccountConfirmed = "account.confirmed";
@@ -49,5 +50,6 @@ public static class AuditKinds
         AccountDeleted, AccountDeleteRefused,
         ProviderLinked, ProviderReauthenticated,
         AccountConfirmed, AccountConfirmRefused, ProviderUnlinked, PasswordChanged,
+        OrgSwitched,
     ];
 }

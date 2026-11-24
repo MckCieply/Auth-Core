@@ -121,7 +121,7 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
     {
         var (_, operations) = await DescriptionAsync();
 
-        Assert.Equal(40, operations.Count);   // spec 0012: the four settings endpoints
+        Assert.Equal(43, operations.Count);   // spec 0012: the four settings endpoints; spec 0015: GET /auth/orgs, POST /auth/switch; spec 0016: POST /auth/orgs
         foreach (var (endpoint, operation) in operations)
         {
             Assert.Contains("too_many_requests", Description(operation, "429"));
@@ -155,18 +155,24 @@ public sealed class OpenApiHardeningTests(PostgresFixture postgres, KeyMaterialF
             }
         }
 
-        Assert.Equal(28, covered);   // spec 0012: the four settings endpoints
+        Assert.Equal(30, covered);   // spec 0011: the exchange, the link and the finish; spec 0012: the four settings endpoints; spec 0015: the switch; spec 0016: POST /auth/orgs
     }
 
     [Fact]
-    public async Task Refresh_can_say_503_temporarily_unavailable_with_retry_after_and_no_other_endpoint_can()   // spec 0008 → OpenAPI
+    public async Task Refresh_and_switch_can_say_503_temporarily_unavailable_with_retry_after_and_no_other_endpoint_can()   // spec 0008 → OpenAPI; spec 0015
     {
         var (_, operations) = await DescriptionAsync();
 
-        var refresh = operations["POST /auth/refresh"];
-        Assert.Contains("temporarily_unavailable", Description(refresh, "503"));
-        Assert.NotNull(refresh["responses"]!["503"]!["headers"]!["Retry-After"]);
-        Assert.Equal(["POST /auth/refresh"], operations.Where(o => o.Value["responses"]!["503"] is not null).Select(o => o.Key));
+        foreach (var endpoint in new[] { "POST /auth/refresh", "POST /auth/switch" })
+        {
+            var operation = operations[endpoint];
+            Assert.Contains("temporarily_unavailable", Description(operation, "503"));
+            Assert.NotNull(operation["responses"]!["503"]!["headers"]!["Retry-After"]);
+        }
+
+        Assert.Equal(
+            ["POST /auth/refresh", "POST /auth/switch"],
+            operations.Where(o => o.Value["responses"]!["503"] is not null).Select(o => o.Key).Order(StringComparer.Ordinal));
     }
 
     [Fact]

@@ -9,7 +9,7 @@ import { InvitePage } from './invite';
 import { LoginPage } from './login';
 import { SignupPage } from './signup';
 
-const both = { signup: 'self-service', private_signup: 'self-service' };
+const both = { signup: 'self-service', private_signup: 'self-service', org_creation: 'self-service' };
 const preview = { org_name: 'Acme', email: 'new@acme.example', role: 'viewer' };
 
 async function open(path: string, page: Type<unknown>, options: object, query = '') {
@@ -131,12 +131,14 @@ describe('the provider buttons on the screens (spec 0011)', () => {
     expect(has(harness.fixture, '#password')).toBe(true);
   });
 
-  it('/invite: no button for an address with a private account: the screen of spec 0010', async () => {
+  it('/invite: the provider buttons are shown for an existing account too, below the Accept button', async () => {
     const { fixture, ctrl } = await open('invite', InvitePage, { ...both, providers: ['google'] }, '?token=tok-i');
-    ctrl.expectOne('/auth/invites/preview').flush({ ...preview, has_private_account: true });
+    ctrl.expectOne('/auth/invites/preview').flush({ ...preview, has_private_account: true, has_account: true, org_id: 'org-acme' });
     await settle(fixture);
-    expect(has(fixture, '[data-testid="move"]')).toBe(true);
-    expect(pageText(fixture)).not.toContain('Accept with');
+    expect(has(fixture, '[data-testid="accept"]')).toBe(true);
+    expect(pageText(fixture)).toContain('Accept with Google');
+    expect(has(fixture, 'a[href="/auth/providers/google/start?invite=tok-i"]')).toBe(true);
+    expect(has(fixture, '#password')).toBe(false);
   });
 
   it('/invite: no button when providers is empty', async () => {

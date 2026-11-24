@@ -92,7 +92,7 @@ export const TOKEN_PATHS: readonly string[] = ['/auth/me', '/auth/account'];
 `/auth/account` is the self-deletion of a private account (spec 0010): it needs the token too.
 
 Edit them to the paths of your own backend (`/api/` is the sample's). It never adds the token to another origin or to the other
-`/auth` endpoints (`/auth/login`, `/auth/refresh`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
+`/auth` endpoints (`/auth/login`, `/auth/refresh`, `/auth/switch`, the mail-link endpoints, `/auth/options`, `/auth/signup`), and a path that only looks like one after `..` is
 resolved does not count. [`samples/notes-web/src/app/auth/auth.interceptor.spec.ts`](../../samples/notes-web/src/app/auth/auth.interceptor.spec.ts)
 shows the cases.
 
@@ -110,7 +110,7 @@ for a product with company sign-up only), so a product does not repeat its manif
 | --- | --- | --- |
 | `/reset?token=` | new password, twice; the rules it did not meet; "link used up" | `POST /auth/password/reset` |
 | `/verify?token=` | confirms on opening; a form to ask for a new link when it is used up | `POST /auth/email/verify`, `POST /auth/email/verify/request` |
-| `/invite?token=` | "Join {company} as {role}" and the email; the password, twice; for an address with a private account (the preview's `has_private_account`) the warning in red instead and one button, "Move me to the company and delete my private account", which sends `leave_private_account: true` and no password | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
+| `/invite?token=` | "Join {company} as {role}" and, for an address with no account (the preview's `has_account` `false`), the email and the password, twice; for an address that has an account of any kind (`has_account` `true`) the line "You already have an account with {email}. Accepting adds {company} to it; everything else stays as it is." and one button, "Accept the invitation", which sends the token alone and no password; below it the provider buttons | `POST /auth/invites/preview`, `POST /auth/invites/accept` |
 | `/signup` | "Organization / Private person" when `GET /auth/options` says both are on (with one on, that one); the email, and for an organization the company name; always "Check your inbox"; the wait on a `429`; "closed" on `signup_disabled` | `POST /auth/signup` (`kind` `private` for a private person, with no `company_name`) |
 | `/complete-signup?token=` | the address (read-only); for an organization the company name (editable); the password, twice; the rules it did not meet; "link used up" with a way to sign up again; "an account already exists" with a way to sign in; on success the person is signed in and the notes screen opens | `POST /auth/signup/preview` (it says `kind`), `POST /auth/signup/complete` (answers as `POST /auth/login` does: the access token and the refresh cookie) |
 | `/forgot` | email; always the same answer | `POST /auth/password/forgot` |
@@ -211,6 +211,68 @@ Known limits, in the spec's words: another open tab keeps its token until it exp
 because tabs are not synchronised; and a token in memory can be read by script running in the page, which the
 `Content-Security-Policy` of step 6 limits to your own files.
 
+## Several companies (spec 0015)
+
+One account can belong to several companies (and at most one personal space), each with its own role. Every session works in one of them,
+the **session's company**: the access token's `org_id` names it, a refresh keeps it, and the other devices of the person keep theirs. A
+product that never switches sees no change. Today a second membership comes from the development seed (`Auth:DevSeed:SecondOrgName`, which puts
+the first seed user in a second company as a plain member), from tests, from `POST /auth/orgs` ("Creating another company" below) and, since spec 0017, from an invitation to an account that already exists ("Private accounts" below).
+
+- **Listing:** `GET /auth/orgs` with the access token answers `{"orgs":[{"id","name","kind","role":{"id","name"},"current"}]}`: every
+  space of the person, ordered by name (ignoring case), then id; `current` is `true` for the one named by the token's `org_id`. A personal space
+  is listed as `private` with `kind` `personal`: hide the entries of that kind if your product has no use for them. `/auth/orgs` starts with
+  `/auth/org`, so the interceptor's list of step 3 already sends the token to it. After a removal from the token's company no entry is `current`.
+- **Switching:** `POST /auth/switch` with `{"org_id": "<id>"}` and the refresh cookie (no access token) answers as `POST /auth/refresh` does:
+  a new access token in the body and a new cookie, for the chosen space. Keep the token as the same session, ask `GET /auth/me` again and
+  reload your data. `404 not_found` means the id is not one of the person's spaces (read the list again; the cookie still works); `401` is a
+  refresh that failed (`invalid_grant`): open `/login`, and do not run the refresh-and-retry of step 5, because the switch is itself a refresh;
+  `400` is a body that is not `{"org_id": "<uuid>"}` sent as `application/json` (a form post is `400`), `415` is a JSON body declared in a charset other than UTF-8; `503` keeps the session, as at a refresh. The sample's `auth.service.ts` has `orgs`
+  (the last list), `loadOrgs()` and `switchTo(orgId)`, and `pages/notes.ts` draws the picker in the account bar when the list has more than
+  one entry: each company by name, the personal space as "Private", the current one marked.
+- **The sample's walk-through** of the picker, the switch and its failures, and the tests that cover them, is in the
+  [README of `samples/notes-web`](../../samples/notes-web/README.md).
+- **The company used last:** a sign-in lands in the company the person used last (set by a sign-in or a switch; a refresh does not write
+  it), so a person who never switched lands where they always did.
+- **Reload per-company data when `org_id` changes.** Your product keeps its data under the token's `org_id`, so everything on screen that
+  belongs to a company must be read again after a switch **and after a refresh that returns another `org_id`**: the cookie is shared by
+  every tab of the browser, so a switch in one tab moves the others at their next refresh, and within the 15-second grace window a
+  tab that refreshes with the old cookie can put the device back in the old company (after the window the old cookie is a used-up token again: reuse detection, `refresh.reuse_detected`, ends the session). After every refresh the sample reads `GET /auth/me`, and when
+  `org_id` changed it reloads the notes and shows "Switched to {name} in another tab."
+- **A removal signs out only the devices that work in that company.** Removing a person from a company ends the sessions whose
+  company it was, at their next refresh or switch (`401 invalid_grant`); the person's sessions in other companies go on, and a new sign-in lands
+  in the company used last among the rest. Their access token still works at your backend until it expires (at most 10 minutes), while
+  `GET /auth/me` and the company API refuse it at once with `403 permissions_changed`.
+
+## Creating another company (spec 0016)
+
+A signed-in person can start another company. It is off until your manifest says `org_creation: self-service`; an instance that does not
+opt in sees no change.
+
+- **Offer it from `GET /auth/options`.** The answer has `org_creation`, `self-service` or `off`: show "New company..." only for
+  `self-service`. The sample reads it once when the notes page starts (`pages/notes.ts`, through `account-api.ts`) and adds "New company..." as
+  the last entry of the picker, also for a person who has only one space; the entry opens a small form with the name.
+- **Create:** `POST /auth/orgs` with the access token and `{"name": "<1 to 100 characters>"}` as `application/json`. The answer is `201` with
+  the entry of `GET /auth/orgs` for the new company (`id`, `name`, `kind` `organization`, `role`, `current` `false`). The person is its first
+  admin and the company has a copy of the default roles. Any signed-in account may create, a private one included; its personal space stays.
+  Creating does not move the session: the token and the cookie are unchanged.
+- **Switch after the `201`.** Call `POST /auth/switch` with the new `id`, as the picker does, then ask `GET /auth/me` and reload. The sample's
+  `createCompany(name)` in `auth.service.ts` does both. If the switch fails after the `201`, the company exists and the next `GET /auth/orgs`
+  lists it.
+- **The product's data in the new company starts empty.** Your product keeps its rows under the token's `org_id`, and the new company has none:
+  show the empty state (the sample shows no notes), and write nothing for it until the person adds something.
+- **The answers.** `403 org_creation_disabled`: the switch is off (hide the entry, as the sample does, with "Creating companies is turned
+  off."); `409 company_limit_reached`: the account is in as many companies as `Auth:Tenancy:MaxCompaniesPerAccount` allows (20 by default; the
+  personal space is not counted); `400 invalid_request`: a name or a body that breaks the rules; `403 permissions_changed`: the account is gone
+  or has no membership any more, so read the list again; `401`: refresh as for any call. `415` is a JSON body declared in another charset.
+  The per-IP `invite` limit counts it.
+- **Deleting an account that is still in a company.** `DELETE /auth/account` answers `403 company_member` to an account that holds its
+  personal space and a company, whichever space the token names: no company is deleted with an account and none loses its admin. Tell the
+  person to delete their companies (`DELETE /auth/org`, which an admin does with the company's token) or to ask their admins to remove them, then to
+  delete the account. The sample reads `GET /auth/orgs` before it deletes the notes and, when a company is listed, shows "You are still a member
+  of {names}. Delete those companies or ask their admins to remove you, then delete your account." without deleting anything; the server's
+  `403 company_member` stays the guard for a company created in another tab in between (then the notes are already gone, as after a wrong
+  password).
+
 ## Private accounts (spec 0010)
 
 When your manifest says `private.signup: self-service`, a person can sign up alone. Your screens tell the two kinds apart by `me().org_kind`:
@@ -223,12 +285,22 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
   after its `204`: Auth-Core does not tell your product that an account is gone. Warn first ("This deletes your account and all your notes. It
   cannot be undone."), ask for the password on the same screen, and on `403 wrong_password` say what happened: the data is gone, the account
   is not. A `429 too_many_attempts` is the lockout: show the wait. On success open the sign-in screen.
-- **An invitation to a private account:** when the preview says `has_private_account`, show the warning (the paragraph of the mail) and one
-  button that sends `leave_private_account: true` with no password: the account keeps its own. Without it the acceptance answers
-  `409 private_account_exists` ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)).
-- **Removing a member deletes the account,** and deleting a company deletes every member's, the admin's included. Say so in the confirmation
-  of your own team screen, with the sample's sentence: "This person's account will be deleted." ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)).
-  The person can be invited again, as a new account.
+- **An invitation to an address that has an account** (spec 0017), a private account or a company member's: the preview answers
+  `has_account` `true` (and `org_id`, the invited company's id). Show one line saying the company is added to the account and
+  nothing else changes, with one button that sends `{"token"}` and no password; a `password` that is sent is not used. The acceptance
+  adds the membership and nothing more: the account keeps its password, its other companies, its personal space and its sessions, and
+  the new company is in `GET /auth/orgs` at once with `current` `false`. After the `204` move only the same person, and only
+  with `POST /auth/switch` and the preview's `org_id`: the sample does it when `GET /auth/me` names the invited address (equal up to
+  ASCII case) and otherwise opens `/login` with the address, because the open session may be another person's. `409 already_member`
+  now means a member of the invited company only. `leave_private_account: true` is still accepted for a screen built for spec 0010: it
+  deletes the personal space on purpose, and the sample no longer sends it
+  ([`pages/invite.ts`](../../samples/notes-web/src/app/pages/invite.ts)). The server no longer answers `409 private_account_exists`; the
+  sample keeps the string for an older server and shows the generic error for it.
+- **Removing a member deletes the account only with its last space** (spec 0015), and deleting a company does the same for every member, the
+  admin included: a person who is a member of another space keeps the account. Say so in the confirmation of your own team screen, with the
+  sample's sentence: "This person loses access to this company. Their account is deleted if this company is their last."
+  ([`pages/team.ts`](../../samples/notes-web/src/app/pages/team.ts)). A person whose account is deleted can be invited again, as a new
+  account.
 - **Personal data after deletion:** Auth-Core deletes the account and what it holds of it, keeps the audit rows that name it (its id, its
   address and the client addresses) for their 90 days by default on the legitimate interest of security, and backups keep everything until they are
   rotated ([threat model](../security/threat-model.md), "Account deletion and personal data"). Your product's data is yours to delete.
@@ -237,7 +309,7 @@ When your manifest says `private.signup: self-service`, a person can sign up alo
 
 When `GET /auth/options` lists `providers` (`["google","microsoft"]`, in the manifest's order), draw one button per name, first on the
 sign-in, sign-up and invitation screens, then "or" and the form. **A button is a link, not a call**: `<a href="/auth/providers/google/start">`
-(on `/invite` with `?invite=<the token>`, for an address without a private account only). The browser leaves for the provider and comes back
+(on `/invite` with `?invite=<the token>`). The browser leaves for the provider and comes back
 to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src/app/pages/provider-buttons.ts)).
 
 - **The return screen** (the sample's `/provider-return`, the address of `Auth:App:FrontendUrls:ProviderReturn`) reads the fragment once,
@@ -256,8 +328,10 @@ to your return screen ([`pages/provider-buttons.ts`](../../samples/notes-web/src
 - **The exchange.** `POST /auth/providers/exchange` `{"ticket"}` answers as a login does (the token and the refresh cookie), or
   `{"next":"link","email","email_verified"}` (open the link screen), or `{"next":"finish_signup","email","kinds"}` (open the finish
   screen), or an error that the sample words one by one: `invalid_ticket` (too late, used, or another browser: start again), `no_email`,
-  `no_account`, `already_registered`, `no_membership`, and for an invitation `invalid_token`, `address_mismatch`, `already_member`,
-  `private_account_exists` and `provider_already_linked`. A `429` keeps the ticket and shows "Try again". The cookie `auth_pt` goes along by
+  `no_account`, `already_registered`, `no_membership`, and for an invitation `invalid_token`, `address_mismatch`, `already_member`
+  (a member of the invited company), `already_registered` (spec 0017: the address has an account and the provider's identity is not one of its
+  logins; the person accepts with the button of `/invite` and signs in) and `provider_already_linked`. When the identity is one of the
+  account's logins, an invitation joins the company and signs the person in to it, with the answer of a login. A `429` keeps the ticket and shows "Try again". The cookie `auth_pt` goes along by
   itself; the call needs no access token, so leave the provider paths out of the interceptor's token paths.
 - **The link screen** asks the password of the existing account once (`POST /auth/providers/link`); when `email_verified` is `false` it
   says so and adds a link to sign-up above the same password form, because the provider did not prove the address and the person may have

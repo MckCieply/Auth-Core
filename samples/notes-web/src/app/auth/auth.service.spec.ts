@@ -2,7 +2,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { adminMe, holdToken, privateMe, settle, signedInAs, viewerMe } from '../../testing/helpers';
+import { adminMe, holdToken, privateMe, settle, signedInAs, viewerMe, answerOrgs } from '../../testing/helpers';
 import { AuthService, failureOf } from './auth.service';
 
 const status = (code: number) => ({ status: code, statusText: String(code) });
@@ -35,6 +35,7 @@ describe('AuthService', () => {
       expect(auth.token()).toBe('tok-1');
       expect(auth.me()).toEqual(adminMe);
       expect(auth.notice()).toBeNull();
+      answerOrgs(ctrl);
       ctrl.verify();
     });
 
@@ -170,6 +171,7 @@ describe('AuthService', () => {
       expect(await done).toEqual({ ok: true });
       expect(auth.token()).toBe('tok-9');
       expect(auth.me()).toEqual(adminMe);
+      answerOrgs(ctrl);
       ctrl.verify();
     });
 
@@ -253,6 +255,7 @@ describe('AuthService', () => {
       expect(await done).toEqual({ ok: true });
       expect(auth.token()).toBe('tok-b');
       expect(auth.me()).toBeNull();
+      answerOrgs(ctrl);
       ctrl.verify();
     });
 
@@ -270,6 +273,7 @@ describe('AuthService', () => {
       newRequest.flush(viewerMe);
       expect(await done).toEqual({ ok: true });
       expect(auth.me()).toEqual(viewerMe);
+      answerOrgs(ctrl);
       ctrl.verify();
     });
 

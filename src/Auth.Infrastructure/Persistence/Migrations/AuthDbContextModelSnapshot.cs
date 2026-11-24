@@ -399,6 +399,9 @@ namespace Auth.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("JoinedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("RoleId")
                         .HasColumnType("uuid");
 

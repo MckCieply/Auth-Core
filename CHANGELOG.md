@@ -1,9 +1,79 @@
 # Changelog
 
 All notable changes to Auth-Core. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions are those of the tags
-(`v0.1.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
+(`v0.3.0` for the service and its image; `python-v0.1.1` for the Python package in `clients/python/`).
 
-## Unreleased
+## 0.3.0 - 2026-11-23
+
+Several companies per account ([spec 0015](docs/superpowers/specs/0015-multiple-companies.md), the first of three slices with 0016 and 0017): one
+person belongs to several companies (and at most one personal space) with one account and moves between them without signing in again. A product that
+never switches companies sees no change: every person has one company, the token carries the same claims and every endpoint answers as before. No
+endpoint made a second membership in spec 0015 itself: spec 0016 adds `POST /auth/orgs` (below) and spec 0017 lets an invitation keep the other memberships (below).
+
+### Added
+
+- **`POST /auth/orgs`** (spec 0016): a signed-in account creates another company with `{"name"}` and becomes its first admin (the manifest's first admin role); it
+  answers `201` with the entry of `GET /auth/orgs` (`current` `false`) and does not move the session, so the product calls `POST /auth/switch`. It is off until the
+  manifest says `org_creation: self-service` (`403 org_creation_disabled`), any account may create (a private one keeps its personal space), and it counts against the
+  per-IP `invite` limit. `org.created` is written with `details.via` `api`; there is no new audit kind.
+- **The manifest key `org_creation`** (`self-service` or `off`, the default; any other value makes the manifest invalid) and **the option `org_creation`** in
+  `GET /auth/options`, `self-service` or `off`.
+- **`Auth:Tenancy:MaxCompaniesPerAccount`** (env `AUTH_MAX_COMPANIES_PER_ACCOUNT`): how many companies one account may be a member of before `POST /auth/orgs`
+  answers `409 company_limit_reached`; a whole number from 1 to 1000, 20 when absent or empty, anything else stops the start. The personal space is not counted
+  and an invitation is not refused by it.
+- **`DELETE /auth/account` answers `403 company_member`** to an account that holds its personal space and a company, with a token of either; nothing is deleted
+  and no attempt is counted. An account with company memberships only still gets `403 forbidden`.
+- **The sample**: "New company..." in the picker of `samples/notes-web`, and the `company_member` text before the account's notes are deleted.
+- **`GET /auth/orgs`**: every space of the token's user (companies and the personal space, listed as `private` with `kind` `personal`), ordered by name, with the
+  role and `current` for the token's `org_id`; it counts against the `general` limit.
+- **`POST /auth/switch`** with `{"org_id"}` and the refresh cookie: a new access token and cookie for another space of the person, answered as `/auth/refresh`;
+  `404 not_found` for a space that is not the person's (the cookie is not used up), the uniform `401 invalid_grant` of a refresh that would fail. It counts against
+  the `refresh` limit with `/auth/refresh`.
+- **The session's company.** Every session works in one space: a sign-in sets it, a switch changes it, a refresh keeps it. The refresh token carries it as two
+  internal claims, `session_org_id` and `session_org_joined`; the access token gains no claim.
+- **The company used last.** A membership gains `LastUsedAt`, written by a sign-in and a switch (never by a refresh); a sign-in lands in the company used last,
+  so a person who never switched lands where they always did.
+- **One audit kind**, `org.switched` (29 in all), with `details.from_org_id`; none for a switch to the session's own company.
+- **`Auth:DevSeed:SecondOrgName`**: the development seed also creates that company and makes its first user a plain member of it.
+- **The sample**: a company picker in the account bar of `samples/notes-web`, and a reload of the notes when another tab switched.
+- **`scripts/e2e-orgs.sh`**: the live check of the sequence above against the development stack (the run sequences of `e2e-tenancy.sh` and `e2e-hardening.sh` name it).
+- **An invitation keeps the other memberships** (spec 0017). An address that has an account of any kind (a company member's, a private account, or both) accepts an
+  invitation and joins the company with that account: the password, the linked providers, the other memberships, the personal space and the sessions stay, and the new
+  company is in `GET /auth/orgs` at once (`current` `false`). The acceptance needs no password for such an address (one sent is not used), confirms an unconfirmed
+  email and writes `LastUsedAt` with `JoinedAt`.
+- **`has_account` and `org_id` in `POST /auth/invites/preview`**: `has_account` is `true` when the address has an account of any kind, `org_id` is the invited
+  company's id. A client uses them to show one button instead of a password form and to call `POST /auth/switch` after the `204`.
+- **The acceptance through Google or Microsoft joins an existing account** when the identity is one of its logins: the person is signed in to the invited company
+  with the answer of a login. An identity that is not one of the account's logins is `409 already_registered`; one that belongs to another account is
+  `409 provider_already_linked`; nothing is used up in those cases.
+- **The sample**: `/invite` shows one line and the button "Accept the invitation" for an existing account, with the provider buttons below, and moves the session of
+  the invited person into the company after the `204`; it never sends `leave_private_account`.
+
+### Changed
+
+- **An invitation to an existing account no longer ends sessions, mail links or the login streak** (spec 0017). Until now an acceptance bumped the security stamp and
+  ended every session of the account; it ends none, on either path, and a lockout, a reset link or a verification link sent before it stays as it was.
+- **`409 already_member` of an invitation means a member of the invited company only** (preview, acceptance and provider exchange); a member of another company
+  joins. **`409 private_account_exists` is no longer answered by any path** (the OpenAPI description drops it; the exchange describes `already_registered` for the
+  purpose `invite`). A client built for spec 0010 that sends `leave_private_account: true` still gets the move: the personal space is deleted, and sessions of that space
+  get `401 invalid_grant` at their next refresh or switch. A screen built for an older server that sends a `password` for an existing account sees it ignored.
+- **The invitation mail to an address that has an account** names the application and the company and says that the account joins and keeps everything it has (English
+  and Polish); no mail holds the warning of spec 0010 any more. As since `0.1.2`, no invitation mail names the role.
+- **An account is deleted only when it loses its last space.** Removing a member and deleting a company delete the membership; an account left with no space is
+  deleted as before (`account.deleted`, now naming in `org_id` the space it lost), and one that has another space is kept (`member.removed` is written either way).
+  The sessions whose company was the removed one get `401 invalid_grant` at their next refresh or switch; the others go on. `remove-member` prints
+  "Member removed; the account is deleted." or "Member removed; the account is kept."; `delete-org` prints "Company deleted; members with no other space lose their accounts too."
+- `GET /auth/me`, every endpoint under `/auth/org` and `DELETE /auth/account` act on the token's company, checked against the database. `DELETE /auth/account`
+  with a personal-space token of an account that is also a company member answers `403 company_member` (spec 0016; it was `403 permissions_changed`).
+- The per-IP limits count `POST /auth/switch` against the `refresh` policy and `GET /auth/orgs` against `general`. The OpenAPI description has 38 operations (39 with `POST /auth/orgs`).
+- The threat model (residual risks 62 to 65, the session's company), the guides for Angular and Python, the design document and the audit runbook describe the feature (residual risks 66 and 67 are spec 0016's, 68 to 70 spec 0017's).
+
+### Upgrading
+
+One migration adds `Memberships.LastUsedAt` (nullable; every existing row reads `null`); the service applies it at start. A refresh token issued before this
+version carries no company and refreshes into the space a sign-in would take.
+
+## 0.2.0 - 2026-11-21
 
 Self-service sign-up ([spec 0009](docs/superpowers/specs/0009-self-service-signup.md)): a product can let a visitor start a company of their own. Off by default; an
 instance that does not turn it on behaves as `0.1.0`, apart from what spec 0010 below changes (accounts are deleted instead of kept).
@@ -86,6 +156,7 @@ and two new members in `GET /auth/me`, and nothing else changes.
 - `POST /auth/invites/accept`: an account that exists keeps its password (a `password` sent is not used); a missing password with an unknown
   token is now `400 invalid_token`. `POST /auth/signup/complete`: the company name is required for an organization and refused for a private
   sign-up, judged after the token.
+- The invitation to an address that has a private account no longer names the role either (as in `0.1.2`, for every invitation mail).
 
 ### Fixed
 
@@ -98,6 +169,22 @@ company, or an organization sign-up); the third adds the table `ProviderTickets`
 membership (one an earlier version kept after a removal or a company deletion) is deleted, each with an `account.deleted` row whose
 `details.reason` is `upgrade`. This cannot be undone but by restoring a backup, so back up first; a start that fails on an account stops and logs its id (level Critical). Nothing else is required: without the manifest keys and the address, neither kind of sign-up is on and no
 setting is new and required.
+
+## 0.1.2 - 2026-10-28
+
+A patch release of `0.1.1`.
+
+### Changed
+
+- The invitation mail no longer names the role. It printed the role's key from the consumer's manifest (for example `worker`), which is a code, not a word the invitee should read. The rest of the mail is unchanged.
+
+## 0.1.1 - 2026-10-20
+
+A patch release of `0.1.0`: the same code, with the patched transitive packages.
+
+### Changed
+
+- `Directory.Packages.props` pins `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` (transitive packages, brought in by MailKit and the test host) to 10.0.13: NuGet audit reports advisories (GHSA-2fmv-rv2c-59x7, GHSA-846f-f764-76mx; both denial of service) for the versions they resolved to, and the build treats warnings as errors, so `0.1.0` no longer restored from source. The image carries the patched packages.
 
 ## 0.1.0 - 2026-02-24
 

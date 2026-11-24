@@ -94,12 +94,11 @@ export const texts = {
     joinMiddle: 'as',
     setsPassword: (email: string): string => `This sets the password for ${email}.`,
     submit: 'Join',
-    alreadyMember: 'This account already belongs to a company.',
-    // The paragraph of the invitation mail (spec 0010), for an address that has a private account.
-    privateWarning: (company: string): string =>
-      `You already have a private account with this email address. If you accept, you move to ${company}: the space of your private account ` +
-      `is deleted, with everything in it. Your account itself stays, with its email address and its password, and becomes a member of ${company}.`,
-    move: 'Move me to the company and delete my private account',
+    alreadyMember: 'You are already a member of this company. Sign in to open it.',
+    // Spec 0017: an address that has an account of any kind joins the company with that account; nothing it has is lost.
+    existingAccount: (email: string, company: string): string =>
+      `You already have an account with ${email}. Accepting adds ${company} to it; everything else stays as it is.`,
+    accept: 'Accept the invitation',
     // Not the link texts of the other screens: a person cannot get a new invitation from this app, only from the company.
     invalid: 'This invitation has expired or was already used. Ask for a new one.',
   },
@@ -149,7 +148,8 @@ export const texts = {
     alreadyRegistered: 'An account with this address exists. Sign in with your password.',
     addressMismatch: 'Use the Google or Microsoft account of the invited address, or open the invitation link again and choose a password.',
     alreadyMember: 'This account already belongs to a company.',
-    privateAccountExists: 'You have a private account with this address. Open the invitation link again to move it into the company.',
+    // Spec 0017: an invitation for an address that has an account is accepted with the button on /invite, then the person signs in.
+    alreadyRegisteredInvite: 'You already have an account with this address. Open the invitation link again, choose Accept the invitation, then sign in.',
     providerAlreadyLinked: 'This Google or Microsoft account already signs in to another account.',
     invalidToken: 'This invitation has expired or was already used. Ask for a new one.',
   },
@@ -196,14 +196,37 @@ export const texts = {
     tooLong: (max: number): string => `A note can be at most ${max} characters.`,
   },
 
+  // Spec 0015: an account in more than one company (or a company and a personal space). The picker of the account bar.
+  orgs: {
+    label: 'Company',
+    // The name of the personal space, whatever the server calls it.
+    private: 'Private',
+    gone: 'That company is no longer yours. The list is up to date.',
+    // Spec 0016: the account's rights changed while a company was being created.
+    changed: 'Your companies changed. The list is up to date.',
+    // The bar, after a refresh found that another tab moved the session to another space.
+    switchedInAnotherTab: (name: string): string => `Switched to ${name} in another tab.`,
+    // Spec 0016: creating another company.
+    limitReached: 'You have reached the limit of companies.',
+    creationOff: 'Creating companies is turned off.',
+    nameRule: 'Check the company name.',
+    // The last entry of the picker and its small form.
+    newCompany: 'New company...',
+    newCompanyName: 'Name of the new company',
+    createCompany: 'Create company',
+    // Spec 0016: an account that is still in a company cannot be deleted; the names are those of GET /auth/orgs.
+    companyMember: (names: string): string =>
+      `You are still a member of ${names}. Delete those companies or ask their admins to remove you, then delete your account.`,
+  },
+
   team: {
     title: 'Team',
     loading: 'Loading...',
     back: 'Back to the notes',
     remove: 'Remove',
     cancel: 'Cancel',
-    // Spec 0010: removing a member deletes the account. A product's own team screen says the same.
-    removeConfirm: "This person's account will be deleted.",
+    // Spec 0015: removing a member deletes the account only when this company was its last space. A product's own team screen says the same.
+    removeConfirm: 'This person loses access to this company. Their account is deleted if this company is their last.',
     permissionNotHeld: 'You cannot remove someone who holds more permissions than you.',
     lastManager: 'The company needs at least one person who manages its members.',
     cannotChangeSelf: 'You cannot remove yourself.',

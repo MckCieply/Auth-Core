@@ -45,9 +45,14 @@ public abstract class TenancyTestBase : MailTestBase
     protected async Task<TenantContext> TenantOfAsync(Guid userId)
     {
         using var scope = Factory.Services.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<MembershipReader>().ReadAsync(userId, TestContext.Current.CancellationToken)
+        return await scope.ServiceProvider.GetRequiredService<MembershipReader>().ReadSignInSpaceAsync(userId, TestContext.Current.CancellationToken)
             ?? throw new InvalidOperationException("The user belongs to no company.");
     }
+
+    /// <summary>How many company memberships (kind organization) the account has; its personal space is not counted.</summary>
+    protected Task<int> CompanyCountOfAsync(Guid userId) =>
+        InDbAsync(db => db.Memberships.CountAsync(
+            m => m.UserId == userId && db.Companies.Any(c => c.Id == m.CompanyId && c.Kind == CompanyKind.Organization), TestContext.Current.CancellationToken));
 
     /// <summary>The company the development seed made.</summary>
     protected Task<Guid> DevCompanyIdAsync() =>
@@ -102,6 +107,15 @@ public abstract class TenancyTestBase : MailTestBase
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
             return 0;
         });
+
+    /// <summary>An invitation of the company to the address, dispatched: the token as its mail holds it.</summary>
+    protected async Task<string> InvitationTokenAsync(Guid companyId, string email, string role = "user")
+    {
+        var invite = await AddInviteAsync(companyId, email, role);
+        await EnqueueInvitationAsync(invite, email);
+        await DispatchAsync();
+        return TokenIn(Mail.Sent.Last(m => m.To == email));
+    }
 
     protected Task<Invite?> InviteAsync(Guid inviteId) =>
         InDbAsync(db => db.Invites.AsNoTracking().SingleOrDefaultAsync(i => i.Id == inviteId, TestContext.Current.CancellationToken));
@@ -160,13 +174,39 @@ public abstract class TenancyTestBase : MailTestBase
     /// Gives an account a membership of a company in the database, an hour after its other ones, as only a direct change of the database can
     /// leave an account with two.
     /// </summary>
-    protected Task AddLaterMembershipAsync(Guid userId, Guid companyId, string role) =>
+    protected Task AddLaterMembershipAsync(Guid userId, Guid companyId, string role) => AddMembershipAsync(userId, companyId, role);
+
+    /// <summary>
+    /// Gives an account one more membership straight in the database, with the company's role of that name; <paramref name="joinedAt"/> is
+    /// the factory clock's now plus one hour unless told otherwise.
+    /// </summary>
+    protected Task AddMembershipAsync(Guid userId, Guid companyId, string role, DateTimeOffset? joinedAt = null) =>
         InDbAsync(async db =>
         {
             var roleId = await RoleIdAsync(companyId, role);
-            db.Memberships.Add(new Membership { UserId = userId, CompanyId = companyId, RoleId = roleId, JoinedAt = StorableTime.Now(Clock).AddHours(1) });
+            db.Memberships.Add(new Membership { UserId = userId, CompanyId = companyId, RoleId = roleId, JoinedAt = joinedAt ?? StorableTime.Now(Clock).AddHours(1) });
             return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         });
+
+    /// <summary>Ends the one membership of an account in a company, straight in the database; its other memberships stay.</summary>
+    protected Task RemoveMembershipAsync(Guid userId, Guid companyId) =>
+        InDbAsync(db => db.Memberships.Where(m => m.UserId == userId && m.CompanyId == companyId).ExecuteDeleteAsync(TestContext.Current.CancellationToken));
+
+    /// <summary>Gives an account another role in one company, straight in the database; its other memberships stay as they are.</summary>
+    protected Task SetMemberRoleAsync(Guid userId, Guid companyId, string role) =>
+        InDbAsync(async db =>
+        {
+            var roleId = await RoleIdAsync(companyId, role);
+            var membership = await db.Memberships.SingleAsync(m => m.UserId == userId && m.CompanyId == companyId, TestContext.Current.CancellationToken);
+            membership.RoleId = roleId;
+            return await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        });
+
+    /// <summary>When the membership was last used to sign in or switch to; <see langword="null"/> for a membership never used.</summary>
+    protected Task<DateTimeOffset?> LastUsedAtAsync(Guid userId, Guid companyId) =>
+        InDbAsync(async db => (await db.Database
+            .SqlQuery<DateTimeOffset?>($"""SELECT "LastUsedAt" AS "Value" FROM "Memberships" WHERE "UserId" = {userId} AND "CompanyId" = {companyId}""")
+            .ToListAsync(TestContext.Current.CancellationToken)).Single());
 
     /// <summary>Makes an account with <see cref="MailTestBase.UserPassword"/> and puts it into the company with the named role.</summary>
     protected async Task<Guid> AddMemberAsync(Guid companyId, string email, string role, bool confirmed = true)
