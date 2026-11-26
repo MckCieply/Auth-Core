@@ -520,7 +520,6 @@ starlight-lang-select label:hover {
 }
 starlight-theme-select select,
 starlight-lang-select select {
-  min-height: 44px;
   color: var(--ac-text);
 }
 :root[data-theme='dark'] starlight-theme-select select,
@@ -574,8 +573,8 @@ starlight-lang-select select {
 }
 
 /* The buy button on the Pricing page is the one cyan element (spec 0018, "Pricing"). */
-.sl-link-button.primary,
-.sl-link-button.primary:hover {
+.ac-buy .sl-link-button.primary,
+.ac-buy .sl-link-button.primary:hover {
   background: var(--ac-accent);
   border-color: var(--ac-accent);
   color: var(--ac-on-accent);
