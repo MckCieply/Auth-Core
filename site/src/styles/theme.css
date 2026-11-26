@@ -466,3 +466,37 @@ html[data-has-hero] body::before {
 .ac-title-band {
   padding-top: 12rem;
 }
+
+/* Accessibility fixes of the local axe and touch-target check (spec 0018, criterion 18). */
+site-search button[data-open-modal] > kbd {
+  display: none;
+}
+.ac-code:focus-visible {
+  outline: 2px solid var(--ac-accent);
+  outline-offset: 2px;
+}
+a.site-title {
+  min-height: 44px;
+}
+site-search button[data-open-modal] {
+  min-width: 44px;
+}
+.ac-footer a[hreflang] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+mobile-starlight-toc a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+a.sl-anchor-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -10px -10px -10px -10px;
+}
