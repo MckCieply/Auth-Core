@@ -59,10 +59,7 @@ if (summaryProblems.length) fail('the version summaries', summaryProblems);
 
 // 4. the page parity
 const docs = join(site, 'src', 'content', 'docs');
-// 404.md is the one page in both languages (Starlight serves a single 404.html), so it has no Polish twin.
-const parityProblems = checkParity(
-  readdirSync(docs, { recursive: true }).map((name) => String(name).split(sep).join('/')).filter((name) => name !== '404.md'),
-);
+const parityProblems = checkParity(readdirSync(docs, { recursive: true }).map((name) => String(name).split(sep).join('/')), ['404.md']);
 if (parityProblems.length) fail('the page parity', parityProblems);
 
 const server = versions.filter((entry) => entry.kind === 'server').length;

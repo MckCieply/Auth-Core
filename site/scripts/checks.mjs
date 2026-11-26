@@ -52,8 +52,9 @@ export function checkSummaries(versions, files) {
 }
 
 // paths: every entry under src/content/docs/, relative to it, with forward slashes ('fit.mdx', 'pl/fit.mdx', 'pl').
-export function checkParity(paths) {
-  const pages = paths.filter((path) => /\.mdx?$/.test(path));
+// skip: names of pages that have no twin by design (404.md is one page for both languages).
+export function checkParity(paths, skip = []) {
+  const pages = paths.filter((path) => /\.mdx?$/.test(path) && !skip.includes(path));
   const english = pages.filter((path) => !path.startsWith('pl/'));
   const polish = pages.filter((path) => path.startsWith('pl/')).map((path) => path.slice(3));
   const problems = [];
@@ -90,7 +91,13 @@ export function brokenLinks(pages, exists, base) {
     for (const found of html.matchAll(/\s(?:href|src)="([^"]*)"/g)) {
       const target = found[1].replaceAll('&amp;', '&');
       if (!target || target.startsWith('#') || target.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
-      let path = decodeURIComponent(new URL(target, 'https://site.invalid' + base + file).pathname);
+      let path;
+      try {
+        path = decodeURIComponent(new URL(target, 'https://site.invalid' + base + file).pathname);
+      } catch {
+        problems.push(file + ': the link ' + found[1] + ' is not a valid URL');
+        continue;
+      }
       if (path === root) path = base;
       if (!path.startsWith(base)) {
         problems.push(file + ': the link ' + found[1] + ' is outside ' + base);

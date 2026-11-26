@@ -93,6 +93,17 @@ test('parity: files that are not pages are ignored', () => {
   assert.deepEqual(checkParity([...pages, 'pl', 'notes.txt', 'pl/image.webp']), []);
 });
 
+test('parity: a skipped name with no Polish twin passes, and without the skip it fails', () => {
+  assert.deepEqual(checkParity([...pages, '404.md'], ['404.md']), []);
+  assert.deepEqual(checkParity([...pages, '404.md']), ['src/content/docs/404.md has no Polish page src/content/docs/pl/404.md']);
+});
+
+test('parity: a skip does not hide any other missing page', () => {
+  assert.deepEqual(checkParity([...pages.filter((path) => path !== 'pl/compare.md'), '404.md'], ['404.md']), [
+    'src/content/docs/compare.md has no Polish page src/content/docs/pl/compare.md',
+  ]);
+});
+
 test('dates: every month in both languages, the day without a leading zero', () => {
   const en = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const pl = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
@@ -243,5 +254,11 @@ test('links: a component link without the base path is reported', () => {
 test('links: a link to a missing page is reported', () => {
   assert.deepEqual(brokenLinks({ 'index.html': '<a href="/Auth-Core/nope/">x</a><a href="fit">y</a>' }, exists, '/Auth-Core/'), [
     'index.html: the link /Auth-Core/nope/ leads to no file',
+  ]);
+});
+
+test('links: a malformed percent escape is reported, not thrown', () => {
+  assert.deepEqual(brokenLinks({ 'index.html': '<a href="/Auth-Core/a%zz">x</a>' }, exists, '/Auth-Core/'), [
+    'index.html: the link /Auth-Core/a%zz is not a valid URL',
   ]);
 });
