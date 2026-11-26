@@ -1,4 +1,4 @@
-// Satteri hast plugin: Polish pages get Polish footnote labels (the footnote markup is written in English).
+// Satteri hast plugin: the footnote heading reads Sources (Polish: Źródła) on every page; Polish pages also get Polish back-link labels.
 const PL_PATH = '/content/docs/pl/';
 const BACK = 'Back to reference ';
 
@@ -7,11 +7,11 @@ export function isPolishPage(fileURL) {
   return path.includes(PL_PATH);
 }
 
-export function relabelHeading(node, ctx) {
+export function relabelHeading(node, ctx, polish = false) {
   if (node.properties?.id !== 'footnote-label') return;
   const count = node.children?.length ?? 0;
   for (let index = count - 1; index >= 0; index--) ctx.removeChildAt(node, index);
-  ctx.appendChild(node, { type: 'text', value: 'Przypisy' });
+  ctx.appendChild(node, { type: 'text', value: polish ? 'Źródła' : 'Sources' });
 }
 
 export function relabelBackLink(node, ctx) {
@@ -22,12 +22,8 @@ export function relabelBackLink(node, ctx) {
 }
 
 export default function footnoteLabels(factoryContext) {
-  if (!isPolishPage(factoryContext?.fileURL)) return false;
-  return {
-    name: 'footnote-labels',
-    element: [
-      { filter: ['h2'], visit: relabelHeading },
-      { filter: ['a'], visit: relabelBackLink },
-    ],
-  };
+  const polish = isPolishPage(factoryContext?.fileURL);
+  const element = [{ filter: ['h2'], visit: (node, ctx) => relabelHeading(node, ctx, polish) }];
+  if (polish) element.push({ filter: ['a'], visit: relabelBackLink });
+  return { name: 'footnote-labels', element };
 }

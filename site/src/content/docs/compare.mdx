@@ -1,0 +1,59 @@
+---
+title: Comparison
+description: Why Auth-Core, and when another tool fits better, with a source for every claim about the others.
+---
+
+import { CardGrid, Card } from '@astrojs/starlight/components';
+
+## Why Auth-Core
+
+<CardGrid>
+  <Card title="Your data, your server">
+    No external identity provider and no per-user fees. It runs on a small x86-64 Linux VPS with Docker; sign-in with Google, Microsoft and GitHub is optional.
+  </Card>
+  <Card title="Any backend language">
+    Access tokens are standard RS256 JWTs. Your backend checks them offline with any JWT library that reads a JWKS, so Auth-Core is not in the path of every API call.
+  </Card>
+  <Card title="Companies and roles built in">
+    Users belong to companies, with members, roles, invitations and a permission catalog that your product declares.
+  </Card>
+  <Card title="A flat price">
+    EUR 490 a year per product, for any number of users. [See pricing](/Auth-Core/pricing/ "Pricing").
+  </Card>
+  <Card title="Isolated from your app">
+    Its own container, its own PostgreSQL database and signing keys. It runs as a non-root user on a read-only file system, and your backend never touches the auth database.
+  </Card>
+</CardGrid>
+
+The same alternatives as the README, in the same order.
+
+## When to pick which
+
+<div class="ac-picks" style={{ '--ac-pick-label': "'Pick it when'", '--ac-instead-label': "'Auth-Core instead when'" }}>
+
+|  | Pick it when | Auth-Core instead when |
+|---|---|---|
+| **Better Auth** | Your backend is TypeScript and you want auth as a library inside the app[^ba-docs], with 2FA[^ba-2fa] and passkeys[^ba-passkey]. | Your backend is in another language, or you want auth apart from the app, with its own database. |
+| **Keycloak** | You need SSO across products, SAML or LDAP[^kc-home], or the broadest set of standards. | You want a small service for one product, with companies and roles built in. |
+| **Clerk** | You want ready-made sign-in screens[^cl-docs] and MFA[^cl-mfa] today, as a service[^cl-terms]. | You want to host it yourself, keep the users' data on your server, and pay a flat yearly price. |
+| **WorkOS** | You sell to enterprises and need SSO[^wo-sso] and directory sync[^wo-dsync] per customer. | Your customers sign in with a password or Google, Microsoft or GitHub, and you want to host it yourself. |
+| **Auth-Core** | You want one self-hosted service per product, isolated from the app, any backend language. | |
+
+</div>
+
+Auth-Core does not fit when you need MFA today, SSO across products, SAML or SCIM, ready-made screens, or a TypeScript backend that
+wants auth inside the app.
+
+Checked: 26 Nov 2026.
+
+[^ba-docs]: Better Auth, documentation: https://www.better-auth.com/docs/introduction
+[^ba-2fa]: Better Auth, two-factor plug-in: https://www.better-auth.com/docs/plugins/2fa
+[^ba-passkey]: Better Auth, passkey plug-in: https://www.better-auth.com/docs/plugins/passkey
+[^kc-home]: Keycloak, home page: https://www.keycloak.org/
+[^cl-docs]: Clerk, documentation: https://clerk.com/docs
+[^cl-mfa]: Clerk, sign-up and sign-in options: https://clerk.com/docs/authentication/configuration/sign-up-sign-in-options
+[^cl-terms]: Clerk, terms of service: https://clerk.com/legal/terms
+[^wo-sso]: WorkOS, single sign-on: https://workos.com/docs/sso
+[^wo-dsync]: WorkOS, directory sync: https://workos.com/docs/directory-sync
+
+[Is it for me?](/Auth-Core/fit/ "Is it for me?") lists what Auth-Core needs and where it stops.
