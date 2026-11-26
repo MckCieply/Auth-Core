@@ -30,13 +30,15 @@ const REPO = 'https://github.com/MckCieply/Auth-Core/blob/main/';
 ---
 
 <footer class="ac-footer not-content">
-  <p>
-    <a href={REPO + 'LICENSE'}>{t.server}</a>
-    <a href={pagePath(lang, 'license')}>{t.open}</a>
-    <a href={REPO + 'site/CREDITS.md'}>{t.photo}</a>
-  </p>
-  <p>
-    {route.editUrl && <a href={route.editUrl.href}>{t.edit}</a>}
-    {hasTwin && <a href={otherLanguagePath(route.id)} hreflang={t.otherLang} lang={t.otherLang}>{t.other}</a>}
-  </p>
+  <ul>
+    <li><a href={REPO + 'LICENSE'}>{t.server}</a></li>
+    <li><a href={pagePath(lang, 'license')}>{t.open}</a></li>
+    <li><a href={REPO + 'site/CREDITS.md'}>{t.photo}</a></li>
+  </ul>
+  {(route.editUrl || hasTwin) && (
+    <p>
+      {route.editUrl && <a href={route.editUrl.href}>{t.edit}</a>}
+      {hasTwin && <a href={otherLanguagePath(route.id)} hreflang={t.otherLang} lang={t.otherLang}>{t.other}</a>}
+    </p>
+  )}
 </footer>

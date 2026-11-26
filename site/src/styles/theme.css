@@ -92,11 +92,14 @@ select:focus-visible {
   color: var(--ac-muted);
   font-size: var(--sl-text-sm);
 }
-.ac-footer p {
+.ac-footer p,
+.ac-footer ul {
   display: flex;
   flex-wrap: wrap;
   gap: 0 1.25rem;
   margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .ac-footer a {
   display: inline-flex;
