@@ -419,3 +419,50 @@ starlight-toc a {
   min-width: 44px;
   justify-content: center;
 }
+
+/* The photo (spec 0018, Look): the whole top of the Start page (1500 px), a 280 px band on inner pages. From the top
+   layer down: the gradient of the background (35 %, 55 % at 45 %, 100 %), the sea-blue tint #0891b2 at 70 % blended as
+   "color", the photo. cover, no-repeat, center top: never stretched (Settled 13). Decorative: no text, no alt. */
+html {
+  background-color: var(--ac-bg);
+}
+body {
+  position: relative;
+  background-color: transparent;
+}
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: -1;
+  height: 280px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--ac-bg) 35%, transparent) 0%,
+      color-mix(in srgb, var(--ac-bg) 55%, transparent) 45%,
+      var(--ac-bg) 100%
+    ),
+    linear-gradient(rgb(8 145 178 / 0.7), rgb(8 145 178 / 0.7)),
+    url('../assets/photos/city-dark.webp');
+  background-blend-mode: normal, color, normal;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center top;
+}
+:root[data-theme='light'] body::before {
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--ac-bg) 35%, transparent) 0%,
+      color-mix(in srgb, var(--ac-bg) 55%, transparent) 45%,
+      var(--ac-bg) 100%
+    ),
+    linear-gradient(rgb(8 145 178 / 0.7), rgb(8 145 178 / 0.7)),
+    url('../assets/photos/city-light.webp');
+}
+html[data-has-hero] body::before {
+  height: 1500px;
+}
+.ac-title-band {
+  padding-top: 12rem;
+}
