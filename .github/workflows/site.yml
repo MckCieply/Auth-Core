@@ -9,6 +9,7 @@ on:
     paths:
       - 'site/**'
       - CHANGELOG.md
+      - README.md
       - scripts/release-notes.py
       - .github/workflows/site.yml
   workflow_dispatch:
