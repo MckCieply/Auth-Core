@@ -115,7 +115,7 @@ Values copied from the spec, one line each; every task includes them.
 - **Tint:** "a flat layer of `#0891b2` at 70 % opacity, with `background-blend-mode: normal, color, normal`."
 - **Glass:** "the background at 80 % opacity, a border of the text colour at 12 %, radius 22 px, `backdrop-filter: blur(18px)`. Where
   `backdrop-filter` is not supported, or `prefers-reduced-transparency: reduce` is set, the card uses the solid surface colour."
-- **Photos:** "WebP, 2200 × 1300, at most 400 KB each: `city-dark.webp`: the photo as it is, cropped to cover; `city-light.webp`:
+- **Photos:** "WebP, 2200 × 1300, at most 550 KB each (spec Decision 12): `city-dark.webp`: the photo as it is, cropped to cover; `city-light.webp`:
   grayscale, inverted, contrast 1.15."
 - **One accent:** "Cyan marks the buttons, the badge, the 'latest' pill, the licence card, the fact dots and the highlighted step of the
   diagram; nothing else is coloured."
@@ -3201,11 +3201,11 @@ Expected: `sharp function`. If the import fails, stop and report (adding sharp t
 //   node scripts/make-photos.mjs <downloaded.jpg>
 // city-dark.webp: the photo as it is, cropped to cover 2200 x 1300. city-light.webp: the same, grayscale, inverted and
 // contrast 1.15 around the middle grey (1.15 * x - 19.2). WebP quality from 82 down in steps of 4 until the file is at
-// most 400 KB. The files stay untinted: the CSS tints them.
+// most 550 KB. The files stay untinted: the CSS tints them.
 import { mkdirSync, statSync } from 'node:fs';
 import sharp from 'sharp';
 
-const LIMIT = 400 * 1000;
+const LIMIT = 550 * 1000;
 const OUT = 'src/assets/photos/';
 const source = process.argv[2];
 if (!source) {
@@ -3225,7 +3225,7 @@ async function write(name, pipeline) {
       return;
     }
   }
-  throw new Error(name + ': more than 400 KB even at quality 50');
+  throw new Error(name + ': more than 550 KB even at quality 50');
 }
 
 await write('city-dark.webp', cropped);

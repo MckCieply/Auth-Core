@@ -309,7 +309,7 @@ The look is the board "L4 Noc" of the design canvas (owner decision 2026-11-26) 
   `backdrop-filter: blur(18px)`. Where `backdrop-filter` is not supported, or `prefers-reduced-transparency: reduce`
   is set, the card uses the solid surface colour.
 - **Photos** (`site/src/assets/photos/`), both from Unsplash photo `1480843669328-3f7e37d196ae`, WebP, 2200 × 1300,
-  at most 400 KB each:
+  at most 550 KB each (Decision 12):
   - `city-dark.webp`: the photo as it is, cropped to cover;
   - `city-light.webp`: grayscale, inverted, contrast 1.15 (Open question 1).
   The photos are decorative: CSS backgrounds, no text in them, nothing a screen reader announces.
@@ -464,6 +464,9 @@ Workflow and documents
 11. **The site is MIT** (owner, 2026-11-26): `site/LICENSE` is MIT, and the root `LICENSE` names `site/` among the files
     outside the Licensed Work, beside `clients/`, `samples/` and `docs/`; the README's "License" section says the same.
     Rejected: the site under BSL 1.1 like the server.
+12. **The photos may weigh up to 550 KB** (owner, 2026-11-26): at 2200 x 1300 the dark photo is 516 KB even at WebP
+    quality 50, so the limit is 550 KB and the size stays, for sharpness on high-density screens. Rejected: 1920 x 1135
+    under 400 KB; quality below 50 (blocks and banding in the dark sky).
 
 ### Settled in this spec
 
@@ -520,7 +523,7 @@ Workflow and documents
 3. That `python3` is on `ubuntu-latest` and the prebuild's fallback to `python` works in Git Bash on Windows.
 4. The author's name and the page of Unsplash photo `1480843669328-3f7e37d196ae`, for the credits. Downloading the
    photo needs the owner's yes.
-5. The weight of both WebP files (at most 400 KB) and the contrast over them.
+5. The weight of both WebP files (at most 550 KB) and the contrast over them.
 6. The threat model's residual risk numbers 3, 4, 13, 15 and 17 at the build commit.
 7. That `prefers-reduced-transparency` is honoured where supported and harmless elsewhere.
 
