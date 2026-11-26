@@ -3359,7 +3359,7 @@ Vite unable to resolve the file. Restore; the build passes.
 
 - [ ] **Step 10: Owner gate: the light photo**
 
-The orchestrator shows the owner the light screenshots (Open question 1: keep the inverted photo, the default, or use a light
+The orchestrator shows the owner the light screenshots (answered as spec Decision 13: keep the inverted photo, the default, or use a light
 photo). A change of photo is a new task, not a change here.
 
 - [ ] **Step 11: Commit**

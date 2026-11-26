@@ -311,7 +311,7 @@ The look is the board "L4 Noc" of the design canvas (owner decision 2026-11-26) 
 - **Photos** (`site/src/assets/photos/`), both from Unsplash photo `1480843669328-3f7e37d196ae`, WebP, 2200 × 1300,
   at most 550 KB each (Decision 12):
   - `city-dark.webp`: the photo as it is, cropped to cover;
-  - `city-light.webp`: grayscale, inverted, contrast 1.15 (Open question 1).
+  - `city-light.webp`: grayscale, inverted, contrast 1.15 (Decision 13).
   The photos are decorative: CSS backgrounds, no text in them, nothing a screen reader announces.
 - **Polish letters:** every page renders ą, ć, ę, ł, ń, ó, ś, ź, ż in Space Grotesk (checked in the verification).
 - **Accessibility:** text on every background and card at least 4.5:1, icons and borders that carry meaning at least
@@ -362,8 +362,8 @@ Both are run at the merge, after the owner says yes to each.
 - **`README.md`**: a "Site" link next to the release badge line, to `https://mckcieply.github.io/Auth-Core/`; the line
   "the specs (0001 to 0009)" becomes "the specs and the plans built from them"; the repository layout gains
   `site/  the project site (Astro Starlight), published to GitHub Pages`.
-- **`site/CREDITS.md`**: the photo (Unsplash id, author, link to the photo page, "Unsplash License", the steps that made
-  each file), the two fonts (name, licence, link).
+- **`site/CREDITS.md`**: the photo (Unsplash id, "Unsplash License", the steps that made each file; no author and no
+  photo page, Decision 14), the two fonts (name, licence, link).
 - **Footer of every page**: "Server: BSL 1.1. Clients, samples and docs: MIT. City photo: Unsplash License." with links
   to `LICENSE`, `/license/` and `site/CREDITS.md`.
 
@@ -467,6 +467,12 @@ Workflow and documents
 12. **The photos may weigh up to 550 KB** (owner, 2026-11-26): at 2200 x 1300 the dark photo is 516 KB even at WebP
     quality 50, so the limit is 550 KB and the size stays, for sharpness on high-density screens. Rejected: 1920 x 1135
     under 400 KB; quality below 50 (blocks and banding in the dark sky).
+13. **The light theme keeps the inverted photo** (owner, 2026-11-26, after the screenshots of both themes). Rejected: a
+    separate light photo (fog, dawn).
+14. **The photo credit names no author** (owner, 2026-11-26): the file id on Unsplash's CDN does not lead to the photo
+    page and a search found neither the page nor the author; the Unsplash License does not require either. The credit
+    reads "from Unsplash (the author is not named; the Unsplash License does not require it)"; if the author is found
+    later, the credit gains the name and the page.
 
 ### Settled in this spec
 
@@ -498,9 +504,7 @@ Workflow and documents
 
 ## Open questions for the owner
 
-1. **The light theme's photo.** The approved board uses the dark photo turned gray and inverted. The later gallery had
-   real light photos (fog, dawn, "G12 Mgła"). Keep the inverted photo (default), or use a light photo?
-2. **The summaries of Appendix B**, Polish and English: approve or correct them.
+1. **The summaries of Appendix B**, Polish and English: approve or correct them.
 
 ## Verification notes (for the local verifiers)
 
@@ -521,8 +525,8 @@ Workflow and documents
 2. The current SHAs and tags of `actions/checkout`, `withastro/action` and `actions/deploy-pages`, and that
    `withastro/action` accepts `node-version: 24` and runs the `prebuild` script.
 3. That `python3` is on `ubuntu-latest` and the prebuild's fallback to `python` works in Git Bash on Windows.
-4. The author's name and the page of Unsplash photo `1480843669328-3f7e37d196ae`, for the credits. Downloading the
-   photo needs the owner's yes.
+4. The author's name and the page of Unsplash photo `1480843669328-3f7e37d196ae`, for the credits (not found: Decision
+   14). Downloading the photo needs the owner's yes.
 5. The weight of both WebP files (at most 550 KB) and the contrast over them.
 6. The threat model's residual risk numbers 3, 4, 13, 15 and 17 at the build commit.
 7. That `prefers-reduced-transparency` is honoured where supported and harmless elsewhere.
