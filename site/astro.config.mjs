@@ -21,6 +21,7 @@ export default defineConfig({
       lastUpdated: false,
       components: {
         Footer: './src/components/Footer.astro',
+        Hero: './src/components/Hero.astro',
       },
       customCss: [
         '@fontsource/space-grotesk/400.css',

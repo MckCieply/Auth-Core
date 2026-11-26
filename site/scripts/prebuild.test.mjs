@@ -262,3 +262,34 @@ test('links: a malformed percent escape is reported, not thrown', () => {
     'index.html: the link /Auth-Core/a%zz is not a valid URL',
   ]);
 });
+
+import { readFileSync as readText } from 'node:fs';
+import { START_COPY, STEP_YAML } from '../src/lib/start-copy.mjs';
+
+function shapeOf(value) {
+  if (Array.isArray(value)) return value.map(shapeOf);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, shapeOf(value[key])]));
+  }
+  return typeof value;
+}
+
+test('start copy: English and Polish have the same keys and list lengths', () => {
+  assert.deepEqual(shapeOf(START_COPY.pl), shapeOf(START_COPY.en));
+});
+
+test('start copy: the headline is the title of the Start page in both languages', () => {
+  for (const [lang, file] of [['en', 'src/content/docs/index.mdx'], ['pl', 'src/content/docs/pl/index.mdx']]) {
+    const title = /^title: (.*)$/m.exec(readText(file, 'utf8'));
+    assert.equal(title && title[1], START_COPY[lang].headline, file);
+  }
+});
+
+test('start copy: the YAML of step 1 is the README example', () => {
+  assert.equal(STEP_YAML, [
+    'permissions: [documents:read, documents:write, documents:approve]',
+    'default_roles:',
+    '  admin: ["*"]',
+    '  user: [documents:read, documents:write]',
+  ].join('\n'));
+});

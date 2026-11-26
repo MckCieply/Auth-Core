@@ -151,3 +151,261 @@ select:focus-visible {
   align-items: center;
   min-height: 44px;
 }
+
+/* Start page (spec 0018, Start and Look). The splash page gets a wider content column for the 12-column bento. */
+html[data-has-hero] {
+  --sl-content-width: 76rem;
+}
+
+/* Glass: the solid surface first, the blur only where it is supported and transparency is not reduced (Settled 6). */
+.ac-glass,
+.header {
+  background-color: var(--ac-surface);
+}
+.ac-glass {
+  border: 1px solid var(--ac-glass-border);
+  border-radius: var(--ac-radius);
+}
+@supports ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  .ac-glass,
+  .header {
+    background-color: var(--ac-glass);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ac-glass,
+  .header {
+    background-color: var(--ac-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.ac-hero {
+  padding-block: 4rem 2rem;
+}
+.ac-hero-card {
+  max-width: 48rem;
+  padding: clamp(1.25rem, 4vw, 2.5rem);
+}
+.ac-badge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0 1rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: 999px;
+  color: var(--ac-text);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+}
+.ac-hero h1 {
+  margin: 0;
+  color: var(--ac-text);
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+}
+.ac-subline {
+  margin: 1rem 0 0;
+  color: var(--ac-text);
+  font-size: var(--sl-text-lg);
+}
+.ac-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+.ac-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1.25rem;
+  border: 1.5px solid var(--ac-text);
+  border-radius: 999px;
+  color: var(--ac-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+.ac-button-primary {
+  border-color: var(--ac-accent);
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+.ac-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ac-muted);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+}
+.ac-facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ac-facts li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ac-accent);
+}
+
+/* Bento: one column, 12 from 64rem. */
+.ac-bento {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  padding-bottom: 2rem;
+}
+.ac-bento > h2 {
+  margin: 1.5rem 0 0;
+}
+@media (min-width: 64rem) {
+  .ac-bento {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .ac-span-3 { grid-column: span 3; }
+  .ac-span-4 { grid-column: span 4; }
+  .ac-span-5 { grid-column: span 5; }
+  .ac-span-6 { grid-column: span 6; }
+  .ac-span-7 { grid-column: span 7; }
+  .ac-span-8 { grid-column: span 8; }
+  .ac-span-12 { grid-column: span 12; }
+}
+.ac-card {
+  padding: 1.25rem;
+  color: var(--ac-text);
+}
+.ac-card h2,
+.ac-card h3 {
+  margin: 0 0 0.75rem;
+  color: inherit;
+}
+.ac-card p {
+  margin: 0 0 0.75rem;
+}
+.ac-card-accent {
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+.ac-card-accent a {
+  color: var(--ac-on-accent);
+}
+.ac-card-accent a:focus-visible {
+  outline-color: var(--ac-on-accent);
+}
+.ac-target {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* The diagram: lists, so a screen reader reads it as text. */
+.ac-diagram,
+.ac-routes {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ac-routes {
+  margin-top: 0.75rem;
+}
+@media (min-width: 40rem) {
+  .ac-routes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ac-node {
+  padding: 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: calc(var(--ac-radius) / 2);
+  background-color: var(--ac-bg);
+}
+.ac-node-accent { background-color: var(--ac-accent); color: var(--ac-on-accent); border-color: var(--ac-text); }
+.ac-path {
+  padding: 0.1em 0.5em;
+  border-radius: 6px;
+  background-color: var(--ac-surface);
+  color: var(--ac-text);
+}
+.ac-path-accent {
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+
+.ac-list,
+.ac-latest,
+.ac-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding-inline-start: 1.25rem;
+}
+.ac-list-ok li::marker {
+  color: var(--ac-ok);
+}
+.ac-list-not-ok li::marker {
+  color: var(--ac-not-ok);
+}
+.ac-latest {
+  padding: 0;
+  list-style: none;
+}
+.ac-latest li {
+  display: grid;
+  gap: 0.125rem;
+}
+.ac-latest-label {
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+  color: var(--ac-muted);
+}
+.ac-code {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  border-radius: calc(var(--ac-radius) / 2);
+  background-color: var(--ac-code-bg);
+  color: var(--ac-code-text);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-xs);
+}
+
+/* Starlight's own controls as 44 px targets (spec 0018, Accessibility); Task 14 measures every page. */
+.sidebar-content a,
+.social-icons a,
+starlight-toc a,
+starlight-theme-select select,
+starlight-lang-select select,
+site-search button,
+starlight-menu-button button,
+mobile-starlight-toc summary {
+  min-height: 44px;
+}
+.sidebar-content a,
+.social-icons a,
+starlight-toc a {
+  display: flex;
+  align-items: center;
+}
+.social-icons a {
+  min-width: 44px;
+  justify-content: center;
+}

@@ -1,0 +1,91 @@
+---
+// The Start page bento (spec 0018, Start, item 2), in the order of the spec. 12 columns from 64rem, one column below.
+import versions from '../data/versions.json';
+import summariesEn from '../data/version-summaries.en.json';
+import summariesPl from '../data/version-summaries.pl.json';
+import { firstSentence, formatDate, serverVersions } from '../lib/versions.mjs';
+import { pagePath } from '../lib/paths.mjs';
+import { START_COPY, STEP_YAML } from '../lib/start-copy.mjs';
+
+interface Props {
+  lang: 'en' | 'pl';
+}
+
+const { lang } = Astro.props;
+const c = START_COPY[lang];
+const summaries: Record<string, string> = lang === 'pl' ? summariesPl : summariesEn;
+const latestThree = serverVersions(versions).slice(0, 3).map((entry) => ({
+  label: 'v' + entry.version + ' · ' + formatDate(entry.date, lang),
+  sentence: firstSentence(summaries[entry.version]),
+}));
+const d = c.diagram;
+---
+
+<div class="ac-bento not-content">
+  <h2 class="ac-span-12" data-block="benefits">{c.benefitsHeading}</h2>
+  {c.benefits.map((benefit) => (
+    <div class="ac-card ac-glass ac-span-3">
+      <h3>{benefit.title}</h3>
+      <p>{benefit.text}</p>
+    </div>
+  ))}
+
+  <div class="ac-card ac-glass ac-span-8" data-block="diagram">
+    <h2>{c.diagramHeading}</h2>
+    <ol class="ac-diagram">
+      <li class="ac-node"><strong>{d.frontend.name}</strong>: {d.frontend.text}</li>
+      <li class="ac-node">
+        <strong>{d.proxy.name}</strong>: {d.proxy.text}
+        <ul class="ac-routes">
+          <li class="ac-node ac-node-accent">
+            <code class="ac-path ac-path-accent">{d.auth.path}</code> <strong>{d.auth.name}</strong>: {d.auth.text}
+          </li>
+          <li class="ac-node">
+            <code class="ac-path">{d.api.path}</code> <strong>{d.api.name}</strong>: {d.api.text}
+          </li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <div class="ac-card ac-card-accent ac-span-4" data-block="licence">
+    <h2>{c.licenceHeading}</h2>
+    <p>{c.licenceText}</p>
+    <a class="ac-target" href={pagePath(lang, 'license')}>{c.licenceLink}</a>
+  </div>
+
+  <h2 class="ac-span-12" data-block="fit">{c.fitHeading}</h2>
+  <div class="ac-card ac-glass ac-span-6">
+    <h3><a class="ac-target" href={pagePath(lang, 'fit')}>{c.goodFitHeading}</a></h3>
+    <ul class="ac-list ac-list-ok">{c.goodFit.map((item) => <li>{item}</li>)}</ul>
+  </div>
+  <div class="ac-card ac-glass ac-span-6">
+    <h3><a class="ac-target" href={pagePath(lang, 'fit')}>{c.elsewhereHeading}</a></h3>
+    <ul class="ac-list ac-list-not-ok">{c.elsewhere.map((item) => <li>{item}</li>)}</ul>
+  </div>
+
+  <div class="ac-card ac-glass ac-span-7" data-block="versions">
+    <h2>{c.versionsHeading}</h2>
+    <ul class="ac-latest">
+      {latestThree.map((entry) => (
+        <li>
+          <span class="ac-latest-label">{entry.label}</span>
+          <span>{entry.sentence}</span>
+        </li>
+      ))}
+    </ul>
+    <a class="ac-target" href={pagePath(lang, 'versions')}>{c.versionsLink}</a>
+  </div>
+
+  <div class="ac-card ac-glass ac-span-5" data-block="steps">
+    <h2>{c.stepsHeading}</h2>
+    <ol class="ac-steps">
+      {c.steps.map((step, index) => (
+        <li>
+          <strong>{step.title}</strong> {step.text}
+          {index === 0 && <pre class="ac-code" lang="en"><code>{STEP_YAML}</code></pre>}
+        </li>
+      ))}
+    </ol>
+  </div>
+</div>
