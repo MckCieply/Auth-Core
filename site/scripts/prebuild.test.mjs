@@ -286,10 +286,7 @@ test('start copy: the headline is the title of the Start page in both languages'
 });
 
 test('start copy: the YAML of step 1 is the README example', () => {
-  assert.equal(STEP_YAML, [
-    'permissions: [documents:read, documents:write, documents:approve]',
-    'default_roles:',
-    '  admin: ["*"]',
-    '  user: [documents:read, documents:write]',
-  ].join('\n'));
+  const readme = readText(new URL('../../README.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(readme.includes(STEP_YAML), 'README.md holds the four lines of STEP_YAML as one consecutive block');
+  assert.equal(STEP_YAML.split('\n').length, 4);
 });

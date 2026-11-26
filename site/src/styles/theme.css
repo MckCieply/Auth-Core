@@ -338,7 +338,11 @@ html[data-has-hero]:not([data-has-sidebar]) {
   border-radius: calc(var(--ac-radius) / 2);
   background-color: var(--ac-bg);
 }
-.ac-node-accent { background-color: var(--ac-accent); color: var(--ac-on-accent); border-color: var(--ac-text); }
+.ac-node-accent {
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+  border-color: var(--ac-text);
+}
 .ac-path {
   padding: 0.1em 0.5em;
   border-radius: 6px;
@@ -348,6 +352,9 @@ html[data-has-hero]:not([data-has-sidebar]) {
 .ac-path-accent {
   background-color: var(--ac-accent);
   color: var(--ac-on-accent);
+}
+.ac-node-accent .ac-path-accent {
+  border: 1px solid var(--ac-text);
 }
 
 .ac-list,
