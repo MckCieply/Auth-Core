@@ -641,6 +641,14 @@ section[data-footnotes] a {
 }
 sup a[data-footnote-ref],
 section[data-footnotes] a[data-footnote-backref] {
-  font-size: 0.75rem;
   color: var(--ac-muted);
+}
+section[data-footnotes] a[data-footnote-backref] {
+  font-size: 0.75rem;
+}
+section[data-footnotes] h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ac-muted);
+  margin-top: 1.5rem;
 }

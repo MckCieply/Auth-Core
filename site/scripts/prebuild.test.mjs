@@ -309,8 +309,8 @@ test('theme: every url() of an asset in theme.css points at a file that exists',
 
 test('footnote labels: the heading reads Sources or Źródła, only Polish pages relabel back links', () => {
   const run = (url) => {
-    const heading = { type: 'element', tagName: 'h2', properties: { id: 'footnote-label' }, children: [{ type: 'text', value: 'Footnotes' }] };
-    const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1' }, children: [] };
+    const heading = { type: 'element', tagName: 'h2', properties: { id: 'footnote-label', className: ['sr-only'] }, children: [{ type: 'text', value: 'Footnotes' }] };
+    const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1' }, children: [{ type: 'text', value: String.fromCharCode(0x21a9) }] };
     const plugin = footnoteLabels({ fileURL: new URL(url) });
     const ctx = {
       removeChildAt: (node, index) => node.children.splice(index, 1),
@@ -318,7 +318,10 @@ test('footnote labels: the heading reads Sources or Źródła, only Polish pages
       setProperty: (node, key, value) => { node.properties[key] = value; },
     };
     plugin.element[0].visit(heading, ctx);
-    if (plugin.element[1]) plugin.element[1].visit(link, ctx);
+    plugin.element[1].visit(link, ctx);
+    const arrow = link.children.map((c) => c.value).join('');
+    assert.ok(!heading.properties.className.includes('sr-only'), 'heading must be visible');
+    assert.equal(arrow, String.fromCharCode(0x21a9, 0xfe0e));
     return { heading: heading.children.map((c) => c.value).join(''), label: link.properties.ariaLabel };
   };
   assert.deepEqual(run('file:///C:/x/site/src/content/docs/pl/compare.mdx'), { heading: 'Źródła', label: 'Powrót do odwołania 1' });
