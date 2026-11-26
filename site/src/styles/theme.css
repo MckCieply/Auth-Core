@@ -1,0 +1,85 @@
+/* Tokens of spec 0018, "Look" (board L4 Noc, palette P4 Cyjan). Dark is Starlight's default (:root), light is
+   :root[data-theme='light']. Starlight's own CSS sits in cascade layers, so these unlayered rules win over it. */
+:root {
+  --ac-bg: #04090c;
+  --ac-surface: #0c171c;
+  --ac-border: #1a3038;
+  --ac-text: #ecf8fb;
+  --ac-muted: #9dbac2;
+  --ac-code-bg: #0c171c;
+  --ac-code-text: #f4f4f2;
+  --ac-code-muted: #a9abb3;
+  --ac-ok: #5fd08f;
+  --ac-not-ok: #ff8a80;
+  --ac-accent: #22d3ee;
+  --ac-on-accent: #0a0a0a;
+  --ac-glass: rgb(4 9 12 / 0.8);
+  --ac-glass-border: rgb(236 248 251 / 0.12);
+  --ac-radius: 22px;
+}
+
+:root[data-theme='light'] {
+  --ac-bg: #f5fafb;
+  --ac-surface: #e9f3f5;
+  --ac-border: #cfe2e6;
+  --ac-text: #08171b;
+  --ac-muted: #3f5a61;
+  --ac-code-bg: #111216;
+  --ac-ok: #1d7348;
+  --ac-not-ok: #b3261e;
+  --ac-glass: rgb(245 250 251 / 0.8);
+  --ac-glass-border: rgb(8 23 27 / 0.12);
+}
+
+/* Starlight's variables, mapped once: they resolve against the tokens of the current theme. Links and the text accent
+   use the text colour, because cyan is kept for the elements of Settled 10. */
+:root {
+  --sl-font: 'Space Grotesk', system-ui, sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --sl-color-bg: var(--ac-bg);
+  --sl-color-bg-nav: var(--ac-bg);
+  --sl-color-bg-sidebar: var(--ac-bg);
+  --sl-color-bg-inline-code: var(--ac-surface);
+  --sl-color-bg-accent: var(--ac-accent);
+  --sl-color-text: var(--ac-text);
+  --sl-color-white: var(--ac-text);
+  --sl-color-gray-1: var(--ac-text);
+  --sl-color-gray-2: var(--ac-text);
+  --sl-color-gray-3: var(--ac-muted);
+  --sl-color-gray-4: var(--ac-muted);
+  --sl-color-gray-5: var(--ac-border);
+  --sl-color-gray-6: var(--ac-surface);
+  --sl-color-black: var(--ac-bg);
+  --sl-color-text-accent: var(--ac-text);
+  --sl-color-text-invert: var(--ac-on-accent);
+  --sl-color-accent-low: var(--ac-surface);
+  --sl-color-accent: var(--ac-accent);
+  --sl-color-accent-high: var(--ac-text);
+  --sl-color-hairline-light: var(--ac-border);
+  --sl-color-hairline: var(--ac-border);
+  --sl-color-hairline-shade: var(--ac-border);
+}
+
+/* The current page in the sidebar: surface and text colour, no cyan (Settled 10). */
+a[aria-current='page'],
+a[aria-current='page']:hover,
+a[aria-current='page']:focus {
+  background-color: var(--ac-surface);
+  color: var(--ac-text);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--ac-text);
+}
+
+/* The caution aside of the Versions page: neutral, not orange (Settled 10). */
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--ac-text);
+  --sl-color-asides-border: var(--ac-muted);
+  background-color: var(--ac-surface);
+}
+
+a:focus-visible,
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--ac-text);
+  outline-offset: 2px;
+}

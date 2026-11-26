@@ -236,7 +236,7 @@ The service is source-available under the [Business Source License 1.1](LICENSE)
 - **Commercial licence:** any other production use, including a company's internal use, needs one. Write to [kontakt@toviq.pl](mailto:kontakt@toviq.pl).
 - **Price:** EUR 490 a year per product, net of VAT, flat, for any number of users. It covers production use, security fixes and best-effort email support, with a reply usually within two working days.
 - **Change to Apache 2.0:** each version becomes available under the Apache License 2.0 three years after it is first published.
-- **MIT:** `clients/`, `samples/` and `docs/` are under the MIT License (see the `LICENSE` file in each).
+- **MIT:** `clients/`, `samples/`, `docs/` and `site/` are under the MIT License (see the `LICENSE` file in each).
 - **Earlier releases:** `v0.1.0` and everything published before this change stay under the MIT License.
 
 © 2026 Aleksander Torka
