@@ -121,7 +121,7 @@ Values copied from the spec, one line each; every task includes them.
   diagram; nothing else is coloured."
 - **Accessibility:** "text on every background and card at least 4.5:1, icons and borders that carry meaning at least 3:1 ...; touch
   targets at least 44 × 44 px; the layout works from 320 px wide; every page passes axe with no serious or critical issue."
-- **Workflow:** triggers `push` to `main` with `paths: [site/**, CHANGELOG.md, scripts/release-notes.py, .github/workflows/site.yml]` and
+- **Workflow:** triggers `push` to `main` with `paths: [site/**, CHANGELOG.md, README.md, scripts/release-notes.py, .github/workflows/site.yml]` and
   `workflow_dispatch`; `permissions: contents: read` at the top, the deploy job `contents: read`, `pages: write`, `id-token: write`;
   `concurrency: { group: pages, cancel-in-progress: false }`; "Every `uses:` names a full 40-character commit SHA, followed by a comment
   with its tag"; "No secrets. No step that runs on a pull request or a tag."
@@ -3407,6 +3407,7 @@ on:
     paths:
       - 'site/**'
       - CHANGELOG.md
+      - README.md
       - scripts/release-notes.py
       - .github/workflows/site.yml
   workflow_dispatch:

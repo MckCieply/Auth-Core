@@ -320,8 +320,9 @@ The look is the board "L4 Noc" of the design canvas (owner decision 2026-11-26) 
 
 ### Workflow (`.github/workflows/site.yml`)
 
-- Triggers: `push` with `branches: [main]` and `paths: [site/**, CHANGELOG.md, scripts/release-notes.py,
-  .github/workflows/site.yml]`, and `workflow_dispatch`. A manual run from another branch fails at the `github-pages`
+- Triggers: `push` with `branches: [main]` and `paths: [site/**, CHANGELOG.md, README.md, scripts/release-notes.py,
+  .github/workflows/site.yml]`, and `workflow_dispatch`. `README.md` is there because a site test compares the Start
+  page's YAML step with the README's example. A manual run from another branch fails at the `github-pages`
   environment, which allows `main` only; that is intended.
 - `permissions`: `contents: read` at the top; the deploy job sets its own in full (`contents: read`, `pages: write`,
   `id-token: write`), since job permissions replace the top-level ones.
