@@ -112,3 +112,42 @@ select:focus-visible {
 .ac-footer a:hover {
   color: var(--ac-text);
 }
+
+/* Versions page and the "latest" pill (spec 0018, Versions; Settled 10: the pill is cyan). */
+.ac-pill {
+  display: inline-block;
+  margin-inline-start: 0.5em;
+  padding: 0.1em 0.6em;
+  border-radius: 999px;
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 0.7em;
+  font-weight: 500;
+  vertical-align: middle;
+}
+.ac-version {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--ac-border);
+}
+.ac-version:first-child {
+  border-top: 0;
+}
+.ac-summary {
+  font-size: var(--sl-text-lg);
+}
+.ac-note,
+.ac-python {
+  color: var(--ac-muted);
+}
+.ac-version-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1.5rem;
+}
+.ac-version-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}

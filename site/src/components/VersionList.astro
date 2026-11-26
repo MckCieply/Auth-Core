@@ -1,0 +1,79 @@
+---
+// The Versions page (spec 0018, Versions): every server version of versions.json, newest first. The bodies are the
+// repository's own changelog (absolute links from --all-json; the prebuild refuses raw HTML in them), so they are
+// rendered with marked and not sanitised.
+import { Aside } from '@astrojs/starlight/components';
+import { marked } from 'marked';
+import versions from '../data/versions.json';
+import summariesEn from '../data/version-summaries.en.json';
+import summariesPl from '../data/version-summaries.pl.json';
+import { formatDate, serverVersions, splitBody } from '../lib/versions.mjs';
+
+interface Props {
+  lang: 'en' | 'pl';
+}
+
+const { lang } = Astro.props;
+const TEXT = {
+  en: {
+    latest: 'Latest',
+    upgrading: 'Upgrading',
+    release: 'GitHub Release',
+    image: 'Image',
+    python: 'The Python package auth-core-fastapi has its own releases:',
+    pythonLink: 'the python-v releases on GitHub',
+    note: '',
+  },
+  pl: {
+    latest: 'Najnowsza',
+    upgrading: 'Aktualizacja',
+    release: 'Wydanie na GitHubie',
+    image: 'Obraz',
+    python: 'Pakiet Pythona auth-core-fastapi ma własne wydania:',
+    pythonLink: 'wydania python-v na GitHubie',
+    note: 'Szczegóły poniżej są po angielsku, jak w changelogu.',
+  },
+};
+const t = TEXT[lang];
+const summaries: Record<string, string> = lang === 'pl' ? summariesPl : summariesEn;
+const entries = serverVersions(versions).map((entry, index) => {
+  const parts = splitBody(entry.body);
+  return {
+    version: entry.version,
+    id: 'v' + entry.version.replaceAll('.', '-'),
+    date: formatDate(entry.date, lang),
+    latest: index === 0,
+    summary: summaries[entry.version],
+    upgrading: parts.upgrading ? marked.parse(parts.upgrading, { async: false }) : '',
+    rest: marked.parse(parts.rest, { async: false }),
+    fullChangelog: marked.parseInline(parts.fullChangelog, { async: false }),
+  };
+});
+---
+
+<div class="ac-versions">
+  {entries.map((entry) => (
+    <section class="ac-version" aria-labelledby={entry.id}>
+      <h2 id={entry.id}>
+        {entry.version} · {entry.date}
+        {entry.latest && <span class="ac-pill">{t.latest}</span>}
+      </h2>
+      <p class="ac-summary">{entry.summary}</p>
+      {t.note && <p class="ac-note">{t.note}</p>}
+      {entry.upgrading && (
+        <Aside type="caution" title={t.upgrading}>
+          <div lang={lang === 'pl' ? 'en' : undefined} set:html={entry.upgrading} />
+        </Aside>
+      )}
+      <div lang={lang === 'pl' ? 'en' : undefined} set:html={entry.rest} />
+      <p lang={lang === 'pl' ? 'en' : undefined} set:html={entry.fullChangelog} />
+      <p class="ac-version-links">
+        <a href={'https://github.com/MckCieply/Auth-Core/releases/tag/v' + entry.version}>{t.release}</a>
+        <span>{t.image} <code>{'ghcr.io/mckcieply/auth-core:' + entry.version}</code></span>
+      </p>
+    </section>
+  ))}
+  <p class="ac-python">
+    {t.python} <a href="https://github.com/MckCieply/Auth-Core/releases?q=python-v">{t.pythonLink}</a>
+  </p>
+</div>
