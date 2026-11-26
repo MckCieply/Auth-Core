@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { checkSummaries, checkParity, checkBodies, pickPython, outcomeOf, brokenLinks, SUMMARY_LIMIT } from './checks.mjs';
 import { formatDate, splitBody, firstSentence, findRawHtml, serverVersions } from '../src/lib/versions.mjs';
 import { otherLanguagePath, pagePath, withBase, slugOf, BASE } from '../src/lib/paths.mjs';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const PL = 'src/data/version-summaries.pl.json';
 const EN = 'src/data/version-summaries.en.json';
@@ -289,4 +291,17 @@ test('start copy: the YAML of step 1 is the README example', () => {
   const readme = readText(new URL('../../README.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(readme.includes(STEP_YAML), 'README.md holds the four lines of STEP_YAML as one consecutive block');
   assert.equal(STEP_YAML.split('\n').length, 4);
+});
+
+test('theme: every url() of an asset in theme.css points at a file that exists', () => {
+  const cssUrl = new URL('../src/styles/theme.css', import.meta.url);
+  const css = readFileSync(cssUrl, 'utf8');
+  const paths = [...css.matchAll(/url\(\s*(?:'([^']*)'|"([^"]*)"|([^)'"\s]*))\s*\)/g)]
+    .map((m) => m[1] ?? m[2] ?? m[3])
+    .filter((p) => p.startsWith('.'));
+  assert.ok(paths.length >= 2, 'expected at least 2 relative url() in theme.css, found ' + paths.length);
+  for (const p of paths) {
+    const file = fileURLToPath(new URL(p, cssUrl));
+    assert.ok(existsSync(file), 'theme.css points at a missing file: ' + p);
+  }
 });
