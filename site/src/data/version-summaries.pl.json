@@ -1,0 +1,8 @@
+{
+  "0.4.0": "Logowanie przez GitHub i ekran ustawień, w którym osoba podłącza i odłącza metody logowania oraz zmienia hasło.",
+  "0.3.0": "Jedno konto w kilku firmach i przełączanie między nimi bez ponownego logowania. Zalogowana osoba może założyć kolejną firmę, gdy produkt to włączy, a przyjęcie zaproszenia zachowuje jej pozostałe firmy.",
+  "0.2.0": "Samodzielna rejestracja firmy, konta prywatne dla osób bez firmy oraz logowanie przez Google i Microsoft.",
+  "0.1.2": "Poprawka: mail z zaproszeniem nie podaje już roli, bo pokazywał jej kod z manifestu zamiast nazwy.",
+  "0.1.1": "Poprawka: ten sam kod z załatanymi pakietami zależnymi, dzięki czemu wersja znowu buduje się ze źródeł.",
+  "0.1.0": "Pierwsze wydanie: usługa i jej obraz, pakiet Pythona dla backendów, przykład w Angularze i dokumenty do uruchomienia."
+}
