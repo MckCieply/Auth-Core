@@ -358,6 +358,9 @@ html[data-has-hero]:not([data-has-sidebar]) {
   margin: 0 0 0.75rem;
   padding-inline-start: 1.25rem;
 }
+.ac-steps {
+  grid-template-columns: minmax(0, 1fr);
+}
 .ac-list-ok li::marker {
   color: var(--ac-ok);
 }
