@@ -53,7 +53,7 @@ PACKAGE_DOCKERFILE = "samples/notes-api/Dockerfile"
 PACKAGE_DIRECTORY = "clients/python/"
 WORKFLOW_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*[\"']?([^\s\"'#]+)")
 FULL_SHA = re.compile(r"@[0-9a-f]{40}$")
-EXACT_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
+EXACT_VERSION = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 SITE_PACKAGE = "site/package.json"
 
 
@@ -275,6 +275,10 @@ def self_test():
         ("site package, a caret", 1, check_site_package(json.dumps({"dependencies": {"astro": "^7.4.13"}}))),
         ("site package, loose versions", 5, check_site_package(json.dumps(
             {"dependencies": {"a": "~1.2.3", "b": "*", "c": ">=1.0.0 <2.0.0", "d": "latest"}, "devDependencies": {"e": "https://x.y/e.tgz"}}))),
+        ("site package, a pre-release and build suffix", 0, check_site_package(json.dumps(
+            {"dependencies": {"a": "1.2.3-beta.1", "b": "1.2.3+build.5"}, "devDependencies": {"c": "1.2.3-rc.1+b2"}}))),
+        ("site package, a caret on a pre-release", 1, check_site_package(json.dumps({"dependencies": {"a": "^1.2.3-beta.1"}}))),
+        ("workflow, a docker image by digest", 1, check_workflow("w.yml", "      - uses: docker://alpine@sha256:" + "a" * 64 + "\n")),
         ("site package, no dependencies", 0, check_site_package(json.dumps({"name": "x"}))),
         ("site package, not JSON", 1, check_site_package("{")),
         ("site package, not an object", 1, check_site_package("[]")),
