@@ -2,7 +2,7 @@
 
 Self-hosted sign-in, companies and roles for B2B products with a backend in any language: one container and its own database, kept apart from your app, with sign-in screens in your own look.
 
-[![Latest release](https://img.shields.io/github/v/release/MckCieply/Auth-Core?sort=semver&filter=v*&label=release)](https://github.com/MckCieply/Auth-Core/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/MckCieply/Auth-Core?sort=semver&filter=v*&label=release)](https://github.com/MckCieply/Auth-Core/releases/latest) · [Site](https://mckcieply.github.io/Auth-Core/)
 
 > **Version 0.4.0.** Image `ghcr.io/mckcieply/auth-core:0.4.0` (public, `linux/amd64`). See the [releases](https://github.com/MckCieply/Auth-Core/releases) and the [changelog](CHANGELOG.md).
 
@@ -218,6 +218,7 @@ samples/notes-api/            the "notes" product: FastAPI and PostgreSQL behind
 samples/notes-web/            its Angular frontend
 deploy/                       the development compose file, the production compose file, the manifest example
 scripts/                      dev keys and the e2e checks of every slice
+site/                         the project site (Astro Starlight), published to GitHub Pages
 docs/                         design brief, ADRs, integration guides, deployment, operations, security, specs and plans
 ```
 
@@ -226,7 +227,7 @@ docs/                         design brief, ADRs, integration guides, deployment
 - [`docs/design.md`](docs/design.md): the MVP brief: goals, decisions, scope, architecture, contracts, timeline, risks.
 - [`docs/adr/`](docs/adr/): architecture decision records.
 - [`docs/workflow.md`](docs/workflow.md): how the work is done: the spec-driven flow, verification, branches.
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`plans/`](docs/superpowers/plans/): the specs (0001 to 0009) and the plans and acceptance maps built from them.
+- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`plans/`](docs/superpowers/plans/): the specs and the plans and acceptance maps built from them.
 
 ## License
 
