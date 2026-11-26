@@ -1,19 +1,21 @@
 # Auth-Core
 
-A self-hosted authentication service in .NET: sign-in, companies, roles and token refresh, ready to put in front of any product.
+Self-hosted sign-in, companies and roles for B2B products with a backend in any language: one container and its own database, kept apart from your app, with sign-in screens in your own look.
 
 [![Latest release](https://img.shields.io/github/v/release/MckCieply/Auth-Core?sort=semver&filter=v*&label=release)](https://github.com/MckCieply/Auth-Core/releases/latest)
 
 > **Version 0.4.0.** Image `ghcr.io/mckcieply/auth-core:0.4.0` (public, `linux/amd64`). See the [releases](https://github.com/MckCieply/Auth-Core/releases) and the [changelog](CHANGELOG.md).
 
-## What it is
+**Price:** EUR 490 a year per product, net of VAT, flat, for any number of users. It covers production use, security fixes and best-effort email support. Development, testing, evaluation and some non-commercial uses are free ([License](#license)). The source is public, and each version becomes Apache 2.0 three years after release.
 
-- **One service per product.** It runs next to your product, behind the same reverse proxy, at `/auth` of the product's own domain. It has its
-  own PostgreSQL database, users and signing keys.
-- **Headless.** A REST API with no screens: your frontend owns the login, reset and invitation pages, in its own look.
-- **Standard tokens.** Short RS256 JWT access tokens that carry the user, the company, the roles and the permissions. Any backend in any language
-  checks them offline against the public keys at `/auth/.well-known/jwks.json`.
-- **Companies built in.** Users belong to companies (a private person to a hidden one-person space of their own), with members, roles, invitations and a permission catalog that your product declares.
+## Why use it
+
+- **Isolated from your app.** Auth-Core is its own container with its own PostgreSQL database, users and signing keys. It connects to the database as a role of its own (the database's superuser is for the operator only). The container runs as a non-root user with a read-only file system, `/tmp` in memory, all Linux capabilities dropped and `no-new-privileges`, and it listens on loopback only, behind your reverse proxy. Your backend never touches the auth database and needs only the public keys.
+- **Your own screens.** Auth-Core is headless: a REST API with no pages. Sign-in, password reset and invitation screens are pages of your product, in its own look, and not a redirect to someone else's hosted page.
+- **Works with any backend.** Access tokens are standard RS256 JWTs (10 minutes) that carry the user, the company, the roles and the permissions. Any language checks them offline, with any JWT library that reads a JWKS, against the public keys at `/auth/.well-known/jwks.json`. FastAPI and Angular have ready-made guides below. Auth-Core is not in the path of every API call.
+- **Companies built in.** Users belong to companies (a private person to a hidden one-person space of their own), with members, roles, invitations and a permission catalog that your product declares. Sign-in, sessions, password reset, email verification and invitations come as one container and a database, the same in every product.
+- **Safe defaults.** The refresh token is an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie that rotates on every use, with reuse detection; the access token lives in the frontend's memory only. Lockout with growing cooldowns, per-IP rate limits, security headers and an audit log are on from the start.
+- **Your data, your server.** No external identity provider is needed and there are no per-user fees; sign-in with Google, Microsoft and GitHub is optional. It runs on a small x86-64 Linux VPS with Docker. The repository has a production compose file, a deployment guide, backup and key-rotation runbooks and a STRIDE threat model.
 
 ```
 Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
@@ -21,23 +23,41 @@ Browser ──> app.example.com (your reverse proxy: HTTPS, HSTS)
                 └── /auth ──> Auth-Core  (issues tokens, serves the keys, manages companies)
 ```
 
-## Why use it
+## What it adds to run
 
-- **Stop rebuilding login.** Sign-in, sessions, password reset, email verification, invitations, companies and roles come as one container
-  and a database, the same in every product.
-- **Safe defaults.** The refresh token is an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie that rotates on every use, with reuse
-  detection; the access token (10 minutes) lives in the frontend's memory only. Lockout with growing cooldowns, per-IP rate limits, security
-  headers and an audit log are on from the start.
-- **No call per request.** A backend verifies tokens locally, so Auth-Core is not in the path of every API call.
-- **Your data, your server.** Auth-Core needs no external identity provider and has no per-user fees; sign-in with Google and Microsoft is optional. It runs on a small VPS with Docker.
-- **Ready to run.** A production compose file (read-only service, no capabilities, its own database role), a deployment guide, backup and
-  key-rotation runbooks and a STRIDE threat model.
+- One container and one PostgreSQL 16 database, from the [production compose file](deploy/docker-compose.prod.yml), behind a reverse proxy that ends TLS.
+- An SMTP relay with TLS (Auth-Core refuses to start with a relay that does not use TLS) and a sender address on a domain you control.
+- Upgrades: read the changelog, back up, set the new version in `.env`, pull and start. The service migrates its database at start, and people stay signed in. A rollback is a restore of the backup. See [`docs/deployment/vps.md`](docs/deployment/vps.md), "Upgrading to a new version".
+- A nightly backup and a restore that you have tried: [`docs/operations/backup.md`](docs/operations/backup.md).
+- Key rotation when a key may have leaked, or on a plan; it signs everyone out: [`docs/operations/key-rotation.md`](docs/operations/key-rotation.md).
 
-It is not for everything:
+## Status
+
+- Version 0.4.0. Auth-Core runs in production in Toviq. One author.
+- There has been no external audit yet. What the design defends against, and the risks that are accepted, are in the [threat model](docs/security/threat-model.md) (STRIDE for each element).
+- The features have end-to-end suites that run against a real stack; see [Develop it](#develop-it) for the scripts.
+- Runbooks: [deployment and upgrading](docs/deployment/vps.md), [backup](docs/operations/backup.md), [key rotation](docs/operations/key-rotation.md).
+
+**Not there yet:** MFA (TOTP) and passkeys are planned, with no date. Until then sign-in is a password, or Google, Microsoft or GitHub.
+
+**Not in scope:**
 
 - **No SSO between products.** Each product has its own instance and its own users.
-- **Never in scope:** SAML, SCIM, LDAP, multi-realm mode, fine-grained resource permissions ("is this my document?" stays in your product).
-- **An internal tool, public as a portfolio piece.** There is no support, docs site or marketing.
+- **Never:** SAML, SCIM, LDAP, multi-realm mode, fine-grained resource permissions ("is this my document?" stays in your product).
+
+## Auth-Core or something else
+
+| | Pick it when | Auth-Core instead when |
+|---|---|---|
+| **Better Auth** | Your backend is TypeScript and you want auth as a library inside the app, with 2FA and passkeys. | Your backend is in another language, or you want auth apart from the app, with its own database. |
+| **Keycloak** | You need SSO across products, SAML or LDAP, or the broadest set of standards. | You want a small service for one product, with companies and roles built in. |
+| **Clerk** | You want ready-made sign-in screens and MFA today, as a service. | You want to host it yourself, keep the users' data on your server, and pay a flat yearly price. |
+| **WorkOS** | You sell to enterprises and need SSO and directory sync per customer. | Your customers sign in with a password or Google, Microsoft or GitHub, and you want to host it yourself. |
+| **Auth-Core** | You want one self-hosted service per product, isolated from the app, any backend language. | |
+
+Auth-Core does not fit when you need MFA today, SSO across products, SAML or SCIM, ready-made screens, or a TypeScript backend that wants auth inside the app.
+
+As of November 2026.
 
 ## How to use it
 
@@ -56,9 +76,9 @@ default_roles:
 `signup: self-service` is optional (the default is `invite-only`, and a manifest without the key behaves as in `0.1.0`): it lets a visitor start a company of their own, and it
 needs the address of your frontend's completion screen as well (`AUTH_FRONTEND_SIGNUP_URL`, see [`docs/deployment/vps.md`](docs/deployment/vps.md), "Self-service sign-up"). Without
 that address sign-up stays off and `/auth/health` says `Degraded`, so add the line to your manifest only when you have the address.
-The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind` (spec 0010).
-`providers: [google, microsoft]` is optional too (no key, no provider): it offers "Continue with Google" and "Continue with Microsoft", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token (spec 0011).
-`org_creation: self-service` is optional as well (the default is `off`): a signed-in person may create another company (`POST /auth/orgs`, off until the key is there), and `GET /auth/options` tells your screens whether to offer it. It needs no address; the number of companies an account may belong to before it can create another (joined ones count too) is `AUTH_MAX_COMPANIES_PER_ACCOUNT` (20 by default; spec 0016).
+The block `private` (`signup: self-service` and `permissions`) lets a private person sign up alone, with an email address only, into a space nobody else joins; it needs the same address, and your backend tells the two kinds apart by `org_kind`.
+`providers: [google, microsoft, github]` is optional too (no key, no provider): it offers "Continue with Google", "Continue with Microsoft" and "Continue with GitHub", and each listed provider needs its keys and your frontend's return address in `.env` ([`docs/deployment/provider-keys.md`](docs/deployment/provider-keys.md); a listed provider without them is not offered and `/auth/health` says `Degraded`). Your backend sees the same access token.
+`org_creation: self-service` is optional as well (the default is `off`): a signed-in person may create another company (`POST /auth/orgs`, off until the key is there), and `GET /auth/options` tells your screens whether to offer it. It needs no address; the number of companies an account may belong to before it can create another (joined ones count too) is `AUTH_MAX_COMPANIES_PER_ACCOUNT` (20 by default).
 
 ### 2. Run it on your server
 
@@ -214,6 +234,7 @@ The service is source-available under the [Business Source License 1.1](LICENSE)
 
 - **Free:** development, testing and evaluation; and production use by an individual for personal, non-commercial projects, or by a non-profit organization or an educational institution for non-commercial purposes.
 - **Commercial licence:** any other production use, including a company's internal use, needs one. Write to [kontakt@toviq.pl](mailto:kontakt@toviq.pl).
+- **Price:** EUR 490 a year per product, net of VAT, flat, for any number of users. It covers production use, security fixes and best-effort email support, with a reply usually within two working days.
 - **Change to Apache 2.0:** each version becomes available under the Apache License 2.0 three years after it is first published.
 - **MIT:** `clients/`, `samples/` and `docs/` are under the MIT License (see the `LICENSE` file in each).
 - **Earlier releases:** `v0.1.0` and everything published before this change stay under the MIT License.
