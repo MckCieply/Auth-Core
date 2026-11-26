@@ -579,4 +579,6 @@ starlight-lang-select select {
   background: var(--ac-accent);
   border-color: var(--ac-accent);
   color: var(--ac-on-accent);
+  min-height: 44px;
+  align-items: center;
 }
