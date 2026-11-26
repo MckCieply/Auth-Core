@@ -24,7 +24,7 @@ TypeScripcie, który chce auth w aplikacji.
 |---|---|---|---|---|---|---|---|
 | **Better Auth** | framework TypeScript w Twoim kodzie[^ba-docs] | MIT[^ba-licence] | wtyczka, z rolami[^ba-org] | niepodane (czytano: wstęp dokumentacji)[^ba-docs] | tak, wtyczka[^ba-2fa] | wtyczka; SAML w niej[^ba-sso] | bezpłatnie na licencji MIT[^ba-licence] |
 | **Keycloak** | serwer, który instalujesz i uruchamiasz[^kc-start] | Apache 2.0[^kc-licence] | funkcja organizacji, którą włączasz[^kc-admin] | strony logowania z Keycloak, z motywami[^kc-admin] | tak[^kc-admin] | tak; tak[^kc-home] | otwarte oprogramowanie[^kc-home] |
-| **Clerk** | usługa w subskrypcji[^cl-terms] | własnościowa[^cl-terms] | organizacje z rolami[^cl-org] | gotowe komponenty[^cl-docs]; strony hostowane przez Clerk[^cl-portal] | tak[^cl-mfa] | połączenia enterprise; SAML w nich[^cl-sso] | za miesięcznego użytkownika retained i za każde dodatkowe połączenie SSO[^cl-pricing] |
+| **Clerk** | usługa w subskrypcji[^cl-terms] | własnościowa[^cl-terms] | organizacje z rolami[^cl-org] | gotowe komponenty[^cl-docs]; strony hostowane przez Clerk[^cl-portal] | tak[^cl-mfa] | połączenia enterprise; SAML w nich[^cl-sso] | za każdego „retained user” w miesiącu i za każde dodatkowe połączenie SSO[^cl-pricing] |
 | **WorkOS** | usługa hostowana[^wo-terms] | własnościowa[^wo-terms] | organizacje z rolami[^wo-roles] | hostowany, gotowy interfejs (AuthKit)[^wo-ui] | tak[^wo-mfa] | tak; tak[^wo-sso] | za aktywnego użytkownika miesięcznie i za połączenie[^wo-pricing] |
 | **Auth-Core** | usługa, którą hostujesz | BSL 1.1 | wbudowane | Twoje własne | w planach, bez daty | nie; nie | 490 EUR rocznie za produkt, stała cena |
 
