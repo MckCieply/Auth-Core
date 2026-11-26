@@ -17,8 +17,9 @@
 ## Goal
 
 A developer who hears of Auth-Core decides in five minutes whether it fits their product, in English or Polish, without
-reading the whole README. The site answers four questions on five pages: what it is (Start), whether it fits (Is it for
-me), how it compares (Comparison), what the licence allows and costs (License), and what changed (Versions).
+reading the whole README. The site answers its questions on six pages: what it is (Start), whether it fits (Is it for
+me), why Auth-Core over the alternatives (Comparison), what it costs (Pricing), what the licence allows (License), and
+what changed (Versions).
 
 The site lives at `https://mckcieply.github.io/Auth-Core/` (English) and `https://mckcieply.github.io/Auth-Core/pl/`
 (Polish). It rebuilds itself on every push to `main` that changes the site, the changelog or the changelog parser, so a
@@ -36,7 +37,7 @@ cd site && npm ci && npm run build                          # -> exit 0 locally,
 
 ## In scope
 
-- A static site in `site/` built with Astro Starlight: five pages, each in English and Polish.
+- A static site in `site/` built with Astro Starlight: six pages, each in English and Polish.
 - The look the owner approved on 2026-11-26 ("L4 Noc" in the colours "P4 Cyjan"): a night-city photo tinted sea blue
   behind the top of the page, glass cards, one cyan accent, a 12-column bento on the Start page, light and dark themes
   that follow the system.
@@ -116,11 +117,12 @@ cd site && npm ci && npm run build                          # -> exit 0 locally,
 |---|---|---|---|
 | Start | `/` | `/pl/` | Starlight `splash`, own components |
 | Is it for me | `/fit/` | `/pl/fit/` | Starlight doc page |
-| Comparison | `/compare/` | `/pl/compare/` | Starlight doc page |
+| Comparison | `/compare/` | `/pl/compare/` | Starlight doc page (MDX) |
+| Pricing | `/pricing/` | `/pl/pricing/` | Starlight doc page (MDX) |
 | License | `/license/` | `/pl/license/` | Starlight doc page |
 | Versions | `/versions/` | `/pl/versions/` | Starlight doc page, own component |
 
-The sidebar holds the four inner pages in this order. The header holds the language picker, the theme picker (light,
+The sidebar holds the five inner pages in this order. The header holds the language picker, the theme picker (light,
 dark, auto; auto is the default) and the GitHub link. The Polish pages use the same paths, so the language picker moves
 a reader to the same page.
 
@@ -134,7 +136,7 @@ The copy is in Appendix A (English and Polish). The layout:
    - four benefit cards (3 columns each);
    - the diagram "How it sits next to your product" (8 columns): browser, reverse proxy, `/auth` Auth-Core, `/api` your
      backend, drawn in HTML and CSS, readable as text by a screen reader;
-   - the licence and price card on the accent colour (4 columns), linking to `/license/`;
+   - the licence and price card on the accent colour (4 columns), linking to `/pricing/` (Decision 16);
    - "A good fit if" and "Look elsewhere if" (6 columns each), linking to `/fit/`;
    - the three latest versions (7 columns), linking to `/versions/`;
    - the three steps with the YAML example (5 columns).
@@ -172,24 +174,26 @@ Sections, in this order:
 
 ### Comparison
 
-The same alternatives as the README's "Auth-Core or something else", in the same order: Better Auth, Keycloak, Clerk,
-WorkOS, then Auth-Core. Two parts:
+The page argues for Auth-Core first and compares second (Decision 15). Three parts:
 
-1. **The README's table**, as it is: "Pick it when" and "Auth-Core instead when", and the line "Auth-Core does not fit
-   when ...".
-2. **A facts table**, one row per product, columns:
-   - how it runs (a service you host, a library inside your app, a hosted service);
-   - licence (name only);
-   - companies and roles (built in, a plug-in, an add-on, not there);
-   - sign-in screens (your own, hosted by the vendor, ready-made components);
-   - MFA today (yes, no; for Auth-Core "planned, no date");
-   - SSO between products, SAML;
-   - how you pay (in words: "free and open source", "per monthly active user", "per connection"; for Auth-Core
-     "EUR 490 a year per product, flat").
+1. **Why Auth-Core** (Polish: "Dlaczego Auth-Core"): five cards in Starlight's `CardGrid`, each a heading and one or two
+   sentences, every fact from the README's "Why use it" or its price line, in this order:
+   - **Your data, your server**: no external identity provider, no per-user fees, a small x86-64 Linux VPS with Docker;
+   - **Any backend language**: RS256 JWTs checked offline with any JWT library against the JWKS; Auth-Core is not in
+     the path of every API call;
+   - **Companies and roles built in**: members, roles, invitations and a permission catalog your product declares;
+   - **A flat price**: EUR 490 a year per product, any number of users, linking to `/pricing/`;
+   - **Isolated from your app**: its own container and database, a non-root user, a read-only file system.
+   The cards carry no icon and no cyan (Settled 10); on a phone they stack in one column.
+2. **When to pick which**: the README's table as it is ("Pick it when", "Auth-Core instead when") and the line
+   "Auth-Core does not fit when ...". Each competitor's "Pick it when" cell carries footnotes to the vendor pages
+   that back it. Below 40rem each row shows as a block: the product's name, then the two cells, each under its column
+   name as a small label; a cell left empty (the Auth-Core row's second cell) is not shown.
+3. **Sources** (Polish: "Źródła"): the footnotes, under the heading "Sources" in place of "Footnotes", then "Checked:
+   <date>", the day the implementer read the pages. Quiet, not hidden: 0.8125rem, the muted text colour, links in the
+   muted colour with an underline (not cyan), the back links and the reference numbers in the text smaller and muted.
 
-Every competitor cell has a footnote with the link to the vendor's page it comes from. Under the table: "Checked:
-<date>", the day the implementer read the pages. A cell the implementer cannot source is written "not stated" with the
-page that was read.
+The former facts table (how it runs, licence, companies and roles, screens, MFA, SSO, how you pay) is not on the page.
 
 ### License
 
@@ -197,15 +201,27 @@ page that was read.
    development, testing and evaluation (free); a personal non-commercial project in production (free); a non-profit or
    educational use, non-commercial (free); a company in production, even for internal use (needs one); a company
    evaluating it before buying (free).
-2. **Price**: the README's line: EUR 490 a year per product, net of VAT, flat, any number of users; production use,
-   security fixes and best-effort email support (a reply usually within two working days). Contact:
-   `kontakt@toviq.pl` as a `mailto:` link.
+2. **Price**: one line, "EUR 490 a year per product, net of VAT.", and a link to `/pricing/` for what it covers and how
+   to buy (Decision 16).
 3. **What stays MIT**: `clients/`, `samples/`, `docs/`, `site/`, and `v0.1.0` with everything published before the licence
    change.
 4. **Change to Apache 2.0**: each version three years after it is first published, as the README and the Change Date
    of `LICENSE` say. The page computes no per-version dates (Settled 11).
 5. A link to the full [`LICENSE`](../../../LICENSE) at `main`, and the sentence "The licence text decides; this page only
    explains it." (Polish: "Rozstrzyga tekst licencji; ta strona go tylko objaśnia.").
+
+### Pricing
+
+Two cards side by side (one column below 40rem), every word from the README and the License page (criterion 13):
+
+1. **Free** (Polish: "Bezpłatnie"): development, testing and evaluation; a personal non-commercial project in
+   production; a non-profit or educational use, non-commercial; a company evaluating it before buying.
+2. **Commercial** (Polish: "Komercyjnie"): "EUR 490 / year per product", net of VAT, flat, any number of users; it
+   covers production use, security fixes and best-effort email support (a reply usually within two working days). A
+   button "Write to buy" (Polish: "Napisz, aby kupić") to `mailto:kontakt@toviq.pl`, the page's one cyan element.
+
+Under the cards: who needs the commercial licence (a company in production, even for internal use) and a link to
+`/license/` for the licence terms.
 
 ### Versions
 
@@ -313,6 +329,12 @@ The look is the board "L4 Noc" of the design canvas (owner decision 2026-11-26) 
   - `city-dark.webp`: the photo as it is, cropped to cover;
   - `city-light.webp`: grayscale, inverted, contrast 1.15 (Decision 13).
   The photos are decorative: CSS backgrounds, no text in them, nothing a screen reader announces.
+- **Pickers** (theme and language, Decision 17): closed, each is a pill with a 1 px border in the border colour,
+  radius 999 px, at least 44 px high, its icon and its arrow; on hover the border takes the text colour. No cyan.
+  `color-scheme` follows the theme, so a browser's own list opens dark in the dark theme and light in the light one.
+  Where `appearance: base-select` is supported, the open list is styled: the surface colour, the border colour, radius
+  12 px, rows at least 44 px high, the hovered row on the text colour at 8 %, the chosen row marked with a check in the
+  text colour. Elsewhere the browser's list stays, in the theme's colours.
 - **Polish letters:** every page renders ą, ć, ę, ł, ń, ó, ś, ź, ż in Space Grotesk (checked in the verification).
 - **Accessibility:** text on every background and card at least 4.5:1, icons and borders that carry meaning at least
   3:1, measured over the brightest part of the photo under the card; touch targets at least 44 × 44 px; the layout
@@ -363,6 +385,8 @@ Both are run at the merge, after the owner says yes to each.
 - **`README.md`**: a "Site" link next to the release badge line, to `https://mckcieply.github.io/Auth-Core/`; the line
   "the specs (0001 to 0009)" becomes "the specs and the plans built from them"; the repository layout gains
   `site/  the project site (Astro Starlight), published to GitHub Pages`.
+- **`CLAUDE.md`** (repository root): a "Release condition" section: no version tag until both summary files carry the
+  version, with a link to `docs/operations/releases.md`, "Before the tag".
 - **`site/CREDITS.md`**: the photo (Unsplash id, "Unsplash License", the steps that made each file; no author and no
   photo page, Decision 14), the two fonts (name, licence, link).
 - **Footer of every page**: "Server: BSL 1.1. Clients, samples and docs: MIT. City photo: Unsplash License." with links
@@ -397,7 +421,7 @@ Build checks
 
 Pages
 
-10. All five pages exist in English and Polish at the paths of the table; the language picker moves between the two
+10. All six pages exist in English and Polish at the paths of the table; the language picker moves between the two
     versions of the same page (guard: the parity check; the verifier opens each pair).
 11. The Start page's badge and three latest versions match the top of `CHANGELOG.md` and change when a section is added
     (guard: the verifier adds a fake `## 0.9.0` section and its two summaries locally, builds, sees both, and drops
@@ -408,10 +432,12 @@ Pages
     cut and the dates; the verifier compares the page with the changelog).
 13. Every product fact on the site is in the README at the build commit, except the five known limits, which are in
     the threat model (guard: the verifier lists each fact with its README or threat-model line).
-14. Every competitor cell of the Comparison page has a source link; the page shows the checked date (guard: the
-    verifier opens every source link).
+14. Every claim about a competitor on the Comparison page has a source link, the five "Why Auth-Core" cards state only
+    README facts, and the page shows the checked date (guard: the verifier opens every source link and lists each
+    card's README line).
 15. The License page states the five cases, the price, the MIT parts and the Apache rule as the README and `LICENSE`
-    do (guard: the verifier compares line by line).
+    do, and the Pricing page states the price, what it covers, the free cases and the contact as the README does
+    (guard: the verifier compares line by line).
 16. The five known limits name the threat model's residual risks that say the same (guard: the verifier reads each).
 
 Look and privacy
@@ -444,8 +470,8 @@ Workflow and documents
    link to the README.
 2. **Address and languages.** `mckcieply.github.io/Auth-Core`, English at the root, Polish under `/pl/`, every page in
    both.
-3. **Astro Starlight**, five pages: Start, Is it for me, Comparison, License, Versions. No blog, newsletter or
-   analytics.
+3. **Astro Starlight**, five pages: Start, Is it for me, Comparison, License, Versions (six since Decision 16 added
+   Pricing). No blog, newsletter or analytics.
 4. **Versions from one parser.** `release-notes.py --all-json` feeds the site; the site shows server versions only;
    the Python package gets one line.
 5. **Polish summaries, missing fails the build.** One to two sentences per version in a JSON file; the release steps
@@ -474,6 +500,17 @@ Workflow and documents
     page and a search found neither the page nor the author; the Unsplash License does not require either. The credit
     reads "from Unsplash (the author is not named; the Unsplash License does not require it)"; if the author is found
     later, the credit gains the name and the page.
+15. **The Comparison page sells Auth-Core** (owner, 2026-11-26, after the site went live): five "Why Auth-Core" cards
+    first, then the README's "When to pick which" table; the facts table goes. Sources stay, small and muted, under
+    "Sources" / "Źródła". Rejected: one line per advantage against each competitor (more facts to keep true), and
+    the facts table folded under "Show details".
+16. **A Pricing page** (owner, 2026-11-26): `/pricing/` between Comparison and License, Free and Commercial cards and a
+    `mailto:` button; the License page keeps the licence terms and one price line. Rejected: renaming License to
+    "License and pricing"; leaving the price only on License.
+17. **Styled pickers** (owner, 2026-11-26): the theme and language pickers look like the site (Look, "Pickers"), in
+    CSS only, no override of Starlight's components.
+18. **More languages later** (owner, 2026-11-26): German, French, Spanish and Ukrainian come in a stage of their own,
+    whose core is a translation mechanism good enough to reuse in other projects. Not in this spec.
 
 ### Settled in this spec
 
@@ -492,7 +529,7 @@ Workflow and documents
 7. **The prebuild runs the checks**, so `npm run build` locally and `withastro/action` in the workflow run the same
    ones. Rejected: separate workflow steps, which a local build would skip.
 8. **Rules 6 and 7 of `check-pins.py`** carry the pinning rule of the images to the workflow and the site's packages.
-9. **Inner pages show a 280 px photo band**, so the five pages read as one site; the full photo stays on Start.
+9. **Inner pages show a 280 px photo band**, so the pages read as one site; the full photo stays on Start.
 10. **One accent, no second colour.** Cyan marks the buttons, the badge, the "latest" pill, the licence card, the fact
     dots and the highlighted step of the diagram; nothing else is coloured.
 11. **No computed Apache dates.** The licence counts three years from the day a version was first published, which can
@@ -563,7 +600,7 @@ The text of the approved board, checked against the README and the changelog at 
 | Step 2 | **Run it on your server.** A production compose file and a guide take you from a Linux server with Docker, a domain and an SMTP relay to a first sign-in. | **Uruchom na swoim serwerze.** Gotowy plik compose i przewodnik prowadzą od serwera z Linuksem, Dockerem, domeną i SMTP do pierwszego logowania. |
 | Step 3 | **Create the first company.** One command creates the company, a second invites its admin. The admin invites the rest. | **Załóż pierwszą firmę.** Jedno polecenie tworzy firmę, drugie zaprasza jej admina. Admin zaprasza resztę. |
 | Footer | Server: BSL 1.1. Clients, samples and docs: MIT. City photo: Unsplash License. · Edit this page on GitHub | Serwer: BSL 1.1. Klienty, przykłady i dokumentacja: MIT. Zdjęcie miasta: licencja Unsplash. · Edytuj tę stronę na GitHubie |
-| Navigation | Start · Is it for me? · Comparison · License · Versions | Start · Czy to dla mnie? · Porównanie · Licencja · Wersje |
+| Navigation | Start · Is it for me? · Comparison · Pricing · License · Versions | Start · Czy to dla mnie? · Porównanie · Cennik · Licencja · Wersje |
 
 The YAML of step 1, the README's example as it is:
 

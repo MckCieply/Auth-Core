@@ -500,3 +500,154 @@ a.sl-anchor-link {
   min-height: 44px;
   margin: -10px -10px -10px -10px;
 }
+
+/* Theme and language pickers: a pill closed, a styled list open (spec 0018, "Pickers"). No cyan. */
+starlight-theme-select label,
+starlight-lang-select label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: 999px;
+  color: var(--ac-text);
+}
+starlight-theme-select label:hover,
+starlight-lang-select label:hover {
+  border-color: var(--ac-text);
+}
+starlight-theme-select select,
+starlight-lang-select select {
+  color: var(--ac-text);
+}
+:root[data-theme='dark'] starlight-theme-select select,
+:root[data-theme='dark'] starlight-lang-select select {
+  color-scheme: dark;
+}
+:root[data-theme='light'] starlight-theme-select select,
+:root[data-theme='light'] starlight-lang-select select {
+  color-scheme: light;
+}
+@supports (appearance: base-select) {
+  starlight-theme-select select::picker-icon,
+  starlight-lang-select select::picker-icon {
+    display: none;
+  }
+  starlight-theme-select select,
+  starlight-lang-select select,
+  starlight-theme-select ::picker(select),
+  starlight-lang-select ::picker(select) {
+    appearance: base-select;
+  }
+  starlight-theme-select ::picker(select),
+  starlight-lang-select ::picker(select) {
+    background: var(--ac-surface);
+    color: var(--ac-text);
+    border: 1px solid var(--ac-border);
+    border-radius: 12px;
+    padding: 0.25rem;
+  }
+  starlight-theme-select option,
+  starlight-lang-select option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.75rem;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ac-text);
+  }
+  starlight-theme-select option:hover,
+  starlight-theme-select option:focus-visible,
+  starlight-lang-select option:hover,
+  starlight-lang-select option:focus-visible {
+    background: color-mix(in srgb, var(--ac-text) 8%, transparent);
+  }
+  starlight-theme-select option::checkmark,
+  starlight-lang-select option::checkmark {
+    color: var(--ac-text);
+  }
+}
+
+/* The buy button on the Pricing page is the one cyan element (spec 0018, "Pricing"). */
+.ac-buy .sl-link-button.primary,
+.ac-buy .sl-link-button.primary:hover {
+  background: var(--ac-accent);
+  border-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+  min-height: 44px;
+  align-items: center;
+}
+
+/* Comparison page: the "When to pick which" table becomes stacked blocks on a phone, and the Sources stay quiet
+   (spec 0018, "Comparison"). Cards use no icon, so Starlight's coloured card borders never show. */
+@media (max-width: 39.999rem) {
+  .ac-picks thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .ac-picks table,
+  .ac-picks tbody,
+  .ac-picks tr,
+  .ac-picks td {
+    display: block;
+    width: 100%;
+  }
+  .ac-picks tr {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--ac-border);
+  }
+  .ac-picks td {
+    border: 0;
+    padding: 0.25rem 0;
+  }
+  .ac-picks td:first-child {
+    font-weight: 700;
+  }
+  .ac-picks td:nth-child(2)::before {
+    content: var(--ac-pick-label);
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--ac-muted);
+  }
+  .ac-picks td:nth-child(3)::before {
+    content: var(--ac-instead-label);
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--ac-muted);
+  }
+  .ac-picks td:empty {
+    display: none;
+  }
+}
+section[data-footnotes],
+section[data-footnotes] a {
+  font-size: 0.8125rem;
+  color: var(--ac-muted);
+}
+section[data-footnotes] a {
+  text-decoration: underline;
+}
+sup a[data-footnote-ref],
+section[data-footnotes] a[data-footnote-backref] {
+  color: var(--ac-muted);
+}
+section[data-footnotes] a[data-footnote-backref] {
+  font-size: 0.75rem;
+}
+section[data-footnotes] h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ac-muted);
+  margin-top: 1.5rem;
+}

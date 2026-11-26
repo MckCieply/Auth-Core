@@ -38,6 +38,7 @@ export default defineConfig({
       sidebar: [
         { slug: 'fit', label: 'Is it for me?', translations: { pl: 'Czy to dla mnie?' } },
         { slug: 'compare', label: 'Comparison', translations: { pl: 'Porównanie' } },
+        { slug: 'pricing', label: 'Pricing', translations: { pl: 'Cennik' } },
         { slug: 'license', label: 'License', translations: { pl: 'Licencja' } },
         { slug: 'versions', label: 'Versions', translations: { pl: 'Wersje' } },
       ],

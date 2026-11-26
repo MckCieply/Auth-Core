@@ -58,7 +58,7 @@ export const START_COPY = {
       'non-commercial projects, and for non-commercial use by non-profit or educational organisations. A company running it in ' +
       'production, even internally, needs a commercial licence: EUR 490 a year per product, net of VAT, any number of users. Each ' +
       'version becomes Apache 2.0 three years after it is published.',
-    licenceLink: 'Read the license in plain words',
+    licenceLink: 'See pricing and what is free',
     fitHeading: 'Is it for me?',
     goodFitHeading: 'A good fit if',
     goodFit: [
@@ -141,7 +141,7 @@ export const START_COPY = {
       'celów komercyjnych oraz do niekomercyjnego użytku organizacji non-profit i edukacyjnych. Firma, która uruchamia go ' +
       'produkcyjnie, nawet wewnętrznie, potrzebuje licencji komercyjnej: 490 EUR netto rocznie za produkt, dowolna liczba ' +
       'użytkowników. Każda wersja przechodzi na Apache 2.0 trzy lata po publikacji.',
-    licenceLink: 'Licencja prostymi słowami',
+    licenceLink: 'Cennik i co jest za darmo',
     fitHeading: 'Czy to dla mnie?',
     goodFitHeading: 'Pasuje, jeśli',
     goodFit: [

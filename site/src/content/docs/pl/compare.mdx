@@ -1,0 +1,59 @@
+---
+title: Porównanie
+description: Dlaczego Auth-Core i kiedy lepiej pasuje coś innego, ze źródłem każdego twierdzenia o innych.
+---
+
+import { CardGrid, Card } from '@astrojs/starlight/components';
+
+## Dlaczego Auth-Core
+
+<CardGrid>
+  <Card title="Twoje dane, Twój serwer">
+    Bez zewnętrznego dostawcy tożsamości i bez opłat za użytkownika. Działa na małym VPS z Linuksem x86-64 i Dockerem; logowanie przez Google, Microsoft i GitHub jest opcjonalne.
+  </Card>
+  <Card title="Backend w dowolnym języku">
+    Tokeny dostępu to standardowe JWT RS256. Twój backend sprawdza je offline dowolną biblioteką JWT, która czyta JWKS, więc Auth-Core nie stoi na drodze każdego wywołania API.
+  </Card>
+  <Card title="Firmy i role w pakiecie">
+    Użytkownicy należą do firm, z członkami, rolami, zaproszeniami i katalogiem uprawnień, który deklaruje Twój produkt.
+  </Card>
+  <Card title="Stała cena">
+    490 EUR rocznie za produkt, dla dowolnej liczby użytkowników. [Zobacz cennik](/Auth-Core/pl/pricing/ "Cennik").
+  </Card>
+  <Card title="Osobno od aplikacji">
+    Własny kontener, własna baza PostgreSQL i własne klucze podpisu. Działa jako użytkownik bez uprawnień roota na systemie plików tylko do odczytu, a Twój backend nigdy nie dotyka bazy auth.
+  </Card>
+</CardGrid>
+
+Te same alternatywy co w README, w tej samej kolejności.
+
+## Kiedy co wybrać
+
+<div class="ac-picks" style={{ '--ac-pick-label': "'Wybierz, gdy'", '--ac-instead-label': "'Auth-Core zamiast tego, gdy'" }}>
+
+|  | Wybierz, gdy | Auth-Core zamiast tego, gdy |
+|---|---|---|
+| **Better Auth** | Twój backend jest w TypeScripcie i chcesz auth jako biblioteki w aplikacji[^ba-docs], z 2FA[^ba-2fa] i passkeys[^ba-passkey]. | Twój backend jest w innym języku albo chcesz auth osobno od aplikacji, z własną bazą. |
+| **Keycloak** | Potrzebujesz SSO między produktami, SAML lub LDAP[^kc-home] albo najszerszego zestawu standardów. | Chcesz małej usługi dla jednego produktu, z wbudowanymi firmami i rolami. |
+| **Clerk** | Chcesz gotowych ekranów logowania[^cl-docs] i MFA[^cl-mfa] już dziś, jako usługi[^cl-terms]. | Chcesz hostować sam, trzymać dane użytkowników na swoim serwerze i płacić stałą roczną cenę. |
+| **WorkOS** | Sprzedajesz dużym firmom i potrzebujesz SSO[^wo-sso] oraz synchronizacji katalogu[^wo-dsync] dla każdego klienta. | Twoi klienci logują się hasłem albo przez Google, Microsoft lub GitHub, a Ty chcesz hostować sam. |
+| **Auth-Core** | Chcesz jednej usługi hostowanej u siebie na produkt, odseparowanej od aplikacji, z backendem w dowolnym języku. | |
+
+</div>
+
+Auth-Core nie pasuje, gdy potrzebujesz MFA już dziś, SSO między produktami, SAML lub SCIM, gotowych ekranów albo backendu w
+TypeScripcie, który chce auth w aplikacji.
+
+Sprawdzono: 26 lis 2026.
+
+[^ba-docs]: Better Auth, dokumentacja: https://www.better-auth.com/docs/introduction
+[^ba-2fa]: Better Auth, wtyczka two-factor: https://www.better-auth.com/docs/plugins/2fa
+[^ba-passkey]: Better Auth, wtyczka passkey: https://www.better-auth.com/docs/plugins/passkey
+[^kc-home]: Keycloak, strona główna: https://www.keycloak.org/
+[^cl-docs]: Clerk, dokumentacja: https://clerk.com/docs
+[^cl-mfa]: Clerk, opcje rejestracji i logowania: https://clerk.com/docs/authentication/configuration/sign-up-sign-in-options
+[^cl-terms]: Clerk, warunki korzystania: https://clerk.com/legal/terms
+[^wo-sso]: WorkOS, single sign-on: https://workos.com/docs/sso
+[^wo-dsync]: WorkOS, synchronizacja katalogu: https://workos.com/docs/directory-sync
+
+[Czy to dla mnie?](/Auth-Core/pl/fit/ "Czy to dla mnie?") mówi, czego Auth-Core potrzebuje i gdzie się kończy.

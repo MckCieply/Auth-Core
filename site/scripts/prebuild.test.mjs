@@ -307,12 +307,11 @@ test('theme: every url() of an asset in theme.css points at a file that exists',
   }
 });
 
-test('footnote labels: Polish pages get Polish labels, English pages stay', () => {
+test('footnote labels: the heading reads Sources or Źródła, only Polish pages relabel back links', () => {
   const run = (url) => {
-    const heading = { type: 'element', tagName: 'h2', properties: { id: 'footnote-label' }, children: [{ type: 'text', value: 'Footnotes' }] };
-    const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1' }, children: [] };
+    const heading = { type: 'element', tagName: 'h2', properties: { id: 'footnote-label', className: ['sr-only'] }, children: [{ type: 'text', value: 'Footnotes' }] };
+    const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1' }, children: [{ type: 'text', value: String.fromCharCode(0x21a9) }] };
     const plugin = footnoteLabels({ fileURL: new URL(url) });
-    if (plugin === false) return { heading: heading.children[0].value, label: link.properties.ariaLabel };
     const ctx = {
       removeChildAt: (node, index) => node.children.splice(index, 1),
       appendChild: (node, child) => node.children.push(child),
@@ -320,8 +319,25 @@ test('footnote labels: Polish pages get Polish labels, English pages stay', () =
     };
     plugin.element[0].visit(heading, ctx);
     plugin.element[1].visit(link, ctx);
+    const arrow = link.children.map((c) => c.value).join('');
+    assert.ok(!heading.properties.className.includes('sr-only'), 'heading must be visible');
+    assert.equal(arrow, String.fromCharCode(0x21a9, 0xfe0e));
     return { heading: heading.children.map((c) => c.value).join(''), label: link.properties.ariaLabel };
   };
-  assert.deepEqual(run('file:///C:/x/site/src/content/docs/pl/compare.md'), { heading: 'Przypisy', label: 'Powrót do odwołania 1' });
-  assert.deepEqual(run('file:///C:/x/site/src/content/docs/compare.md'), { heading: 'Footnotes', label: 'Back to reference 1' });
+  assert.deepEqual(run('file:///C:/x/site/src/content/docs/pl/compare.mdx'), { heading: 'Źródła', label: 'Powrót do odwołania 1' });
+  assert.deepEqual(run('file:///C:/x/site/src/content/docs/compare.mdx'), { heading: 'Sources', label: 'Back to reference 1' });
+});
+
+test('footnote labels: a back link keeps its children in order', () => {
+  const sup = { type: 'element', tagName: 'sup', properties: {}, children: [{ type: 'text', value: '2' }] };
+  const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1-2' }, children: [{ type: 'text', value: String.fromCharCode(0x21a9) }, sup] };
+  const ctx = {
+    removeChildAt: (node, index) => node.children.splice(index, 1),
+    appendChild: (node, child) => node.children.push(child),
+    setProperty: (node, key, value) => { node.properties[key] = value; },
+  };
+  const plugin = footnoteLabels({ fileURL: new URL('file:///C:/x/site/src/content/docs/compare.mdx') });
+  plugin.element[1].visit(link, ctx);
+  assert.equal(link.children[0].value, String.fromCharCode(0x21a9, 0xfe0e));
+  assert.equal(link.children[1], sup);
 });
