@@ -6,7 +6,7 @@ Usage, from anywhere:  python scripts/release-notes.py <tag>           (the rele
                        python scripts/release-notes.py --all-json      (every version section as one JSON array, on stdout)
                        python scripts/release-notes.py --self-test
 Exit status 0 on success, 1 when the tag is malformed or has no section in CHANGELOG.md, or (--all-json) when a version heading breaks
-rule 5. `--self-test` runs the rules on small inline samples (no repository needed).
+item 5 of the list below. `--self-test` runs the rules on small inline samples (no repository needed).
 
 What it does:
   1. tag `vX.Y.Z` maps to the heading `## X.Y.Z - <date>`, tag `python-vX.Y.Z` to `## python-vX.Y.Z - <date>`;
@@ -196,6 +196,7 @@ def self_test():
     check("fence unchanged", unwrap(["intro", "```bash", "a", "  b", "```", "after"]) == ["intro", "```bash", "a", "  b", "```", "after"])
     check("table rows", unwrap(["| a | b |", "| - | - |"]) == ["| a | b |", "| - | - |"])
     check("unwrap keeps links", "](docs/a.md)" in unwrap(["see [a](docs/a.md)", "and `x`"])[0])
+
     def sections_or_error(text):
         try:
             return all_sections(text), None
