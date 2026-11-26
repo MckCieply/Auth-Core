@@ -19,6 +19,9 @@ export default defineConfig({
       editLink: { baseUrl: 'https://github.com/MckCieply/Auth-Core/edit/main/site/' },
       pagination: false,
       lastUpdated: false,
+      components: {
+        Footer: './src/components/Footer.astro',
+      },
       customCss: [
         '@fontsource/space-grotesk/400.css',
         '@fontsource/space-grotesk/500.css',

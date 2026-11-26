@@ -1,0 +1,42 @@
+---
+// The footer of every page (spec 0018, Start, item 3, and Documents): the licence line, the edit link and a plain link
+// to the same page in the other language, which works without JavaScript.
+import { otherLanguagePath, pagePath, slugOf } from '../lib/paths.mjs';
+
+const route = Astro.locals.starlightRoute;
+const lang = route.lang === 'pl' ? 'pl' : 'en';
+const TEXT = {
+  en: {
+    server: 'Server: BSL 1.1.',
+    open: 'Clients, samples and docs: MIT.',
+    photo: 'City photo: Unsplash License.',
+    edit: 'Edit this page on GitHub',
+    other: 'Polski',
+    otherLang: 'pl',
+  },
+  pl: {
+    server: 'Serwer: BSL 1.1.',
+    open: 'Klienty, przykłady i dokumentacja: MIT.',
+    photo: 'Zdjęcie miasta: licencja Unsplash.',
+    edit: 'Edytuj tę stronę na GitHubie',
+    other: 'English',
+    otherLang: 'en',
+  },
+};
+const t = TEXT[lang];
+// The 404 page holds both languages on one page, so it has no other-language twin to link to.
+const hasTwin = slugOf(route.id) !== '404';
+const REPO = 'https://github.com/MckCieply/Auth-Core/blob/main/';
+---
+
+<footer class="ac-footer not-content">
+  <p>
+    <a href={REPO + 'LICENSE'}>{t.server}</a>
+    <a href={pagePath(lang, 'license')}>{t.open}</a>
+    <a href={REPO + 'site/CREDITS.md'}>{t.photo}</a>
+  </p>
+  <p>
+    {route.editUrl && <a href={route.editUrl.href}>{t.edit}</a>}
+    {hasTwin && <a href={otherLanguagePath(route.id)} hreflang={t.otherLang} lang={t.otherLang}>{t.other}</a>}
+  </p>
+</footer>
