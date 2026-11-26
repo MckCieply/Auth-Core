@@ -1,0 +1,502 @@
+/* Tokens of spec 0018, "Look" (board L4 Noc, palette P4 Cyjan). Dark is Starlight's default (:root), light is
+   :root[data-theme='light']. Starlight's own CSS sits in cascade layers, so these unlayered rules win over it. */
+:root {
+  --ac-bg: #04090c;
+  --ac-surface: #0c171c;
+  --ac-border: #1a3038;
+  --ac-text: #ecf8fb;
+  --ac-muted: #9dbac2;
+  --ac-code-bg: #0c171c;
+  --ac-code-text: #f4f4f2;
+  --ac-code-muted: #a9abb3;
+  --ac-ok: #5fd08f;
+  --ac-not-ok: #ff8a80;
+  --ac-accent: #22d3ee;
+  --ac-on-accent: #0a0a0a;
+  --ac-glass: rgb(4 9 12 / 0.8);
+  --ac-glass-border: rgb(236 248 251 / 0.12);
+  --ac-radius: 22px;
+}
+
+:root[data-theme='light'] {
+  --ac-bg: #f5fafb;
+  --ac-surface: #e9f3f5;
+  --ac-border: #cfe2e6;
+  --ac-text: #08171b;
+  --ac-muted: #3f5a61;
+  --ac-code-bg: #111216;
+  --ac-ok: #1d7348;
+  --ac-not-ok: #b3261e;
+  --ac-glass: rgb(245 250 251 / 0.8);
+  --ac-glass-border: rgb(8 23 27 / 0.12);
+}
+
+/* Starlight's variables, mapped once: they resolve against the tokens of the current theme. Links and the text accent
+   use the text colour, because cyan is kept for the elements of Settled 10. */
+:root {
+  --sl-font: 'Space Grotesk', system-ui, sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --sl-color-bg: var(--ac-bg);
+  --sl-color-bg-nav: var(--ac-bg);
+  --sl-color-bg-sidebar: var(--ac-bg);
+  --sl-color-bg-inline-code: var(--ac-surface);
+  --sl-color-bg-accent: var(--ac-accent);
+  --sl-color-text: var(--ac-text);
+  --sl-color-white: var(--ac-text);
+  --sl-color-gray-1: var(--ac-text);
+  --sl-color-gray-2: var(--ac-text);
+  --sl-color-gray-3: var(--ac-muted);
+  --sl-color-gray-4: var(--ac-muted);
+  --sl-color-gray-5: var(--ac-border);
+  --sl-color-gray-6: var(--ac-surface);
+  --sl-color-black: var(--ac-bg);
+  --sl-color-text-accent: var(--ac-text);
+  --sl-color-text-invert: var(--ac-on-accent);
+  --sl-color-accent-low: var(--ac-surface);
+  --sl-color-accent: var(--ac-accent);
+  --sl-color-accent-high: var(--ac-text);
+  --sl-color-hairline-light: var(--ac-border);
+  --sl-color-hairline: var(--ac-border);
+  --sl-color-hairline-shade: var(--ac-border);
+}
+
+/* The current page in the sidebar: surface and text colour, no cyan (Settled 10). */
+a[aria-current='page'],
+a[aria-current='page']:hover,
+a[aria-current='page']:focus {
+  background-color: var(--ac-surface);
+  color: var(--ac-text);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--ac-text);
+}
+
+/* The caution aside of the Versions page: neutral, not orange (Settled 10). */
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--ac-text);
+  --sl-color-asides-border: var(--ac-muted);
+  background-color: var(--ac-surface);
+}
+
+a:focus-visible,
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--ac-text);
+  outline-offset: 2px;
+}
+
+/* Footer: muted text, links as 44 px targets (spec 0018, Accessibility). */
+.ac-footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ac-border);
+  color: var(--ac-muted);
+  font-size: var(--sl-text-sm);
+}
+.ac-footer p,
+.ac-footer ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ac-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ac-muted);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.ac-footer a:hover {
+  color: var(--ac-text);
+}
+
+/* Versions page and the "latest" pill (spec 0018, Versions; Settled 10: the pill is cyan). */
+.ac-pill {
+  display: inline-block;
+  margin-inline-start: 0.5em;
+  padding: 0.1em 0.6em;
+  border-radius: 999px;
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+  font-family: var(--sl-font-mono);
+  font-size: 0.7em;
+  font-weight: 500;
+  vertical-align: middle;
+}
+.ac-version {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--ac-border);
+}
+.ac-version:first-child {
+  border-top: 0;
+}
+.ac-summary {
+  font-size: var(--sl-text-lg);
+}
+.ac-note,
+.ac-python {
+  color: var(--ac-muted);
+}
+.ac-version-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1.5rem;
+}
+.ac-version-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* Start page (spec 0018, Start and Look). The splash page gets a wider content column for the 12-column bento. */
+html[data-has-hero]:not([data-has-sidebar]) {
+  --sl-content-width: 76rem;
+}
+
+/* Glass: the solid surface first, the blur only where it is supported and transparency is not reduced (Settled 6). */
+.ac-glass,
+.header {
+  background-color: var(--ac-surface);
+}
+.ac-glass {
+  border: 1px solid var(--ac-glass-border);
+  border-radius: var(--ac-radius);
+}
+@supports ((backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px))) {
+  .ac-glass,
+  .header {
+    background-color: var(--ac-glass);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ac-glass,
+  .header {
+    background-color: var(--ac-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.ac-hero {
+  padding-block: 4rem 2rem;
+}
+.ac-hero-card {
+  max-width: 48rem;
+  padding: clamp(1.25rem, 4vw, 2.5rem);
+}
+.ac-badge {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0 0 1rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: 999px;
+  color: var(--ac-text);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+}
+.ac-hero h1 {
+  margin: 0;
+  color: var(--ac-text);
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+}
+.ac-subline {
+  margin: 1rem 0 0;
+  color: var(--ac-text);
+  font-size: var(--sl-text-lg);
+}
+.ac-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+.ac-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1.25rem;
+  border: 1.5px solid var(--ac-text);
+  border-radius: 999px;
+  color: var(--ac-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+.ac-button-primary {
+  border-color: var(--ac-accent);
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+.ac-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ac-muted);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+}
+.ac-facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ac-facts li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ac-accent);
+}
+
+/* Bento: one column, 12 from 64rem. */
+.ac-bento {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  padding-bottom: 2rem;
+}
+.ac-bento > h2 {
+  margin: 1.5rem 0 0;
+}
+@media (min-width: 64rem) {
+  .ac-bento {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .ac-span-3 { grid-column: span 3; }
+  .ac-span-4 { grid-column: span 4; }
+  .ac-span-5 { grid-column: span 5; }
+  .ac-span-6 { grid-column: span 6; }
+  .ac-span-7 { grid-column: span 7; }
+  .ac-span-8 { grid-column: span 8; }
+  .ac-span-12 { grid-column: span 12; }
+}
+.ac-card {
+  padding: 1.25rem;
+  color: var(--ac-text);
+}
+.ac-card h2,
+.ac-card h3 {
+  margin: 0 0 0.75rem;
+  color: inherit;
+}
+.ac-card p {
+  margin: 0 0 0.75rem;
+}
+.ac-card-accent {
+  border-radius: var(--ac-radius);
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+.ac-card-accent a {
+  color: var(--ac-on-accent);
+}
+.ac-card-accent a:focus-visible {
+  outline-color: var(--ac-on-accent);
+}
+.ac-target {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* The diagram: lists, so a screen reader reads it as text. */
+.ac-diagram,
+.ac-routes {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ac-routes {
+  margin-top: 0.75rem;
+}
+@media (min-width: 40rem) {
+  .ac-routes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ac-node {
+  padding: 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: calc(var(--ac-radius) / 2);
+  background-color: var(--ac-bg);
+}
+.ac-node-accent {
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+  border-color: var(--ac-text);
+}
+.ac-path {
+  padding: 0.1em 0.5em;
+  border-radius: 6px;
+  background-color: var(--ac-surface);
+  color: var(--ac-text);
+}
+.ac-path-accent {
+  background-color: var(--ac-accent);
+  color: var(--ac-on-accent);
+}
+.ac-node-accent .ac-path-accent {
+  border: 1px solid var(--ac-text);
+}
+
+.ac-list,
+.ac-latest,
+.ac-steps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding-inline-start: 1.25rem;
+}
+.ac-steps {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ac-list-ok li::marker {
+  color: var(--ac-ok);
+}
+.ac-list-not-ok li::marker {
+  color: var(--ac-not-ok);
+}
+.ac-latest {
+  padding: 0;
+  list-style: none;
+}
+.ac-latest li {
+  display: grid;
+  gap: 0.125rem;
+}
+.ac-latest-label {
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-sm);
+  color: var(--ac-muted);
+}
+.ac-code {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  border-radius: calc(var(--ac-radius) / 2);
+  background-color: var(--ac-code-bg);
+  color: var(--ac-code-text);
+  font-family: var(--sl-font-mono);
+  font-size: var(--sl-text-xs);
+}
+
+/* Starlight's own controls as 44 px targets (spec 0018, Accessibility); Task 14 measures every page. */
+.sidebar-content a,
+.social-icons a,
+starlight-toc a,
+starlight-theme-select select,
+starlight-lang-select select,
+site-search button,
+starlight-menu-button button,
+mobile-starlight-toc summary {
+  min-height: 44px;
+}
+.sidebar-content a,
+.social-icons a,
+starlight-toc a {
+  display: flex;
+  align-items: center;
+}
+.social-icons a {
+  min-width: 44px;
+  justify-content: center;
+}
+
+/* The photo (spec 0018, Look): the whole top of the Start page (1500 px), a 280 px band on inner pages. From the top
+   layer down: the gradient of the background (35 %, 55 % at 45 %, 100 %), the sea-blue tint #0891b2 at 70 % blended as
+   "color", the photo. cover, no-repeat, center top: never stretched (Settled 13). Decorative: no text, no alt. */
+html {
+  background-color: var(--ac-bg);
+}
+body {
+  position: relative;
+  background-color: transparent;
+}
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: -1;
+  height: 280px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--ac-bg) 35%, transparent) 0%,
+      color-mix(in srgb, var(--ac-bg) 55%, transparent) 45%,
+      var(--ac-bg) 100%
+    ),
+    linear-gradient(rgb(8 145 178 / 0.7), rgb(8 145 178 / 0.7)),
+    url('../assets/photos/city-dark.webp');
+  background-blend-mode: normal, color, normal;
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center top;
+}
+:root[data-theme='light'] body::before {
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--ac-bg) 35%, transparent) 0%,
+      color-mix(in srgb, var(--ac-bg) 55%, transparent) 45%,
+      var(--ac-bg) 100%
+    ),
+    linear-gradient(rgb(8 145 178 / 0.7), rgb(8 145 178 / 0.7)),
+    url('../assets/photos/city-light.webp');
+}
+html[data-has-hero] body::before {
+  height: 1500px;
+}
+.ac-title-band {
+  padding-top: 12rem;
+}
+
+/* Accessibility fixes of the local axe and touch-target check (spec 0018, criterion 18). */
+site-search button[data-open-modal] > kbd {
+  display: none;
+}
+.ac-code:focus-visible {
+  outline: 2px solid var(--ac-accent);
+  outline-offset: 2px;
+}
+a.site-title {
+  min-height: 44px;
+}
+site-search button[data-open-modal] {
+  min-width: 44px;
+}
+.ac-footer a[hreflang] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+mobile-starlight-toc a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+a.sl-anchor-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -10px -10px -10px -10px;
+}

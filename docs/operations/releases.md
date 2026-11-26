@@ -4,6 +4,10 @@ A tag alone shows nothing on the repository page. The GitHub Release is what peo
 
 Do it after the annotated tag is pushed, and for the service after the image is pushed to GHCR. The section of the changelog must exist before the tag is made: `scripts/release-notes.py` exits 1 when it finds none.
 
+## Before the tag
+
+Add the version's summary, in Polish and in English, to `site/src/data/version-summaries.pl.json` and `site/src/data/version-summaries.en.json`, or the site's build fails.
+
 ## The service
 
 ```bash
@@ -12,6 +16,8 @@ gh release create v0.5.0 --verify-tag --title "$(python scripts/release-notes.py
 ```
 
 The script prints the body of the section: the heading is left out (the title carries it), lines that the changelog wraps are joined (GitHub shows a single line break as a break), relative links become links to the tag on GitHub, and the last line points to the whole changelog.
+
+Then push `main` with the tag (`git push origin main v0.5.0`); the site rebuilds on the push and the Versions page shows the version.
 
 ## The Python package
 

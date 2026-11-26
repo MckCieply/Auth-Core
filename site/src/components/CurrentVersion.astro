@@ -1,0 +1,9 @@
+---
+// The newest server version of versions.json, as text (spec 0018, Is it for me, Status).
+import versions from '../data/versions.json';
+import { serverVersions } from '../lib/versions.mjs';
+
+const latest = serverVersions(versions)[0];
+---
+
+{latest.version}

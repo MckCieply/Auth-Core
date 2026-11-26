@@ -6,9 +6,10 @@ Parameters
 Licensor:             Aleksander Torka
 Licensed Work:        Auth-Core, every version published after 0.1.0.
                       The Licensed Work is (c) 2026 Aleksander Torka.
-                      The files under clients/, samples/ and docs/ are not part of
-                      the Licensed Work; they are licensed under the MIT License
-                      (see the LICENSE file in each of those directories).
+                      The files under clients/, samples/, docs/ and site/ are
+                      not part of the Licensed Work; they are licensed under the
+                      MIT License (see the LICENSE file in each of those
+                      directories).
 Additional Use Grant: You may make production use of the Licensed Work if you are
                       (a) an individual using it for your own personal,
                       non-commercial projects, or (b) a non-profit organization or

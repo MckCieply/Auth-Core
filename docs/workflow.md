@@ -10,6 +10,10 @@ projects — `speech-to-mail`, `Investing-Partner`, `stereo-splitter` (see
 > after local verification passes. The rigorous review that the sibling projects
 > run as CI gates, we run **locally as agents** before the merge.
 
+One exception: `.github/workflows/site.yml` builds the project site and publishes it to
+GitHub Pages on a push to `main`. It runs no tests and gates no merge; the
+verification of the product stays local.
+
 ## Model policy
 
 - **Orchestrator: always Opus.** The session that plans, decomposes work,
@@ -161,6 +165,9 @@ Principles (adapted from `speech-to-mail`'s `spec-review.md` / `e2e-review.md`):
 - **Never develop directly on `main`.** Work on a feature branch.
 - **Integration is a local merge** of the branch into `main` (the "MR") — no GitHub
   pull request, no CI checks, no protected-branch required checks.
+- **One exception: the project site.** `.github/workflows/site.yml` builds the site and
+  publishes it to GitHub Pages on a push to `main`; it runs no tests and gates no
+  merge.
 - **Before merging to `main`:** build + tests pass locally **and** all verifiers
   return PASS. A merge happens only then; a red build is work, not "done".
 - **The Linux run is part of that checklist.** The service runs on Linux and the

@@ -13,16 +13,21 @@ What it checks:
      version chosen by the operator) and an image that the same compose file builds (`notes-web-caddy:local`);
   2. every `FROM` of a Dockerfile (any file named Dockerfile*) names its base image by digest; `FROM scratch` and `FROM <earlier stage>`
      are not images;
-  3. every image that a document names is pinned: an `image:` or `FROM` line in a Markdown file outside docs/superpowers/ follows rules
-     1 and 2, and so does any `name:tag` of an image the repository itself uses (`postgres`, `caddy`, `axllent/mailpit`, ...) in the
+  3. every image that a document names is pinned: an `image:` or `FROM` line in a Markdown or MDX file (`.md`, `.mdx`) outside docs/superpowers/
+     follows rules 1 and 2, and so does any `name:tag` of an image the repository itself uses (`postgres`, `caddy`, `axllent/mailpit`, ...) in the
      prose of those documents;
   4. `deploy/docker-compose.yml` (development) passes the settings of the rate limiter and of the audit retention from `.env`
      (`Auth__RateLimit__Enabled`, the five `Auth__RateLimit__<Policy>__PermitPerMinute` and `Auth__Audit__RetentionDays`);
   5. the files that clients/python/pyproject.toml names (`readme`, `license-files`) are copied into the build of the package by
-     samples/notes-api/Dockerfile (the package's build fails without them).
+     samples/notes-api/Dockerfile (the package's build fails without them);
+  6. every `uses:` of a workflow (.github/workflows/*.yml) names its action by a 40-character commit SHA (`owner/repo@<sha> # vX.Y.Z`);
+     a local action (`./...`) is the exception;
+  7. every version in `dependencies` and `devDependencies` of site/package.json is exact (`1.2.3`): no `^`, `~`, `*`, range, tag or
+     URL. Before the file exists there is nothing to check.
 
 Files are the ones git knows (tracked and untracked, `git ls-files -co --exclude-standard`).
 """
+import json
 import pathlib
 import posixpath
 import re
@@ -46,6 +51,10 @@ DEV_COMPOSE = "deploy/docker-compose.yml"
 PACKAGE_METADATA = "clients/python/pyproject.toml"
 PACKAGE_DOCKERFILE = "samples/notes-api/Dockerfile"
 PACKAGE_DIRECTORY = "clients/python/"
+WORKFLOW_USES = re.compile(r"^\s*(?:-\s*)?uses:\s*[\"']?([^\s\"'#]+)")
+FULL_SHA = re.compile(r"@[0-9a-f]{40}$")
+EXACT_VERSION = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+SITE_PACKAGE = "site/package.json"
 
 
 def is_compose(path):
@@ -62,7 +71,11 @@ def is_dockerfile(path):
 
 
 def is_document(path):
-    return path.endswith(".md") and not path.startswith("docs/superpowers/")
+    return path.endswith((".md", ".mdx")) and not path.startswith("docs/superpowers/")
+
+
+def is_workflow(path):
+    return path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml"))
 
 
 def unpinned_image(reference):
@@ -156,6 +169,40 @@ def check_package_copy(pyproject_text, dockerfile_text):
     return problems
 
 
+def check_workflow(name, text):
+    """Rule 6: every `uses:` of a workflow names its action by a 40-character commit SHA; a local action (`./...`) is the exception."""
+    problems = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        found = WORKFLOW_USES.match(line)
+        if not found:
+            continue
+        action = found.group(1)
+        if action.startswith("./") or FULL_SHA.search(action):
+            continue
+        problems.append(f"{name}:{number}: the action {action} is not pinned by a 40-character commit SHA (owner/repo@<sha> # vX.Y.Z)")
+    return problems
+
+
+def check_site_package(text):
+    """Rule 7: every version in `dependencies` and `devDependencies` of site/package.json is exact (1.2.3)."""
+    try:
+        package = json.loads(text)
+    except json.JSONDecodeError as error:
+        return [f"{SITE_PACKAGE}: not valid JSON ({error})"]
+    if not isinstance(package, dict):
+        return [f"{SITE_PACKAGE}: not a JSON object"]
+    problems = []
+    for field in ("dependencies", "devDependencies"):
+        entries = package.get(field, {})
+        if not isinstance(entries, dict):
+            problems.append(f"{SITE_PACKAGE}: {field} is not an object")
+            continue
+        for dependency, version in sorted(entries.items()):
+            if not isinstance(version, str) or not EXACT_VERSION.match(version):
+                problems.append(f"{SITE_PACKAGE}: {field} {dependency} is {version!r}, not an exact version (1.2.3)")
+    return problems
+
+
 def check_repository(files, read):
     """files: the paths git knows; read(path) -> text. Returns the list of problems."""
     problems = []
@@ -173,11 +220,16 @@ def check_repository(files, read):
         problems.extend(check_package_copy(read(PACKAGE_METADATA), build_texts[PACKAGE_DOCKERFILE]))
     else:
         problems.append(f"{PACKAGE_METADATA} or {PACKAGE_DOCKERFILE} is missing")
+    for path in sorted(p for p in files if is_workflow(p)):
+        problems.extend(check_workflow(path, read(path)))
+    if SITE_PACKAGE in files:
+        problems.extend(check_site_package(read(SITE_PACKAGE)))
     return problems
 
 
 def self_test():
     digest = "@sha256:" + "a" * 64
+    sha = "a" * 40
     pyproject = 'readme = "README.md"\nlicense = "MIT"\nlicense-files = ["LICENSE"]\n'
     cases = [
         # (rule, number of problems expected, problems found)
@@ -211,6 +263,25 @@ def self_test():
         ("package copy, both missing", 2, check_package_copy(pyproject, "COPY clients/python/pyproject.toml /tmp/p/\n")),
         ("package copy, a file only in a comment", 1, check_package_copy(pyproject, "# clients/python/LICENSE\nCOPY clients/python/README.md /tmp/p/\n")),
         ("package copy, nothing named", 0, check_package_copy('name = "x"\n', "COPY a b\n")),
+        ("workflow, pinned by SHA", 0, check_workflow("w.yml", f"      - uses: actions/checkout@{sha} # v7.0.1\n")),
+        ("workflow, quoted and pinned", 0, check_workflow("w.yml", f"        uses: \"withastro/action@{sha}\"  # v6.1.4\n")),
+        ("workflow, a local action", 0, check_workflow("w.yml", "      - uses: ./.github/actions/build\n")),
+        ("workflow, a tag", 1, check_workflow("w.yml", "      - uses: actions/checkout@v7\n")),
+        ("workflow, a short SHA", 1, check_workflow("w.yml", "      - uses: actions/checkout@3d3c42e\n")),
+        ("workflow, no ref", 1, check_workflow("w.yml", "      - uses: actions/checkout\n")),
+        ("workflow, a branch", 1, check_workflow("w.yml", "      - uses: actions/checkout@main\n")),
+        ("workflow, a commented uses", 0, check_workflow("w.yml", "      # uses: actions/checkout@v7\n")),
+        ("site package, exact", 0, check_site_package(json.dumps({"dependencies": {"astro": "7.4.13"}, "devDependencies": {"x": "1.0.0"}}))),
+        ("site package, a caret", 1, check_site_package(json.dumps({"dependencies": {"astro": "^7.4.13"}}))),
+        ("site package, loose versions", 5, check_site_package(json.dumps(
+            {"dependencies": {"a": "~1.2.3", "b": "*", "c": ">=1.0.0 <2.0.0", "d": "latest"}, "devDependencies": {"e": "https://x.y/e.tgz"}}))),
+        ("site package, a pre-release and build suffix", 0, check_site_package(json.dumps(
+            {"dependencies": {"a": "1.2.3-beta.1", "b": "1.2.3+build.5"}, "devDependencies": {"c": "1.2.3-rc.1+b2"}}))),
+        ("site package, a caret on a pre-release", 1, check_site_package(json.dumps({"dependencies": {"a": "^1.2.3-beta.1"}}))),
+        ("workflow, a docker image by digest", 1, check_workflow("w.yml", "      - uses: docker://alpine@sha256:" + "a" * 64 + "\n")),
+        ("site package, no dependencies", 0, check_site_package(json.dumps({"name": "x"}))),
+        ("site package, not JSON", 1, check_site_package("{")),
+        ("site package, not an object", 1, check_site_package("[]")),
     ]
     failures = [
         f"self-test {rule}: expected {expected} problem(s), got {len(found)}: {found}"
@@ -229,10 +300,21 @@ def self_test():
         found = check_repository(set(bad), bad.__getitem__)
         if not any(odd in problem for problem in found):
             failures.append(f"self-test {odd}: expected an unpinned image to be reported, got {found}")
+    for odd, text in (
+        (".github/workflows/site.yml", "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v7\n"),
+        (SITE_PACKAGE, json.dumps({"dependencies": {"astro": "^7.4.13"}})),
+        ("site/src/content/docs/a.mdx", "Run `postgres:16` somewhere.\n"),
+    ):
+        bad = {**files, odd: text}
+        found = check_repository(set(bad), bad.__getitem__)
+        if not any(problem.startswith(odd) for problem in found):
+            failures.append(f"self-test {odd}: expected a problem in it, got {found}")
     found = check_repository(set(files), files.__getitem__)
     if len(found) != 1 or "docs/a.md" not in found[0]:
         failures.append(f"self-test whole repository: expected one problem in docs/a.md (and none from docs/superpowers/), got {found}")
     del files["docs/a.md"]
+    files[".github/workflows/site.yml"] = f"jobs:\n  b:\n    steps:\n      - uses: actions/checkout@{sha} # v7.0.1\n      - uses: ./local\n"
+    files[SITE_PACKAGE] = json.dumps({"dependencies": {"astro": "7.4.13"}, "devDependencies": {}})
     if check_repository(set(files), files.__getitem__):
         failures.append("self-test whole repository: expected a clean sample to pass")
     return failures
@@ -249,7 +331,7 @@ def main(arguments):
     ).stdout.splitlines()
     files = {name for name in listing if (root / name).is_file()}
     problems = check_repository(files, lambda name: (root / name).read_text(encoding="utf-8", errors="replace"))
-    print("\n".join(problems) or "every image is pinned by digest, the development compose passes the limiter settings, the package's build files are copied")
+    print("\n".join(problems) or "every image is pinned by digest, every workflow action by commit SHA, the site's packages by exact version, the development compose passes the limiter settings, the package's build files are copied")
     return 1 if problems else 0
 
 

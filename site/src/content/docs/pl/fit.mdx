@@ -1,0 +1,67 @@
+---
+title: Czy to dla mnie?
+description: Kiedy Auth-Core pasuje do produktu, kiedy szukać gdzie indziej, czego potrzebuje do działania, jego stan i znane ograniczenia.
+---
+
+import CurrentVersion from '../../../components/CurrentVersion.astro';
+
+## Pasuje, jeśli
+
+- **Budujesz produkt, w którym liczą się firmy, ich członkowie i role.** Użytkownicy należą do firm, z członkami, rolami,
+  zaproszeniami i katalogiem uprawnień, który deklaruje Twój produkt.
+- **Twój backend umie sprawdzić JWT, w dowolnym języku.** Access tokeny to standardowe JWT RS256 ważne 10 minut, które niosą
+  użytkownika, firmę, role i uprawnienia; każda biblioteka JWT, która czyta JWKS, sprawdza je offline.
+- **Możesz utrzymać serwer z Linuksem, Dockerem, domeną i SMTP.** Auth-Core działa na małym VPS z Linuksem x86-64 i Dockerem, a
+  repozytorium ma produkcyjny plik compose, przewodnik wdrożenia i runbooki.
+
+## Szukaj gdzie indziej, jeśli
+
+- **Chcesz gotowych ekranów logowania.** Auth-Core jest headless, to REST API bez stron: ekrany logowania, resetu hasła i zaproszeń
+  rysuje Twój frontend.
+- **Potrzebujesz MFA już dziś.** MFA (TOTP) i passkeys są w planach, bez daty. Do tego czasu logowanie to hasło albo Google, Microsoft
+  lub GitHub.
+- **Kilka produktów ma dzielić jedną pulę użytkowników.** Nie ma SSO między produktami: każdy produkt ma własną instancję i własnych
+  użytkowników.
+- **Potrzebujesz SAML, SCIM albo LDAP.** Nie są w zakresie i nigdy nie będą.
+- **Potrzebujesz trybu wielu realmów.** Nie jest w zakresie i nigdy nie będzie.
+- **Potrzebujesz szczegółowych uprawnień do zasobów.** „Czy to mój dokument?” zostaje w Twoim produkcie.
+- **Twój backend jest w TypeScripcie i chce auth jako biblioteki w aplikacji.** Auth-Core działa osobno, jako własny kontener z własną
+  bazą.
+- **Chcesz usługi zarządzanej w chmurze.** Auth-Core hostujesz sam: działa na Twoim serwerze.
+
+## Czego potrzebujesz, żeby go uruchomić
+
+- Serwera z Linuksem x86-64 i Dockerem.
+- Domeny i reverse proxy przed Auth-Core, który kończy TLS.
+- PostgreSQL 16 z produkcyjnego pliku compose: jeden kontener i jedna baza.
+- Serwera SMTP z TLS (bez niego Auth-Core nie wystartuje) i adresu nadawcy w domenie, którą zarządzasz.
+- Nocnej kopii zapasowej i sprawdzonego odtwarzania.
+- Własnych ekranów logowania, resetu hasła i zaproszeń.
+- Aktualizacji: przeczytaj changelog, zrób kopię, ustaw nową wersję, pobierz i uruchom. Usługa migruje bazę przy starcie; powrót do
+  poprzedniej wersji to odtworzenie kopii.
+
+## Stan
+
+- Wersja <CurrentVersion />. Auth-Core działa produkcyjnie w Toviq. Jeden autor.
+- Nie było jeszcze zewnętrznego audytu. Przed czym broni projekt i jakie ryzyka są zaakceptowane, opisuje
+  [model zagrożeń](https://github.com/MckCieply/Auth-Core/blob/main/docs/security/threat-model.md).
+- Funkcje mają testy end-to-end, które działają na prawdziwym stosie.
+
+## Znane ograniczenia
+
+Pięć zaakceptowanych ryzyk z
+[listy ryzyk rezydualnych](https://github.com/MckCieply/Auth-Core/blob/main/docs/security/threat-model.md#residual-risks) modelu
+zagrożeń:
+
+- Usunięty albo zdegradowany członek zachowuje uprawnienia swojego tokenu w Twoich endpointach do 15 minut: 10 minut ważności tokenu i
+  5 minut tolerancji zegara (ryzyko 13).
+- Inna otwarta karta przeglądarki działa do 10 minut po wylogowaniu (ryzyko 15).
+- Wiele osób za jednym adresem dzieli jego limity: 30 logowań na minutę to sufit dla biura za jednym NAT (ryzyko 3).
+- Admin firmy, który ma wszystkie uprawnienia, może usunąć firmę, a przywraca ją tylko kopia zapasowa (ryzyko 4).
+- Safari na prawdziwym telefonie może traktować ciasteczka inaczej niż WebKit w testach przeglądarkowych; test na prawdziwym telefonie
+  jest jeszcze przed nami (ryzyko 17).
+
+## Dalej
+
+[Porównanie](/Auth-Core/pl/compare/ "Porównanie") z Better Auth, Keycloak, Clerk i WorkOS,
+[licencja i cena](/Auth-Core/pl/license/ "Licencja") oraz [wszystkie wersje](/Auth-Core/pl/versions/ "Wersje").

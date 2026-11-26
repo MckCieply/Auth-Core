@@ -1,0 +1,30 @@
+---
+// The Start page hero (spec 0018, Start, item 1): a glass card with the version badge, the headline, the subline, two
+// buttons and the facts row. Replaces Starlight's Hero, which renders only on pages with "hero" in the front matter.
+import versions from '../data/versions.json';
+import { formatDate, serverVersions } from '../lib/versions.mjs';
+import { pagePath } from '../lib/paths.mjs';
+import { QUICKSTART_URL, START_COPY } from '../lib/start-copy.mjs';
+
+const lang = Astro.locals.starlightRoute.lang === 'pl' ? 'pl' : 'en';
+const c = START_COPY[lang];
+const latest = serverVersions(versions)[0];
+---
+
+<div class="ac-hero not-content">
+  <div class="ac-glass ac-hero-card">
+    <p class="ac-badge">
+      <span>{'v' + latest.version + ' · ' + formatDate(latest.date, lang) + ' ·'}</span>
+      <span class="ac-pill">{c.latest}</span>
+    </p>
+    <h1 id="_top" data-page-title>{c.headline}</h1>
+    <p class="ac-subline">{c.subline}</p>
+    <div class="ac-buttons">
+      <a class="ac-button ac-button-primary" href={pagePath(lang, 'fit')}>{c.fitButton}</a>
+      <a class="ac-button" href={QUICKSTART_URL}>{c.quickstartButton}</a>
+    </div>
+    <ul class="ac-facts" aria-label={c.factsLabel}>
+      {c.facts.map((fact) => <li>{fact}</li>)}
+    </ul>
+  </div>
+</div>

@@ -1,0 +1,23 @@
+{
+  "name": "auth-core-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "predev": "node scripts/prebuild.mjs",
+    "dev": "astro dev",
+    "prebuild": "node --test scripts/*.test.mjs && node scripts/prebuild.mjs",
+    "build": "astro build",
+    "postbuild": "node scripts/check-links.mjs",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.43.2",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/space-grotesk": "5.3.0",
+    "astro": "7.4.13",
+    "marked": "18.3.0",
+    "starlight-links-validator": "0.27.1"
+  }
+}

@@ -1,0 +1,66 @@
+---
+title: Is it for me?
+description: When Auth-Core fits a product, when to look elsewhere, what it needs to run, its status and its known limits.
+---
+
+import CurrentVersion from '../../components/CurrentVersion.astro';
+
+## A good fit if
+
+- **You build a product where companies, their members and roles matter.** Users belong to companies, with members, roles,
+  invitations and a permission catalog that your product declares.
+- **Your backend can check a JWT, in any language.** Access tokens are standard RS256 JWTs of 10 minutes that carry the user, the
+  company, the roles and the permissions; any JWT library that reads a JWKS checks them offline.
+- **You can run a Linux server with Docker, a domain and an SMTP relay.** Auth-Core runs on a small x86-64 Linux VPS with Docker, and
+  the repository has a production compose file, a deployment guide and runbooks.
+
+## Look elsewhere if
+
+- **You want ready-made login screens.** Auth-Core is headless, a REST API with no pages: your frontend draws the sign-in, password
+  reset and invitation screens.
+- **You need MFA today.** MFA (TOTP) and passkeys are planned, with no date. Until then sign-in is a password, or Google, Microsoft or
+  GitHub.
+- **Several products must share one pool of users.** There is no SSO between products: each product has its own instance and its own
+  users.
+- **You need SAML, SCIM or LDAP.** They are not in scope, and they never will be.
+- **You need a multi-realm mode.** It is not in scope, and it never will be.
+- **You need fine-grained resource permissions.** "Is this my document?" stays in your product.
+- **Your backend is TypeScript and wants auth as a library inside the app.** Auth-Core runs apart from your app, as its own container
+  with its own database.
+- **You want a managed cloud service.** Auth-Core is self-hosted: it runs on your server.
+
+## What you need to run it
+
+- A Linux x86-64 server with Docker.
+- A domain, and a reverse proxy in front of Auth-Core that ends TLS.
+- PostgreSQL 16, from the production compose file: one container and one database.
+- An SMTP relay with TLS (Auth-Core refuses to start without it) and a sender address on a domain you control.
+- A nightly backup, and a restore that you have tried.
+- Your own sign-in, password reset and invitation screens.
+- Upgrades: read the changelog, back up, set the new version, pull and start. The service migrates its database at start; a rollback
+  is a restore of the backup.
+
+## Status
+
+- Version <CurrentVersion />. Auth-Core runs in production in Toviq. One author.
+- There has been no external audit yet. What the design defends against, and the risks that are accepted, are in the
+  [threat model](https://github.com/MckCieply/Auth-Core/blob/main/docs/security/threat-model.md).
+- The features have end-to-end suites that run against a real stack.
+
+## Known limits
+
+Five of the accepted risks in the threat model's
+[list of residual risks](https://github.com/MckCieply/Auth-Core/blob/main/docs/security/threat-model.md#residual-risks):
+
+- A member who is removed or demoted keeps the permissions of their token at your endpoints for up to 15 minutes: the 10 minutes of
+  the token and 5 minutes of clock skew (residual risk 13).
+- Another open browser tab stays usable for up to 10 minutes after sign-out (residual risk 15).
+- Many people behind one address share its limits: 30 sign-ins a minute is the ceiling for an office behind one NAT (residual risk 3).
+- A company admin who holds every permission can delete the company, and only the backup brings it back (residual risk 4).
+- Safari on a real phone may treat cookies differently from the WebKit of the browser tests; the test on a real phone is still to come
+  (residual risk 17).
+
+## Next
+
+The [comparison](/Auth-Core/compare/ "Comparison") with Better Auth, Keycloak, Clerk and WorkOS, the
+[license and the price](/Auth-Core/license/ "License"), and [every version](/Auth-Core/versions/ "Versions").

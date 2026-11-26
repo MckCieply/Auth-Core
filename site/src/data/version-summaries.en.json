@@ -1,0 +1,8 @@
+{
+  "0.4.0": "Sign-in with GitHub, and a settings screen where a person connects and disconnects sign-in providers and changes the password.",
+  "0.3.0": "One account in several companies, switching between them without signing in again. A signed-in person can create another company when the product turns it on, and accepting an invitation keeps the other companies.",
+  "0.2.0": "Self-service sign-up for companies, private accounts for people without a company, and sign-in with Google and Microsoft.",
+  "0.1.2": "A patch: the invitation mail no longer names the role, which showed the role's key from the manifest instead of a word.",
+  "0.1.1": "A patch: the same code with patched transitive packages, so the version builds from source again.",
+  "0.1.0": "The first release: the service and its image, a Python package for backends, an Angular sample for frontends, and the documents to run it."
+}
