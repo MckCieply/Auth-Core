@@ -500,3 +500,76 @@ a.sl-anchor-link {
   min-height: 44px;
   margin: -10px -10px -10px -10px;
 }
+
+/* Theme and language pickers: a pill closed, a styled list open (spec 0018, "Pickers"). No cyan. */
+starlight-theme-select label,
+starlight-lang-select label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--ac-border);
+  border-radius: 999px;
+  color: var(--ac-text);
+}
+starlight-theme-select label:hover,
+starlight-lang-select label:hover {
+  border-color: var(--ac-text);
+}
+starlight-theme-select select,
+starlight-lang-select select {
+  min-height: 44px;
+  color: var(--ac-text);
+}
+:root[data-theme='dark'] starlight-theme-select select,
+:root[data-theme='dark'] starlight-lang-select select {
+  color-scheme: dark;
+}
+:root[data-theme='light'] starlight-theme-select select,
+:root[data-theme='light'] starlight-lang-select select {
+  color-scheme: light;
+}
+starlight-theme-select select:focus-visible,
+starlight-lang-select select:focus-visible {
+  outline: 2px solid var(--ac-accent);
+  outline-offset: 2px;
+}
+@supports (appearance: base-select) {
+  starlight-theme-select select,
+  starlight-lang-select select,
+  starlight-theme-select ::picker(select),
+  starlight-lang-select ::picker(select) {
+    appearance: base-select;
+  }
+  starlight-theme-select ::picker(select),
+  starlight-lang-select ::picker(select) {
+    background: var(--ac-surface);
+    color: var(--ac-text);
+    border: 1px solid var(--ac-border);
+    border-radius: 12px;
+    padding: 0.25rem;
+  }
+  starlight-theme-select option,
+  starlight-lang-select option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    padding: 0 0.75rem;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ac-text);
+  }
+  starlight-theme-select option:hover,
+  starlight-theme-select option:focus-visible,
+  starlight-lang-select option:hover,
+  starlight-lang-select option:focus-visible {
+    background: color-mix(in srgb, var(--ac-text) 8%, transparent);
+  }
+  starlight-theme-select option::checkmark,
+  starlight-lang-select option::checkmark {
+    color: var(--ac-text);
+  }
+}

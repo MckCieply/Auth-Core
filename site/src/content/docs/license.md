@@ -15,8 +15,7 @@ Auth-Core's server is source-available under the Business Source License 1.1. It
 
 ## Price
 
-EUR 490 a year per product, net of VAT, flat, for any number of users. It covers production use, security fixes and best-effort email
-support, with a reply usually within two working days. To buy a licence, write to [kontakt@toviq.pl](mailto:kontakt@toviq.pl).
+EUR 490 a year per product, net of VAT. [Pricing](/Auth-Core/pricing/ "Pricing") says what it covers and how to buy.
 
 ## What stays MIT
 

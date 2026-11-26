@@ -15,9 +15,7 @@ Serwer Auth-Core ma kod dostępny na licencji Business Source License 1.1. To ni
 
 ## Cena
 
-490 EUR netto rocznie za produkt, stała cena, dowolna liczba użytkowników. Obejmuje użycie produkcyjne, poprawki bezpieczeństwa i
-wsparcie mailowe w miarę możliwości, z odpowiedzią zwykle w ciągu dwóch dni roboczych. Licencję kupisz, pisząc na
-[kontakt@toviq.pl](mailto:kontakt@toviq.pl).
+490 EUR netto rocznie za produkt. [Cennik](/Auth-Core/pl/pricing/ "Cennik") mówi, co obejmuje i jak kupić.
 
 ## Co zostaje na MIT
 
