@@ -2,10 +2,13 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
+import { satteri } from '@astrojs/markdown-satteri';
+import footnoteLabels from './src/lib/footnote-labels.mjs';
 
 export default defineConfig({
   site: 'https://mckcieply.github.io',
   base: '/Auth-Core',
+  markdown: { processor: satteri({ hastPlugins: [footnoteLabels] }) },
   integrations: [
     starlight({
       title: 'Auth-Core',

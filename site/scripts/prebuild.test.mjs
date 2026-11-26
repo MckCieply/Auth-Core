@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { checkSummaries, checkParity, checkBodies, pickPython, outcomeOf, brokenLinks, SUMMARY_LIMIT } from './checks.mjs';
 import { formatDate, splitBody, firstSentence, findRawHtml, serverVersions } from '../src/lib/versions.mjs';
 import { otherLanguagePath, pagePath, withBase, slugOf, BASE } from '../src/lib/paths.mjs';
+import footnoteLabels from '../src/lib/footnote-labels.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -304,4 +305,23 @@ test('theme: every url() of an asset in theme.css points at a file that exists',
     const file = fileURLToPath(new URL(p, cssUrl));
     assert.ok(existsSync(file), 'theme.css points at a missing file: ' + p);
   }
+});
+
+test('footnote labels: Polish pages get Polish labels, English pages stay', () => {
+  const run = (url) => {
+    const heading = { type: 'element', tagName: 'h2', properties: { id: 'footnote-label' }, children: [{ type: 'text', value: 'Footnotes' }] };
+    const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1' }, children: [] };
+    const plugin = footnoteLabels({ fileURL: new URL(url) });
+    if (plugin === false) return { heading: heading.children[0].value, label: link.properties.ariaLabel };
+    const ctx = {
+      removeChildAt: (node, index) => node.children.splice(index, 1),
+      appendChild: (node, child) => node.children.push(child),
+      setProperty: (node, key, value) => { node.properties[key] = value; },
+    };
+    plugin.element[0].visit(heading, ctx);
+    plugin.element[1].visit(link, ctx);
+    return { heading: heading.children.map((c) => c.value).join(''), label: link.properties.ariaLabel };
+  };
+  assert.deepEqual(run('file:///C:/x/site/src/content/docs/pl/compare.md'), { heading: 'Przypisy', label: 'Powrót do odwołania 1' });
+  assert.deepEqual(run('file:///C:/x/site/src/content/docs/compare.md'), { heading: 'Footnotes', label: 'Back to reference 1' });
 });
