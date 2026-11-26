@@ -25,9 +25,9 @@
      acceptance maps".
   5. `docs/operations/releases.md` line 5 makes the release after the annotated tag is pushed, so the tag is on GitHub before the spec's
      step "Push `main` with the tag". The plan adds the spec's sentence as written; pushing a tag that is already pushed changes nothing.
-  6. The root `LICENSE` (line 9) names only `clients/`, `samples/` and `docs/` as outside the Licensed Work, so `site/` falls under BSL 1.1
-     there, while the spec makes `site/LICENSE` MIT. The plan writes `site/LICENSE` as the spec says and does not touch `LICENSE`: an owner
-     question before the merge (Task 14, step 14).
+  6. The root `LICENSE` (line 9) named only `clients/`, `samples/` and `docs/` as outside the Licensed Work, so `site/` fell under BSL
+     1.1 there, while the spec makes `site/LICENSE` MIT. Owner decision 2026-11-26 (spec Decision 11): the site is MIT; Task 3 adds
+     `site/` to line 9 of `LICENSE` and to line 239 of `README.md`.
   7. `1480843669328-3f7e37d196ae` is the id of the file on images.unsplash.com, not the id of the photo's page on unsplash.com; the author
      and the page are not known yet (spec "To verify" 4). Task 11 establishes them or stops.
   8. `CHANGELOG.md` has no `## Unreleased` heading today; the skip of non-version headings is guarded by a self-test case only.
@@ -642,7 +642,8 @@ git -c user.name=Alex -c user.email=mwppl123@gmail.com commit -m "feat: check-pi
   site/astro.config.mjs, site/src/content.config.ts, `site/src/styles/theme.css`, `site/public/favicon.svg`, and ten pages:
   `site/src/content/docs/index.mdx`, `fit.mdx`, compare.md (path site/src/content/docs/compare.md), license.md (path
   site/src/content/docs/license.md), `versions.mdx`, and the same five under `site/src/content/docs/pl/`.
-- Must not touch: anything outside `site/`.
+- Modify: `LICENSE` lines 9-11 and `README.md` line 239 (Step 4), and nothing else outside `site/`.
+- Must not touch: anything else outside `site/`.
 
 **Interfaces:**
 - Consumes: rule 7 of `scripts/check-pins.py` (Task 2).
@@ -696,6 +697,38 @@ version and run `npm install --no-audit --no-fund` again.
 
 Run: `cp docs/LICENSE site/LICENSE && cmp docs/LICENSE site/LICENSE && echo same`
 Expected: `same` (MIT, "Copyright (c) 2026 Aleksander Torka").
+
+Then name `site/` among the MIT parts (spec Decision 11). In `LICENSE` replace the three lines
+
+```
+                      The files under clients/, samples/ and docs/ are not part of
+                      the Licensed Work; they are licensed under the MIT License
+                      (see the LICENSE file in each of those directories).
+```
+
+with these four (the same 22-space indent, no line over 80 columns, LF as the file has):
+
+```
+                      The files under clients/, samples/, docs/ and site/ are
+                      not part of the Licensed Work; they are licensed under the
+                      MIT License (see the LICENSE file in each of those
+                      directories).
+```
+
+In `README.md` (CRLF: keep it) replace line 239
+
+```
+- **MIT:** `clients/`, `samples/` and `docs/` are under the MIT License (see the `LICENSE` file in each).
+```
+
+with
+
+```
+- **MIT:** `clients/`, `samples/`, `docs/` and `site/` are under the MIT License (see the `LICENSE` file in each).
+```
+
+Run: `grep -c 'site/' LICENSE && grep -n 'and .site/. are under the MIT' README.md && git diff --stat LICENSE README.md`
+Expected: `1`; README line 239; `LICENSE` 4 insertions and 3 deletions, `README.md` 1 and 1.
 
 - [ ] **Step 5: Write site/tsconfig.json and site/src/content.config.ts**
 
@@ -2155,7 +2188,7 @@ support, with a reply usually within two working days. To buy a licence, write t
 
 ## What stays MIT
 
-- `clients/`, `samples/` and `docs/` are under the MIT License, with a `LICENSE` file in each.
+- `clients/`, `samples/`, `docs/` and `site/` are under the MIT License, with a `LICENSE` file in each.
 - `v0.1.0` and everything published before the licence change stay under the MIT License.
 
 ## Change to Apache 2.0
@@ -2190,7 +2223,7 @@ wsparcie mailowe w miarę możliwości, z odpowiedzią zwykle w ciągu dwóch dn
 
 ## Co zostaje na MIT
 
-- `clients/`, `samples/` i `docs/` są na licencji MIT, każdy z własnym plikiem `LICENSE`.
+- `clients/`, `samples/`, `docs/` i `site/` są na licencji MIT, każdy z własnym plikiem `LICENSE`.
 - `v0.1.0` i wszystko, co wydano przed zmianą licencji, zostaje na licencji MIT.
 
 ## Przejście na Apache 2.0
@@ -3769,18 +3802,19 @@ curl -sI http://localhost:4321/Auth-Core/ | grep -ci "set-cookie"
    parts that need JavaScript. If the owner wants a browser check too, they turn JavaScript off for `http://localhost:4321` in their
    own browser settings; the verifier does not change browser settings.
 
-- [ ] **Step 14: Owner question: the licence of `site/`**
+- [ ] **Step 14: The licence of `site/`**
 
-Mismatch 6: the root `LICENSE` keeps `site/` under BSL 1.1, and `site/LICENSE` says MIT. The orchestrator asks the owner, before the
-merge: "The site's files: MIT as the spec says (then `LICENSE` line 9 gains `site/` beside `clients/`, `samples/` and `docs/`, and the
-README's License section says so too), or BSL like the server (then `site/LICENSE` goes)?" The answer is a small task on this branch
-before Task 15; this plan does not pick.
+Spec Decision 11: `site/LICENSE` is MIT, line 9 of `LICENSE` names `site/` beside `clients/`, `samples/` and `docs/`, the README's
+License section says the same, and the License page lists `site/` under "What stays MIT" in both languages.
+
+Run: `grep -n 'site/' LICENSE; grep -n 'and .site/. are under the MIT' README.md; grep -c 'site/' site/src/content/docs/license.md site/src/content/docs/pl/license.md`
+Expected: one line of `LICENSE`, one line of `README.md`, at least 1 for each page.
 
 - [ ] **Step 15: Report and clean up**
 
 `rm -rf "$CLONE" "$AXE"`; stop the preview and the `http.server`. The report has one line per step 1 to 13 (PASS or FAIL with the
 decisive output), the fact table of Step 10.3, the comparison notes of Step 10.4, the eight screenshots, the axe version, and the
-owner questions: the light photo (Task 11), the summaries (Appendix B), the licence of `site/` (Step 14).
+owner questions: the light photo (Task 11) and the summaries (Appendix B).
 
 ---
 

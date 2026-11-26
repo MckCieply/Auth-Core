@@ -49,7 +49,8 @@ cd site && npm ci && npm run build                          # -> exit 0 locally,
 - `.github/workflows/site.yml`: builds the site and publishes it to GitHub Pages. The first workflow of the repository.
 - Two new rules in `scripts/check-pins.py`: actions pinned by commit SHA, exact versions in `site/package.json`.
 - Documents: the exception in `docs/workflow.md`, the summary step in `docs/operations/releases.md`, a link to the site
-  in `README.md`, `site/LICENSE`, the photo and font credits.
+  in `README.md`, `site/LICENSE` with `site/` named among the MIT parts of `LICENSE` and the README, the photo and font
+  credits.
 - The one-time repository settings: Pages source "GitHub Actions", the repository's "Website" field.
 
 ## Out of scope
@@ -105,7 +106,9 @@ cd site && npm ci && npm run build                          # -> exit 0 locally,
   - `prebuild`: `node --test scripts/*.test.mjs && node scripts/prebuild.mjs`;
   - `build`: `astro build` (npm runs `prebuild` first);
   - `preview`: `astro preview`.
-- `site/LICENSE`: MIT, for the site's code and text. The photos and fonts keep their own licences (below).
+- `site/LICENSE`: MIT, for the site's code and text. The photos and fonts keep their own licences (below). The root
+  `LICENSE` (the files outside the Licensed Work) and the README's "License" section name `site/` beside `clients/`,
+  `samples/` and `docs/` (Decision 11).
 
 ### Pages and paths
 
@@ -197,7 +200,7 @@ page that was read.
 2. **Price**: the README's line: EUR 490 a year per product, net of VAT, flat, any number of users; production use,
    security fixes and best-effort email support (a reply usually within two working days). Contact:
    `kontakt@toviq.pl` as a `mailto:` link.
-3. **What stays MIT**: `clients/`, `samples/`, `docs/`, and `v0.1.0` with everything published before the licence
+3. **What stays MIT**: `clients/`, `samples/`, `docs/`, `site/`, and `v0.1.0` with everything published before the licence
    change.
 4. **Change to Apache 2.0**: each version three years after it is first published, as the README and the Change Date
    of `LICENSE` say. The page computes no per-version dates (Settled 11).
@@ -430,8 +433,8 @@ Workflow and documents
     `check-pins.py`; the verifier reads the file).
 22. After the merge, the owner's yes and the Pages setting, the workflow run is green and the three `curl` lines of
     the Goal answer as written (guard: the run's log and the `curl` output in the report).
-23. `docs/workflow.md`, `docs/operations/releases.md`, `README.md`, `site/LICENSE` and `site/CREDITS.md` carry the text
-    above, and `python scripts/check-docs.py` passes both with no argument (its own list) and with
+23. `docs/workflow.md`, `docs/operations/releases.md`, `README.md`, `LICENSE`, `site/LICENSE` and `site/CREDITS.md` carry
+    the text above, and `python scripts/check-docs.py` passes both with no argument (its own list) and with
     `docs/workflow.md docs/operations/releases.md site/CREDITS.md` (guard: `check-docs.py`; the verifier reads each).
 
 ## Decisions (owner, 2026-11-26)
@@ -458,6 +461,9 @@ Workflow and documents
     sea-blue night, the photo tinted sea blue, one accent, cyan `#22d3ee`, with near-black text on it. Rejected: the
     board's gold; pairs of two accents (used equally, on frames only, on headings only); one dominant colour with a
     second as a symbol. The generator of the board is `.claude/design-0018/gen9.py` (not committed).
+11. **The site is MIT** (owner, 2026-11-26): `site/LICENSE` is MIT, and the root `LICENSE` names `site/` among the files
+    outside the Licensed Work, beside `clients/`, `samples/` and `docs/`; the README's "License" section says the same.
+    Rejected: the site under BSL 1.1 like the server.
 
 ### Settled in this spec
 
