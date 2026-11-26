@@ -327,3 +327,17 @@ test('footnote labels: the heading reads Sources or Źródła, only Polish pages
   assert.deepEqual(run('file:///C:/x/site/src/content/docs/pl/compare.mdx'), { heading: 'Źródła', label: 'Powrót do odwołania 1' });
   assert.deepEqual(run('file:///C:/x/site/src/content/docs/compare.mdx'), { heading: 'Sources', label: 'Back to reference 1' });
 });
+
+test('footnote labels: a back link keeps its children in order', () => {
+  const sup = { type: 'element', tagName: 'sup', properties: {}, children: [{ type: 'text', value: '2' }] };
+  const link = { type: 'element', tagName: 'a', properties: { ariaLabel: 'Back to reference 1-2' }, children: [{ type: 'text', value: String.fromCharCode(0x21a9) }, sup] };
+  const ctx = {
+    removeChildAt: (node, index) => node.children.splice(index, 1),
+    appendChild: (node, child) => node.children.push(child),
+    setProperty: (node, key, value) => { node.properties[key] = value; },
+  };
+  const plugin = footnoteLabels({ fileURL: new URL('file:///C:/x/site/src/content/docs/compare.mdx') });
+  plugin.element[1].visit(link, ctx);
+  assert.equal(link.children[0].value, String.fromCharCode(0x21a9, 0xfe0e));
+  assert.equal(link.children[1], sup);
+});
